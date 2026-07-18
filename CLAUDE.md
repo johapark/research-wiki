@@ -133,7 +133,8 @@ Categories are **local and derived from your papers, never predefined.** Valid i
 - **Scaffold (committed)**: `synthesis`, `ideas`, `concepts`, `references`, `other` — via `.gitkeep`. First four are **page-type dirs**, not content categories; `other` is the classifier's abstention bucket.
 - **Growth is explicit**: a new category exists only once `wiki/<category>/` is created. `--category X` rejected if dir doesn't exist; classifier abstains to `other`. Typos can't spawn categories.
 - **Cold start**: `researchwiki bootstrap-categories` reads `inbox/` and proposes+creates dirs. See Operations → Initialization.
-- **At ingest**: classifier picks existing category or abstains. `wiki/other/` ≥10 papers → `status` flags it, `suggest-splits` proposes splits.
+- **At ingest**: classifier picks existing category or abstains. `wiki/other/` ≥10 papers → `status` flags it, `suggest-splits` proposes splits (new category / reassign / stay).
+- **Divergence (populated category)**: a category can grow a sub-cluster distinct enough to speciate into a sibling. `status` surfaces a cluster-verified, decay-stamped nudge; `researchwiki suggest-splits --category <cat>` (or `--all`) judges each separable sub-cluster `split_out` vs `stay` and prints migration steps. Same review-gated, human-applied model as the `other`-bucket splits — nothing auto-creates a category.
 
 Tip: classify by **method**, not topic. If removing the domain guts the contribution, group with the domain-grounded papers; else group with methods papers.
 
@@ -176,8 +177,7 @@ issuance_date: "April 2026"           # optional
 status: draft                         # optional: draft | final | active | superseded
 document_id: ""                       # optional: docket #, guidance #, NCT #, ISBN
 authors: ""                           # required for `book`
-pdf_path: /.../papers/fda-2026-....pdf
-pdf_filename: fda-2026-....pdf
+pdf_path: "[[fda-2026-....pdf]]"       # Obsidian wikilink → click-to-open (papers/ sits beside wiki/ in the vault); quote it
 source_collection: external
 source_url: ""                        # optional: canonical URL for blog posts / online whitepapers
 author_model: "claude-opus-4-7"       # optional: LLM that authored the page (manual whitepaper path — mirrors the field agent ingest writes on paper pages)
@@ -409,7 +409,7 @@ Query syntax: Tantivy's (`"quoted phrases"`, `field:value`, `+required`, `-exclu
 
 - **Copy, never symlink** from external locations into `inbox/`.
 - **Move (`mv`) from `inbox/` → `papers/{stem}.pdf`** during processing.
-- `pdf_path` always inside `papers/`; `pdf_filename` matches `basename(pdf_path)`.
+- `pdf_path` is an Obsidian wikilink to the source PDF (`"[[{stem}.pdf]]"`) — click-to-open in the vault. The real file always lives at `papers/{stem}.pdf`; `db rebuild` derives that path from the stem.
 - **One canonical PDF per page**. Stem collisions classified by DOI prefix:
   - `journal-upgrade` (preprint page, incoming journal): PDF auto-swapped; manually update YAML `doi:`/`venue:` (run `preprint-check --doi <preprint-doi>`). Body + `[[wikilinks]]` preserved. Logs `pdf_upgrade`.
   - `duplicate` / `preprint-downgrade` / `unclear`: PDF stays in `inbox/`; agent path raises rather than overwriting.

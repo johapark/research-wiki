@@ -291,8 +291,6 @@ def _build_frontmatter(
     else:
         senior = _detect_senior_authors(authors if isinstance(authors, str) else None)
 
-    pdf_abs = papers_dir() / f"{stem}.pdf"
-
     fm_lines = [
         "---",
         f'title: "{title}"',
@@ -316,8 +314,14 @@ def _build_frontmatter(
     fm_lines.extend([
         "type: paper",
         f"category: [{category}]",
-        f"pdf_path: {pdf_abs}",
-        f"pdf_filename: {stem}.pdf",
+        # `pdf_path` is an Obsidian wikilink to the source PDF so the property
+        # renders as a click-to-open link (the vault root holds wiki/ + papers/
+        # side by side, so `[[stem.pdf]]` resolves and opens in Obsidian's PDF
+        # viewer). Must be quoted — an unquoted leading `[[` parses as a YAML
+        # flow sequence. `db rebuild` derives the real filesystem path from the
+        # stem; the basename lives in this wikilink, so no separate
+        # `pdf_filename` field is needed.
+        f'pdf_path: "[[{stem}.pdf]]"',
         "source_collection: external",
     ])
     if category_strength == "weak":

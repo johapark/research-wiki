@@ -13,7 +13,6 @@ look like a wiki page" helper — used by grade (for scoring) and by commit
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from .. import llm, prompt_lib
 from .crosslinks import CrosslinkCandidate
@@ -360,8 +359,7 @@ def _wrap_with_frontmatter(
     if category_strength == "weak":
         lines.append("category_suggestion_strength: weak  # first-of-kind — review")
     lines += [
-        f"pdf_path: {Path('papers') / (stem + '.pdf')}",
-        f"pdf_filename: {stem}.pdf",
+        f'pdf_path: "[[{stem}.pdf]]"',
         "source_collection: external",
         "tags: []",
         "---",

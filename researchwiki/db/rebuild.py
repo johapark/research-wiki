@@ -105,12 +105,20 @@ def _upsert_paper(
     now_ts: int,
 ) -> None:
     """Write or update a single papers row."""
-    pdf_path_raw = fm.get("pdf_path")
+    # Resolve the real PDF from the canonical stem rather than trusting the
+    # YAML `pdf_path`: that field now carries an Obsidian wikilink
+    # (`pdf_path: "[[stem.pdf]]"`) so the property renders as a click-to-open
+    # link in the vault — it is not a filesystem path. papers/{stem}.pdf is
+    # the invariant, so derive the path (and mtime) from the stem and store a
+    # real path in the DB. Fall back to the raw YAML value only if the file is
+    # absent (e.g. a legacy page whose PDF hasn't landed yet).
+    resolved_pdf = papers_dir() / f"{page.stem}.pdf"
     pdf_mtime: int | None = None
-    if pdf_path_raw:
-        p = Path(str(pdf_path_raw))
-        if p.exists():
-            pdf_mtime = int(p.stat().st_mtime)
+    if resolved_pdf.exists():
+        pdf_mtime = int(resolved_pdf.stat().st_mtime)
+        pdf_path_stored: str | None = str(resolved_pdf)
+    else:
+        pdf_path_stored = _coerce_str(fm.get("pdf_path")) or None
 
     page_mtime = int(page.path.stat().st_mtime)
 
@@ -133,7 +141,7 @@ def _upsert_paper(
         "authors": _coerce_str(fm.get("authors")) or None,
         "senior_authors": _coerce_str(fm.get("senior_authors")) or None,
         "tags": json.dumps(fm.get("tags") or []),
-        "pdf_path": _coerce_str(pdf_path_raw) or None,
+        "pdf_path": pdf_path_stored,
         "page_path": str(page.path),
         "page_mtime": page_mtime,
         "pdf_mtime": pdf_mtime,
