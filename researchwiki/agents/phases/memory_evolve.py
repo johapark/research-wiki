@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from ..context import Context
 
 
-def memory_evolve(ctx: "Context", conn, *, source_key: str) -> dict:
+def evolve_memory(ctx: "Context", conn, *, source_key: str) -> dict:
     """Propose neighbor-page edits and write actionable proposals to disk.
 
     Returns the stats dict from `propose_evolution` augmented with the

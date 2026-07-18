@@ -1,7 +1,7 @@
 """Post-commit grading phase — run the per-paper fidelity grader on the
 freshly-committed page and persist per-claim scores to the DB.
 
-Distinct from `phases.grade` (the per-draft scorer used during the
+Distinct from `phases.grade_draft` (the per-draft scorer used during the
 tournament): this runs *after* commit, against the canonical wiki page,
 and writes `claims.bm25_top1`, `semantic_score`, `negation_mismatch`,
 `numeric_unmatched`, etc. into the structured DB so other read-side
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from ..context import Context
 
 
-def grade_persist(ctx: "Context", conn) -> dict:
+def persist_grades(ctx: "Context", conn) -> dict:
     """Grade the freshly-committed paper page and write per-claim scores.
 
     Returns a small summary dict (n_claims, n_graded, mean_top1,

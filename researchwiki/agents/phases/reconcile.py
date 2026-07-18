@@ -197,7 +197,7 @@ def _is_preprint_venue(venue: str | None) -> bool:
     return bool(v) and any(p in v for p in _PREPRINT_VENUES)
 
 
-def reconcile(
+def reconcile_metadata(
     pdf_path: Path,
     *,
     doi_override: str | None = None,

@@ -55,7 +55,7 @@ class ClaimDetail:
         return False
 
 
-def grade(
+def grade_draft(
     *,
     stem: str | None,
     draft_text: str,

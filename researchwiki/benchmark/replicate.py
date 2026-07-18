@@ -147,10 +147,10 @@ def replicate_score(
     _v(f"[replicate] reconcile + extract + crosslinks (once, shared)")
 
     # 1. Reconcile (once). Returns the metadata dict the runner uses.
-    metadata = phases.reconcile(pdf_path, use_llm=not use_stub)
+    metadata = phases.reconcile_metadata(pdf_path, use_llm=not use_stub)
 
     # 2. Extract sections + full text (once).
-    sections, _, full_text = phases.extract(pdf_path)
+    sections, _, full_text = phases.extract_sections(pdf_path)
 
     # 3. Crosslink candidates: citation-graph (S2/Crossref) + topical (semantic).
     citation_cands = phases.crosslink_candidates(pdf_path, metadata)

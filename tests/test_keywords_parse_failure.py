@@ -13,11 +13,7 @@ three behaviours that close that hole:
 """
 from __future__ import annotations
 
-import importlib
-
-# `researchwiki.agents.phases` re-exports a `commit` *function*, which shadows
-# the submodule of the same name — import the module explicitly.
-commit = importlib.import_module("researchwiki.agents.phases.commit")
+from researchwiki.agents.phases import commit
 
 
 def test_non_json_response_is_logged(monkeypatch):

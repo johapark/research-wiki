@@ -54,7 +54,7 @@ from typing import Any
 # auto-imports `replicate.py` — the previous cycle was
 #   benchmark/__init__.py
 #     → benchmark.replicate
-#       → agents.phases.grade
+#       → agents.phases.grade_draft
 #         → grade.fidelity.paper
 #           → grade.salience
 #             → benchmark.fixture (loops back into benchmark/__init__.py)

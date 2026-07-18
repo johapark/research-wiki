@@ -15,7 +15,7 @@ from ...pdf.text import extract_pdf
 from ...pdf.sections import anchor_sections
 
 
-def extract(pdf_path: Path) -> tuple[dict, int, str]:
+def extract_sections(pdf_path: Path) -> tuple[dict, int, str]:
     """Run the structured section + claim extractors over the PDF.
 
     Returns (sections_dict, claim_count, full_text). `sections` has whichever

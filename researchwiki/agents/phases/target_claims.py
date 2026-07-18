@@ -314,7 +314,7 @@ _HEADERS = {
 
 def _rich_sections(sections: dict, pdf_full_text: str | None, cap: int) -> dict:
     """Re-derive sections from the full PDF text so each is complete up to
-    `cap` chars (the extract() sections are pre-capped at 4000 — sized for the
+    `cap` chars (extract_sections() output is pre-capped at 4000 — sized for the
     author phase, far too tight for claim extraction). Falls back to the
     pre-capped sections when full text isn't available."""
     if not pdf_full_text:

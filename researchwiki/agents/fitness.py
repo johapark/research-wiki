@@ -24,7 +24,7 @@ salience-recall (`salience_score`) at equal weight (0.5/0.5). This replaces
 recall without changing paraphrase fidelity is correctly credited as an
 improvement; the prior single-axis rule discarded exactly those gains.
 
-Aggregate keys consumed (from `phases.grade()`):
+Aggregate keys consumed (from `phases.grade_draft()`):
   semantic_score, salience_score, n_anchors, mean_bm25, n_graded, n_drift,
   weakest_score, coherence_score.
 

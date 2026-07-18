@@ -1,12 +1,13 @@
-"""Commit phase — write the winning draft to the sandbox as a wiki page.
+"""Commit-time LLM utilities for the winning draft.
 
-Also home for two small commit-time LLM utilities:
   - propose_short_name → 1-4 word handle for the index.md auto-entry
   - propose_keywords   → 5-10 retrieval tokens for YAML `keywords:`
 
-v0 deliberately writes to .agent-output/{stem}.md, NOT wiki/{category}/.
-The user reviews and promotes manually. Phase 2.7 will write directly to
-wiki/ once we trust the gates.
+The sandbox/promote write itself lives in `runner._phase_commit`, which
+composes `verify_crosslinks` + `promote` + `_wrap_with_frontmatter` directly.
+A `commit()` function here duplicated that path but was never called by
+anything, so it was removed rather than left as an untested second
+implementation of the promotion write.
 """
 
 from __future__ import annotations
@@ -14,37 +15,9 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from .. import llm
-from ...fsatomic import write_text_atomic
 from ...log import log
-from .crosslinks import CrosslinkCandidate, VerificationReport, verify_crosslinks
-from .draft import Draft, _wrap_with_frontmatter
-
-
-def commit(
-    *,
-    winner: Draft,
-    metadata: dict,
-    sandbox_dir: Path,
-    candidates: list[CrosslinkCandidate] | None = None,
-) -> tuple[Path, VerificationReport]:
-    """Write the winning draft as a complete wiki page in the sandbox.
-
-    Before writing, the cross-link verifier strips any [[wikilinks]] that
-    aren't on the verified candidate list (or whose target wiki page is
-    missing). Returns the output path and a verification report so the
-    runner can record what was removed in the commit ingest_iterations row.
-    """
-    sandbox_dir.mkdir(parents=True, exist_ok=True)
-    stem = metadata.get("stem") or "unknown-stem"
-
-    cleaned_text, verification = verify_crosslinks(winner.text, candidates or [])
-
-    out_path = sandbox_dir / f"{stem}.md"
-    write_text_atomic(out_path, _wrap_with_frontmatter(cleaned_text, metadata, stem))
-    return out_path, verification
 
 
 # ---------- short-name proposal ----------

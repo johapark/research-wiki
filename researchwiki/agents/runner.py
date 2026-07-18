@@ -288,7 +288,7 @@ def run_ingest(
 def _phase_reconcile(ctx: Context, conn) -> tuple[dict, int]:
     """Wrapper for the reconcile phase. Persists one row before returning."""
     t0 = time.time()
-    meta = phases.reconcile(
+    meta = phases.reconcile_metadata(
         ctx.pdf_path,
         doi_override=ctx.doi_override,
         title_override=ctx.title_override,
@@ -314,7 +314,7 @@ def _phase_reconcile(ctx: Context, conn) -> tuple[dict, int]:
 def _phase_extract(ctx: Context, conn) -> tuple[dict, int, str]:
     """Wrapper for the extract phase. Persists one row."""
     t0 = time.time()
-    sections, n_claims, full_text = phases.extract(ctx.pdf_path)
+    sections, n_claims, full_text = phases.extract_sections(ctx.pdf_path)
     elapsed_ms = int((time.time() - t0) * 1000)
     write_iteration(
         attempt_id=ctx.attempt_id,
@@ -475,7 +475,7 @@ def _phase_grade(ctx: Context, conn, draft) -> None:
     tournament can see it. Coherence is regex-only and adds no noticeable
     latency.
     """
-    scores, details = phases.grade(
+    scores, details = phases.grade_draft(
         stem=ctx.paper_stem,
         draft_text=draft.text,
         metadata=ctx.metadata,
@@ -705,7 +705,7 @@ def _run_entailment_check(ctx: Context, conn, cleaned_text: str) -> None:
     """
     from ..grade.support import llm_support_classifier
     try:
-        support_scores, _ = phases.grade(
+        support_scores, _ = phases.grade_draft(
             stem=ctx.paper_stem,
             draft_text=cleaned_text,
             metadata=ctx.metadata,
@@ -990,7 +990,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # Cosine prefilter inside skips zero-signal candidates so the cost
         # bill stays bounded (~$0.04 worst-case per ingest).
         ctx.next_iter()
-        phases.memory_evolve(ctx, conn, source_key=f"{result.category}/{ctx.paper_stem}")
+        phases.evolve_memory(ctx, conn, source_key=f"{result.category}/{ctx.paper_stem}")
 
         # Coverage grading: score the just-committed page's claims against
         # its source PDF and write the per-claim signal back into the DB.
@@ -998,7 +998,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # the read-side surfaces (claim-id lookup, weak-page surfacing,
         # synthesis grounding) have no signal to consume.
         ctx.next_iter()
-        phases.grade_persist(ctx, conn)
+        phases.persist_grades(ctx, conn)
 
         out_path = result.wiki_path
     else:

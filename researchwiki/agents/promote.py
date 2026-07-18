@@ -60,7 +60,7 @@ def should_auto_promote(
 ) -> GateResult:
     """Evaluate the promotion gates. All must pass for auto-promote.
 
-    `scores` is the aggregate dict from phases.grade(). `verification` is
+    `scores` is the aggregate dict from phases.grade_draft(). `verification` is
     the VerificationReport from verify_crosslinks. `n_key_contributions` is
     a structural check — pages with too few KCs likely missed the prompt.
     `paper_type` is 'research' (default) or 'review'; reviews use a relaxed

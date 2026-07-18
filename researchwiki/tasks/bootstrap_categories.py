@@ -108,14 +108,12 @@ def _gather_inbox_metadata(pdfs: list[Path]) -> list[dict]:
     Falls through gracefully on per-paper failures — bootstrap doesn't need
     every paper to succeed, just enough to ground a taxonomy.
     """
-    # `reconcile` is re-exported as a function via phases/__init__, not as a
-    # module — import the function directly from its file to dodge the shadow.
-    from ..agents.phases.reconcile import reconcile
+    from ..agents.phases import reconcile_metadata
 
     bag: list[dict] = []
     for pdf in pdfs:
         try:
-            meta = reconcile(pdf, use_llm=False)
+            meta = reconcile_metadata(pdf, use_llm=False)
         except Exception as e:
             print(f"  skipped {pdf.name}: {e}", file=sys.stderr)
             continue
