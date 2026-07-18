@@ -18,6 +18,29 @@ Phases (in order):
 
 Files in this package mirror the phase grouping. Public names re-exported
 here so callers can keep `from .phases import X` style imports.
+
+**Name shadowing — read before writing an import.** Six phase functions share
+a name with the module that defines them, and the re-export below wins: once
+this package is imported, `phases.commit` is the *function*, not the module.
+The split is not uniform — it depends purely on whether `__init__` re-exports
+a same-named symbol:
+
+    function (module shadowed): commit, extract, grade, reconcile,
+                                grade_persist, memory_evolve
+    module (nothing shadows it): crosslinks, draft, evolution, revise,
+                                evolve_ledger, target_claims
+
+So `from .phases import grade` hands you a function while `from .phases import
+draft` hands you a module. When you specifically need the *module* — typically
+to monkeypatch its internals in a test — import it by full path, which the
+import system resolves independently of this namespace:
+
+    from researchwiki.agents.phases.commit import propose_keywords  # fine
+    importlib.import_module("researchwiki.agents.phases.commit")    # fine
+    from researchwiki.agents.phases import commit  # the FUNCTION, not the module
+
+`tests/test_phases_namespace.py` pins this map; update it when you add or drop
+a re-export.
 """
 
 from .commit import (
