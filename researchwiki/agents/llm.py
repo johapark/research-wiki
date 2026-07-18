@@ -154,9 +154,13 @@ _OPENAI_COMPAT_PROVIDERS = frozenset({"openai-compatible", "lmstudio", "openai"}
 # returns 503 ("model experiencing high demand") and 429 (rate limit) under
 # load; these are transient, so we retry with exponential backoff + jitter
 # rather than failing the whole ingest. Local servers (LM Studio) rarely hit
-# these but inherit the same harmless policy. 4xx other than 429 (bad request,
-# auth) are NOT retried — they won't succeed on a retry.
-_RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+# these but inherit the same harmless policy. 401 is included because OpenAI
+# intermittently returns spurious 401 "insufficient permissions" on valid keys
+# (observed 2026-07-18: some calls in a run 401 while others on the same key +
+# model succeed; the retry cleared it). A genuinely bad key still fails — just
+# after the bounded backoff budget rather than instantly. Other 4xx (400 bad
+# request, 403, 404) are NOT retried — they won't succeed on a retry.
+_RETRY_STATUS = frozenset({401, 429, 500, 502, 503, 504})
 _RETRY_MAX_ATTEMPTS = 5          # total tries, including the first
 _RETRY_BASE_DELAY = 2.0          # seconds; delay = base * 2**(attempt-1) + jitter
 _RETRY_MAX_DELAY = 60.0          # cap any single backoff wait
@@ -239,9 +243,9 @@ def call_openai_compatible(
 
     api_key = os.environ.get("OPENAI_API_KEY", "lm-studio")
     url = f"{base_url.rstrip('/')}/chat/completions"
-    # Retry transient failures (429 / 5xx) with exponential backoff + jitter.
-    # A fresh Request is built each attempt because urllib consumes the body
-    # stream once. Non-retryable HTTP errors (4xx except 429) and the final
+    # Retry transient failures (401 / 429 / 5xx) with exponential backoff +
+    # jitter. A fresh Request is built each attempt because urllib consumes the
+    # body stream once. Non-retryable HTTP errors (other 4xx) and the final
     # exhausted attempt re-raise as RuntimeError, preserving prior behavior.
     data = None
     for attempt in range(1, _RETRY_MAX_ATTEMPTS + 1):
