@@ -23,7 +23,7 @@ ingest agent's tournament selects the winning draft via a combined
 fidelity-plus-salience scalar; coherence and numeric drift form the
 lexicographic tail. New ingests then trigger evolution proposals against
 neighboring synthesis pages — when paper P arrives, the framework asks an
-LLM whether existing entity / concept / synthesis pages should be edited in
+LLM whether existing synthesis pages should be edited in
 light of P, and writes structured proposals to
 `.ingest/{stem}-evolution-proposals/` for human review. The result is a
 markdown wiki on disk that compounds: every new paper makes related synthesis
@@ -41,7 +41,7 @@ inbox/raw-paper.pdf
 │ researchwiki agent ingest inbox/raw-paper.pdf                      │
 │                                                                    │
 │  1. reconcile     PDF → DOI / title / year / venue / authors       │
-│                   (Haiku-extractor on first 1-2 pages → Semantic    │
+│                   (LLM extractor on first 1-2 pages → Semantic      │
 │                    Scholar lookup → Crossref + regex fallbacks)     │
 │  2. extract       PDF → introduction / methods / results sections   │
 │  3. crosslinks    citation-graph candidates ∪ semantic-KNN         │
@@ -64,7 +64,7 @@ inbox/raw-paper.pdf
 │                   add back-links, append to index.md and log.md     │
 │ 11. shortname     LLM proposes a 1–4 word handle for the index entry│
 │ 12. keywords      LLM proposes 5–10 retrieval tokens for YAML       │
-│ 13. memory evolve KNN against existing synthesis/entity/concept     │
+│ 13. memory evolve KNN against existing synthesis                    │
 │                   pages → per-neighbor LLM judgment → proposals     │
 │                   written to .ingest/{stem}-evolution-proposals/    │
 └────────────────────────────────────────────────────────────────────┘
@@ -118,7 +118,7 @@ You'll see something like (excerpted, real output from a recent ingest):
 ```
 [agent] attempt_id=8a3b...
 [agent] pdf=some-paper.pdf
-[agent] mode=real (anthropic/claude-sonnet-4-6)
+[agent] mode=real (openai-compatible/gpt-5.6-luna)
 [agent] n_drafts=2  use_semantic=True  max_evolve=1
 [agent] reconcile → stem=du-2025-a-versatile-crisprcas9-system-off-target year=2025 type=research
 [agent] extract   → sections=['introduction', 'methods', 'results', 'discussion'] pdf_claims=11
@@ -165,7 +165,7 @@ doi: 10.1093/bib/...
 venue: Briefings in Bioinformatics
 type: paper
 category: [cgt]
-pdf_path: /.../papers/du-2025-a-versatile-crisprcas9-system-off-target.pdf
+pdf_path: "[[du-2025-a-versatile-crisprcas9-system-off-target.pdf]]"   # Obsidian wikilink → click-to-open; real file at papers/{stem}.pdf
 short_name: CCLMoff
 keywords: [CRISPR off-target prediction, transformer, RNA language model, ...]
 tags: [ingested-via-agent]
@@ -192,7 +192,7 @@ tags: [ingested-via-agent]
 - ...
 ```
 
-YAML carries the full audit (DOI, source PDF location, ingest tags). The
+YAML carries the full audit (DOI, source-PDF wikilink, ingest tags). The
 body is six standard sections capped to budget. Every wikilink in
 `Related Papers` was verified — either citation-graph confirmed or
 LLM-judged topical with a one-line rationale.
@@ -218,8 +218,10 @@ RNA language model backbone and the largest benchmark dataset to date.
 
 ## Patch
 
-- Add `[[cgt/du-2025-a-versatile-crisprcas9-system-off-target]]` to the
-  `referenced_papers:` list (or to the `## Approaches` / equivalent section).
+- Add `[[cgt/du-2025-a-versatile-crisprcas9-system-off-target]]` into the
+  `## Approaches` / equivalent section as an inline `[[wikilink]]`, plus a
+  matching `[^id]: [[cgt/du-2025-…]]` footnote under `## References`
+  (synthesis pages cite via the body — there is no `referenced_papers:` field).
 - Section: **### Prediction — computational ranking of candidate off-targets**
 - New bullet:
   > **CCLMoff** [[cgt/du-2025-a-versatile-crisprcas9-system-off-target]] is a
@@ -297,9 +299,12 @@ match — likely noise).
 The same content is reachable from the CLI without any server: topic search
 is `researchwiki search`, a page is a plain file `Read`, and structural
 questions go through `researchwiki db query`. For grounded citations use
-`researchwiki claims "<query>"` — every claim has a stable `claim_id` you
-can cite as `claim_id:NNN` — and `researchwiki pdf-search <stem> "<query>"`
-to pull an exact passage the wiki page didn't quote.
+`researchwiki claims "<query>"` — each hit prints a durable
+`[[stem#claim_slug]]` anchor (content-addressed, survives `db rebuild`) that
+you paste straight into a page. The bare `claim_id:NNN` shown alongside is a
+session-local row handle, reassigned on rebuild — never a citation token.
+Use `researchwiki pdf-search <stem> "<query>"` to pull an exact passage the
+wiki page didn't quote.
 
 ---
 
@@ -328,7 +333,7 @@ Ingest cost (last 7 days):
   attempts:           7
   total tokens:       20K input + 31K output
   mean per attempt:   7K tokens
-  estimated cost:     $2.58  (Anthropic 2026-05 rates)
+  estimated cost:     $0.00  (default models unpriced in the estimator)
 ```
 
 `lint` reports orphans, broken wikilinks, missing back-links, stale
@@ -361,13 +366,17 @@ Where things live in the package:
 researchwiki/
 ├── index/                  # Indexing primitives
 │   ├── embeddings.py       #   Bi-encoder model singleton (BAAI/bge-small)
+│   ├── claim_embeddings.py #   Cached bi-encoder embeddings for claims
 │   ├── pdf_chunks.py       #   Per-PDF Tantivy chunk index + chunk embeddings
 │   ├── pages_bm25.py       #   Wiki-page BM25 index (Tantivy)
 │   ├── pages_semantic.py   #   Wiki-page dense embedding store
+│   ├── graph.py            #   Weighted paper-graph edges + modularity clustering
 │   └── types.py            #   Document, SearchHit, SearchBackend ABC
 ├── search/                 # Query orchestration over index/
 │   ├── __init__.py         #   suggest_category, build_documents_from_wiki
-│   └── hybrid.py           #   RRF fusion (BM25 + semantic)
+│   ├── hybrid.py           #   RRF fusion (BM25 + semantic)
+│   ├── refs.py             #   Durable [[stem#slug]] citation form for a claim hit
+│   └── tools.py            #   Read-only primitives behind `claims` + `pdf-search`
 ├── grade/                  # All page-scoring / quality evaluation
 │   ├── fidelity/           #   Per-claim fidelity, paired by page-type
 │   │   ├── paper.py        #     Paper page vs. its OWN PDF (continuous floats)
@@ -378,6 +387,8 @@ researchwiki/
 │   ├── coherence.py        #   Page-shape contract (sections, word count,
 │   │                       #     bullets, wikilink density). No PDF, no LLM.
 │   ├── grounding.py        #   Citation-presence check on every claim-shaped unit
+│   ├── support.py          #   Per-claim entailment (qualitative analogue of fidelity)
+│   ├── claim_overlap.py    #   Near-paraphrase claim overlap across papers (crosslink)
 │   ├── scorer.py           #   Fixture-based scorer (token-overlap + bi-encoder
 │   │                       #     cosine + LLM-judge verdict paths). Used by both
 │   │                       #     grade/salience.py and benchmark/benchmark-fixture.
@@ -386,14 +397,20 @@ researchwiki/
 ├── benchmark/              # Benchmark methodology (renamed from eval/)
 │   ├── fixture.py          #   ContentFixture / RetrievalFixture loaders
 │   ├── retrieval.py        #   Retrieval-quality benchmarks
+│   ├── retrieval_reports.py#   Retrieval-fixture scoring dispatch + prose reports
+│   ├── content_reports.py  #   Rendering for content-fixture scoring output
 │   ├── replicate.py        #   Author-N-times replication driver (NOT auto-imported
 │   │                       #     from the package — depends on agents.phases)
 │   └── style.py            #   Style report
 ├── agents/                 # The ingest agent
 │   ├── runner.py           #   13-phase state-machine driver
+│   ├── context.py          #   Shared phase Context (each phase reads/writes it)
 │   ├── fitness.py          #   Tournament + improvement-rule lenses;
 │   │                       #     `combined_quality` = 0.5·semantic + 0.5·salience
-│   ├── llm.py              #   Anthropic API wrapper (real + stub)
+│   ├── llm.py              #   LLM API wrapper (provider-routed; real + stub)
+│   ├── model_config.py     #   Per-role model assignments from config/models.*.yaml
+│   ├── relay.py            #   chat-relay provider client
+│   ├── judge.py            #   LLM-judge helpers (structural verdicts)
 │   ├── prompt_lib.py       #   Load prompts from prompts/*.md (A/B-able)
 │   ├── promote.py          #   Move PDF + write wiki page + back-links + index.md
 │   └── phases/             #   Each phase as its own module
@@ -406,7 +423,10 @@ researchwiki/
 │       │                   #     + grade.coherence, packs aggregate scores dict
 │       ├── revise.py       #     Critic + evolve + debug
 │       ├── commit.py       #     Sandbox write + propose_short_name + keywords
-│       └── evolution.py    #     Memory-evolution proposals
+│       ├── grade_persist.py#     Post-commit fidelity grading on the promoted page
+│       ├── evolution.py    #     Memory-evolution proposals (orchestration)
+│       ├── memory_evolve.py#     Propose edits to existing synthesis pages
+│       └── evolve_ledger.py#     Judged-pair idempotency cache for memory_evolve
 ├── providers/              # External-API wrappers (S2, Crossref, PubMed, bioRxiv, ORCID)
 ├── db/                     # State DB (sqlite) — derived from wiki/, rebuildable
 ├── tasks/                  # CLI subcommands — one module per command, auto-discovered
@@ -420,7 +440,10 @@ researchwiki/
 │   ├── benchmark_fixture.py #  Hand-curated-fixture benchmark
 │   ├── evolve.py           #   Standalone memory-evolution proposals
 │   ├── search.py reindex.py status.py lint.py audit.py claims.py pdf_search.py ...
-└── tools/                  # Shared read-only primitives behind `claims` + `pdf-search`
+├── concepts/               # Concept-hub surfacing + scaffold + reciprocal linking
+├── claim_graph/            # Content-addressed claim identity + edge cache
+├── synthesis_candidates/   # Detect paper clusters lacking a synthesis page
+└── pdf/                    # pypdfium2-backed PDF text/structure extraction
 ```
 
 **Recent layering cleanup** (worth knowing because the docstrings still
@@ -490,36 +513,44 @@ This is by design — the markdown layer is what survives.
 
 ## Costs and trade-offs
 
-### Per-ingest cost (Anthropic 2026-05 rates)
+### Per-ingest cost
 
-A typical full-agent ingest costs roughly **$0.10–$0.15 per paper** after
-the 2026-05-28 author-role flip from Opus 4.7 → Sonnet 4.6 (commit
-`11084ae`). Per-phase breakdown:
+Absolute cost is **config-dependent** — it rides on whichever
+`config/models.*.yaml` file `RW_MODELS_CONFIG` selects and that provider's
+token pricing. The current active default is `models.chatgpt.yaml`:
+`gpt-5.6-luna` drives the quality-sensitive roles (author / critic / judge /
+proposer), and the cheaper `gpt-5.4-mini` handles the deterministic
+short-output roles (classifier / extractor). The committed fallback when no
+override is set is `config/models.yaml` (Upstage Solar: `solar-pro3` /
+`solar-mini`).
 
-- Reconcile (Haiku 4.5 metadata extraction, default-on): ~$0.001
-- 2 author drafts at Sonnet 4.6: ~$0.06
-- 2 grader runs (semantic only, no LLM): free
-- 1 critic + 1 evolve at Sonnet 4.6: ~$0.02
-- Short-name + keywords + crosslink judge at Sonnet 4.6: ~$0.02
-- Crosslink-judge gleaning round (when fired, ~⅔ of ingests): ~$0.005
-- Memory-evolution proposals at Sonnet 4.6: ~$0.04 (with cosine prefilter)
+At OpenAI standard rates (per 1M tokens: `gpt-5.6-luna` $1.00 in / $6.00
+out, `gpt-5.4-mini` $0.75 in / $4.50 out), a single-draft ingest runs
+roughly ~20K input + ~6K output tokens across all roles (from `researchwiki
+insights`), with the **author** phase dominating and everything else a long
+tail — so a typical paper lands around **~$0.05–$0.08**, and a 2-draft
+author tournament (`-n 2`) closer to **~$0.08–$0.12**. The two grader runs
+are semantic-only (no LLM) and free; memory-evolution proposals cost in
+proportion to how many synthesis neighbors clear the cosine prefilter.
 
-The author flip dropped per-paper cost ~70% (from $0.30–$0.50 to
-$0.10–$0.15) without measurable fidelity loss — A/B sandbox over compbio /
-genomics / cgt showed Sonnet 4.6 matched or beat Opus 4.7 on
-mean_semantic with 0 drift on all three test papers. The breakdown above
-will drift again as model assignments evolve in `config/models.yaml` —
-treat the dollar figures as order-of-magnitude. The agent is still
-calibrated to spend on *fidelity* (claim-grading, critic, evolve) not on
-speed.
+Treat these as order-of-magnitude — token counts are config-independent
+(same prompts), but dollars move with the model assignment. Note the
+framework's built-in cost estimator only prices models already in its
+internal rate table; the current default models aren't in it, so
+`researchwiki insights` and `status` report **`$0.00`** for them today —
+read that as "unpriced," and multiply the per-role token counts from
+`insights` by your provider's rates for a real figure. The agent is
+calibrated to spend on *fidelity* (claim-grading, critic, evolve), not on
+speed — that hasn't changed across model swaps.
 
 ### When to opt out of which phases
 
 - **`--use-stub`** — full offline / deterministic mode. No API calls. Use
   for harness tests and CI.
-- **`--no-llm-reconcile`** — skip the Haiku-class extractor, fall back to
-  the regex+S2 path. Use for offline/stub mode or to shave the ~$0.001
-  reconcile cost. The regex path is still maintained but accumulated
+- **`--no-llm-reconcile`** — skip the LLM metadata extractor (`gpt-5.4-mini`
+  under the current default), fall back to the regex+S2 path. Use for
+  offline/stub mode or to shave the (tiny) reconcile cost. The regex path is
+  still maintained but accumulated
   format-specific patches; LLM-reconcile is the structurally robust path.
 - **`--no-semantic` on reindex** — skip the bi-encoder pass, BM25 only.
   Use when sentence-transformers isn't installed.
