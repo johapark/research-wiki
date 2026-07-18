@@ -114,14 +114,20 @@ def stamp_age_days() -> float | None:
     return (time.time() - ts) / 86400.0
 
 
+def _count_category_pages(category: str) -> int:
+    """Number of *.md files in wiki/<category>/. Returns 0 if the dir doesn't
+    exist (cold-install case)."""
+    from .paths import wiki_dir
+    cat_dir = wiki_dir() / category
+    if not cat_dir.exists():
+        return 0
+    return sum(1 for _ in cat_dir.glob("*.md"))
+
+
 def _count_other_pages() -> int:
     """Number of *.md files in wiki/other/. Returns 0 if the dir doesn't
     exist (cold-install case)."""
-    from .paths import wiki_dir
-    other_dir = wiki_dir() / "other"
-    if not other_dir.exists():
-        return 0
-    return sum(1 for _ in other_dir.glob("*.md"))
+    return _count_category_pages("other")
 
 
 def other_saturation_warning(*, touch: bool = True) -> str | None:
@@ -146,3 +152,38 @@ def other_saturation_warning(*, touch: bool = True) -> str | None:
         f"⚠ wiki/other/ has {n} paper(s) — taxonomy may be undersized.\n"
         f"  Run `researchwiki suggest-splits` to propose new categories or reassignments."
     )
+
+
+# Within-category divergence tunables. Parallel to the `other`-saturation
+# machinery above, but for the *opposite* signal: a populated content category
+# that has grown a sub-cluster distinct enough to deserve its own sibling
+# category. Detection (clustering) lives in
+# `researchwiki/tasks/suggest_splits.py`; only the decay stamp lives here so the
+# constant stays beside its sibling. Separate stamp file so the two warnings
+# decay independently.
+CATEGORY_DIVERGENCE_DECAY_DAYS = 7
+CATEGORY_DIVERGENCE_STAMP = ".category-divergence-stamp"
+
+
+def _divergence_stamp_path() -> Path:
+    from .paths import wiki_root
+    return wiki_root() / CATEGORY_DIVERGENCE_STAMP
+
+
+def write_divergence_stamp() -> None:
+    """Touch the divergence dismissal stamp — called when the status warning is
+    surfaced and when `suggest-splits --category/--all` runs, so the nudge
+    suppresses for the decay window."""
+    _divergence_stamp_path().write_text(str(int(time.time())))
+
+
+def divergence_stamp_age_days() -> float | None:
+    """Days since the divergence stamp was last written, or None if absent."""
+    p = _divergence_stamp_path()
+    if not p.exists():
+        return None
+    try:
+        ts = int(p.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    return (time.time() - ts) / 86400.0

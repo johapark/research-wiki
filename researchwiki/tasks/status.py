@@ -374,6 +374,16 @@ def main(argv: list[str]) -> int:
         print(msg)
         print()
 
+    # Within-category divergence nudge. Structural-only (no LLM) and
+    # decay-stamped like the `other` warning — fires when a populated category
+    # has grown a sub-cluster distinct enough to consider splitting out. See
+    # researchwiki.tasks.suggest_splits.divergence_warning.
+    from .suggest_splits import divergence_warning
+    div_msg = divergence_warning()
+    if div_msg:
+        print(div_msg)
+        print()
+
     print("Cross-link graph (from `[[wikilinks]]` in wiki pages):")
     print(f"  directional links:   {directional}")
     print(f"  unique paper pairs:  {undirected_count}")
