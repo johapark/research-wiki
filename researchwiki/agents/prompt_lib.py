@@ -1,9 +1,10 @@
 """Load LLM prompts from `prompts/*.md` at the repo root.
 
-Centralizing prompts as text files (instead of Python constants) lets the
-A/B regression eval (`researchwiki agent eval`) swap a prompt by passing
-a different file path — no source edit, no rebuild. It also makes prompt
-changes diff-able as content rather than as code.
+Centralizing prompts as text files (instead of Python constants) lets an A/B
+run swap a prompt by passing a different file path — `agent ingest
+--author-prompt-file`, or `benchmark-fixture --repeat` for a scored
+comparison — with no source edit and no rebuild. It also makes prompt changes
+diff-able as content rather than as code.
 
 Conventions:
   - One prompt per file, no frontmatter.

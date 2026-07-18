@@ -1,2 +1,0 @@
-# Single-paper fixture for isolating xu-2025 OOM behavior.
-xu-2025-a-mem-agentic-memory-for-llm
