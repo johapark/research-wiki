@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+from .model_config import PhaseNotRegistered
+
 
 def parse_json_response(raw: str) -> dict | None:
     """Parse an LLM response into a dict, tolerating ```-fences and stray prose.
@@ -40,8 +42,13 @@ def parse_json_response(raw: str) -> dict | None:
 def run_llm_judge(*, phase: str, system: str, prompt: str, schema: dict | None = None) -> dict | None:
     """Call the configured LLM for `phase` and return the parsed JSON verdict.
 
-    Returns None on any failure (LLM unreachable, bad JSON) so callers can treat
-    "no verdict" uniformly rather than distinguishing error kinds.
+    Returns None on *runtime* failure (LLM unreachable, bad JSON) so callers can
+    treat "no verdict" uniformly rather than distinguishing error kinds.
+
+    `PhaseNotRegistered` is deliberately excluded from that tolerance: an
+    unregistered phase is a config/programming bug that no retry can fix, and
+    swallowing it here turns a whole feature into a silent no-op that looks
+    exactly like "the judge had no opinion".
     """
     try:
         from . import llm
@@ -49,6 +56,8 @@ def run_llm_judge(*, phase: str, system: str, prompt: str, schema: dict | None =
         return None
     try:
         resp = llm.call(phase=phase, system=system, prompt=prompt, schema=schema)
+    except PhaseNotRegistered:
+        raise
     except Exception:
         return None
     return parse_json_response(resp.text or "")

@@ -32,6 +32,21 @@ from ..paths import wiki_root
 from ..log import log
 
 
+class PhaseNotRegistered(KeyError):
+    """A phase (or its bound role) is absent from the model config.
+
+    This is a *programming* error, not a runtime one: an unregistered phase
+    will never resolve on retry, so callers that tolerate transient LLM
+    failures (`run_llm_judge` returns None on any exception) must not swallow
+    it — doing so silently no-ops the whole phase. Subclasses `KeyError` so
+    existing `except KeyError` handlers keep working.
+
+    Adding a new LLM phase? Register it in `_FALLBACK_PHASES` below; the
+    `test_phase_registration` suite fails CI if a `phase=` literal in the
+    package has no entry.
+    """
+
+
 def config_path() -> Path:
     """Resolve which models-config file to load.
 
@@ -331,13 +346,14 @@ def for_phase(name: str) -> ModelConfig:
     roles, phases = _config()
     spec = phases.get(name)
     if spec is None:
-        raise KeyError(
-            f"phase {name!r} not in model config (known: {sorted(phases)})"
+        raise PhaseNotRegistered(
+            f"phase {name!r} not in model config (known: {sorted(phases)}). "
+            f"Register it in _FALLBACK_PHASES in agents/model_config.py."
         )
     role_name = spec["role"]
     base = roles.get(role_name)
     if base is None:
-        raise KeyError(
+        raise PhaseNotRegistered(
             f"role {role_name!r} (for phase {name!r}) not in model config"
         )
     # Apply per-phase overrides.
@@ -372,7 +388,7 @@ def for_role(name: str) -> ModelConfig:
     roles, _ = _config()
     cfg = roles.get(name)
     if cfg is None:
-        raise KeyError(f"role {name!r} not in model config")
+        raise PhaseNotRegistered(f"role {name!r} not in model config")
     return cfg
 
 
