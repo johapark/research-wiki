@@ -1,0 +1,31 @@
+fixture_id: llm-based-cell-type-annotation
+fixture_type: claims
+query: "large language model with knowledge graph for cell type annotation"
+k: 10
+notes: |
+  Claim-level retrieval — scHilda's headline contribution (LLM+KG for
+  single-cell annotation) should surface in top-K. `position: 0` targets
+  the first `key_contributions` entry, which is the stable landing spot
+  for a paper's headline result under the ingest template.
+
+  Portability caveat: if the author phase places the LLM+KG claim at a
+  different position on a new ingest, this fixture reports a rank miss.
+  When that happens the fix is to update `position:` here, not the ingest.
+  See PLAN.md for calibration guidance after the first ingest run.
+
+expected_claims:
+  - paper_stem: li-2026-schilda-hierarchical-integration-of-llm
+    section: key_contributions
+    position: 0
+    importance: critical
+    rationale: "The paper's headline framework — hierarchical integration of LLM output with a knowledge-graph cell ontology — should be the first key contribution."
+
+must_not_appear:
+  - paper_stem: muslu-2026-variantmedium-sensitive-and-generalizable-somatic
+    rationale: "Uses deep learning but for somatic variant calling, not cell type annotation."
+  - paper_stem: zhang-2026-mga-a-tool-for-haplotype-mixed
+    rationale: "Genome assembly, no LLM component."
+  - paper_stem: fonseca-2026-adjunctive-ibuprofen-in-pre-extensively-drug-resistant
+    rationale: "Clinical trial, no LLM component."
+  - paper_stem: nohel-2026-beamster-brain-metastases-segmentation-for-stereotactic
+    rationale: "MRI dataset, no LLM component."

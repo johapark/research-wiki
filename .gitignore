@@ -1,0 +1,122 @@
+# Content directories — the dirs themselves are tracked (via .gitkeep)
+# so a fresh clone has the structure, but every PDF / wiki page / supp file
+# inside stays gitignored as per-user content.
+#
+# `wiki/*` covers wiki/{category}/*.md (the LLM-authored paper pages),
+# wiki/synthesis/*, wiki/references/*, AND the three bookkeeping files
+# wiki/index.md / wiki/log.md / wiki/pdfs-failed-parsing.md — all per-user
+# state that lives inside the Obsidian vault.
+papers/*
+!papers/.gitkeep
+inbox/*
+!inbox/.gitkeep
+wiki/*
+!wiki/.gitkeep
+# Local-only shareable artifacts.
+share/
+# Default scaffold subdirs — committed (via .gitkeep) so every clone has the
+# universal structure: the page-type dirs (synthesis/ideas/references) plus
+# the `other` content bucket. Their contents stay gitignored as per-user
+# state. Content categories like sc-omics are intentionally NOT seeded here —
+# they're local, derived from each user's papers.
+!wiki/synthesis/
+wiki/synthesis/*
+!wiki/synthesis/.gitkeep
+!wiki/ideas/
+wiki/ideas/*
+!wiki/ideas/.gitkeep
+!wiki/concepts/
+wiki/concepts/*
+!wiki/concepts/.gitkeep
+!wiki/references/
+wiki/references/*
+!wiki/references/.gitkeep
+!wiki/other/
+wiki/other/*
+!wiki/other/.gitkeep
+
+# Per-user "I dismissed the suggest-splits warning at this time" stamp.
+# Touched by `researchwiki suggest-splits`; status uses it to suppress
+# the `wiki/other/` saturation warning for the decay window.
+.suggest-splits-stamp
+
+# Active LLM model config — per-user, mutable. The committed templates
+# (config/models.anthropic.yaml — the default/primary — plus
+# config/models.openai-compatible.yaml and config/models.lmstudio.yaml)
+# ARE tracked; `config/models.yaml` is
+# the live copy a user selects by `cp config/models.anthropic.yaml
+# config/models.yaml` and then edits (provider swaps, per-role mixing).
+# Gitignored so local A/B edits don't churn the repo or fight `git pull`.
+config/models.yaml
+
+# Ephemeral processing artifacts
+.ingest/
+.s2-cache/
+.crossref-cache/
+.web-cache/
+.tantivy-index/
+.grade-cache/
+.semantic-cache/
+.claim-graph/
+.evolve-cache/
+.agent-output/
+.llm-relay/
+.benchmark-runs/
+
+# Editor / vault configs (user-specific)
+.obsidian/
+.claude/
+*.base
+
+# OS / editor detritus
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+
+# Virtualenvs
+.venv/
+venv/
+
+# Per-user LLM backend credentials and routing config.
+# Template: copy from config/models.*.yaml comments, fill in key + URL.
+.env
+.acceptance/
+.evaluate-output/
+.eval-output/
+
+# Local state DB. Canonical path is ~/.local/share/researchwiki/state.db;
+# the package directory should never hold one — entry catches stray copies.
+# `.researchwiki.db` covers another stray location (repo root) where some
+# code paths drop a state DB.
+researchwiki/db/state.db
+.researchwiki.db
+
+# Per-model retrieval caches built by the retrieval-fixture eval harness.
+# Each candidate embedding (BGE-small, SPECTER2, etc.) gets its own
+# `.retrieval-cache-{slug}/` with claim + page vectors. Local-only.
+.retrieval-cache-*/
+.eval-sandbox/
+
+# WIP planning drafts and agent run logs — local only, must never be committed.
+turboquant-single-cell-phase0-plan.md
+.agent-runs/
+
+# Internal maintainer-only artifacts (design notes, backfill/calibration
+# helpers). Present in the working tree for the author's use; not shipped
+# in the public repo.
+internal/
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store
+
+# Local state DB — repo-root fallback path (some tools open it here
+# before resolving the canonical ~/.local/share/researchwiki/state.db).
+.state.db

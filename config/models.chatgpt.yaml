@@ -1,0 +1,71 @@
+# OpenAI ChatGPT — https://api.openai.com/v1
+# Endpoint folded into `base_url:` below, so .env needs only the key:
+#   OPENAI_API_KEY=sk-...
+# (RW_LLM_BASE_URL in .env still overrides base_url if set.)
+#
+# Select this config with RW_MODELS_CONFIG=models.chatgpt.yaml.
+# gpt-5.6-luna drives the quality-sensitive roles (author/critic/judge);
+# the deterministic short-output roles (classifier, extractor) run on the
+# cheaper gpt-5.4-mini. proposer still on gpt-5.6-luna — downgrade it too
+# once mini output quality is confirmed on short_name/keywords.
+
+base_url: https://api.openai.com/v1
+
+roles:
+  # Drafting — produces the page prose. Quality matters most here.
+  author:
+    provider: openai-compatible
+    model: gpt-5.6-luna
+    temperature: 0.5
+    max_tokens: 6000
+
+  # Critic — turns grader flags into revision notes.
+  critic:
+    provider: openai-compatible
+    model: gpt-5.6-luna
+    temperature: 0.3
+    max_tokens: 2500
+
+  # Judge — structural decisions (cross-link selection, memory evolution).
+  judge:
+    provider: openai-compatible
+    model: gpt-5.6-luna
+    temperature: 0.2
+    max_tokens: 1500
+
+  # Classifier — single JSON verdict, deterministic.
+  classifier:
+    provider: openai-compatible
+    model: gpt-5.4-mini
+    temperature: 0.1
+    max_tokens: 200
+
+  # Proposer — short-name / keyword lists.
+  proposer:
+    provider: openai-compatible
+    model: gpt-5.6-luna
+    temperature: 0.3
+    max_tokens: 200
+
+  # Extractor — title/authors/DOI/abstract from PDF first page.
+  extractor:
+    provider: openai-compatible
+    model: gpt-5.4-mini
+    temperature: 0.0
+    max_tokens: 800
+
+phases:
+  author:           {role: author}
+  evolve:           {role: author}
+  debug:            {role: author, temperature: 0.2}
+  critic:           {role: critic}
+  classifier:       {role: classifier}
+  short_name:       {role: proposer, max_tokens: 32}
+  keywords:         {role: proposer}
+  link_generation:  {role: judge, max_tokens: 1200}
+  memory_evolution: {role: judge, max_tokens: 3000}
+  synthesis_judge:  {role: judge}
+  eval_judge:       {role: judge}
+  reconcile:        {role: extractor}
+  target_claims:    {role: judge, max_tokens: 8000}
+  claim_support:    {role: judge}

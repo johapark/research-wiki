@@ -1,0 +1,451 @@
+"""Per-check unit tests for the lint subpackage.
+
+After splitting `tasks/lint.py` into `tasks/lint/` (one module per check
+group), each check is a pure function over already-walked page state
+and is independently testable. These tests construct synthetic wiki
+trees under tmp_path, monkey-patch `wiki_dir()` to point at them, and
+call each check directly.
+
+Coverage focus is on checks that previously had zero tests:
+  - link graph (orphans, missing back-links, broken links)
+  - yaml-shape checks (type mismatches, category drift, missing DOI,
+    stem/year drift, missing keywords)
+  - staleness (synthesis, audit count)
+  - concepts
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from researchwiki.concepts.candidates import find_concept_candidates
+from researchwiki.tasks.lint.link_checks import (
+    build_link_graph,
+    find_missing_backlinks,
+    find_orphans,
+)
+from researchwiki.tasks.lint.staleness import (
+    find_stale_by_audit_count,
+    find_stale_synthesis,
+)
+from researchwiki.tasks.lint.walk import (
+    broken_links,
+    count_keywords,
+    extract_links,
+    first_category,
+    page_key,
+)
+from researchwiki.tasks.lint.yaml_checks import (
+    find_category_drift,
+    find_missing_doi,
+    find_missing_keywords,
+    find_page_type_mismatches,
+    find_stem_year_drift,
+)
+
+
+# ---------- fixtures ----------
+
+@pytest.fixture
+def tmp_wiki(tmp_path, monkeypatch):
+    """Synthetic wiki rooted at tmp_path/wiki.
+
+    The lint subpackage modules use `from ...paths import wiki_dir`, which
+    binds the symbol at import time — patching `researchwiki.paths.wiki_dir`
+    alone wouldn't reach those bindings. Patch every module that consumes
+    it so synthetic wiki paths flow through `page_key()` cleanly.
+    """
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    fake = lambda: wiki  # noqa: E731
+    monkeypatch.setattr("researchwiki.paths.wiki_dir", fake)
+    monkeypatch.setattr("researchwiki.tasks.lint.walk.wiki_dir", fake)
+    return wiki
+
+
+def _mkpage(wiki: Path, key: str, body: str = "") -> Path:
+    """Create wiki/{key}.md with the given body. Returns the Path."""
+    p = wiki / f"{key}.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body)
+    return p
+
+
+# ---------- walk ----------
+
+def test_extract_links_resolves_full_keys(tmp_wiki):
+    a = _mkpage(tmp_wiki, "cgt/foo-2024-bar")
+    b = _mkpage(tmp_wiki, "compbio/baz-2025-qux")
+    known = {page_key(a), page_key(b)}
+    text = "See [[cgt/foo-2024-bar]] and [[compbio/baz-2025-qux]]."
+    assert extract_links(text, known) == known
+
+
+def test_extract_links_resolves_bare_stems(tmp_wiki):
+    a = _mkpage(tmp_wiki, "cgt/foo-2024-bar")
+    known = {page_key(a)}
+    # Bare stem with no category should still resolve.
+    text = "See [[foo-2024-bar]] for context."
+    assert extract_links(text, known) == known
+
+
+def test_broken_links_flags_unresolved(tmp_wiki):
+    a = _mkpage(tmp_wiki, "cgt/foo-2024-bar")
+    known = {page_key(a)}
+    text = "Real [[cgt/foo-2024-bar]] but broken [[cgt/missing-page]] and [[also-missing]]."
+    bad = broken_links(text, known)
+    assert "cgt/missing-page" in bad
+    assert "also-missing" in bad
+    assert "cgt/foo-2024-bar" not in bad
+
+
+def test_first_category_handles_three_shapes():
+    assert first_category("[single-cell]") == "single-cell"
+    assert first_category(["compbio"]) == "compbio"
+    assert first_category("ai") == "ai"
+    assert first_category("") == ""
+
+
+def test_count_keywords_handles_three_shapes():
+    assert count_keywords(["one", "two", "three"]) == 3
+    assert count_keywords("[a, b, c]") == 3
+    assert count_keywords("a, b") == 2
+    assert count_keywords("") == 0
+    assert count_keywords(None) == 0
+
+
+# ---------- link graph: orphans + missing back-links ----------
+
+def test_find_orphans_flags_zero_link_papers(tmp_wiki):
+    a = _mkpage(tmp_wiki, "cgt/orphan", "## Page\n\nNo links.")
+    b = _mkpage(tmp_wiki, "cgt/linked-from", "## Page\n\nSee [[cgt/orphan]]")
+    pages = [a, b]
+    pages_prose = {a: "No links.", b: "See [[cgt/orphan]]"}
+    known = {page_key(a), page_key(b)}
+    out_links, in_links, _ = build_link_graph(pages, pages_prose, known)
+    orphans = find_orphans(pages, out_links, in_links)
+    # 'a' has an inbound link → not orphan. 'b' has an outbound → not orphan.
+    assert orphans == []
+
+
+def test_find_orphans_real_orphan(tmp_wiki):
+    a = _mkpage(tmp_wiki, "cgt/orphan", "")
+    b = _mkpage(tmp_wiki, "cgt/connected-1", "See [[cgt/connected-2]]")
+    c = _mkpage(tmp_wiki, "cgt/connected-2", "See [[cgt/connected-1]]")
+    pages = [a, b, c]
+    pages_prose = {a: "", b: "See [[cgt/connected-2]]", c: "See [[cgt/connected-1]]"}
+    known = {page_key(p) for p in pages}
+    out_links, in_links, _ = build_link_graph(pages, pages_prose, known)
+    assert find_orphans(pages, out_links, in_links) == ["cgt/orphan"]
+
+
+def test_find_orphans_excludes_synthesis(tmp_wiki):
+    """Synthesis pages can have zero inbound links and still not be orphans."""
+    s = _mkpage(tmp_wiki, "synthesis/empty-synth", "")
+    pages = [s]
+    pages_prose = {s: ""}
+    known = {page_key(s)}
+    out_links, in_links, _ = build_link_graph(pages, pages_prose, known)
+    assert find_orphans(pages, out_links, in_links) == []
+
+
+def test_find_missing_backlinks_paper_to_paper(tmp_wiki):
+    a = _mkpage(tmp_wiki, "cgt/a", "[[cgt/b]]")
+    b = _mkpage(tmp_wiki, "cgt/b", "")  # b doesn't link back to a
+    pages = [a, b]
+    pages_prose = {a: "[[cgt/b]]", b: ""}
+    known = {page_key(a), page_key(b)}
+    out_links, _, _ = build_link_graph(pages, pages_prose, known)
+    missing = find_missing_backlinks(out_links)
+    assert ("cgt/a", "cgt/b") in missing
+
+
+def test_find_missing_backlinks_excludes_synthesis(tmp_wiki):
+    """A → synthesis is asymmetric by design; not a missing-backlink."""
+    a = _mkpage(tmp_wiki, "cgt/a", "[[synthesis/topic]]")
+    s = _mkpage(tmp_wiki, "synthesis/topic", "")
+    pages = [a, s]
+    pages_prose = {a: "[[synthesis/topic]]", s: ""}
+    known = {page_key(a), page_key(s)}
+    out_links, _, _ = build_link_graph(pages, pages_prose, known)
+    assert find_missing_backlinks(out_links) == []
+
+
+def test_find_missing_backlinks_excludes_index_and_ideas(tmp_wiki):
+    """The index catalogue and idea-page grounding links are asymmetric by
+    design — a paper must not be forced to back-link them."""
+    idx = _mkpage(tmp_wiki, "index", "[[cgt/a]]")
+    idea = _mkpage(tmp_wiki, "ideas/plan", "[[cgt/a]]")
+    a = _mkpage(tmp_wiki, "cgt/a", "")
+    pages = [idx, idea, a]
+    pages_prose = {idx: "[[cgt/a]]", idea: "[[cgt/a]]", a: ""}
+    known = {page_key(idx), page_key(idea), page_key(a)}
+    out_links, _, _ = build_link_graph(pages, pages_prose, known)
+    assert find_missing_backlinks(out_links) == []
+
+
+def test_find_missing_backlinks_never_self_pair(tmp_wiki):
+    """A page that links itself must not be flagged as owing itself a backlink."""
+    a = _mkpage(tmp_wiki, "cgt/a", "[[cgt/a]]")
+    pages = [a]
+    pages_prose = {a: "[[cgt/a]]"}
+    known = {page_key(a)}
+    out_links, _, _ = build_link_graph(pages, pages_prose, known)
+    assert find_missing_backlinks(out_links) == []
+
+
+def test_find_missing_backlinks_flags_concept_hub(tmp_wiki):
+    """A concept hub → member edge IS meant to be reciprocal, so a one-way
+    concept link is a real gap (unlike synthesis/ideas)."""
+    c = _mkpage(tmp_wiki, "concepts/rag", "[[cgt/a]]")
+    a = _mkpage(tmp_wiki, "cgt/a", "")
+    pages = [c, a]
+    pages_prose = {c: "[[cgt/a]]", a: ""}
+    known = {page_key(c), page_key(a)}
+    out_links, _, _ = build_link_graph(pages, pages_prose, known)
+    assert ("concepts/rag", "cgt/a") in find_missing_backlinks(out_links)
+
+
+# ---------- yaml-shape checks ----------
+
+def test_find_page_type_mismatches_synthesis_with_paper_type(tmp_wiki):
+    s = _mkpage(tmp_wiki, "synthesis/x", "")
+    pages = [s]
+    fm = {s: {"type": "paper"}}
+    out = find_page_type_mismatches(pages, fm)
+    assert any("synthesis" in r for _, r in out)
+
+
+def test_find_page_type_mismatches_references_with_paper_type(tmp_wiki):
+    r = _mkpage(tmp_wiki, "references/some-doc", "")
+    pages = [r]
+    fm = {r: {"type": "paper"}}
+    out = find_page_type_mismatches(pages, fm)
+    assert any("references" in r for _, r in out)
+
+
+def test_find_category_drift(tmp_wiki):
+    """YAML category disagrees with parent dir."""
+    p = _mkpage(tmp_wiki, "cgt/x", "")
+    pages = [p]
+    fm = {p: {"category": ["compbio"]}}  # frontmatter says compbio, dir says cgt
+    drift = find_category_drift(pages, fm)
+    assert drift == [("cgt/x", "compbio", "cgt")]
+
+
+def test_find_category_drift_no_drift(tmp_wiki):
+    p = _mkpage(tmp_wiki, "cgt/x", "")
+    pages = [p]
+    fm = {p: {"category": ["cgt"]}}
+    assert find_category_drift(pages, fm) == []
+
+
+def test_find_missing_doi(tmp_wiki):
+    a = _mkpage(tmp_wiki, "cgt/has-doi", "")
+    b = _mkpage(tmp_wiki, "cgt/no-doi", "")
+    c = _mkpage(tmp_wiki, "cgt/todo-doi", "")
+    d = _mkpage(tmp_wiki, "cgt/no-doi-by-design", "")
+    s = _mkpage(tmp_wiki, "synthesis/topic", "")  # excluded by dir
+    pages = [a, b, c, d, s]
+    fm = {
+        a: {"type": "paper", "doi": "10.1/x"},
+        b: {"type": "paper", "doi": ""},
+        c: {"type": "paper", "doi": "TODO"},
+        d: {"type": "paper", "no_doi_reason": "workshop poster, no DOI"},
+        s: {"type": "synthesis"},
+    }
+    missing = find_missing_doi(pages, fm)
+    assert missing == ["cgt/no-doi", "cgt/todo-doi"]
+    assert "cgt/has-doi" not in missing
+    assert "cgt/no-doi-by-design" not in missing  # escape hatch
+    assert not any(k.startswith("synthesis/") for k in missing)
+
+
+def test_find_stem_year_drift(tmp_wiki):
+    p = _mkpage(tmp_wiki, "cgt/foo-2024-bar", "")
+    pages = [p]
+    fm = {p: {"type": "paper", "year": 2025}}  # YAML says 2025, stem says 2024
+    drift = find_stem_year_drift(pages, fm)
+    assert drift == [{"page": "cgt/foo-2024-bar", "stem_year": 2024, "yaml_year": 2025}]
+
+
+def test_find_stem_year_drift_lettered_year_match(tmp_wiki):
+    """smith-2024b-... stem year matches YAML year=2024."""
+    p = _mkpage(tmp_wiki, "cgt/smith-2024b-thing", "")
+    pages = [p]
+    fm = {p: {"type": "paper", "year": 2024}}
+    assert find_stem_year_drift(pages, fm) == []
+
+
+def test_find_missing_keywords(tmp_wiki):
+    a = _mkpage(tmp_wiki, "cgt/has-keywords", "")
+    b = _mkpage(tmp_wiki, "cgt/sparse-keywords", "")
+    pages = [a, b]
+    fm = {
+        a: {"type": "paper", "keywords": ["one", "two", "three", "four"]},
+        b: {"type": "paper", "keywords": ["one"]},
+    }
+    out = find_missing_keywords(pages, fm)
+    assert out == [("cgt/sparse-keywords", 1)]
+
+
+def test_find_missing_keywords_covers_reference_types(tmp_wiki):
+    """`keywords:` is required on reference-document pages too (whitepaper,
+    guidance, protocol, book) per CLAUDE.md Page Types §3. Regression guard
+    on the extension: a whitepaper without enough keywords must surface here."""
+    ok = _mkpage(tmp_wiki, "references/anthropic-2026-good", "")
+    thin = _mkpage(tmp_wiki, "references/anthropic-2026-thin", "")
+    missing = _mkpage(tmp_wiki, "references/fda-2026-blank", "")
+    guidance_ok = _mkpage(tmp_wiki, "references/fda-2026-good-guidance", "")
+    book_thin = _mkpage(tmp_wiki, "references/kutz-2024-thin-book", "")
+    pages = [ok, thin, missing, guidance_ok, book_thin]
+    fm = {
+        ok: {"type": "whitepaper",
+             "keywords": ["a", "b", "c", "d", "e", "f"]},
+        thin: {"type": "whitepaper", "keywords": ["only-one", "two"]},
+        missing: {"type": "guidance"},  # no keywords key at all
+        guidance_ok: {"type": "guidance",
+                      "keywords": ["one", "two", "three"]},
+        book_thin: {"type": "book", "keywords": []},
+    }
+    out = find_missing_keywords(pages, fm)
+    assert ("references/anthropic-2026-thin", 2) in out
+    assert ("references/fda-2026-blank", 0) in out
+    assert ("references/kutz-2024-thin-book", 0) in out
+    # Well-populated ones don't trip.
+    assert all(k != "references/anthropic-2026-good" for k, _ in out)
+    assert all(k != "references/fda-2026-good-guidance" for k, _ in out)
+
+
+def test_find_missing_keywords_ignores_synthesis_idea_concept(tmp_wiki):
+    """Synthesis / idea / concept pages don't need `keywords:` (their body
+    carries the search substrate). Exempt from the check even when empty."""
+    syn = _mkpage(tmp_wiki, "synthesis/no-kw-syn", "")
+    idea = _mkpage(tmp_wiki, "ideas/no-kw-idea", "")
+    concept = _mkpage(tmp_wiki, "concepts/no-kw-concept", "")
+    pages = [syn, idea, concept]
+    fm = {p: {"type": p.parent.name.rstrip("s"), "keywords": []} for p in pages}
+    assert find_missing_keywords(pages, fm) == []
+
+
+# ---------- staleness ----------
+
+def test_find_stale_by_audit_count_threshold(tmp_wiki):
+    """A page caching wiki_papers_at_audit:10 should flag once corpus grows by ≥5."""
+    audit_page = _mkpage(tmp_wiki, "synthesis/suggested-additions", "")
+    pages = [audit_page]
+    # Pad with 16 paper pages to make corpus >= cached + threshold.
+    for i in range(16):
+        pages.append(_mkpage(tmp_wiki, f"cgt/paper-{i:02d}", ""))
+    fm = {audit_page: {"wiki_papers_at_audit": "10"}}
+    for p in pages[1:]:
+        fm[p] = {"type": "paper"}
+    out = find_stale_by_audit_count(pages, fm)
+    assert len(out) == 1
+    assert out[0][0] == audit_page
+    assert out[0][1] == 10
+
+
+def test_find_stale_by_audit_count_below_threshold(tmp_wiki):
+    audit_page = _mkpage(tmp_wiki, "synthesis/suggested-additions", "")
+    pages = [audit_page]
+    for i in range(13):
+        pages.append(_mkpage(tmp_wiki, f"cgt/p-{i}", ""))
+    fm = {audit_page: {"wiki_papers_at_audit": "10"}}
+    for p in pages[1:]:
+        fm[p] = {"type": "paper"}
+    # Only 13 papers vs cached 10 → delta=3 < threshold=5; should not fire.
+    assert find_stale_by_audit_count(pages, fm) == []
+
+
+def test_find_stale_synthesis_no_generated_at(tmp_wiki):
+    """Pages without generated_at are silently skipped."""
+    s = _mkpage(tmp_wiki, "synthesis/x", "[[cgt/foo]]")
+    p = _mkpage(tmp_wiki, "cgt/foo", "")
+    pages = [s, p]
+    fm = {s: {}, p: {"type": "paper"}}
+    known = {page_key(s), page_key(p)}
+    assert find_stale_synthesis(pages, fm, known) == []
+
+
+# ---------- concepts ----------
+
+def test_find_concept_candidates_acronym_threshold():
+    """Acronym appearing in 3 distinct pages should surface."""
+    pages_body = {
+        Path("cgt/a.md"): "We use FOOBAR everywhere.",
+        Path("cgt/b.md"): "FOOBAR is the key tool here.",
+        Path("cgt/c.md"): "Adopting FOOBAR for analysis.",
+        Path("cgt/d.md"): "Unrelated content.",
+    }
+    out = find_concept_candidates(pages_body, existing_slugs=set())
+    tokens = {tok for tok, *_ in out}
+    assert "FOOBAR" in tokens
+
+
+def test_find_concept_candidates_filters_existing_slugs():
+    """If a slug exists, the acronym is filtered."""
+    pages_body = {
+        Path("cgt/a.md"): "FOOBAR is here.",
+        Path("cgt/b.md"): "FOOBAR is here too.",
+        Path("cgt/c.md"): "Yet another mention of FOOBAR.",
+    }
+    out = find_concept_candidates(pages_body, existing_slugs={"foobar"})
+    assert all(tok != "FOOBAR" for tok, *_ in out)
+
+
+def test_find_concept_candidates_filters_stop_acronyms():
+    """Common stop-acronyms (DOI, YAML, ...) are filtered even if frequent."""
+    pages_body = {
+        Path("cgt/a.md"): "DOI YAML PDF API",
+        Path("cgt/b.md"): "DOI YAML PDF API",
+        Path("cgt/c.md"): "DOI YAML PDF API",
+    }
+    assert find_concept_candidates(pages_body, existing_slugs=set()) == []
+
+
+def test_find_concept_candidates_filters_english_and_primitives():
+    """All-caps English words and ubiquitous primitives are filtered."""
+    pages_body = {
+        Path("cgt/a.md"): "THIS AND RNA DNA are frequent.",
+        Path("cgt/b.md"): "THIS AND RNA DNA again.",
+        Path("cgt/c.md"): "THIS AND RNA DNA once more.",
+    }
+    assert find_concept_candidates(pages_body, existing_slugs=set()) == []
+
+
+def test_find_concept_candidates_filters_structural_phrases():
+    """Figure/table cross-references never surface as concepts."""
+    pages_body = {
+        Path("cgt/a.md"): "See Extended Data Fig for details.",
+        Path("cgt/b.md"): "As in Extended Data Fig again.",
+        Path("cgt/c.md"): "Extended Data Fig shows this.",
+    }
+    tokens = {tok for tok, *_ in find_concept_candidates(pages_body, set())}
+    assert "Extended Data Fig" not in tokens
+    assert "Extended Data" not in tokens
+
+
+def test_find_concept_candidates_filters_venue_names():
+    """Venue names in STOP_PHRASES are filtered."""
+    pages_body = {
+        Path("ai/a.md"): "Published in Nature Machine Intelligence.",
+        Path("ai/b.md"): "Also Nature Machine Intelligence.",
+        Path("ai/c.md"): "Cited from Nature Machine Intelligence.",
+    }
+    tokens = {tok for tok, *_ in find_concept_candidates(pages_body, set())}
+    assert "Nature Machine Intelligence" not in tokens
+
+
+def test_find_concept_candidates_reports_category_span():
+    """A term spanning two categories reports n_categories=2."""
+    pages_body = {
+        Path("ai/a.md"): "RAPTOR is a hierarchy.",
+        Path("single-cell/b.md"): "RAPTOR-style trees here.",
+        Path("compbio/c.md"): "We adopt RAPTOR.",
+    }
+    out = find_concept_candidates(pages_body, existing_slugs=set())
+    span = {tok: c for tok, _, c in out}
+    assert span["RAPTOR"] == 3

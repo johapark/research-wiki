@@ -1,0 +1,158 @@
+paper_stem: nohel-2026-beamster-brain-metastases-segmentation-for-stereotactic
+paper_type: dataset
+title: "BEAMSTER: Brain mEtAstases segMentation for STEreotactic Radiotherapy, A Retrospective MRI Dataset with Expert Segmentations"
+published_at: "2026-07-01"
+notes: |
+  Scientific Data dataset descriptor (Article in Press) releasing BEAMSTER
+  (Brain mEtAstases segMentation for STEreotactic Radiotherapy) — a
+  retrospective, single-institution collection of 140 contrast-enhanced
+  T1-weighted MPRAGE MRI scans with expert binary segmentations of 260
+  brain metastases from patients treated with CyberKnife stereotactic
+  radiotherapy at University Hospital Ostrava.
+
+  Distinctive feature: the second cohort (Dataset B, 27 patients / 44
+  metastases, mean volume 0.5 cc) was deliberately enriched with small
+  sub-centimeter lesions that are typically underrepresented in existing
+  open-access brain-metastasis datasets (BraTS-METS, BrainMetShare,
+  UCSF-BMSR, Yale Longitudinal). Data released on FigShare under CC-BY 4.0.
+
+  Watch out for: single-observer annotations (no inter-rater agreement
+  reported), single institution, T1-post-contrast only (not
+  multi-parametric).
+
+headline_claims:
+  - id: dataset-size-patients-lesions
+    importance: critical
+    verbalization: |
+      BEAMSTER contains contrast-enhanced T1-weighted MRI scans from 140
+      patients with a total of 260 expert-annotated brain metastatic lesions.
+    relation:
+      subject: "BEAMSTER dataset size"
+      ratio: "140 patients / 260 metastases"
+      comparator: "single-institution retrospective cohort (Ostrava, Oct 2019–Sep 2024)"
+    location: "Abstract; Data Overview"
+
+  - id: two-cohort-structure
+    importance: critical
+    verbalization: |
+      The dataset is split into Dataset A (113 patients, 216 metastases, mean
+      volume 6.7 cc, SD 10.5 cc, treated Oct 2019–Apr 2022 with 1/3/5-fraction
+      stereotactic radiotherapy) and Dataset B (27 patients, 44 metastases,
+      mean volume 0.5 cc, SD 0.6 cc, treated Jul 2021–Sep 2024 with SRS),
+      with Dataset B intentionally enriched for very small lesions.
+    relation:
+      subject: "Dataset B mean lesion volume"
+      ratio: "0.5 cc (SD 0.6 cc)"
+      comparator: "Dataset A (6.7 cc, SD 10.5 cc)"
+    location: "Methods, Patient selection"
+
+  - id: mri-acquisition-protocol
+    importance: critical
+    verbalization: |
+      All scans are post-contrast T1-weighted 3D MPRAGE (TFL3D variant)
+      acquired on three Siemens Healthineers scanners: Magnetom Avanto 1.5T
+      (majority), Magnetom Sola 1.5T (n=4), and Magnetom Prisma 3T (n=10),
+      with 1.0×1.0×1.0 mm voxels on Avanto and 0.9×0.9×0.9 mm on Sola/Prisma.
+    relation:
+      subject: "BEAMSTER MRI sequence"
+      ratio: "contrast-enhanced T1-weighted 3D MPRAGE (TFL3D)"
+      comparator: "Siemens Avanto 1.5T / Sola 1.5T / Prisma 3T"
+    location: "Methods, Image acquisition; Table 1"
+
+  - id: expert-annotation-process
+    importance: critical
+    verbalization: |
+      Metastases were manually segmented in MultiPlan 5.2 (Accuray) by a
+      board-certified radiation oncologist with 13 years of clinical
+      experience, following ICRU Report 50 volume definitions (GTV/PTV) on
+      MRI rigidly registered to planning CT; contours were exported as
+      DICOM-RT Structure Sets and converted to binary NIfTI masks.
+    location: "Methods, Image segmentation"
+
+  - id: small-lesion-enrichment
+    importance: high
+    verbalization: |
+      A key characteristic of the dataset is the deliberate inclusion of a
+      high proportion of small brain metastases (Dataset B), which are
+      clinically relevant, prone to interobserver variability, and typically
+      underrepresented in existing open-access datasets such as BraTS-METS,
+      BrainMetShare, UCSF-BMSR, and the Yale Longitudinal collection.
+    location: "Abstract; Background & Summary; Usage Notes"
+
+  - id: anonymization-and-release
+    importance: high
+    verbalization: |
+      All imaging data were de-identified per GDPR (Regulation (EU)
+      2016/679); facial features and ears were removed via AFNI's deface
+      procedure while preserving intracranial structures. The dataset is
+      released on FigShare under CC-BY 4.0.
+    location: "Methods, Imaging Data Anonymisation; Data availability"
+
+capabilities:
+  - id: segmentation-model-training
+    importance: critical
+    verbalization: |
+      Provides paired T1-weighted MRI volumes and expert binary segmentation
+      masks in NIfTI format, directly usable as supervised training and
+      validation data for automated brain-metastasis detection and
+      segmentation algorithms.
+    location: "Usage Notes"
+
+  - id: small-lesion-benchmark
+    importance: critical
+    verbalization: |
+      Enables benchmarking of detection sensitivity for sub-centimeter
+      metastases via the Dataset B enrichment (mean lesion volume 0.5 cc),
+      which is difficult to evaluate on datasets dominated by larger,
+      clinically visible lesions.
+    location: "Background & Summary; Data Overview; Usage Notes"
+
+  - id: radiotherapy-planning-research
+    importance: high
+    verbalization: |
+      Supports research into automated GTV/PTV delineation for stereotactic
+      radiotherapy planning, with segmentations aligned to the planning-CT
+      coordinate space and accompanied by clinical metadata (age, sex,
+      scanner, prescribed dose, fraction count, isodose level, prior
+      surgery, treatment status, overall survival).
+    location: "Data Records; Methods"
+
+  - id: cross-dataset-integration
+    importance: normal
+    verbalization: |
+      NIfTI packaging and subject-wise organization allow integration with
+      other public brain-metastasis resources (BraTS-METS, BrainMetShare,
+      UCSF-BMSR) for comparative studies and generalization testing.
+    location: "Usage Notes"
+
+limitations:
+  - id: single-institution-retrospective
+    importance: high
+    verbalization: |
+      Retrospective, single-institution study (University Hospital Ostrava),
+      which may introduce selection bias and limit generalizability,
+      although MRI examinations were selected from the institutional
+      registry independent of tumour type, treatment strategy, image
+      quality, or outcome.
+    location: "Dataset limitations"
+
+  - id: single-modality-t1-only
+    importance: high
+    verbalization: |
+      Only contrast-enhanced T1-weighted post-contrast MRI scans are
+      included, which may limit applicability in multiparametric imaging
+      studies. No intensity harmonization or normalization is applied
+      across the 1.5T and 3T scanners.
+    location: "Dataset limitations"
+
+  - id: single-observer-no-irr
+    importance: high
+    verbalization: |
+      Annotations represent single-observer segmentations by one
+      radiation oncologist; inter-observer variability was not formally
+      assessed and is not captured in the dataset, despite independent
+      verification of segmentation precision by a board-certified
+      neuro-radiologist.
+    location: "Dataset limitations; Technical Validation"
+
+related_papers: []

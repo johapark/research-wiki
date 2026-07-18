@@ -1,0 +1,26 @@
+fixture_id: human-genome-sequencing-analysis-methods
+fixture_type: pages
+query: "human genome sequencing and analysis methods"
+k: 10
+notes: |
+  Discriminates the two bundled genomics methods (variant calling +
+  assembly) from the non-genomics bundled papers (single-cell annotation,
+  clinical trial, MRI dataset). A retrieval that surfaces the MRI or TB
+  papers on this query is confusing lexical proximity ("methods",
+  "analysis") with the domain the query actually asks for.
+
+expected_pages:
+  - paper_stem: muslu-2026-variantmedium-sensitive-and-generalizable-somatic
+    importance: critical
+    rationale: "Somatic point mutation calling on whole-genome / whole-exome sequencing — a canonical human genome analysis method."
+  - paper_stem: zhang-2026-mga-a-tool-for-haplotype-mixed
+    importance: critical
+    rationale: "Haplotype-mixed assembly from HiFi long reads — the assembly half of genome sequencing methods, with benchmarks on the HG002 human genome."
+
+must_not_appear:
+  - paper_stem: li-2026-schilda-hierarchical-integration-of-llm
+    rationale: "Single-cell RNA type annotation; not DNA sequencing or genome analysis."
+  - paper_stem: fonseca-2026-adjunctive-ibuprofen-in-pre-extensively-drug-resistant
+    rationale: "TB clinical trial with no sequencing method."
+  - paper_stem: nohel-2026-beamster-brain-metastases-segmentation-for-stereotactic
+    rationale: "MRI imaging dataset, unrelated to genome sequencing."

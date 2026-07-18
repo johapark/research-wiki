@@ -1,0 +1,11 @@
+# Fixed paper set for `researchwiki agent eval`.
+# Stems must exist in papers/{stem}.pdf. One per line; blank lines and
+# # comments are ignored. Run `researchwiki agent eval --label X` to
+# produce a JSON summary; diff two summaries to A/B-test prompt changes.
+
+# A diverse mix to exercise different paper types:
+brixi-2026-genome-modelling-and-design-across-all-domains
+arral-2026-design-principles-of-lipid-nanoparticles
+wan-2026-in-vivo-base-editing-gene
+xu-2025-a-mem-agentic-memory-for-llm
+cancellieri-2022-human-genetic-diversity-alters-off-target

@@ -1,0 +1,160 @@
+paper_stem: fonseca-2026-adjunctive-ibuprofen-in-pre-extensively-drug-resistant
+paper_type: clinical-trial
+title: "Adjunctive ibuprofen in pre-extensively drug-resistant and extensively drug-resistant tuberculosis: a phase IIA open-label pilot clinical trial"
+published_at: "2026-07-01"
+notes: |
+  Phase IIA open-label pilot trial (NCT02781909) of adjunctive ibuprofen in
+  adults with pulmonary pre-XDR or XDR tuberculosis, conducted at the National
+  Center for Tuberculosis and Lung Diseases in Tbilisi, Georgia. 28 participants
+  allocated by simple alternation (not randomisation) to background anti-TB
+  regimen alone (n=14) or plus 400 mg/day ibuprofen for 2 months (n=14), with
+  6-month follow-up. Enrolment October 2016 – February 2018.
+
+  Watch out for: (1) baseline severity imbalance between arms — the ibuprofen
+  arm was consistently sicker at baseline (higher TB severity score, more XDR
+  vs pre-XDR, lower albumin), which confounds outcome comparisons. (2) The
+  primary clinical endpoint is negative — ibuprofen did not improve microbiological,
+  radiological, or WHO-defined treatment outcomes. Numerical trends in
+  inflammatory biomarkers and transcriptomic signatures are explicitly
+  described as exploratory and hypothesis-generating, not evidence of benefit.
+  A wiki page that frames this as a positive result is misreading the paper.
+
+headline_claims:
+  - id: trial-design
+    importance: critical
+    verbalization: |
+      NSAIDS-XDR-TB was a phase IIA prospective open-label pilot trial
+      (ClinicalTrials.gov NCT02781909) conducted in Tbilisi, Georgia, enrolling
+      28 adults with pulmonary pre-XDR or XDR tuberculosis between October 2016
+      and February 2018. Participants were allocated by simple alternation to
+      background individualised anti-TB regimen alone (n=14) or with 400 mg
+      daily oral ibuprofen for 2 months (n=14), followed for 6 months.
+    location: "Abstract; Results — Participant characteristics, p.4"
+
+  - id: primary-endpoint-negative
+    importance: critical
+    verbalization: |
+      Adjunctive ibuprofen did not improve month-2 sputum culture negativity:
+      27% (3/11) of the control group versus 9% (1/11) of the ibuprofen group
+      achieved culture negativity at month 2, with a risk difference of 18%
+      (95% CI −13 to 50). The median time to stable sputum culture conversion
+      was 4 months in both arms.
+    relation:
+      subject: "month-2 sputum culture negativity, ibuprofen arm"
+      ratio: "9% (1/11)"
+      comparator: "control arm 27% (3/11); RD 18%, 95% CI −13 to 50"
+    location: "Results — Microbiological changes, p.4"
+
+  - id: who-treatment-outcomes-equal
+    importance: critical
+    verbalization: |
+      WHO-defined final treatment outcomes were similar between arms, with 71%
+      of participants in each group classified as cured (10/14 in the control
+      arm; 10/14 in the ibuprofen arm). Loss to follow-up occurred in 21% (3/14)
+      of the control arm and 29% (4/14) of the ibuprofen arm; one participant
+      died in the control arm and none in the ibuprofen arm.
+    relation:
+      subject: "WHO cure rate, ibuprofen arm"
+      ratio: "71% (10/14)"
+      comparator: "control arm 71% (10/14)"
+    location: "Results — Final treatment outcomes, p.5"
+
+  - id: safety-similar
+    importance: critical
+    verbalization: |
+      Safety and tolerability were similar between arms. Safety-related event
+      incidence was comparable, the most frequent being alterations in blood
+      tests; all events were transient and none required intervention. Adverse
+      events were recorded but not formally graded for severity and causality
+      was not formally adjudicated.
+    location: "Abstract; Results — Safety-related events, p.5; Discussion, p.7"
+
+  - id: exploratory-inflammatory-signal
+    importance: high
+    verbalization: |
+      Ibuprofen was associated with numerically greater reductions in several
+      blood-based inflammatory measures (MLR at month 2, and plasma IFNG,
+      IL-10, IL-12, IL-17, IL-6 at months 2 and 6) and in transcriptomic
+      signature scores associated with poor tuberculosis outcomes, with the
+      Thompson_FAIL_13 signature showing the strongest between-group difference
+      at month 6. These findings are explicitly framed as exploratory and
+      hypothesis-generating.
+    location: "Results — Impact on the immune and lipid mediated responses, p.5-6; Discussion, p.7-8"
+
+  - id: radiological-no-difference
+    importance: high
+    verbalization: |
+      Radiological evolution assessed by X-ray score showed no between-group
+      difference. At month 3, 7/11 (64%) of the control arm and 6/11 (55%) of
+      the ibuprofen arm showed radiographic improvement (RD 9%, 95% CI −32 to
+      50). By month 6, all participants had improved compared to baseline
+      (RD 0%, 95% CI −26 to 26).
+    relation:
+      subject: "month-3 radiographic improvement, ibuprofen arm"
+      ratio: "55% (6/11)"
+      comparator: "control arm 64% (7/11); RD 9%, 95% CI −32 to 50"
+    location: "Results — Radiological changes, p.4-5"
+
+capabilities:
+  - id: feasibility-in-pre-xdr-xdr-population
+    importance: critical
+    verbalization: |
+      Demonstrated feasibility of adding a low-dose oral NSAID to complex
+      individualised second-line anti-TB regimens (including linezolid and
+      bedaquiline) in a pre-XDR/XDR-TB referral population, with acceptable
+      safety and tolerability supporting the design of the subsequent
+      placebo-controlled SMA-TB RCT (NCT04575519).
+    location: "Discussion — operational lessons, p.8"
+
+  - id: biological-activity-signal
+    importance: high
+    verbalization: |
+      Provided a biological-activity signal — numerically greater reductions
+      in blood cell-derived inflammation indices, plasma cytokines, and
+      transcriptomic TB-outcome signature scores in the ibuprofen arm —
+      supporting further evaluation of anti-inflammatory host-directed
+      therapies in larger controlled trials.
+    location: "Abstract; Results — immune response, p.5-6"
+
+  - id: multi-modal-immune-readouts
+    importance: normal
+    verbalization: |
+      Integrated three classes of immunological readout — blood cell-derived
+      inflammation indices (NLR, MLR, SII), plasma cytokine panels (10
+      biomarkers including IFNG, IL-6, IL-10, IL-17, TNF), and whole-blood
+      RNA transcriptomic signatures (seven published TB treatment-failure
+      signatures scored by ssGSEA) — to characterise the host inflammatory
+      response longitudinally.
+    location: "Results — immune response, p.5-6"
+
+limitations:
+  - id: small-sample-no-placebo
+    importance: critical
+    verbalization: |
+      Small sample size (28 participants) and absence of a placebo control
+      preclude formal hypothesis testing; effect estimates are imprecise and
+      the authors instruct them to be interpreted descriptively and cautiously.
+    location: "Discussion — Limitations, p.8"
+
+  - id: allocation-by-alternation
+    importance: high
+    verbalization: |
+      Allocation was implemented by simple alternation rather than concealed
+      randomisation. This approach is predictable and does not ensure
+      allocation concealment; selection bias cannot be excluded, and it may
+      have contributed to the observed baseline imbalance in disease extent
+      and severity between arms.
+    location: "Discussion — Limitations, p.8"
+
+  - id: heterogeneous-background-regimens
+    importance: high
+    verbalization: |
+      Background anti-TB regimens were individualised, heterogeneous, and
+      showed some imbalance between arms (e.g., linezolid-containing regimens
+      slightly more frequent in the ibuprofen arm, 11/14 vs 9/14), which may
+      have influenced sputum culture conversion and other outcomes and
+      increases uncertainty in attributing observed differences specifically
+      to ibuprofen.
+    location: "Discussion — Limitations, p.8; Results — Participant characteristics, p.4"
+
+related_papers: []

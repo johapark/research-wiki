@@ -1,0 +1,385 @@
+"""Crash-safe batch driver shared by `researchwiki agent ingest` and
+`researchwiki ingest`.
+
+Both commands take `nargs="+"` on their PDF positional. When invoked with
+multiple PDFs (or an explicit `--workers`/`--resume`), they delegate here
+so a mid-batch crash is recoverable: a `checkpoint.json` records every
+completion and failure atomically, and `--resume <batch-dir>` picks up
+where the previous run left off.
+
+This module is *not* a CLI subcommand (leading-underscore filename hides
+it from `__main__.py`'s auto-discovery). Callers import `new_batch()` /
+`resume_batch()` and pass the subcommand they want each worker to run —
+`["agent", "ingest"]` for the agent path, `["ingest"]` for the digest
+path. That subcommand is recorded in `plan.json` so `--resume` doesn't
+need the user to remember which command started the batch.
+
+Design notes:
+  - Subprocess-per-worker (`python -m researchwiki <subcommand> <pdf>`) —
+    full isolation across lru_cache and DB connections, matches CLAUDE.md's
+    bash-fan-out mental model. One crash can't corrupt siblings.
+  - `concurrent.futures.ThreadPoolExecutor` over subprocesses (threads are
+    I/O-bound on `subprocess.wait`).
+  - Absolute paths as checkpoint keys — `--resume` works from any cwd.
+  - Atomic checkpoint via tmp+rename. Every worker completion re-writes.
+  - SIGINT cancels unstarted futures, lets in-flight subprocesses finish.
+    Killing mid-ingest could strand state.db mid-transaction; the 5s
+    busy_timeout doesn't help if the writer never comes back. Second
+    Ctrl-C SIGKILLs the whole process group.
+
+Pattern lifted from hermes-agent `batch_runner.py::BatchRunner`.
+"""
+
+from __future__ import annotations
+
+import concurrent.futures
+import datetime as _dt
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+from pathlib import Path
+
+
+def _now_iso() -> str:
+    """Local-time ISO stamp, second precision — matches `ingested_at`."""
+    return _dt.datetime.now().replace(microsecond=0).isoformat()
+
+
+def _batch_dir_for_new_run() -> Path:
+    """Timestamped batch dir under `.ingest/`. `.ingest/` is gitignored."""
+    from ..paths import wiki_root
+    stamp = _dt.datetime.now().strftime("%Y%m%dT%H%M%S")
+    d = wiki_root() / ".ingest" / f"batch-{stamp}"
+    d.mkdir(parents=True, exist_ok=False)
+    return d
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """Write JSON via tmp+rename — rename is atomic on POSIX, so a crash
+    mid-write can't leave a truncated checkpoint that fails json.loads on
+    resume."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True))
+    os.replace(tmp, path)
+
+
+def _read_checkpoint(batch_dir: Path) -> dict:
+    """Read checkpoint.json. Missing file → empty state (fresh batch)."""
+    p = batch_dir / "checkpoint.json"
+    if not p.exists():
+        return {}
+    return json.loads(p.read_text())
+
+
+def _write_checkpoint(batch_dir: Path, state: dict) -> None:
+    _atomic_write_json(batch_dir / "checkpoint.json", state)
+
+
+def _resolve_inputs(paths: list[str]) -> list[str]:
+    """Absolute-path every input. Reject non-existent or non-PDF entries so
+    a typo doesn't silently produce a smaller batch than expected. Dedup
+    while preserving order (shell glob can occasionally yield dupes)."""
+    out: list[str] = []
+    for p in paths:
+        path = Path(p).expanduser().resolve()
+        if not path.exists():
+            print(f"ingest-batch: not found: {p}", file=sys.stderr)
+            sys.exit(2)
+        if path.suffix.lower() != ".pdf":
+            print(f"ingest-batch: not a PDF: {p}", file=sys.stderr)
+            sys.exit(2)
+        out.append(str(path))
+    if not out:
+        print("ingest-batch: no PDFs given", file=sys.stderr)
+        sys.exit(2)
+    seen: set[str] = set()
+    return [x for x in out if not (x in seen or seen.add(x))]
+
+
+def _worker(pdf_path: str, batch_dir: Path, subcommand: list[str],
+            extra_args: list[str]) -> dict:
+    """Run one ingest subprocess. Module-level so tests can monkeypatch it.
+
+    Full per-worker output lands in `worker-{stem}.log` beside the
+    checkpoint; the returned record is deliberately minimal — resume only
+    needs `input` + `status`.
+    """
+    log_path = batch_dir / f"worker-{Path(pdf_path).stem}.log"
+    cmd = [sys.executable, "-m", "researchwiki", *subcommand, pdf_path, *extra_args]
+    with log_path.open("w") as log_fp:
+        log_fp.write(f"# cmd: {' '.join(cmd)}\n")
+        log_fp.flush()
+        proc = subprocess.run(cmd, stdout=log_fp, stderr=subprocess.STDOUT, check=False)
+    status = "completed" if proc.returncode == 0 else "failed"
+    return {"input": pdf_path, "status": status, "returncode": proc.returncode}
+
+
+# Regexes matching lines the per-worker subprocess emits during ingest.
+# `[agent] evolve   → N proposal(s) at /path (…actionable=N)`, or
+# `[agent] evolve   → no actionable proposals (…actionable=0)`.
+_EVOLVE_ACTIONABLE_RE = re.compile(
+    r"\[agent\] evolve\s+→\s+(\d+)\s+proposal.*?actionable=(\d+)"
+)
+# `[concepts] concept-attach: skipped <paper>→<hub>, term only in body prose …`
+_CONCEPT_NEARMISS_RE = re.compile(
+    r"\[concepts\] concept-attach:\s+skipped\s+(\S+)→(\S+),\s+term only in body prose"
+)
+# `[concepts] concept-attach <paper>: joined <hub>[, <hub>…]`
+_CONCEPT_JOINED_RE = re.compile(
+    r"\[concepts\] concept-attach\s+(\S+):\s+joined\s+(.+?)$", re.MULTILINE
+)
+
+
+def _summarize_worker_log(log_path: Path) -> dict:
+    """Parse one worker log for the actions a downstream reviewer needs to
+    know about: evolve proposals waiting for review, concept-hub near-misses,
+    and hub attachments that already fired.
+
+    Returns `{evolve_actionable: int, concept_joined: [hub, …], concept_near_missed: [hub, …]}`.
+    Silent on any I/O error — this runs post-batch as an informational
+    summary, not a gate.
+    """
+    out = {"evolve_actionable": 0,
+           "concept_joined": [], "concept_near_missed": []}
+    try:
+        text = log_path.read_text()
+    except OSError:
+        return out
+    for m in _EVOLVE_ACTIONABLE_RE.finditer(text):
+        out["evolve_actionable"] += int(m.group(2))
+    for m in _CONCEPT_NEARMISS_RE.finditer(text):
+        out["concept_near_missed"].append(m.group(2))
+    for m in _CONCEPT_JOINED_RE.finditer(text):
+        for hub in [h.strip() for h in m.group(2).split(",") if h.strip()]:
+            out["concept_joined"].append(hub)
+    return out
+
+
+def _print_batch_epilogue(batch_dir: Path, state: dict) -> None:
+    """After the pool drains, aggregate per-worker log summaries and surface
+    anything the reviewer might otherwise miss inside `.ingest/batch-*/worker-*.log`.
+
+    Two motivating misses this catches:
+      - Evolve emits `[agent] evolve → N proposal(s) … actionable=N` inside
+        each worker log; without this epilogue the batch driver only prints
+        `[N/M] ok: …` and the proposal counts stay hidden.
+      - Concept-attach's near-miss + join lines also live inside worker logs.
+        Attach-hook signals (e.g. FH-shaped abbreviation misses) belong in
+        the batch summary so they surface at the same time as ingest results.
+
+    Silent when nothing to report. Non-fatal (no exceptions escape).
+    """
+    try:
+        completed = list((state.get("completed") or {}).values())
+        if not completed:
+            return
+        totals = {"evolve_actionable": 0}
+        per_paper_evolve: list[tuple[str, int]] = []
+        joined: list[tuple[str, str]] = []
+        near_missed: list[tuple[str, str]] = []
+        for rec in completed:
+            pdf = rec.get("input")
+            if not pdf:
+                continue
+            stem = Path(pdf).stem
+            summary = _summarize_worker_log(batch_dir / f"worker-{stem}.log")
+            if summary["evolve_actionable"]:
+                per_paper_evolve.append((stem, summary["evolve_actionable"]))
+                totals["evolve_actionable"] += summary["evolve_actionable"]
+            joined.extend((stem, h) for h in summary["concept_joined"])
+            near_missed.extend((stem, h) for h in summary["concept_near_missed"])
+
+        if not (per_paper_evolve or joined or near_missed):
+            return
+
+        print()
+        print("ingest-batch: post-run summary")
+        if per_paper_evolve:
+            print(f"  evolve: {totals['evolve_actionable']} actionable "
+                  f"proposal(s) across {len(per_paper_evolve)} paper(s) — "
+                  f"review under .ingest/*-evolution-proposals/")
+            for stem, n in per_paper_evolve:
+                print(f"    · {stem}: {n} actionable")
+        if joined:
+            print(f"  concept-attach: {len(joined)} hub attachment(s)")
+            for stem, hub in joined:
+                print(f"    · {stem} → {hub}")
+        if near_missed:
+            print(f"  concept-attach near-miss: {len(near_missed)} "
+                  "(body prose only; run `researchwiki concepts` to review)")
+            for stem, hub in near_missed:
+                print(f"    · {stem} → {hub}")
+    except Exception:
+        # Epilogue is best-effort; never let a formatting bug affect the
+        # ingest exit code.
+        pass
+
+
+def _run_batch(batch_dir: Path, pending: list[str], workers: int,
+               subcommand: list[str], extra_args: list[str]) -> int:
+    """Drive the thread pool. Returns 0 iff every pending item completed.
+
+    SIGINT: cancel unstarted futures, let in-flight subprocesses finish
+    their current PDF, persist the checkpoint on the way out.
+    """
+    state = _read_checkpoint(batch_dir)
+    state.setdefault("completed", {})
+    state.setdefault("failed", {})
+
+    total = len(state["completed"]) + len(pending)
+    done_before = len(state["completed"])
+    if not pending:
+        print(f"nothing pending ({done_before}/{total} already complete)")
+        return 0 if not state.get("failed") else 1
+
+    print(f"ingest-batch: {len(pending)} pending, {done_before} done, "
+          f"{workers} worker{'s' if workers != 1 else ''} → {batch_dir}")
+
+    interrupted = False
+    # Capture the caller's SIGINT handler so we can restore it in the outer
+    # finally. Without this, a batch that installs `SIG_DFL` for second-Ctrl-C
+    # leaks that policy into post-batch work (evolve, epilogue, tests).
+    try:
+        prev_sigint = signal.getsignal(signal.SIGINT)
+    except (ValueError, OSError):
+        prev_sigint = None
+    installed_dfl = False
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_worker, p, batch_dir, subcommand, extra_args): p
+                   for p in pending}
+        try:
+            try:
+                for fut in concurrent.futures.as_completed(futures):
+                    result = fut.result()
+                    idx = len(state["completed"]) + len(state["failed"]) + 1
+                    if result["status"] == "completed":
+                        state["completed"][result["input"]] = result
+                        tag = "ok"
+                    else:
+                        state["failed"][result["input"]] = result
+                        tag = f"FAIL rc={result['returncode']}"
+                    _write_checkpoint(batch_dir, state)
+                    print(f"[{idx}/{total}] {tag}: {Path(result['input']).name}")
+            except KeyboardInterrupt:
+                interrupted = True
+                # Second Ctrl-C: hand the signal back to the default handler so
+                # the whole process group aborts immediately instead of the
+                # doc-comment's promise of "SIGKILL" that no code enforced.
+                # Restored in the outer `finally` so post-batch work still runs
+                # under the caller's original handler.
+                try:
+                    signal.signal(signal.SIGINT, signal.SIG_DFL)
+                    installed_dfl = True
+                except (ValueError, OSError):
+                    pass  # signal only settable from main thread; no-op otherwise
+                print("\ningest-batch: interrupt received — waiting for in-flight "
+                      "workers to finish (Ctrl-C again aborts immediately)",
+                      file=sys.stderr)
+                # In-flight workers finish and their state.db writes complete,
+                # but their results don't make it into checkpoint.json (the
+                # as_completed loop is dead). --resume will re-run them. For
+                # personal-wiki scale that's a few wasted minutes at most.
+                pool.shutdown(wait=True, cancel_futures=True)
+        finally:
+            # Belt-and-braces flush: whatever happened above (normal exit,
+            # KeyboardInterrupt, or unexpected exception), the last observed
+            # `state` must be on disk before we leave. Every worker completion
+            # already writes the checkpoint inside the loop; this extra flush
+            # is a no-op on the happy path and a lifeline on the sad one.
+            try:
+                _write_checkpoint(batch_dir, state)
+            except Exception as e:
+                print(f"ingest-batch: final checkpoint flush failed: "
+                      f"{type(e).__name__}: {e}", file=sys.stderr)
+            # Restore only if we actually installed SIG_DFL. When the prior
+            # handler wasn't Python-settable (getsignal returned None), fall
+            # back to the default KeyboardInterrupt handler rather than leaking
+            # SIG_DFL into post-batch work (evolve, epilogue, tests).
+            if installed_dfl:
+                try:
+                    signal.signal(
+                        signal.SIGINT,
+                        prev_sigint if prev_sigint is not None else signal.default_int_handler,
+                    )
+                except (ValueError, OSError):
+                    pass
+
+    if interrupted:
+        resume_cmd = f"researchwiki {' '.join(subcommand)} --resume {batch_dir}"
+        print(f"ingest-batch: interrupted. "
+              f"{len(state['completed'])}/{total} done, "
+              f"{len(state['failed'])} failed, "
+              f"{total - len(state['completed']) - len(state['failed'])} unstarted. "
+              f"Resume: {resume_cmd}",
+              file=sys.stderr)
+        return 1
+    _print_batch_epilogue(batch_dir, state)
+    return 0 if not state["failed"] else 1
+
+
+# ---------- public entry points ----------
+
+def new_batch(pdfs: list[str], subcommand: list[str],
+              extra_args: list[str], workers: int) -> int:
+    """Create a fresh batch dir, drive the ingest pool. Returns exit code.
+
+    `subcommand` is the CLI verb chain each worker's subprocess runs — e.g.
+    `["agent", "ingest"]` or `["ingest"]`. Recorded in plan.json so
+    `resume_batch` doesn't need it re-supplied.
+    """
+    resolved = _resolve_inputs(pdfs)
+    batch_dir = _batch_dir_for_new_run()
+    plan = {
+        "started_at": _now_iso(),
+        "subcommand": subcommand,
+        "workers": workers,
+        "inputs": resolved,
+        "extra_args": extra_args,
+    }
+    _atomic_write_json(batch_dir / "plan.json", plan)
+    return _run_batch(batch_dir, resolved, workers, subcommand, extra_args)
+
+
+def resume_batch(batch_dir: Path, no_retry: bool,
+                 workers_override: int | None = None) -> int:
+    """Continue an interrupted batch. Reads plan.json for its subcommand +
+    passthrough flags so semantics don't drift across a restart.
+
+    Retried failures re-enter the queue (dropped from `failed` so the retry
+    either promotes to `completed` or overwrites with a fresh failure).
+    `--no-retry` leaves failures where they are.
+    """
+    if not batch_dir.is_dir():
+        print(f"ingest-batch: not a directory: {batch_dir}", file=sys.stderr)
+        return 2
+    plan_path = batch_dir / "plan.json"
+    if not plan_path.exists():
+        print(f"ingest-batch: no plan.json in {batch_dir}", file=sys.stderr)
+        return 2
+    plan = json.loads(plan_path.read_text())
+    state = _read_checkpoint(batch_dir)
+    completed = set((state.get("completed") or {}).keys())
+    failed = set((state.get("failed") or {}).keys())
+
+    pending: list[str] = []
+    for pdf in plan["inputs"]:
+        if pdf in completed:
+            continue
+        if pdf in failed and no_retry:
+            continue
+        pending.append(pdf)
+
+    if not no_retry and failed:
+        state.setdefault("failed", {})
+        for pdf in list(state["failed"]):
+            if pdf in pending:
+                del state["failed"][pdf]
+        _write_checkpoint(batch_dir, state)
+
+    workers = workers_override if workers_override is not None else plan.get("workers", 4)
+    subcommand = plan.get("subcommand", ["agent", "ingest"])  # legacy default
+    return _run_batch(batch_dir, pending, workers, subcommand,
+                      plan.get("extra_args", []))

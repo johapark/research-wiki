@@ -1,0 +1,172 @@
+paper_stem: li-2026-schilda-hierarchical-integration-of-llm
+paper_type: method-with-benchmarks
+title: "scHilda: Hierarchical Integration of LLM with KG database for single cell type annotation"
+published_at: "2026-05-11"
+notes: |
+  Single-cell RNA-seq cell-type annotation method paper (PLoS Computational
+  Biology). scHilda deeply integrates a biological Knowledge Graph (KG) into
+  an LLM's reasoning as a "co-processor" rather than a post-hoc validator,
+  with a three-stage hierarchical annotation: (1) LLM proposes top-3 major
+  cell-type candidates, (2) global KG query arbitrates the major type,
+  (3) local subgraph query determines the subtype. Benchmarked against
+  CellTypeAgent and GPTCellType on eight public scRNA-seq datasets, using
+  the "Agreement Score" hierarchical metric from Hou & Ji.
+
+  Watch out for: the KG's pathway-activity and co-expression edges are
+  derived from a single human dataset (HCL), which the authors explicitly
+  flag as a coverage limitation. Also, adding an IS_MARKER_FOR relation
+  from CellMarker/PanglaoDB (the "gold standard") *hurt* accuracy — a
+  counterintuitive ablation finding worth surfacing.
+
+headline_claims:
+  - id: agreement-score-vs-gptcelltype
+    importance: critical
+    verbalization: |
+      Across 8 benchmark scRNA-seq datasets, scHilda's Agreement Score
+      exceeded GPTCellType's by a mean of +0.049 (Cohen's d = 1.60,
+      p = 0.0027), a statistically significant improvement.
+    relation:
+      subject: "scHilda Agreement Score (cross-dataset mean)"
+      ratio: "+0.049"
+      comparator: "GPTCellType"
+    location: "Table 1, p.11"
+
+  - id: agreement-score-vs-celltypeagent
+    importance: critical
+    verbalization: |
+      Across 8 benchmark datasets, scHilda's Agreement Score exceeded
+      CellTypeAgent's by a mean of +0.038 (Cohen's d = 0.87, p = 0.0431).
+    relation:
+      subject: "scHilda Agreement Score (cross-dataset mean)"
+      ratio: "+0.038"
+      comparator: "CellTypeAgent"
+    location: "Table 1, p.11"
+
+  - id: hierarchical-three-stage-workflow
+    importance: critical
+    verbalization: |
+      scHilda uses a three-stage workflow: Stage 1 the LLM proposes 3
+      candidate major cell types from marker genes; Stage 2 a global KG
+      query supplies ontology, pathway, and co-expression evidence for
+      each candidate and the LLM arbitrates the major type; Stage 3 the
+      system retrieves the subgraph domain of the confirmed major type
+      and the LLM assigns the subtype.
+    location: "Methods — Hierarchical reasoning and annotation strategy, p.6-7"
+
+  - id: top-k-3-candidates-optimal
+    importance: high
+    verbalization: |
+      Across 330 evaluated cells from Azimuth, HCL, and HCA datasets, the
+      true major cell type appeared as the Top-1 candidate in 86.97% of
+      cases, Top-2 in 10.91%, and Top-3 in 2.12% — validating the need
+      for Stage 2 arbitration since >13% of true labels sit below Top-1.
+    location: "Impact of the Number of Major Type Candidates, p.15; Fig 2E"
+
+  - id: subgraph-query-complexity
+    importance: high
+    verbalization: |
+      The full KG contains 23,280 gene nodes, 3,795 pathway nodes, 3,129
+      cell-type nodes, and over 370,000 relationship edges. scHilda's
+      Stage 3 subgraph query averages only ~150 nodes and ~230 edges,
+      keeping context tokens low and enabling batch annotation in 3-5
+      minutes (or 1-3 minutes with 64 parallel workers).
+    location: "Analysis of knowledge graph query complexity, p.7-8"
+
+  - id: cost-per-annotation-deepseek
+    importance: high
+    verbalization: |
+      Using DeepSeek-V3.2 as the backbone LLM, scHilda achieves an
+      average cost of $0.001 per cell annotation, and DeepSeek-V3.2 can
+      match or surpass OpenAI o3 on some datasets under the scHilda
+      framework.
+    relation:
+      subject: "scHilda per-cell annotation cost (DeepSeek-V3.2 backbone)"
+      ratio: "$0.001"
+      comparator: "OpenAI o3 (higher-cost, comparable accuracy)"
+    location: "Configuration and setup — API and Cost, p.8"
+
+  - id: is-marker-for-hurts-accuracy
+    importance: critical
+    verbalization: |
+      Adding an IS_MARKER_FOR relation from CellMarker and PanglaoDB —
+      the "gold standard" marker databases — into the KG had a negative
+      impact on scHilda's accuracy. Direct marker-to-cell-type links have
+      short latent-space distances that the LLM's self-attention over-
+      weights, bypassing critical evaluation of pathway evidence.
+    location: "Different relationship searching types in the scHilda KG, p.12-13; Fig 2B"
+
+capabilities:
+  - id: lightweight-llm-parity
+    importance: critical
+    verbalization: |
+      Lightweight LLMs (gemini-2.5-flash, gpt5-nano, o3-mini,
+      DeepSeek-V3.2) achieve annotation performance close to the top-tier
+      o3 model when run under the scHilda framework, because the KG
+      provides a reasoning scaffold that guarantees a performance
+      baseline.
+    location: "scHilda maintains excellent performance on lightweight LLMs, p.11; Fig 2C"
+
+  - id: mixed-cell-sample-robustness
+    importance: critical
+    verbalization: |
+      Robustly annotates mixed-cell samples: the hierarchical strategy
+      preserves multiple high-probability major-type candidates in
+      Stage 1, then independently resolves subtypes for each major
+      lineage. Maintains identification accuracy even at extreme 1:9
+      mixing proportions, and works with or without an explicit mixture
+      prompt hint.
+    location: "scHilda shows strong robustness in annotating mixed-cell samples, p.13-14; Fig 3A"
+
+  - id: interpretable-reasoning-traces
+    importance: high
+    verbalization: |
+      Produces traceable step-by-step reasoning that cites KG evidence
+      (ontology paths, pathway hits, co-expression links) for each
+      annotation, demonstrated on Cluster 105 of Azimuth (marker set
+      including PLXDC2, DOCK4, ITPR2, SET-SPP1, DOCK8, APBB1IP, IPCEF1)
+      correctly reaching "microglial cell" (CL:0000129) via Macrophage.
+    location: "Case study for the interpretability of scHilda, p.9-10"
+
+  - id: neutral-prompt-strategy
+    importance: normal
+    verbalization: |
+      Prompt engineering ablation shows that a neutral prompt treating
+      KG evidence as a "reference" rather than either "absolute truth"
+      (KG-biased) or asking the LLM to "trust your expert judgment"
+      (LLM-biased) achieves the best accuracy; both biased variants
+      show significant performance drops.
+    location: "Guiding LLM-KG interaction through prompt engineering, p.12; Fig 2F"
+
+limitations:
+  - id: kg-single-dataset-provenance
+    importance: critical
+    verbalization: |
+      The pathway-activity (HAS_ACTIVITY_IN) and gene co-expression
+      (COEXPRESSED_IN) edges in scHilda's KG are derived solely from
+      HCL, a single human cell dataset. Authors acknowledge most
+      currently misannotated clusters trace to sparse KG evidence
+      forcing the LLM back onto its internal knowledge.
+    location: "Limitations, p.15-16"
+
+  - id: explanation-answer-mismatch
+    importance: high
+    verbalization: |
+      When explanation generation is enabled, occasional explanation-
+      answer mismatches occur: (1) correct prediction with inaccurate
+      explanation (post-hoc rationalization, e.g., citing MKI67 for
+      anucleate platelets, or hallucinating MERTK/APOE not in the input
+      markers), and (2) correct reasoning with incorrect final label
+      (CoT breakdown / RLHF-induced conservative fallback to a broader
+      parent class).
+    location: "Limitations — Correct prediction with inaccurate explanation & Correct explanation with inaccurate prediction, p.16"
+
+  - id: dependent-on-llm-upper-bound
+    importance: high
+    verbalization: |
+      When the KG lacks sufficient evidence for a cluster, scHilda's
+      outcome is entirely dependent on the LLM's own upper-bound
+      capability. Framework accuracy is therefore capped by the
+      combination of KG coverage and backbone LLM strength.
+    location: "Limitations, p.16"
+
+related_papers: []

@@ -1,0 +1,27 @@
+fixture_id: medical-imaging-datasets-for-segmentation
+fixture_type: pages
+query: "medical imaging dataset for tumor segmentation"
+k: 10
+notes: |
+  Single-answer target: only nohel-2026 (BEAMSTER, brain-metastases MRI
+  segmentation) is a medical-imaging dataset in the bundled corpus. The
+  discriminating challenge is not confusing "segmentation" (used
+  metaphorically in genome-assembly contexts) with medical-image
+  segmentation. A retrieval that pulls the assembly paper here is
+  keyword-matching, not semantic-matching.
+
+expected_pages:
+  - paper_stem: nohel-2026-beamster-brain-metastases-segmentation-for-stereotactic
+    importance: critical
+    expected_rank: 1
+    rationale: "The dataset descriptor for BEAMSTER — brain-metastases MRI segmentations for stereotactic radiotherapy — is the unambiguous answer."
+
+must_not_appear:
+  - paper_stem: zhang-2026-mga-a-tool-for-haplotype-mixed
+    rationale: "The genome-assembly paper contains 'segmentation'-adjacent graph-topology language but is not a medical-imaging dataset."
+  - paper_stem: muslu-2026-variantmedium-sensitive-and-generalizable-somatic
+    rationale: "Somatic variant calling, unrelated to imaging."
+  - paper_stem: li-2026-schilda-hierarchical-integration-of-llm
+    rationale: "Single-cell annotation, unrelated to imaging."
+  - paper_stem: fonseca-2026-adjunctive-ibuprofen-in-pre-extensively-drug-resistant
+    rationale: "Clinical trial, unrelated to imaging datasets."

@@ -1,0 +1,4 @@
+# 2-paper smoke fixture for verifying --max-workers parallelism.
+# Picks one research and one review paper to exercise paper-type routing.
+brixi-2026-genome-modelling-and-design-across-all-domains
+arral-2026-design-principles-of-lipid-nanoparticles

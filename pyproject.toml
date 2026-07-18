@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "researchwiki"
+version = "0.1.0"
+description = "A self-refining markdown wiki for research papers — LLM-authored, claim-graded against source PDFs."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Joha Park"},
+]
+keywords = ["research", "wiki", "obsidian", "semantic-scholar", "pdf", "claude-code"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+dependencies = [
+    # PDF text extraction. Migrated pypdf → pypdfium2 on 2026-05-28 — Python
+    # binding to Google's PDFium (the engine Chrome ships). ~22× faster than
+    # pypdf at equivalent text quality across 122 papers; permissively licensed
+    # (BSD-3-Clause + Apache-2.0); pre-built wheels for all major platforms.
+    "pypdfium2>=4.30",
+    "tantivy>=0.22",
+    "pyyaml>=6",
+    "numpy>=1.24",
+    # Semantic-similarity claim grader (BAAI/bge-small-en-v1.5, ~133 MB on
+    # first use, cached under ~/.cache/huggingface/). Required by the agent
+    # path's auto-promote gate. Runtime opt-out: `agent ingest --no-semantic`
+    # or `reindex --no-semantic` (falls back to BM25).
+    "torch>=2.0",
+    "transformers>=4.30",
+    "sentence-transformers>=3.0",
+    # Anthropic cloud-API SDK. Imported lazily in agents/llm.py; only pulled
+    # in when a role has `provider: anthropic`. Bundled by default because
+    # the shipped `config/models.yaml` defaults route to Anthropic.
+    "anthropic>=0.40",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+# MCP server for read-only wiki queries (search / claims / db-papers /
+# check-grounding). Enables Claude Desktop and other MCP clients to query
+# the wiki without shelling out to the CLI. Optional — the CLI itself
+# doesn't need `mcp`; only `researchwiki mcp-serve` does. Install with:
+#   pip install -e '.[mcp]'
+mcp = [
+    "mcp>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/johapark/research-wiki"
+Repository = "https://github.com/johapark/research-wiki"
+Issues = "https://github.com/johapark/research-wiki/issues"
+
+[project.scripts]
+researchwiki = "researchwiki.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["researchwiki*"]
+exclude = ["tests*", "internal*", "wiki*"]
+
+[tool.setuptools.package-data]
+# Bundle the English wordlist used by `pdf.py` for ligature repair so the
+# package works on any platform without an OS-provided `/usr/share/dict/words`.
+researchwiki = ["pdf/data/*.txt"]
+
+[tool.pytest.ini_options]
+# Unit tests cover the pure, deterministic operators (stem derivation, the
+# promotion gate, numeric-drift detection, the selection rule, the DEBUG issue
+# classifier). They make no network or LLM calls — fast and hermetic.
+testpaths = ["tests"]
+python_files = ["test_*.py"]

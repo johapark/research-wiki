@@ -1,0 +1,193 @@
+paper_stem: muslu-2026-variantmedium-sensitive-and-generalizable-somatic
+paper_type: method-with-benchmarks
+title: "VariantMedium: sensitive and generalizable somatic point mutation calling with 3D DenseNets trained and evaluated on experimental data"
+published_at: "2026-06-19"
+notes: |
+  Somatic SNV caller method paper. VariantMedium combines an ExtraTrees
+  candidate-filtering classifier with a 3D DenseNet (one block, four dense
+  layers) trained on experimentally confirmed variants from cell lines,
+  AML31, and TCGA-MC3. Benchmarked against Mutect2, Strelka2, VarNet,
+  NeuSomatic, and the four PCAWG production pipelines (Broad, DKFZ, MuSE,
+  Sanger SVCP) on the PCAWG-Pilot63 WGS dataset (~106K deep-sequenced
+  SNVs, 37 patients) and the SEQC2-WES HCC1395/HCC1395BL dataset (12 WES
+  pairs). Total corpus: 336,839 training/validation variants from 2,956
+  samples plus 118,887 evaluation variants.
+
+  Watch out for: the paper's headline framing is "highest sensitivity,"
+  not "highest F1" — on straight PCAWG-Pilot63 F1, Mutect2 edges out
+  VariantMedium by 0.004. VariantMedium wins on concordance-weighted F1
+  (0.79 vs 0.77) because its higher recall pays off once precision is
+  weighted by concordance bin. Numbers to preserve verbatim: recall 0.876
+  and F1 0.913 on PCAWG-Pilot63 (unweighted), F1 0.79 concordance-weighted,
+  AUPRC 0.918 on SEQC2 all regions.
+
+headline_claims:
+  - id: pcawg-sensitivity-vs-mutect2-strelka2
+    importance: critical
+    verbalization: |
+      On the PCAWG-Pilot63 WGS test set (~106,000 targeted-deep-sequencing
+      confirmed SNVs from 37 patients), VariantMedium achieved the highest
+      sensitivity among benchmarked callers at 0.876, versus Mutect2 at
+      0.871 and Strelka2 at 0.848.
+    relation:
+      subject: "VariantMedium PCAWG-Pilot63 sensitivity"
+      ratio: "0.876"
+      comparator: "Mutect2 (0.871), Strelka2 (0.848)"
+    location: "Results, p.11; Fig. 3"
+
+  - id: pcawg-f1-second-behind-mutect2
+    importance: critical
+    verbalization: |
+      On the same PCAWG-Pilot63 unweighted evaluation, VariantMedium
+      achieved F1 of 0.913, second-best behind Mutect2 at 0.917 (a
+      difference of 0.004), and ahead of Strelka2 at 0.899.
+    relation:
+      subject: "VariantMedium PCAWG-Pilot63 F1"
+      ratio: "0.913"
+      comparator: "Mutect2 (0.917), Strelka2 (0.899)"
+    location: "Results, p.11; Fig. 3"
+
+  - id: concordance-weighted-f1-lead
+    importance: critical
+    verbalization: |
+      Under concordance-weighted benchmarking on PCAWG-Pilot63 (following
+      the ICGC/TCGA PCAWG Consortium methodology), VariantMedium achieved
+      the best F1 of 0.79, ahead of Mutect2 and Strelka2 at 0.77, SVCP at
+      0.74, and Broad Mutect at 0.73. VarNet dropped to F1 of 0.65 under
+      concordance weighting. VariantMedium had slightly lower precision
+      (0.93 vs. [0.74, 0.99] for others) but higher recall (0.68 vs.
+      [0.52, 0.65]).
+    relation:
+      subject: "VariantMedium concordance-weighted F1 on PCAWG-Pilot63"
+      ratio: "0.79"
+      comparator: "Mutect2 & Strelka2 (0.77), SVCP (0.74), Broad (0.73), VarNet (0.65)"
+    location: "Results, p.14; Fig. 4C-E"
+
+  - id: seqc2-all-regions-auprc
+    importance: critical
+    verbalization: |
+      On the SEQC2-WES HCC1395/HCC1395BL dataset (12 WES sample pairs
+      across sequencing centers), VariantMedium achieved the highest
+      AUPRC of 0.918 in all exome regions, versus Mutect2 at 0.892 and
+      Strelka2 at 0.843, along with the highest sensitivity of 0.909
+      versus VarNet 0.738, Strelka2 0.819, and Mutect2 0.867.
+    relation:
+      subject: "VariantMedium SEQC2 all-regions AUPRC"
+      ratio: "0.918"
+      comparator: "Mutect2 (0.892), Strelka2 (0.843)"
+    location: "Results, p.15-16; Fig. 6A,C; Additional file 1: Table S13"
+
+  - id: low-confidence-region-advantage
+    importance: high
+    verbalization: |
+      In SEQC2 low-confidence genomic regions (excluded from the consortium's
+      high-confidence 2.48 Gb region set), the deep-learning callers led:
+      VarNet reached F1 of 0.826 and VariantMedium 0.823, versus Strelka2
+      at 0.805 (AUPRC 0.897 for Strelka2, 0.89 for VariantMedium). Mutect2
+      ranked last on both F1 and AUPRC in low-confidence regions and showed
+      the highest variability across samples.
+    relation:
+      subject: "VariantMedium SEQC2 low-confidence F1"
+      ratio: "0.823"
+      comparator: "VarNet (0.826), Strelka2 (0.805), Mutect2 (last)"
+    location: "Results, p.16-17; Fig. 6B,D"
+
+  - id: architecture-extratrees-plus-3d-densenet
+    importance: high
+    verbalization: |
+      VariantMedium is a two-stage caller: an ExtraTrees classifier filters
+      Strelka2's unfiltered candidate list (up to 3 million candidates,
+      >99% sensitivity retained), then a 3D DenseNet with one block of four
+      dense layers classifies each candidate into somatic, germline, or no
+      mutation using tensors (11×3×5×(window_size*2+1)) built by the
+      bam2tensor library. Training used stochastic gradient descent with
+      weighted cross-entropy (no mutation 0.3, germline 0.3, somatic 0.4).
+    location: "Methods, p.6-8; Fig. 1"
+
+  - id: training-corpus-scale
+    importance: high
+    verbalization: |
+      VariantMedium was trained and validated on 336,839 variants from
+      2,956 samples spanning cell lines (11 matched tumor-normal WES pairs),
+      the AML31 WGS dataset (1 sample, 8,345 labels, downsampled to 20%),
+      and TCGA-MC3 (2,944 samples, 158,682 labels). Evaluation used 118,887
+      variants from two independent studies (PCAWG-Pilot63 WGS and SEQC2
+      WES) with sequencing characteristics distinct from training.
+    location: "Abstract; Methods Table 1, p.3"
+
+capabilities:
+  - id: generalizes-across-wes-wgs
+    importance: critical
+    verbalization: |
+      Generalizes from WES-heavy training data to independent WGS
+      evaluation on PCAWG-Pilot63 despite differences in sequencing depth
+      (median 112× training vs. 53× test) and read length (51/76/100 bp
+      training vs. 101/151 bp test), maintaining top-tier F1 and
+      sensitivity.
+    location: "Results, p.11; Table 1, p.3"
+
+  - id: stable-across-clonality-and-coverage
+    importance: high
+    verbalization: |
+      Delivers stable F1 scores between 0.80 and 0.95 for sites with
+      coverage above 10 on PCAWG-Pilot63, outperforms all callers except
+      Mutect2 when coverage exceeds 20, and achieves the highest F1
+      (0.967) in the "clonal [NA]" clonality class while ranking among
+      the top three callers across all four PCAWG clonality classes.
+      Shows the lowest weighted variance in F1 across the 37 patients.
+    location: "Results, p.14-15; Fig. 5A,B; Additional file 2: Fig. S13"
+
+  - id: active-learning-training
+    importance: high
+    verbalization: |
+      Uses an active-learning training loop: preliminary VariantMedium
+      calls plus Mutect2 and Strelka2 calls are subjected to targeted
+      deep sequencing in three batches (1,663 SNVs and 201 indels across
+      five cell lines total, with a median targeted-sequencing coverage
+      of 11,042× in tumor and 9,832× in normal), and the resulting
+      confirmed labels feed the next training round.
+    location: "Results, p.10-11; Fig. 2A"
+
+  - id: modest-compute-footprint
+    importance: normal
+    verbalization: |
+      Runs on modest compute: median 2 hours per SEQC2-WES BAM pair, up
+      to 4 CPU cores and 1 GPU, with an effective average of ~2.5 cores
+      utilized and 7.3 GB peak memory (measured via Slurm sacct on
+      VariantMedium v1.2.1).
+    location: "Methods, p.10; Additional file 2: Fig. S7"
+
+limitations:
+  - id: indel-calling-limited
+    importance: critical
+    verbalization: |
+      Indel calling performance is limited compared to other callers,
+      which the authors attribute to current dataset scale and the
+      difficulty of modeling the more complex and noisier indel variant
+      space with deep learning. Future work is proposed to focus on
+      indel-specific algorithms and validation of more indel candidates.
+    location: "Discussion, p.17; Additional file 2: Fig. S15"
+
+  - id: tmb-recall-negative-correlation
+    importance: high
+    verbalization: |
+      Recall and F1 correlate negatively with tumor mutation burden
+      (Spearman ρ = -0.636 for recall and ρ = -0.632 for F1 on
+      PCAWG-Pilot63), while precision correlates positively with TMB
+      (ρ = 0.339). No significant association was found with tumor
+      purity, ploidy, whole-genome doubling status, or patient sex.
+    location: "Results, p.15; Additional file 1: Table S12"
+
+  - id: precision-trade-off-vs-mutect2
+    importance: high
+    verbalization: |
+      VariantMedium's headline advantage is sensitivity, not precision:
+      under concordance-weighted evaluation, its precision (0.93) is
+      slightly below the [0.74, 0.99] range of competing callers, and
+      Mutect2-specific calls yielded higher precision on a per-patient
+      basis. The gain in F1 comes from higher recall (0.68 vs. [0.52,
+      0.65]). Users can adjust the 3D DenseNet score threshold to shift
+      the precision/sensitivity trade-off.
+    location: "Results, p.14; Conclusions, p.17"
+
+related_papers: []

@@ -1,0 +1,115 @@
+# Central LLM model configuration.
+#
+# Each *role* defines a (provider, model, temperature, max_tokens) tuple.
+# Each *phase* binds to a role, optionally overriding individual fields.
+#
+# ── Provider precedence ──
+# 1. Primary (this file): `anthropic` — Sonnet 5 / Haiku 4.5 via the
+#    Anthropic API. Reliable and the historical default; what `git pull`
+#    should always restore to. Requires ANTHROPIC_API_KEY.
+# 2. Secondary fallback: local LM Studio / vLLM / Ollama via the
+#    `lmstudio` (openai-compatible) provider. Use when the Anthropic API
+#    is unreachable or for offline/private runs. Swap in by copying a
+#    template (e.g. cp models.lmstudio.yaml models.yaml) and pointing
+#    RW_LLM_BASE_URL at the local server.
+# 3. Tertiary fallback: chat-relay or other openai-compatible bridges
+#    (OpenAI / Gemini / Groq / OpenRouter — see models.openai-compatible.yaml). Use only when
+#    neither Anthropic nor a local server is available.
+#
+# Edit this file to A/B test models within the Anthropic tier (e.g. swap
+# classifier from Sonnet to Haiku). For provider-level switches, prefer
+# copying a template over editing this file in-place, so the primary
+# config stays clean for the next pull.
+#
+# Loaded by researchwiki/agents/model_config.py with caching. Falls back
+# to hardcoded defaults if this file is missing or unparseable.
+
+roles:
+  # Drafting role — used when the LLM produces substantial text the grader
+  # will score. Flipped from Opus 4.7 → Sonnet 4.6 on 2026-05-28 after a
+  # 3-paper A/B sandbox test showed Sonnet matched or beat Opus on
+  # mean_semantic across compbio / genomics / cgt with 0 drift on all three,
+  # while writing MORE valid Key Contributions bullets on 2/3 papers.
+  # Cost dropped ~83% per ingest ($0.36 → $0.06 for the 2-draft author phase).
+  # See log.md for the per-paper grader-score deltas.
+  author:
+    provider: anthropic
+    model: claude-sonnet-5
+    temperature: 0.5
+    max_tokens: 6000
+
+  # Lightweight critic — translates grader flags into actionable revision notes.
+  critic:
+    provider: anthropic
+    model: claude-sonnet-5
+    temperature: 0.3
+    max_tokens: 2500
+
+  # General-purpose judging role — used by the structural-judgment phases
+  # (B1 link generation, B2 memory evolution, B4.5 synthesis scoping).
+  judge:
+    provider: anthropic
+    model: claude-sonnet-5
+    temperature: 0.2
+    max_tokens: 1500
+
+  # Strict classifier — used by the category auto-suggester. Low temperature
+  # and small max_tokens because output is a single JSON verdict.
+  classifier:
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    temperature: 0.1
+    max_tokens: 200
+
+  # Short-output proposer — used for one-line outputs like short-names and
+  # keyword lists. Default max_tokens is 200; override per phase if needed.
+  proposer:
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    temperature: 0.3
+    max_tokens: 200
+
+  # PDF metadata extractor — small model, deterministic output, structured
+  # JSON. Same shape as classifier but temp=0 (extraction, not classification).
+  # 800 tokens: title + authors + DOI + ~1500-char abstract fits with margin.
+  # See plans/strengthen-reconcile.md for the rollout.
+  extractor:
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    temperature: 0.0
+    max_tokens: 800
+
+phases:
+  # Each phase binds to a role and optionally overrides specific fields.
+  # Call sites can also pass explicit `temperature=` / `max_tokens=` to
+  # override at call time (the author phase uses this to vary temperature
+  # per parallel draft).
+  author:           {role: author}
+  evolve:           {role: author}
+  debug:            {role: author, temperature: 0.2}
+  critic:           {role: critic}
+  classifier:       {role: classifier}
+  short_name:       {role: proposer, max_tokens: 32}
+  keywords:         {role: proposer}
+  link_generation:  {role: judge, max_tokens: 1200}
+  # Evolve-proposal judge — one call per synthesis neighbor above the cosine
+  # floor. Per-call input is small (~1.5k tokens: the neighbor body is already
+  # capped at 3500 chars + source summary); the aggregate cost is driven by
+  # call *volume* (papers x ~8 neighbors), not per-call size — so shrinking the
+  # payload (a "skeleton" representation) was measured to save ~0% and abandoned.
+  #
+  # Model = Haiku 4.5, NOT the Sonnet judge role — for cost (this phase is a
+  # structured verdict+patch; the human reviews every proposal). The empty-
+  # output failure mode is closed independently: the call site passes
+  # `disable_thinking=True`, so an adaptive-thinking model (Sonnet 5, Opus 4.6+)
+  # can no longer spend the whole max_tokens budget on thinking and return an
+  # empty answer (measured: stop_reason=max_tokens, content=[thinking] only).
+  # That makes reverting to {role: judge} safe if Sonnet-grade triage is
+  # wanted (re-A/B first). max_tokens 2500 = headroom for a long `enhance`
+  # patch paragraph; Haiku typically emits ~150-400 tokens and stops.
+  memory_evolution: {role: judge, model: claude-haiku-4-5-20251001, temperature: 0.2, max_tokens: 3000}
+  synthesis_judge:  {role: judge}
+  eval_judge:       {role: judge}
+  reconcile:        {role: extractor}
+  target_claims:    {role: judge, max_tokens: 8000}
+  claim_support:    {role: judge}
