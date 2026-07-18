@@ -306,6 +306,15 @@ cd tests/grade-fixtures && python run-eval.py
 
 If cold-install fails on a fresh clone, that's a packaging bug — please file an issue.
 
+## License
+
+The framework — everything under `researchwiki/`, `tests/`, `prompts/`, `config/`, and the docs — is **MIT** ([`LICENSE`](./LICENSE)).
+
+Two carve-outs, neither covered by that MIT grant:
+
+- **`benchmark-fixtures/pdfs/`** — five published papers redistributed under **CC-BY-4.0**, each with per-paper attribution in [`benchmark-fixtures/LICENSES.md`](./benchmark-fixtures/LICENSES.md). If you fork or redistribute, keep that attribution intact.
+- **Your own library** — `papers/`, `inbox/`, and `wiki/` are gitignored and never distributed. The PDFs you add stay under their publishers' terms; this project claims nothing over them.
+
 ## Design principles
 
 - **Two-tier**: raw PDF (immutable) → single LLM-authored wiki page. No separate "summary" layer.
