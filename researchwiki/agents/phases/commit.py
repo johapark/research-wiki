@@ -111,6 +111,8 @@ def propose_short_name(
     name = lines[0].strip() if lines else ""
     name = name.rstrip(".,;:")
     if len(name) > 40 or not name:
+        log(f"short_name unusable (got {name[:60]!r}); falling back to TODO",
+            tag="agent")
         name = "TODO"
     return ShortNameOutput(
         name=name,
@@ -280,6 +282,27 @@ def propose_keywords(
         return KeywordsOutput(model="(failed)")
 
     keywords = _parse_keywords_response(resp.text)
+    if not keywords:
+        # An empty list is nearly always a transient formatting miss (prose
+        # instead of JSON, truncated object), not a paper with no keywords —
+        # so spend one more call before giving up. Cheap: `keywords` is a
+        # short-output role.
+        log("keywords empty after parse; retrying once", tag="agent")
+        try:
+            retry = llm.call(phase="keywords", prompt=prompt, use_stub=False)
+        except Exception as e:
+            log(f"keywords retry failed: {type(e).__name__}: {e}", tag="agent")
+        else:
+            retry_keywords = _parse_keywords_response(retry.text)
+            if retry_keywords:
+                return KeywordsOutput(
+                    keywords=retry_keywords,
+                    model=retry.model,
+                    input_tokens=resp.input_tokens + retry.input_tokens,
+                    output_tokens=resp.output_tokens + retry.output_tokens,
+                )
+        log("WARNING: keywords still empty after retry — page will need "
+            "`researchwiki backfill keywords`", tag="agent")
     return KeywordsOutput(
         keywords=keywords,
         model=resp.model,
@@ -487,10 +510,13 @@ def _parse_keywords_batch_response(
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.DOTALL).strip()
     m = re.search(r"\{.*\}", raw, re.DOTALL)
     if not m:
+        log(f"keywords batch response carried no JSON object "
+            f"(len={len(raw)}, head={raw[:80]!r})", tag="agent")
         return {}
     try:
         obj = json.loads(m.group(0))
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        log(f"keywords batch response was not valid JSON: {e}", tag="agent")
         return {}
     items = obj.get("items") or []
     out: dict[str, list[str]] = {}
@@ -528,11 +554,17 @@ def _parse_keywords_response(text: str) -> list[str]:
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.DOTALL).strip()
     # Find the first JSON object — tolerates pre/post prose.
     m = re.search(r"\{.*\}", raw, re.DOTALL)
+    # A parse miss here is not "this paper has no keywords" — it's a malformed
+    # response. Returning [] silently is how 38% of the corpus ended up with no
+    # `keywords:` field despite `lint` requiring one, so both misses are logged.
     if not m:
+        log(f"keywords response carried no JSON object "
+            f"(len={len(raw)}, head={raw[:80]!r})", tag="agent")
         return []
     try:
         obj = json.loads(m.group(0))
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        log(f"keywords response was not valid JSON: {e}", tag="agent")
         return []
     return _filter_keyword_list(obj.get("keywords") or [])
 
