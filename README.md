@@ -306,6 +306,8 @@ cd tests/grade-fixtures && python run-eval.py
 
 If cold-install fails on a fresh clone, that's a packaging bug — please file an issue.
 
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the conventions that are enforced by tests (phase naming, phase registration, the never-rename-phase-strings rule) and [`SECURITY.md`](./SECURITY.md) for the credential/data-flow surface — notably that ingesting a paper sends its text to your configured LLM provider.
+
 ## License
 
 The framework — everything under `researchwiki/`, `tests/`, `prompts/`, `config/`, and the docs — is **MIT** ([`LICENSE`](./LICENSE)).
