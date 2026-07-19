@@ -19,8 +19,10 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
+from ..fsatomic import read_json, write_json_atomic
 from ..log import log
 from ..paths import s2_cache_dir
+from ._cache import safe_cache_key
 from .base import ScholarlyArticle, ScholarlyDatabaseProvider
 
 S2_BASE = "https://api.semanticscholar.org/graph/v1"
@@ -75,8 +77,7 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
     # ---------- transport ----------
 
     def _cache_path(self, url: str) -> Path:
-        safe = url.replace("/", "_").replace(":", "_").replace("?", "_").replace("&", "_")
-        return s2_cache_dir() / f"s2__{safe[-160:]}.json"
+        return s2_cache_dir() / f"s2__{safe_cache_key(url)}.json"
 
     def _read_cache(self, cache: Path, url: str) -> tuple[bool, dict[str, Any] | None]:
         """Read a cache file with negative-cache + force-refresh semantics.
@@ -97,12 +98,9 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
         ignored even without a force-refresh, so a paper S2 didn't index yet
         auto-recovers on the next audit past the deadline.
         """
-        if not cache.exists():
-            return False, None
-        try:
-            data = json.loads(cache.read_text())
-        except (json.JSONDecodeError, OSError):
-            return False, None  # corrupt → treat as miss
+        data = read_json(cache)
+        if data is None:
+            return False, None  # missing or corrupt → treat as miss
 
         is_negative = isinstance(data, dict) and data.get(_NEG_KEY) is True
 
@@ -152,7 +150,7 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
             _NEG_AT: _dt.datetime.now().replace(microsecond=0).isoformat(),
         }
         try:
-            cache.write_text(json.dumps(sentinel, indent=2))
+            write_json_atomic(cache, sentinel)
             self.negative_cache_hits.append(url)
         except OSError as e:
             log(f"  WARN: could not write negative-cache for {url}: {e}",
@@ -207,7 +205,7 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
             except json.JSONDecodeError as e:
                 log(f"  JSON parse error on {url}: {e}", tag=self._log_tag)
                 continue
-            cache.write_text(json.dumps(data, indent=2))
+            write_json_atomic(cache, data)
             time.sleep(self.sleep_sec)
             return data
         log(f"  giving up on {url} after {self.retries} retries", tag=self._log_tag)
@@ -269,7 +267,7 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
             except json.JSONDecodeError as e:
                 log(f"  JSON parse error on POST {url}: {e}", tag=self._log_tag)
                 continue
-            cache_path.write_text(json.dumps(data, indent=2))
+            write_json_atomic(cache_path, data)
             time.sleep(self.sleep_sec)
             return data
         log(f"  giving up on POST {url} after {retries} retries", tag=self._log_tag)
@@ -363,7 +361,7 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
                 )
                 per_cache = self._cache_path(per_url)
                 if not per_cache.exists():
-                    per_cache.write_text(json.dumps(item, indent=2))
+                    write_json_atomic(per_cache, item)
         return result
 
     # ---------- helpers ----------

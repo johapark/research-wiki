@@ -1,6 +1,16 @@
 """Shared on-disk cache helpers for the whitelist providers.
 
-Two guarantees the providers previously lacked (S2 already had them):
+Used directly by Crossref, bioRxiv, ORCID, and PubMed (`read_cache` /
+`write_cache` / `negative_sentinel`). Semantic Scholar keeps its own
+sentinel format (`_negative_cached`/`_cached_at`, plus force-refresh and
+negative-cache-hit tracking that don't apply to the other four) — existing
+`.s2-cache/` entries already use those key names, and switching to this
+module's `_rw_negative`/`_rw_cached_at` would make old cached negatives
+silently misread as real data. S2 instead calls `fsatomic.read_json` /
+`write_json_atomic` directly for the same guarded-read/atomic-write
+guarantees, and this module's `safe_cache_key` for its cache filenames.
+
+Two guarantees every provider gets, one way or the other:
 
 - **Guarded reads / atomic writes.** A cache file truncated by an interrupted
   write reads as a miss (re-fetch) instead of crashing every subsequent run,
@@ -59,3 +69,18 @@ def read_cache(cache: Path):
 def write_cache(cache: Path, data) -> None:
     """Atomically persist `data` (utf-8)."""
     write_json_atomic(cache, data)
+
+
+def safe_cache_key(raw: str, max_len: int = 160) -> str:
+    """Sanitize an arbitrary string (URL, DOI, name) into a filesystem-safe
+    cache-key fragment.
+
+    Strips characters unsafe or awkward in filenames and keeps only the
+    last `max_len` chars — the discriminating part of a long URL or DOI is
+    usually the tail (query string / DOI suffix), and cache keys can
+    otherwise exceed filesystem name limits.
+    """
+    safe = raw
+    for ch in ("/", ":", "?", "&", " "):
+        safe = safe.replace(ch, "_")
+    return safe[-max_len:]

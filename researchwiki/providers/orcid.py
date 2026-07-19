@@ -24,7 +24,7 @@ from datetime import date
 
 from ..log import log
 from ..paths import web_cache_dir
-from ._cache import read_cache, write_cache
+from ._cache import negative_sentinel, read_cache, safe_cache_key, write_cache
 
 ORCID_BASE = "https://pub.orcid.org/v3.0"
 USER_AGENT = "researchwiki/0.1 (https://github.com/anthropic/claude-code; mailto:noreply@example.com)"
@@ -72,8 +72,7 @@ def _cache_path(kind: str, key: str) -> "Path":  # type: ignore[name-defined]
     from pathlib import Path
     cache_dir = web_cache_dir()
     cache_dir.mkdir(exist_ok=True)
-    safe = key.replace("/", "_").replace(":", "_").replace(" ", "_")
-    return cache_dir / f"orcid_{kind}__{safe[-160:]}.json"
+    return cache_dir / f"orcid_{kind}__{safe_cache_key(key)}.json"
 
 
 def _empty_record(orcid_id: str = "") -> dict:
@@ -129,7 +128,9 @@ def lookup_by_id(orcid_id: str) -> dict:
         if pd is None:
             return out  # network failure
         time.sleep(POLITE_SLEEP)
-        write_cache(pd_cache, pd)
+        # Empty dict = HTTP 404 (unknown ORCID) — TTL it so a since-registered
+        # ORCID isn't rejected forever; a real 200 payload always has a `name`.
+        write_cache(pd_cache, negative_sentinel(pd) if not pd else pd)
 
     name = pd.get("name") or {}
     gn = (name.get("given-names") or {}).get("value") or ""
@@ -150,7 +151,8 @@ def lookup_by_id(orcid_id: str) -> dict:
         if em is None:
             return out
         time.sleep(POLITE_SLEEP)
-        write_cache(em_cache, em)
+        # Same 404-vs-real-payload TTL as the personal-details cache above.
+        write_cache(em_cache, negative_sentinel(em) if not em else em)
 
     groups = em.get("affiliation-group") or []
     if groups:
@@ -224,7 +226,8 @@ def search_by_name(given: str = "", family: str = "", limit: int = 5) -> list[di
         if data is None:
             return []
         time.sleep(POLITE_SLEEP)
-        write_cache(cache, data)
+        # Empty dict = HTTP 404; TTL it like the lookups above.
+        write_cache(cache, negative_sentinel(data) if not data else data)
 
     results = data.get("result") or []
     records: list[dict] = []

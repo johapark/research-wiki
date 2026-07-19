@@ -26,7 +26,7 @@ from datetime import date
 
 from ..log import log
 from ..paths import web_cache_dir
-from ._cache import read_cache, write_cache
+from ._cache import negative_sentinel, read_cache, safe_cache_key, write_cache
 
 EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 USER_AGENT = "researchwiki/0.1 (https://github.com/anthropic/claude-code; mailto:noreply@example.com)"
@@ -76,8 +76,7 @@ def doi_to_pmid(doi: str) -> str | None:
     doi_norm = doi.strip().lower()
     cache_dir = web_cache_dir()
     cache_dir.mkdir(exist_ok=True)
-    safe = doi_norm.replace("/", "_").replace(":", "_")
-    cache = cache_dir / f"pubmed_esearch__{safe[-160:]}.json"
+    cache = cache_dir / f"pubmed_esearch__{safe_cache_key(doi_norm)}.json"
     data = read_cache(cache)
     if data is None:
         url = (f"{EUTILS_BASE}/esearch.fcgi"
@@ -86,7 +85,9 @@ def doi_to_pmid(doi: str) -> str | None:
         if data is None:
             return None
         time.sleep(POLITE_SLEEP)
-        write_cache(cache, data)
+        # Empty dict = HTTP 404; TTL it so a DOI PubMed hasn't indexed yet
+        # (common for fresh publications) is re-checked later.
+        write_cache(cache, negative_sentinel(data) if not data else data)
     ids = (data.get("esearchresult") or {}).get("idlist") or []
     return ids[0] if ids else None
 
@@ -135,7 +136,8 @@ def retraction_status(doi: str) -> dict:
         if data is None:
             return out
         time.sleep(POLITE_SLEEP)
-        write_cache(cache, data)
+        # Empty dict = HTTP 404; TTL it like the esearch cache above.
+        write_cache(cache, negative_sentinel(data) if not data else data)
 
     result = (data.get("result") or {}).get(pmid) or {}
     pubtypes = result.get("pubtype") or []

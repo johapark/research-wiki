@@ -25,7 +25,7 @@ from datetime import date
 
 from ..log import log
 from ..paths import web_cache_dir
-from ._cache import negative_sentinel, read_cache, write_cache
+from ._cache import negative_sentinel, read_cache, safe_cache_key, write_cache
 
 BIORXIV_BASE = "https://api.biorxiv.org/details"
 USER_AGENT = "researchwiki/0.1 (https://github.com/anthropic/claude-code; mailto:noreply@example.com)"
@@ -67,8 +67,7 @@ def _curl_json(url: str, retries: int = 3) -> dict | None:
 def _fetch_server(server: str, doi: str) -> dict | None:
     cache_dir = web_cache_dir()
     cache_dir.mkdir(exist_ok=True)
-    safe = doi.replace("/", "_").replace(":", "_")
-    cache = cache_dir / f"biorxiv_{server}__{safe[-160:]}.json"
+    cache = cache_dir / f"biorxiv_{server}__{safe_cache_key(doi)}.json"
     cached = read_cache(cache)
     if cached is not None:
         return cached

@@ -33,7 +33,7 @@ import urllib.parse
 
 from ..log import log
 from ..paths import crossref_cache_dir
-from ._cache import negative_sentinel, read_cache, write_cache
+from ._cache import negative_sentinel, read_cache, safe_cache_key, write_cache
 
 CROSSREF_BASE = "https://api.crossref.org/works"
 # Polite-pool User-Agent per Crossref API guidelines.
@@ -60,8 +60,7 @@ def _fetch_crossref_work(
     doi_norm = doi.strip().lower()
     cache_dir = crossref_cache_dir()
     cache_dir.mkdir(exist_ok=True)
-    safe = doi_norm.replace("/", "_").replace(":", "_")
-    cache = cache_dir / f"crossref__{safe[-160:]}.json"
+    cache = cache_dir / f"crossref__{safe_cache_key(doi_norm)}.json"
     cached = read_cache(cache)
     if cached is not None:
         return cached
