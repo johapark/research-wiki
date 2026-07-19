@@ -46,7 +46,7 @@ These apply to every response, including synthesis pages.
 
 **Corollary — flag adjacent gaps.** After a substantive cross-paper answer with partial coverage, close with a concrete "What's missing" line (specific paper types, not vague topics) and ask user to drop PDFs in `inbox/`. Skip when coverage is comprehensive.
 
-**Corollary — ground through the claims DB.** Wiki pages are truth (Rule 2); the **claims DB is the grounding layer**. Before authoring any page with factual claims (synthesis, idea, filed query), `researchwiki claims "<topic>"` (or `--by-stem <stem>`) is the **first stop** — pre-graded units anchored to paper + section, scored against the PDF. Cite at the claim level with `[[stem#claim_slug]]` anchors (durable, content-addressed — a slug like `kc-9f3a2b1c` survives `db rebuild` and its identity is verified by `check-grounding`); the `claims` CLI prints the exact citation form to copy. Fall back to bare `[[stem]]` when the paragraph refers to the paper as a whole. On prose-heavy pages, use **academic footnotes** — one per source paper, `[^id]: [[category/stem]]` at bottom (exact form + grading gotcha in [`prompts/synthesis-page-author.md`](./prompts/synthesis-page-author.md)). Paper-page *Related Papers* stay inline `[[wikilink]]`. **In markdown tables**, footnotes don't render — use bare `[[stem]]` (or `Short-name [[stem]]`), never `[[stem\|alias]]`. **Never write `claim_id:NNN`** into a page (they're `AUTOINCREMENT` row keys, reassigned on `db rebuild`). Verify synthesis + idea pages with **both** gates, both must exit 0:
+**Corollary — ground through the claims DB.** Wiki pages are truth (Rule 2); the **claims DB is the grounding layer**. Before authoring any page with factual claims (synthesis, idea, filed query), `researchwiki claims "<topic>"` (or `--by-stem <stem>`) is the **first stop** — pre-graded units anchored to paper + section, scored against the PDF. Cite at the claim level with `[[stem#claim_slug]]` anchors (durable, content-addressed — a slug like `kc-9f3a2b1c` survives `db rebuild` and its identity is verified by `check-grounding`); the `claims` CLI prints the exact citation form to copy. Fall back to bare `[[stem]]` when the paragraph refers to the paper as a whole. On prose-heavy pages, use **academic footnotes** — one per source paper, `[^id]: [[category/stem]]` at bottom (exact form + grading gotcha in [`prompts/synthesis-page-author.md`](./prompts/synthesis-page-author.md)). Paper-page *Related Papers* stay inline `[[wikilink]]`. **In markdown tables**, footnotes don't render — use bare `[[stem]]` (or `Short-name [[stem]]`), never `[[stem\|alias]]`. **Never write `claim_id:NNN`** (legacy row-id form; `check-grounding` still tolerates it on old pages, but no current tool emits it — row ids are `AUTOINCREMENT` and reassigned on `db rebuild`, so cite the slug instead). Verify synthesis + idea pages with **both** gates, both must exit 0:
 - `researchwiki check-grounding <page>` — structural (every claim carries a citation)
 - `researchwiki grade synthesis <page>` — fidelity (each cited claim holds in the paper it cites)
 
@@ -317,12 +317,12 @@ When asked to benchmark/test an LLM by ingesting a `benchmark-fixtures/` paper: 
 
 ### Query — ask a cross-paper question and file the answer back
 
-1. Answer from `wiki/` first. `researchwiki claims "<topic>"` is the **first stop** for factual claims (pre-graded, BM25+semantic-scored). Each hit prints its `[[stem#claim_slug]]` citation form — copy that directly into prose. `claim_id:NNN` is a session-local handle, never a citation token. `researchwiki search` for page-level discovery.
+1. Answer from `wiki/` first. `researchwiki claims "<topic>"` is the **first stop** for factual claims (pre-graded, BM25+semantic-scored). Each hit prints its `[[stem#claim_slug]]` citation form — copy that directly into prose. `researchwiki search` for page-level discovery.
 
    **Structural/bibliometric questions go to the DB.** Corpus counts/filters — "how many cgt papers from 2024?", "which lack a DOI?", "everything in *Nature*" — via `researchwiki db papers [--year/--category/--page-type/--no-doi/--venue/--author/--status] [--count] [--json]` or `researchwiki db query "SELECT …"` for ad-hoc. Ingest telemetry (model quality/cost, hardest sections, token spend) via `researchwiki insights`.
 2. Insufficient (Rule 3): re-read PDFs; update paper pages if worth keeping.
 3. No paper covers it (Rule 4): say so.
-4. Cite facts with `[[wikilink]]`; mention sections in prose, not `claim_id`s.
+4. Cite facts with `[[wikilink]]`; mention sections in prose.
 5. Non-trivial cross-paper → create a synthesis page. **This is how the wiki compounds.**
 
 | User question shape | Location |
@@ -362,7 +362,7 @@ When user asks to share/export a synthesis or idea page, produce a self-containe
 
 **Opportunity signals (not defects; user-initiated cadence):**
 
-- **`researchwiki candidates concepts [--bridges] [--json]`** — recurring vocabulary terms mentioned by ≥3 wiki papers with no `wiki/concepts/{slug}.md` yet. Bridge candidates (span ≥2 categories) are the highest-leverage ones — `status` auto-surfaces the bridge count, so run this whenever that line is nonzero. Scaffold with `researchwiki concepts "<term>"` (see [`prompts/concept-page-author.md`](./prompts/concept-page-author.md)).
+- **`researchwiki candidates concepts [--bridges] [--json]`** — recurring vocabulary terms mentioned by ≥3 wiki papers with no `wiki/concepts/{slug}.md` yet. Bridge candidates (span ≥2 categories) are the highest-leverage ones — `status` auto-surfaces the bridge count, so run this whenever that line is nonzero. Scaffold with `researchwiki concepts "<term>"` (see [`prompts/concept-page-author.md`](./prompts/concept-page-author.md)). A candidate that fails the concept-vs-glossary thesis test (`docs/concept-vs-glossary.md`) can be permanently suppressed with `--decline TERM --reason TEXT` (`--undecline`/`--list-declined` manage the list), so it stops resurfacing here and in `status`'s bridge count.
 - **`researchwiki candidates synthesis`** — dense paper clusters (wikilinks + semantic cosine + keyword Jaccard, connected components) not yet covered by any existing synthesis page. Higher noise rate than concepts, so **not** auto-surfaced; run after ≥5 ingests since last, or when the user asks a cross-paper question that lands in an unfamiliar cluster. Output is proposal stubs in `.ingest/synthesis-candidates/{slug}.md`; human picks a topic and runs `researchwiki synthesize`.
 
 **Category-YAML↔dir drift** catches a recategorized paper whose frontmatter wasn't updated. Page-type dirs (`ideas/`/`synthesis/`/`references/`) accept either the page-type name or a valid content category as YAML `category:`.
@@ -373,9 +373,9 @@ CLI wrappers around PubMed / bioRxiv / ORCID. Usage, YAML-recording rules, and w
 
 ### Agent output — prefer `--json`
 
-- `search --json` → `[{stem, category, page_type, title, score, snippet, key}]`; `--see-also` adds `see_also`.
-- `lint --json` → `{pages_scanned, orphans, broken_wikilinks, missing_backlinks, page_type_mismatches, category_yaml_drift, stale_synthesis, stale_by_content, stale_by_audit_count, p2_entries_with_anchor_hits, dangling_claim_anchors, concept_contract_violations, fix_applied}`. Concept-hub candidates: `candidates concepts --json` → `[{term, pages, categories}]`. Contract violations are advisory (Definition ≥40 words, span≥2 hubs need Cross-domain connections, Definition shouldn't paraphrase a spoke).
-- `audit --json` → `{papers, cross_wiki_citations, edge_summary, recommended_additions, shared_citation_anchors, anchor_groups, categories, category_breadth, count_normalized}`.
+- `search --json` → `[{key, stem, category, page_type, title, score, rrf_score, bm25_rank, bm25_score, semantic_rank, semantic_score, snippet}]`; `--see-also` adds `see_also`.
+- `lint --json` → `{pages_scanned, invalid_frontmatter, orphans, broken_wikilinks, missing_backlinks, page_type_mismatches, category_yaml_drift, stale_synthesis, stale_by_content, stale_by_audit_count, stale_evolution_proposals, missing_keywords, missing_doi, stem_year_drift, unquoted_wikilink_lists, supplementary_missing_on_disk, supplementary_orphaned_files, dangling_claim_anchors, concept_contract_violations, ungraded_papers, db_drift, cross_paper_contradictions, p2_entries_with_anchor_hits, fix_applied}`. Concept-hub candidates: `candidates concepts --json` → `[{term, slug, pages, categories, weighted, label, source, sections}]` — `label` is the triage signal (`concept-ready (bridge)` / `concept-ready (deep)` / `candidate` / `glossary-suspect`). Contract violations are advisory (Definition ≥40 words, span≥2 hubs need Cross-domain connections, Definition shouldn't paraphrase a spoke).
+- `audit --json` → `{papers_skipped_no_doi, papers_intentional_no_doi, total_paper_pages, papers, cross_wiki_citations, edge_summary, recommended_additions, shared_citation_anchors, anchor_groups, s2_missing}`; `categories`/`category_breadth`/`count_normalized` are per-entry fields nested inside `recommended_additions`/`shared_citation_anchors`, not top-level.
 
 ### Exit-code contract
 
