@@ -579,6 +579,201 @@ speed — that hasn't changed across model swaps.
 
 ---
 
+## Provider setup in depth
+
+Companion to `README.md`'s Providers/Model-config tables, which cover the
+default path (`config/models.chatgpt.yaml` + `OPENAI_API_KEY`, nothing else
+to configure). This section is for the paths beyond that default: switching
+configs without copying, mixing providers per role, running fully local, and
+chat-relay for users with no API key at all.
+
+### Switching configs without copying (`RW_MODELS_CONFIG`)
+
+Instead of copying a template over your active `config/models.yaml`, point
+the loader at any config file via the `RW_MODELS_CONFIG` env var. A bare
+filename resolves under `config/`; an absolute/path-separated value is used
+verbatim. This is the clean way to A/B a backend or run a one-off without
+disturbing your default:
+
+```bash
+RW_MODELS_CONFIG=models.glm.yaml researchwiki agent ingest inbox/paper.pdf   # one-off
+# or in .env to make it your persistent default backend
+```
+
+Precedence: `RW_MODELS_CONFIG` → `config/models.yaml` → hardcoded defaults.
+`researchwiki status` prints the active config (with a `[RW_MODELS_CONFIG]`
+marker when the env var is in effect), so "which config am I using?" is
+always answerable. Unlike `RW_LLM_PROVIDER` (which forces one provider
+across every phase and defeats per-role mixing), `RW_MODELS_CONFIG` selects
+a whole file that keeps its own per-role mixing.
+
+### Chat-relay (subscription users — no API key)
+
+If your only model access is a **chat subscription** (Claude.ai Pro, ChatGPT
+Plus, Cursor Pro), the framework still runs end-to-end. The chat-relay
+provider delegates each LLM call to whatever chat agent is already in your
+terminal via a filesystem protocol — no API key, server, or per-paper cost.
+
+**How it works.** `agent ingest` emits a prompt at
+`.llm-relay/pending/{op_id}.prompt.json` and blocks; the chat agent reads
+it, writes `.llm-relay/completed/{op_id}.response.json`; the CLI moves on.
+One ingest is 5–8 handoffs — a few minutes if the agent watches for
+prompts. Protocol spec: [`prompts/chat-relay.md`](./prompts/chat-relay.md).
+
+```bash
+export RW_LLM_PROVIDER=chat-relay      # or add to .env
+researchwiki agent ingest inbox/some-paper.pdf
+```
+
+Then tell your chat agent *"watch `.llm-relay/pending/` and respond to each
+prompt as it appears."* Schema validation + retry-with-feedback is built in
+(up to 3 attempts), so you don't babysit format drift.
+
+**Caveats:**
+- **Wall clock is bounded by your attention** — each phase blocks on the
+  agent; times out at 10 min/phase if it walks away.
+- **Cost dashboards show $0** — tokens aren't measurable through the relay.
+- **One ingest at a time** — parallel ingests queue to the same agent, which
+  responds serially.
+- **Cache reuse on re-runs** — `op_id = sha1(phase|prompt)[:12]`, so a crash
+  mid-ingest reuses completed phases. `RW_RELAY_FRESH=1` forces re-prompting.
+
+### Per-role mixing
+
+`RW_LLM_PROVIDER` is a **global override** — it forces *every* phase to one
+provider and **silently defeats per-role mixing** whenever set (**including
+in `.env`**). To mix (e.g. chat-relay `author`, local everything else):
+**unset `RW_LLM_PROVIDER`**, then set `provider:` per role in
+`config/models.yaml`:
+
+```yaml
+roles:
+  author:     {provider: chat-relay, model: claude-via-relay,    temperature: 0.5, max_tokens: 16000}
+  critic:     {provider: lmstudio,   model: qwen3.6-35b-a3b-mlx, temperature: 0.3, max_tokens: 12000}
+  judge:      {provider: lmstudio,   model: qwen3.6-35b-a3b-mlx, temperature: 0.2, max_tokens: 12000}
+  classifier: {provider: lmstudio,   model: qwen3.6-35b-a3b-mlx, temperature: 0.1, max_tokens: 6000}
+  proposer:   {provider: lmstudio,   model: qwen3.6-35b-a3b-mlx, temperature: 0.3, max_tokens: 6000}
+  extractor:  {provider: lmstudio,   model: qwen3.6-35b-a3b-mlx, temperature: 0.0, max_tokens: 8000}
+```
+
+`author`/`evolve`/`debug` follow the `author` role. For this mix,
+**`RW_LLM_BASE_URL` must be set** (e.g. `http://localhost:1234/v1`) so local
+roles pass the readiness gate — **even on the default port** — and the
+relay needs an active servicer for the `author` phase.
+
+### Local LLMs (LM Studio / vLLM / llama.cpp / ollama)
+
+Any OpenAI-compatible server works alongside or instead of Anthropic. For a
+**fully local** setup, the model we dogfood is **Qwen3.6-35B-A3B** (a
+35B-param MoE, ~3B active — runs on a 32 GB Apple-silicon laptop via LM
+Studio's MLX build): across our ingest history it authored drafts at mean
+claim-fidelity ≈ 0.78, within a hair of Gemini 3.5 Flash (≈ 0.80) and above
+Solar (≈ 0.75) — good enough to keep **every** role local, not just the
+cheap ones. `config/models.lmstudio.yaml` points all six roles at one such
+model. If you'd rather mix, a common split is to keep **author** on
+Anthropic for peak fidelity and route **classifier** / **proposer** /
+**reconcile** to a smaller local model to drop marginal cost toward zero.
+
+**Start a server** (LM Studio is simplest — download a model, click **Start
+Server**; default `http://localhost:1234/v1`):
+
+```bash
+curl http://localhost:1234/v1/models | jq '.data[].id'   # confirm it's up
+```
+
+vLLM: `vllm serve <model> --port 1234`. llama.cpp:
+`llama-server -m <gguf> --port 1234`. ollama: `http://localhost:11434/v1`.
+Real OpenAI: `RW_LLM_BASE_URL=https://api.openai.com/v1` + `OPENAI_API_KEY`.
+
+**Route a role** in `config/models.yaml`:
+
+```yaml
+roles:
+  author:     {provider: anthropic, model: claude-sonnet-4-6,          temperature: 0.5, max_tokens: 2500}
+  classifier: {provider: lmstudio,  model: meta-llama-3.1-8b-instruct, temperature: 0.1, max_tokens: 200}
+  proposer:   {provider: lmstudio,  model: meta-llama-3.1-8b-instruct, temperature: 0.3, max_tokens: 200}
+```
+
+**Sizing:** a **7–8B** model handles the short roles well —
+`classifier`, `short_name`/`keywords`, `reconcile` (verify against S2) —
+but writes shallow `author` drafts and weak `judge` verdicts, so on small
+hardware keep those two on Anthropic and route the rest local. A **~30B+
+MoE like Qwen3.6-35B-A3B** closes that gap (near-cloud author fidelity in
+our runs) while still fitting a 32 GB laptop, which is why it's our
+recommended all-roles-local model; dense 70B+ raises the ceiling further
+but needs 40+ GB VRAM.
+
+**Caveats:** no prompt caching (author is ~free on local anyway); token
+counts may be approximate/zero (dashboard shows $0 — accurate); pure-local
+is supported (readiness checks are provider-aware — leave
+`ANTHROPIC_API_KEY` unset).
+
+---
+
+## CLI reference
+
+Your LLM picks among these based on what you ask; you can run any directly.
+
+```bash
+cp ~/Downloads/some-paper.pdf inbox/                 # 1. drop a PDF
+
+researchwiki agent ingest inbox/some-paper.pdf       # 2. default: LLM authors + grades + promotes + back-links + evolve
+researchwiki agent ingest inbox/*.pdf                #    ≥2 PDFs auto-batch with checkpoint/resume
+
+researchwiki ingest inbox/some-paper.pdf --category cgt   # 2-fallback: digest-only (recovery / unextractable / custom voice)
+
+researchwiki synthesize --title "CRISPR off-target strategies" \
+    --slug crispr-off-target-strategies --topic-seed "CRISPR off-target prediction" \
+    --papers cgt/smith-2024-... cgt/jones-2025-...   # 3. scaffold a synthesis page (idea pages are manual)
+
+researchwiki reindex                                 # 4. rebuild Tantivy + semantic index (~10s)
+
+researchwiki search "CRISPR off-target"              # 5. hybrid (BM25 + semantic RRF); --mode bm25|semantic
+researchwiki search --like compbio/smith-2024-...    #    See-Also on a page; --see-also adds 2 related/hit
+
+researchwiki evolve cgt/some-stem                    # 6. synthesis-evolution proposals for a paper
+researchwiki neighbors compbio/some-stem --needs-ingest --year 2024-2026   # 7. what to ingest next
+researchwiki attach compbio/some-stem ~/Downloads/Methods.pdf              # 8. attach supplementary files
+
+researchwiki status                                  # 9. health: index, costs, pending proposals
+researchwiki lint --fix                              #    consistency report; --fix auto-inserts back-links
+researchwiki audit > /tmp/audit.md                   #    citation-graph audit (Semantic Scholar)
+```
+
+`researchwiki status` on a populated wiki prints per-category counts,
+cross-link density, orphans, and inbox backlog; on an empty wiki it prints
+`Pages: 0` cleanly.
+
+### All commands
+
+| Command | Purpose |
+|---|---|
+| `agent ingest <pdf> [--supplementary <f>...]` | Full pipeline: reconcile → extract → crosslink → parallel-author → grade → critic/evolve/debug → promote → propose evolutions. Provider API key required (`OPENAI_API_KEY` by default). |
+| `ingest <pdf>... [--category] [--supplementary]` | Digest-only (no LLM authoring): DOI, S2 metadata, stem, crosslinks, anchoring → `.ingest/{stem}-digest.md`. Author the page yourself. |
+| `attach <category/stem> <file>` | Attach a supplementary file to an existing page; copies into `papers/{stem}.supp/`, updates YAML. |
+| `neighbors <doi-or-stem>` | S2 citation-graph neighbors. `--mode references\|citations\|recommendations\|all`, `--year`, `--needs-ingest`. Structured fields only. |
+| `evolve <category/stem>` | Neighboring synthesis pages to edit in light of a paper → proposals in `.ingest/{stem}-evolution-proposals/`. |
+| `backfill <keywords\|doi>` | One-shot: populate the named field on paper pages predating it (keywords via LLM; doi via Semantic Scholar → Crossref). |
+| `synthesize --title [...] [--papers]` | Scaffold `wiki/synthesis/{slug}.md`. Idea/reference pages are manual. |
+| `candidates <concepts\|synthesis>` | Surface opportunity signals: un-scaffolded concept hubs (concepts) or uncovered paper clusters warranting a synthesis page (synthesis). |
+| `reindex [--no-semantic]` | Rebuild Tantivy + semantic index from `wiki/`. |
+| `search "<query>" [--mode ...]` or `--like <stem>` | Hybrid retrieval (RRF over BM25 + semantic) by default. |
+| `status` | Dashboard: counts, density, orphans, backlog, index health, pending proposals, 7-day cost. |
+| `lint [--fix]` | Orphans, broken/missing wikilinks (auto-fixable), stale syntheses, missing keywords/DOIs, year drift, stale proposals. |
+| `audit` | Citation-graph audit vs Semantic Scholar: wikilinks without a real citation, and vice versa. |
+| `retraction-check`, `preprint-check`, `orcid-lookup` | Structured PubMed / bioRxiv / ORCID queries. |
+| `claims "<query>" [--k N]` | Grounded-citation search over the pre-graded claims table (atomic bullets + `[[stem#slug]]` citation anchors + support scores). |
+| `pdf-search <stem> "<query>" [--k N]` | BM25 inside one paper's PDF chunks — pull an exact number/passage the page didn't quote. |
+| `check-grounding` | Lint a markdown file: flag claim-bearing units lacking a `[[wikilink]]` or `claim_id`. |
+| `claim-overlap <stem> [--sim N] [--top N] [--dry-run] [--json]` | Proactively cross-link a newly-ingested paper: finds existing papers with near-paraphrase claims, LLM-judges each as a real relationship vs coincidence, and auto-adds reciprocal Related-Papers `[[wikilinks]]` for confirmed matches. Run after `db rebuild`. |
+| `db papers [--year/--category/--page-type/--no-doi/--venue/--author/--status] [--count] [--json]` | Structured lookups over the frontmatter mirror — counts/filters ("cgt papers from 2024", "papers missing a DOI") without re-reading markdown. `db query "SELECT…"` for ad-hoc read-only SQL. |
+| `insights [--days N] [--json]` | Analytics over the ingest telemetry log: draft quality + cost by model, section difficulty, token spend by role, draft decisions. Read-only, no LLM. |
+
+Every operation appends a parseable entry to `wiki/log.md` (inside `wiki/`
+so an Obsidian vault opened there can browse it).
+
+---
+
 ## When to do what (quick reference)
 
 | You did this | Then run |
