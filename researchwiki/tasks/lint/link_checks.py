@@ -52,12 +52,17 @@ def find_orphans(
     """Paper pages with zero in-links and zero out-links.
 
     Synthesis pages excluded — they're catalog-shaped and legitimately
-    can have no inbound links until someone references them.
+    can have no inbound links until someone references them. Root meta
+    pages (`index`, `log`, `views`, … — a slashless key) excluded too:
+    they're catalogues/dashboards, not content nodes with citation
+    relationships. Same exclusion as `find_missing_backlinks._excluded`.
     """
     orphans: list[str] = []
     for md in pages:
         key = page_key(md)
         if md.parent.name == "synthesis":
+            continue
+        if "/" not in key:
             continue
         if not out_links.get(key) and not in_links.get(key):
             orphans.append(key)
