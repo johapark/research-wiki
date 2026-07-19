@@ -8,6 +8,8 @@
 Two targets:
 
   researchwiki candidates concepts   [--bridges] [--persist-edges] [--json]
+                                      [--decline TERM --reason TEXT]
+                                      [--undecline TERM] [--list-declined]
   researchwiki candidates synthesis  [--min-cluster N] [--threshold F] ...
 
 **concepts** — recurring vocabulary terms mentioned by ≥3 wiki papers with no
@@ -15,6 +17,13 @@ Two targets:
 (--bridges: span ≥ 2 categories) is the highest-leverage — those are the terms
 the citation graph and semantic-KNN don't naturally connect. `status`
 auto-surfaces the bridge count, so treat that line as the trigger.
+
+Detection is stateless — it re-derives candidates from scratch every call, so
+a term that fails the concept-vs-glossary thesis test (see
+docs/concept-vs-glossary.md) resurfaces every time. `--decline TERM --reason
+TEXT` records a permanent suppression in `.concept-declines.json`
+(`--undecline` reverses it, `--list-declined` shows the current list) so a
+rejected candidate stops appearing here and in `status`'s bridge count.
 
 **synthesis** — dense paper clusters (wikilinks + semantic cosine ≥ 0.65 +
 keyword Jaccard ≥ 0.2, connected components) not covered by any existing
@@ -25,7 +34,8 @@ by default (--no-judge to skip); ~30s + a few Anthropic calls per run.
 
 Exit code: 0 always. Both targets are read-only opportunity signals; the only
 output that mutates state is the synthesis-target's proposal files under
-`.ingest/synthesis-candidates/` (skipped with --dry-run).
+`.ingest/synthesis-candidates/` (skipped with --dry-run), and the concepts
+target's `.concept-declines.json` (only touched by --decline/--undecline).
 """
 
 from __future__ import annotations
@@ -40,7 +50,7 @@ def _run_concepts(argv: list[str]) -> int:
     Reuses the same `collect_candidates` implementation."""
     import json
 
-    from ..concepts import collect_candidates
+    from ..concepts import add_decline, collect_candidates, load_declines, remove_decline
 
     parser = argparse.ArgumentParser(
         prog="researchwiki candidates concepts",
@@ -53,7 +63,52 @@ def _run_concepts(argv: list[str]) -> int:
                              ".claim-graph/edges.db. Off by default; enable to seed the graph.")
     parser.add_argument("--json", action="store_true",
                         help="Emit as JSON.")
+    parser.add_argument("--decline", metavar="TERM",
+                        help="Permanently suppress TERM from every future listing (this command "
+                             "and `status`'s bridge count) — for a candidate that failed the "
+                             "concept-vs-glossary thesis test (docs/concept-vs-glossary.md) and "
+                             "would otherwise keep resurfacing, since detection here is stateless. "
+                             "Requires --reason.")
+    parser.add_argument("--reason", metavar="TEXT",
+                        help="One-sentence reason recorded with --decline: why TERM is glossary/"
+                             "redundant rather than a concept. Same discipline as the scaffold-time "
+                             "thesis prompt — forces the judgment to be written out.")
+    parser.add_argument("--undecline", metavar="TERM",
+                        help="Remove TERM from the suppression list so it can resurface.")
+    parser.add_argument("--list-declined", action="store_true",
+                        help="Print the current suppression list instead of the candidate list.")
     args = parser.parse_args(argv)
+
+    if args.decline:
+        if not args.reason or not args.reason.strip():
+            print("researchwiki candidates concepts --decline: --reason is required "
+                  "(one sentence — why this is glossary/redundant, not a concept).",
+                  file=sys.stderr)
+            return 1
+        slug = add_decline(args.decline, args.reason.strip())
+        print(f"Declined `{args.decline}` (slug: {slug}). It will no longer appear "
+              f"in `candidates concepts` or `status`'s bridge count.")
+        return 0
+
+    if args.undecline:
+        removed = remove_decline(args.undecline)
+        if removed:
+            print(f"Removed `{args.undecline}` from the suppression list.")
+        else:
+            print(f"`{args.undecline}` was not on the suppression list.")
+        return 0
+
+    if args.list_declined:
+        declines = load_declines()
+        if not declines:
+            print("_no declined concept terms._")
+            return 0
+        print(f"Declined concept terms ({len(declines)}):")
+        print()
+        for slug, entry in sorted(declines.items()):
+            print(f"- `{entry['term']}` (slug: {slug}, declined {entry['declined_at']})")
+            print(f"  {entry['reason']}")
+        return 0
 
     cands = collect_candidates(bridges_only=args.bridges, persist_edges=args.persist_edges)[:30]
     if args.json:
@@ -81,6 +136,7 @@ def _run_concepts(argv: list[str]) -> int:
     print('_`glossary-suspect` = bare acronym or corpus-ubiquitous term — demoted, not a bridge;_')
     print('_scaffold one only if you can write a genuine concept-thesis for it (see docs/concept-vs-glossary.md)._')
     print("_Pass --persist-edges to write `instantiates` edges into `.claim-graph/edges.db`._")
+    print('_Fails the thesis test? `--decline "<term>" --reason "..."` suppresses it for good._')
     return 0
 
 

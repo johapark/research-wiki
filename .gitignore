@@ -44,6 +44,13 @@ wiki/other/*
 # suppress `suggest-splits --category` reminders for the decay window).
 .category-divergence-stamp
 
+# Per-user "I decided this isn't a concept" denylist for concept-hub
+# candidates that failed the concept-vs-glossary thesis test. Written by
+# `researchwiki candidates concepts --decline`; read by `collect_candidates`
+# so a rejected term stops resurfacing. Curatorial state, not code — same
+# bucket as `wiki/*` and the stamps above.
+.concept-declines.json
+
 # Active LLM model config — per-user, mutable. The committed templates
 # (config/models.anthropic.yaml — the default/primary — plus
 # config/models.openai-compatible.yaml and config/models.lmstudio.yaml)

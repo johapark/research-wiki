@@ -703,6 +703,13 @@ def collect_candidates(
     when both surface the same concept. Rows carry a `source` field
     (`keywords` | `claims` | `page-body`) so downstream can weight them.
 
+    Terms recorded in `.concept-declines.json` (via
+    `researchwiki candidates concepts --decline`) are always excluded —
+    a manual, permanent override for terms that failed the
+    concept-vs-glossary thesis test (docs/concept-vs-glossary.md) and
+    would otherwise keep resurfacing every call, since detection here is
+    stateless.
+
     Returns [{term, slug, pages, categories, weighted, sections, label, source}].
     `bridges_only` restricts to concept-ready (bridge) tier. `persist_edges`
     side-writes `instantiates` edges into `.claim-graph/edges.db` — attributed
@@ -710,7 +717,12 @@ def collect_candidates(
     """
     from ..categories import content_categories
     from ..tasks.lint.walk import all_pages
+    # Deferred import: `.declines` imports `_term_slug` from this module, so
+    # importing it at module level here would cycle. By call time both
+    # modules are fully loaded.
+    from .declines import declined_slugs
 
+    declined = declined_slugs()
     pages = all_pages()
     known_stems = {p.stem.lower() for p in pages}
 
@@ -741,6 +753,7 @@ def collect_candidates(
     # Union: keywords primary, claim-regex fills gaps.
     if keyword_rows or claim_regex_rows:
         combined = _merge_candidate_sources(keyword_rows, claim_regex_rows)
+        combined = [r for r in combined if r["slug"] not in declined]
         if persist_edges:
             # Keyword-anchored edges for candidates surfaced by keywords.
             _persist_keyword_instantiates(keyword_rows, claim_rows_data, papers_meta)
@@ -774,6 +787,8 @@ def collect_candidates(
     for tok, n, c in legacy_rows:
         label = _label_for(n, c, term=tok, corpus_size=legacy_corpus_size)
         if bridges_only and label != "concept-ready (bridge)":
+            continue
+        if _term_slug(tok) in declined:
             continue
         out.append({
             "term": tok, "slug": _term_slug(tok),

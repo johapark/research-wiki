@@ -19,12 +19,16 @@ just a thin argparse wrapper over these entry points.
 """
 
 from .candidates import collect_candidates, n_bridge_candidates
+from .declines import add_decline, load_declines, remove_decline
 from .refresh import refresh_concept, upgrade_spokes
 from .scaffold import attach_after_ingest, find_members, run
 
 __all__ = [
     "collect_candidates",
     "n_bridge_candidates",
+    "add_decline",
+    "load_declines",
+    "remove_decline",
     "refresh_concept",
     "upgrade_spokes",
     "attach_after_ingest",
