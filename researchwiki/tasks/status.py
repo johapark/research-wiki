@@ -24,7 +24,7 @@ from ..paths import (
     inbox_dir, ingest_dir, papers_dir, search_index_dir, semantic_cache_dir,
     wiki_dir, wiki_root,
 )
-from ..wiki import read_wiki_papers
+from ..wiki import read_pages
 
 
 # Model pricing — public Anthropic rates per million tokens. Used only for
@@ -258,12 +258,20 @@ def main(argv: list[str]) -> int:
 
     root = wiki_root()
     wdir = wiki_dir()
-    # `read_wiki_papers()` returns any page-with-DOI outside `synthesis/`, so
-    # reference docs whose YAML has a DOI leak into the paper list. Filter by
-    # the page-type dir names — those directories are page-type buckets, not
-    # content categories.
+    # Scan pages directly rather than `read_wiki_papers()`, which silently
+    # drops any page missing a `doi:` field from its result — that erased
+    # doi-less papers (e.g. an arXiv survey never assigned one) from the
+    # cross-link graph entirely, so every edge pointing at or from them
+    # vanished too (`lint`'s `missing_doi` still flags these separately).
+    # Filter on `type: paper` instead of just excluding page-type dirs, so
+    # housekeeping pages (e.g. the Dataview dashboard at `wiki/views.md`,
+    # category "wiki") can't leak in as a "paper".
     PAGE_TYPE_DIRS = ("synthesis", "references", "ideas", "concepts")
-    papers = [p for p in read_wiki_papers() if p["category"] not in PAGE_TYPE_DIRS]
+    papers = [
+        {"stem": p.stem, "category": p.category}
+        for p in read_pages()
+        if p.fm.get("type") == "paper" and p.category not in PAGE_TYPE_DIRS
+    ]
 
     # --- edges from [[wikilink]] occurrences in wiki pages
     known_pages = {f"{p['category']}/{p['stem']}" for p in papers}
@@ -278,15 +286,8 @@ def main(argv: list[str]) -> int:
     # Every page type can be a [[wikilink]] target: papers + all page-type dirs.
     all_link_targets = known_pages | set().union(*page_type_sets.values())
 
-    edges_by_src: dict[str, set[str]] = {}
-    edges_by_tgt: dict[str, set[str]] = {}
-
-    for p in papers:
-        page = wdir / p["category"] / f"{p['stem']}.md"
-        if not page.exists():
-            continue
-        text = page.read_text()
-        src_key = f"{p['category']}/{p['stem']}"
+    def _scan_links(page_path: Path, src_key: str) -> set[str]:
+        text = page_path.read_text()
         targets: set[str] = set()
         for link in _extract_wikilinks(text):
             if link == src_key:
@@ -300,13 +301,50 @@ def main(argv: list[str]) -> int:
                     if kp.split("/", 1)[1] == link and kp != src_key:
                         targets.add(kp)
                         break
+        return targets
+
+    edges_by_src: dict[str, set[str]] = {}
+    edges_by_tgt: dict[str, set[str]] = {}
+
+    for p in papers:
+        page = wdir / p["category"] / f"{p['stem']}.md"
+        if not page.exists():
+            continue
+        src_key = f"{p['category']}/{p['stem']}"
+        targets = _scan_links(page, src_key)
         if targets:
             edges_by_src[src_key] = targets
         for t in targets:
             edges_by_tgt.setdefault(t, set()).add(src_key)
 
-    directional = sum(len(v) for v in edges_by_src.values())
-    undirected = {tuple(sorted([src, tgt])) for src, tgts in edges_by_src.items() for tgt in tgts}
+    # Synthesis/idea/concept/reference pages cite papers via [[wikilink]]s
+    # and footnote defs, but were never scanned as edge *sources* — so a
+    # paper cited only by, say, a dedicated idea page's footnotes (e.g.
+    # zandieh-2025-turboquant) showed up as a false orphan. Scan them too.
+    for keys in page_type_sets.values():
+        for src_key in keys:
+            page = wdir / f"{src_key}.md"
+            if not page.exists():
+                continue
+            targets = _scan_links(page, src_key)
+            if targets:
+                edges_by_src[src_key] = targets
+            for t in targets:
+                edges_by_tgt.setdefault(t, set()).add(src_key)
+
+    # Density/directional stats stay paper-to-paper only — a citation from a
+    # synthesis/idea page isn't a paper-to-paper cross-link, so it shouldn't
+    # inflate a metric sized against `n choose 2` paper pairs. Orphan
+    # detection below uses the full edge sets so those citations still count.
+    directional = sum(
+        1 for src, tgts in edges_by_src.items() if src in known_pages
+        for tgt in tgts if tgt in known_pages
+    )
+    undirected = {
+        tuple(sorted([src, tgt]))
+        for src, tgts in edges_by_src.items() if src in known_pages
+        for tgt in tgts if tgt in known_pages
+    }
     undirected_count = len(undirected)
 
     n = len(papers)
