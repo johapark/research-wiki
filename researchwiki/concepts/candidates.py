@@ -241,6 +241,56 @@ def _term_slug(term: str) -> str:
     s = re.sub(r"-+", "-", s).strip("-")
     return s
 
+
+# Suffixes where a trailing "s" is part of the stem, not a plural marker —
+# stripping it would corrupt the term (bias→bia, analysis→analysi, virus→viru).
+_SINGULARIZE_SKIP_SUFFIXES = ("ss", "us", "is", "os")
+# Whole tokens that end in "s" (often vowel+"s") but are already singular /
+# invariant — the suffix guards above miss "-as" singulars. Small, stable set;
+# the co-occurrence gate makes any miss harmless (forms just stay distinct).
+_SINGULARIZE_SKIP_WORDS = frozenset({
+    "species", "series", "bias", "atlas", "canvas", "alias", "lens",
+})
+
+
+def _singularize(word: str) -> str:
+    """Best-effort singularization of ONE lowercased alnum token, used only
+    to *detect* a collision between two surface forms that both appear as
+    candidates (see `_canonical_key` / the co-occurrence-gated merge) — never
+    to rewrite a lone term. Conservative by design: irregular plurals
+    (analyses→analysis, indices→index) are deliberately NOT handled, because
+    a missed merge is harmless (the forms stay distinct) while a wrong merge
+    is not. First rule that matches wins.
+    """
+    if word in _SINGULARIZE_SKIP_WORDS or len(word) <= 3:
+        return word
+    if word.endswith(_SINGULARIZE_SKIP_SUFFIXES):
+        return word
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3] + "y"                 # studies → study
+    if word.endswith(("sses", "shes", "ches", "xes", "zes")):
+        return word[:-2]                        # batches → batch, boxes → box
+    if word.endswith("s"):                      # (not "ss" — guarded above)
+        return word[:-1]                        # models → model
+    return word
+
+
+def _canonical_key(term: str) -> str:
+    """A grouping key that folds morphological near-dupes together
+    ("foundation models" / "foundation-model" → "foundation-model"). Built
+    ON TOP of `_term_slug` (never mutating it — that stays the frozen filename
+    / decline / edge key) by singularizing only the LAST hyphen segment, where
+    English plurals live ("systems biology" keeps "systems"). Returns "" iff
+    `_term_slug` does.
+    """
+    slug = _term_slug(term)
+    if not slug:
+        return ""
+    parts = slug.split("-")
+    parts[-1] = _singularize(parts[-1])
+    return "-".join(p for p in parts if p)
+
+
 def _normalize_lc_phrase(tok: str) -> str | None:
     """Post-process a PHRASE_RE_LC match: lowercase, whitespace-collapse, strip
     leading stopwords, filter against CLAIM_STOP_PHRASES. Returns None if the
@@ -328,6 +378,7 @@ def find_candidates_from_claims(
     *,
     persist_edges: bool = False,
     corpus_size: int | None = None,
+    existing_canon: set[str] | None = None,
 ) -> list[dict]:
     """Claim-substrate concept-hub detector.
 
@@ -369,7 +420,8 @@ def find_candidates_from_claims(
         terms = _extract_terms(text)
         for tok in terms:
             term_slug = _term_slug(tok)
-            if not term_slug or term_slug in existing_slugs:
+            if (not term_slug or term_slug in existing_slugs
+                    or _canonical_key(tok) in (existing_canon or set())):
                 continue
             per_term.setdefault(tok, {}).setdefault(stem, {})
             per_term[tok][stem][section] = per_term[tok][stem].get(section, 0) + 1
@@ -517,6 +569,44 @@ def _load_paper_metadata() -> list[dict]:
     conn.close()
     return out
 
+
+def _load_hub_aliases() -> list[str]:
+    """Every existing concept hub's `topic_seed` + `topic_seed_aliases`, read
+    from state.db — NOT the filesystem: this runs on `status`'s fast path via
+    `n_bridge_candidates`, so it's one query, no file opens or YAML parses
+    (concept pages already carry `raw_frontmatter` in `papers`). Used to
+    canonically exclude candidates that are near-dupes of a hub that already
+    exists (e.g. "protein language model" vs the `protein-language-models`
+    page, or "FH" for familial hypercholesterolemia). Empty list on any DB
+    failure — the filename-stem exclusion still applies without it.
+    """
+    try:
+        from ..db.connection import get_connection
+        import json as _json
+        conn = get_connection()
+    except Exception:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT raw_frontmatter FROM papers WHERE page_type = 'concept'"
+        ).fetchall()
+    except Exception:
+        return []
+    out: list[str] = []
+    for r in rows:
+        try:
+            fm = _json.loads(r["raw_frontmatter"])
+        except (TypeError, ValueError):
+            continue
+        seed = fm.get("topic_seed")
+        if isinstance(seed, str) and seed.strip():
+            out.append(seed)
+        aliases = fm.get("topic_seed_aliases") or []
+        if isinstance(aliases, list):
+            out.extend(a for a in aliases if isinstance(a, str) and a.strip())
+    conn.close()
+    return out
+
 # Framework/agent-artifact tags that leak into `tags:` YAML but aren't concepts.
 _FRAMEWORK_TAG_STOPLIST: frozenset[str] = frozenset({
     "ingested-via-agent",
@@ -528,6 +618,8 @@ _FRAMEWORK_TAG_STOPLIST: frozenset[str] = frozenset({
 def find_candidates_from_keywords(
     papers_meta: list[dict],
     existing_slugs: set[str],
+    *,
+    existing_canon: set[str] | None = None,
 ) -> list[dict]:
     """Primary detector: aggregate the LLM-authored `keywords` + `tags`.
 
@@ -543,6 +635,8 @@ def find_candidates_from_keywords(
     from math import sqrt
 
     corpus_size = len(papers_meta) or None
+    if existing_canon is None:   # canonical hub/alias exclusion is opt-in (real
+        existing_canon = set()   # callers pass it; tests keep the exact-slug path)
 
     # {canonical_slug → {stem → category}}, plus a companion map keeping
     # the human-readable form for display (whichever variant is longest).
@@ -566,7 +660,7 @@ def find_candidates_from_keywords(
             if term.lower() in _FRAMEWORK_TAG_STOPLIST:
                 continue
             slug = _term_slug(term)
-            if not slug or slug in existing_slugs:
+            if not slug or slug in existing_slugs or _canonical_key(term) in existing_canon:
                 continue
             by_slug_stems.setdefault(slug, {})[stem] = category
             # Prefer the longer form as display (usually the fuller phrase).
@@ -574,8 +668,28 @@ def find_candidates_from_keywords(
             if len(term) > len(prev):
                 display_form[slug] = term
 
+    # Fold morphological near-dupes ("foundation model" / "foundation models")
+    # into one representative — but ONLY when ≥2 distinct surface slugs share a
+    # canonical key (co-occurrence gate). A lone slug is never rewritten, so a
+    # false plural (e.g. "biases" with no "bias") can't be corrupted. Page/
+    # category counts come from the UNIONED stem map, not summed integers.
+    canon_members: dict[str, list[str]] = {}
+    for slug in by_slug_stems:
+        ckey = _canonical_key(display_form.get(slug) or slug)
+        canon_members.setdefault(ckey, []).append(slug)
+
     out: list[dict] = []
-    for slug, stems in by_slug_stems.items():
+    for slugs in canon_members.values():
+        if len(slugs) >= 2:
+            stems: dict[str, str] = {}
+            for s in slugs:
+                stems.update(by_slug_stems[s])   # union stem→category by stem key
+            # Representative: longest display form, tie → most pages → lexical.
+            slug = sorted(slugs, key=lambda s: (-len(display_form.get(s, s)),
+                                                -len(by_slug_stems[s]), s))[0]
+        else:
+            slug = slugs[0]
+            stems = by_slug_stems[slug]
         pages = len(stems)
         if pages < 3:
             continue
@@ -612,6 +726,38 @@ def _merge_candidate_sources(
         out.append(r)
     return out
 
+
+_SOURCE_RANK = {"keywords": 2, "claims": 1, "page-body": 0}
+
+
+def _dedup_by_canonical(rows: list[dict]) -> list[dict]:
+    """Collapse morphological near-dupes that survive `_merge_candidate_sources`
+    because they came from different detectors (keywords "foundation models" vs
+    claims "foundation model") or from the claims path's raw-token keying — the
+    exact-slug merge leaves those separate. Keep ONE representative per
+    `_canonical_key`: keywords source wins, then more pages, then longer term.
+
+    A dedup (pick-best), NOT a count-union: for the same concept across sources
+    the pages overlap, so keeping the higher-signal row's count is right and
+    avoids the double-count summing would cause. Single-member canonical groups
+    are returned verbatim — a lone term is never rewritten (co-occurrence-safe).
+    First-seen order is preserved so the keyword detector's ranking survives.
+    """
+    def rank(r: dict) -> tuple:
+        return (_SOURCE_RANK.get(r.get("source", ""), 0), r.get("pages", 0),
+                len(r.get("term", "")))
+
+    best: dict[str, dict] = {}
+    order: list[str] = []
+    for r in rows:
+        ck = _canonical_key(r["term"])
+        if ck not in best:
+            best[ck] = r
+            order.append(ck)
+        elif rank(r) > rank(best[ck]):
+            best[ck] = r
+    return [best[ck] for ck in order]
+
 def _persist_keyword_instantiates(
     keyword_rows: list[dict], claim_rows: list[dict],
     papers_meta: list[dict],
@@ -638,8 +784,11 @@ def _persist_keyword_instantiates(
                     if isinstance(raw, str) and raw.strip():
                         terms.add(raw.strip().lower())
             paper_keywords[p["stem"]] = terms
-        # Candidate slugs → canonical term string (for lowercase matching).
-        candidate_slugs = {r["slug"]: r["term"].lower() for r in keyword_rows}
+        # Canonical key → representative slug. Keyed canonically so a paper
+        # keyword that is a morphological variant of the merged representative
+        # (e.g. "foundation model" when the row emitted "foundation models")
+        # still attributes its edge to the representative, not dropped.
+        candidate_by_canon = {_canonical_key(r["term"]): r["slug"] for r in keyword_rows}
 
         conn = open_edges_db()
         try:
@@ -649,8 +798,8 @@ def _persist_keyword_instantiates(
                 if not stem_claims:
                     continue
                 for kw in keywords:
-                    slug = _term_slug(kw)
-                    if slug not in candidate_slugs:
+                    slug = candidate_by_canon.get(_canonical_key(kw))
+                    if slug is None:
                         continue
                     # Word-boundary match (not naive substring) so a keyword
                     # like "gene" doesn't attribute an edge to a claim about
@@ -720,17 +869,25 @@ def collect_candidates(
     # Deferred import: `.declines` imports `_term_slug` from this module, so
     # importing it at module level here would cycle. By call time both
     # modules are fully loaded.
-    from .declines import declined_slugs
+    from .declines import declined_canon, declined_slugs
 
     declined = declined_slugs()
+    declined_ckeys = declined_canon()
     pages = all_pages()
     known_stems = {p.stem.lower() for p in pages}
+    # Canonical exclusion = filename stems + every existing hub's topic_seed
+    # and aliases, singularized. Catches near-dupes of a scaffolded hub
+    # ("protein language model" vs `protein-language-models`; "FH").
+    existing_canon = {_canonical_key(s) for s in known_stems} | {
+        _canonical_key(a) for a in _load_hub_aliases()
+    }
 
     # Primary: LLM keywords + tags.
     papers_meta = _load_paper_metadata()
     keyword_rows: list[dict] = []
     if papers_meta:
-        keyword_rows = find_candidates_from_keywords(papers_meta, known_stems)
+        keyword_rows = find_candidates_from_keywords(
+            papers_meta, known_stems, existing_canon=existing_canon)
 
     # Secondary: claim-substrate regex. Persist edges only from the
     # secondary path when it surfaces something keywords missed; for terms
@@ -745,6 +902,7 @@ def collect_candidates(
     if claim_rows_data:
         claim_regex_rows = find_candidates_from_claims(
             claim_rows_data, known_stems, persist_edges=False, corpus_size=corpus_size,
+            existing_canon=existing_canon,
         )
         # Tag them for provenance.
         for r in claim_regex_rows:
@@ -753,7 +911,16 @@ def collect_candidates(
     # Union: keywords primary, claim-regex fills gaps.
     if keyword_rows or claim_regex_rows:
         combined = _merge_candidate_sources(keyword_rows, claim_regex_rows)
-        combined = [r for r in combined if r["slug"] not in declined]
+        # Decline filter = exact-slug OR canonical-key (union). Exact honors
+        # every legacy decline verbatim (even if a merged representative slug
+        # shifted); canonical adds "decline one form → suppress its near-dupes".
+        combined = [r for r in combined
+                    if r["slug"] not in declined
+                    and _canonical_key(r["term"]) not in declined_ckeys]
+        # Cross-source near-dupe collapse (keywords "foundation models" vs
+        # claims "foundation model"): the exact-slug merge above leaves these
+        # separate; fold them to one representative per canonical key.
+        combined = _dedup_by_canonical(combined)
         if persist_edges:
             # Keyword-anchored edges for candidates surfaced by keywords.
             _persist_keyword_instantiates(keyword_rows, claim_rows_data, papers_meta)
@@ -788,7 +955,7 @@ def collect_candidates(
         label = _label_for(n, c, term=tok, corpus_size=legacy_corpus_size)
         if bridges_only and label != "concept-ready (bridge)":
             continue
-        if _term_slug(tok) in declined:
+        if _term_slug(tok) in declined or _canonical_key(tok) in declined_ckeys:
             continue
         out.append({
             "term": tok, "slug": _term_slug(tok),

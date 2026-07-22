@@ -33,7 +33,7 @@ CHUNK_SIZE = 40              # candidates per LLM call — bounds output tokens
 _MAX_TOKENS = 3500           # ~50-60 output tokens/verdict × CHUNK_SIZE + headroom
 TRIAGE_SYSTEM_FILENAME = "concept-triage-system.md"
 
-NOISE_VERDICTS = frozenset({"glossary", "fragment", "redundant"})
+NOISE_VERDICTS = frozenset({"glossary", "fragment", "redundant", "alias"})
 KEEP_VERDICTS = frozenset({"concept", "uncertain"})
 _VALID_VERDICTS = NOISE_VERDICTS | KEEP_VERDICTS
 
@@ -52,6 +52,10 @@ _TRIAGE_SCHEMA = {
                     "term": {"type": "string"},
                     "verdict": {"type": "string", "enum": sorted(_VALID_VERDICTS)},
                     "reason": {"type": "string"},
+                    # Advisory only (for the `alias` verdict): the more-canonical
+                    # term this one duplicates. Decorates the decline reason; the
+                    # decline still acts on the candidate's own term, never this.
+                    "canonical": {"type": "string"},
                 },
             },
         }
@@ -183,7 +187,8 @@ def triage_candidates(
                 continue
             seen.add(slug)
             reason = str(v.get("reason") or "").strip() or "(no reason given)"
-            results.append({**cand, "verdict": verdict, "reason": reason})
+            results.append({**cand, "verdict": verdict, "reason": reason,
+                            "canonical": str(v.get("canonical") or "").strip()})
 
         for slug, cand in by_slug.items():   # fail-safe: unjudged terms are kept
             if slug not in seen:
@@ -207,9 +212,14 @@ def apply_triage(results: list[dict], *, dry_run: bool = False) -> dict:
         v = r["verdict"]
         counts[v] = counts.get(v, 0) + 1
         if v in NOISE_VERDICTS:
+            # For an alias verdict, record the canonical it duplicates. The
+            # decline still keys off the candidate's OWN term (slug-safe) — the
+            # echoed `canonical` only decorates the human-readable reason.
+            reason = (f"near-duplicate of '{r.get('canonical') or '?'}'"
+                      if v == "alias" else r["reason"])
             if not dry_run:
-                add_decline(r["term"], r["reason"], source="llm-triage")
-            declined.append({"term": r["term"], "verdict": v, "reason": r["reason"]})
+                add_decline(r["term"], reason, source="llm-triage")
+            declined.append({"term": r["term"], "verdict": v, "reason": reason})
         else:
             kept.append({"term": r["term"], "verdict": v, "reason": r["reason"]})
     return {

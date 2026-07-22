@@ -30,6 +30,13 @@ Assign one verdict per term:
     served by a synthesis page than a concept hub (e.g. "off-target
     prediction", "variant calling") — likely already covered.
 
+  - **`alias`**: a near-duplicate of ANOTHER candidate in this batch, or of an
+    existing concept hub — the same idea at a different granularity or phrasing
+    (e.g. "language models" when "genomic language model" is the real concept;
+    or a broader/narrower restatement of a term already scaffolded). Set
+    `canonical` to the term it duplicates. (Morphological plural/singular
+    variants are already merged upstream — use `alias` for *semantic* dupes.)
+
   - **`uncertain`**: you cannot judge from the term + counts alone. Keep it
     surfaced for a human.
 
@@ -39,17 +46,20 @@ input term, `term` echoed verbatim:**
 ```json
 {
   "verdicts": [
-    {"term": "<verbatim input term>", "verdict": "concept" | "glossary" | "fragment" | "redundant" | "uncertain", "reason": "<one sentence>"}
+    {"term": "<verbatim input term>", "verdict": "concept" | "glossary" | "fragment" | "redundant" | "alias" | "uncertain", "reason": "<one sentence>", "canonical": "<only for alias: the term this duplicates>"}
   ]
 }
 ```
 
 Field rules:
 - `term` must be echoed **exactly** as given (the caller matches on it).
-- `verdict` must be one of the five values above.
+- `verdict` must be one of the six values above.
 - `reason` is always required: one sentence. For `glossary`/`fragment`/
   `redundant`, say what it is instead of a concept; for `concept`, state the
   thesis in a clause; for `uncertain`, say what you'd need to decide.
+- `canonical` is required only for `alias` (the more-canonical term it
+  duplicates, echoed as it appears in the batch or naming the existing hub);
+  omit it otherwise.
 - Emit a verdict for every term in the input. Do not add terms not listed.
 
 **Bias toward `uncertain` or `concept`, never toward a noise verdict when you
@@ -58,4 +68,7 @@ a real concept* from the candidate surface (the term is suppressed and will not
 resurface until a human notices). A wrong `concept`/`uncertain` verdict is
 cheap — the term simply appears again next run. Only mark a noise verdict when
 the term is *clearly* not a concept. Reserve `fragment` for terms that aren't
-coherent standalone phrases; reserve `redundant` for genuine comparison topics.
+coherent standalone phrases; reserve `redundant` for genuine comparison topics;
+reserve `alias` for a term that genuinely restates one you can name in
+`canonical` — when in doubt whether two terms are the same concept, prefer
+`uncertain` over `alias`.

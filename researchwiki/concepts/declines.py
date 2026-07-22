@@ -22,7 +22,7 @@ import json
 import time
 from pathlib import Path
 
-from .candidates import _term_slug
+from .candidates import _canonical_key, _term_slug
 
 DECLINES_FILENAME = ".concept-declines.json"
 
@@ -47,6 +47,16 @@ def load_declines() -> dict[str, dict]:
 
 def declined_slugs() -> set[str]:
     return set(load_declines().keys())
+
+
+def declined_canon() -> set[str]:
+    """Canonical keys of every declined *term* — so declining one morphological
+    form ("foundation models") also suppresses its near-dupes ("foundation
+    model"). Canonicalizes the stored term, not the slug key. Paired with the
+    exact-slug check (union, not replacement) so every legacy decline still
+    matches even if a merged candidate's representative slug shifts."""
+    return {_canonical_key(e.get("term", ""))
+            for e in load_declines().values() if e.get("term")}
 
 
 def add_decline(term: str, reason: str, *, source: str = "manual") -> str:
