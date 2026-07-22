@@ -573,9 +573,14 @@ def main(argv: list[str]) -> int:
 
     # --- concept-hub candidates (opportunity signal; not a defect)
     try:
-        from ..concepts import n_bridge_candidates
+        from ..concepts import TRIAGE_THRESHOLD, n_bridge_candidates
         n_bridges = n_bridge_candidates()
-        if n_bridges > 0:
+        if n_bridges >= TRIAGE_THRESHOLD:
+            print(f"Concept-hub candidates: {n_bridges} bridge term(s) — likely dominated by "
+                  "extraction noise. Batch-triage with "
+                  "`researchwiki candidates concepts --triage` (--dry-run to preview).")
+            print()
+        elif n_bridges > 0:
             print(f"Concept-hub candidates: {n_bridges} bridge term(s) with no hub yet "
                   "(`researchwiki candidates concepts --bridges`)")
             print()

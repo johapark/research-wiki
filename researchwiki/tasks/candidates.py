@@ -10,6 +10,7 @@ Two targets:
   researchwiki candidates concepts   [--bridges] [--persist-edges] [--json]
                                       [--decline TERM --reason TEXT]
                                       [--undecline TERM] [--list-declined]
+                                      [--triage [--dry-run]]
   researchwiki candidates synthesis  [--min-cluster N] [--threshold F] ...
 
 **concepts** — recurring vocabulary terms mentioned by ≥3 wiki papers with no
@@ -25,6 +26,13 @@ TEXT` records a permanent suppression in `.concept-declines.json`
 (`--undecline` reverses it, `--list-declined` shows the current list) so a
 rejected candidate stops appearing here and in `status`'s bridge count.
 
+`--triage` automates that judgment when noise accumulates: one batch LLM call
+classifies every candidate (concept/glossary/fragment/redundant/uncertain)
+against the same thesis test and auto-declines the noise verdicts (tagged
+`source=llm-triage`, reversible). `--dry-run` previews without writing. Genuine
+`concept`/`uncertain` verdicts stay surfaced — triage never scaffolds. `status`
+recommends this once the bridge count crosses `TRIAGE_THRESHOLD`.
+
 **synthesis** — dense paper clusters (wikilinks + semantic cosine ≥ 0.65 +
 keyword Jaccard ≥ 0.2, connected components) not covered by any existing
 synthesis page. Higher noise rate than concepts, so **not** auto-surfaced by
@@ -35,7 +43,8 @@ by default (--no-judge to skip); ~30s + a few Anthropic calls per run.
 Exit code: 0 always. Both targets are read-only opportunity signals; the only
 output that mutates state is the synthesis-target's proposal files under
 `.ingest/synthesis-candidates/` (skipped with --dry-run), and the concepts
-target's `.concept-declines.json` (only touched by --decline/--undecline).
+target's `.concept-declines.json` (touched by --decline/--undecline, and by
+--triage unless --dry-run).
 """
 
 from __future__ import annotations
@@ -50,7 +59,8 @@ def _run_concepts(argv: list[str]) -> int:
     Reuses the same `collect_candidates` implementation."""
     import json
 
-    from ..concepts import add_decline, collect_candidates, load_declines, remove_decline
+    from ..concepts import (add_decline, apply_triage, collect_candidates,
+                            load_declines, remove_decline, triage_candidates)
 
     parser = argparse.ArgumentParser(
         prog="researchwiki candidates concepts",
@@ -77,6 +87,13 @@ def _run_concepts(argv: list[str]) -> int:
                         help="Remove TERM from the suppression list so it can resurface.")
     parser.add_argument("--list-declined", action="store_true",
                         help="Print the current suppression list instead of the candidate list.")
+    parser.add_argument("--triage", action="store_true",
+                        help="Batch-LLM classify all candidates (concept/glossary/fragment/"
+                             "redundant/uncertain) against the concept-vs-glossary thesis test "
+                             "and auto-decline the noise verdicts (tagged source=llm-triage, "
+                             "reversible via --undecline). Use --dry-run to preview without writing.")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="With --triage, print the verdicts and write nothing.")
     args = parser.parse_args(argv)
 
     if args.decline:
@@ -106,8 +123,49 @@ def _run_concepts(argv: list[str]) -> int:
         print(f"Declined concept terms ({len(declines)}):")
         print()
         for slug, entry in sorted(declines.items()):
-            print(f"- `{entry['term']}` (slug: {slug}, declined {entry['declined_at']})")
+            src = entry.get("source", "manual")
+            print(f"- `{entry['term']}` (slug: {slug}, declined {entry['declined_at']}, via {src})")
             print(f"  {entry['reason']}")
+        return 0
+
+    if args.triage:
+        results = triage_candidates()
+        if not results:
+            print("_no concept candidates to triage._")
+            return 0
+        summary = apply_triage(results, dry_run=args.dry_run)
+        counts, declined, kept = summary["counts"], summary["declined"], summary["kept"]
+        # Nothing actionable and everything kept as uncertain → the LLM path
+        # degraded (provider down, prompt missing, unparsable) — say so plainly.
+        if not declined and all(k["verdict"] == "uncertain" for k in kept):
+            print("concept triage unavailable or produced no actionable verdicts — no changes.")
+            print("(LLM provider unreachable, prompt missing, or every term kept as uncertain.)")
+            return 0
+        print(f"Concept triage — {summary['total']} candidate(s): "
+              + ", ".join(f"{n} {v}" for v, n in sorted(counts.items())))
+        print()
+        if declined:
+            verb = "Would decline" if summary["dry_run"] else "Declined"
+            print(f"{verb} ({len(declined)}) as noise:")
+            for d in declined:
+                print(f"- `{d['term']}` [{d['verdict']}] — {d['reason']}")
+            print()
+        concepts_kept = [k for k in kept if k["verdict"] == "concept"]
+        uncertain_kept = [k for k in kept if k["verdict"] == "uncertain"]
+        if concepts_kept:
+            print(f"Surfaced as genuine concepts ({len(concepts_kept)}) — scaffold with "
+                  '`researchwiki concepts "<term>" --thesis "..."`:')
+            for k in concepts_kept:
+                print(f"- `{k['term']}` — {k['reason']}")
+            print()
+        if uncertain_kept:
+            print(f"Kept as uncertain ({len(uncertain_kept)}) — left surfaced for review.")
+            print()
+        if summary["dry_run"]:
+            print("_Dry run — nothing written. Re-run without --dry-run to apply the declines._")
+        else:
+            print("_Declines tagged `source: llm-triage`; reverse any with "
+                  '`researchwiki candidates concepts --undecline "<term>"`._')
         return 0
 
     cands = collect_candidates(bridges_only=args.bridges, persist_edges=args.persist_edges)[:30]
@@ -137,6 +195,7 @@ def _run_concepts(argv: list[str]) -> int:
     print('_scaffold one only if you can write a genuine concept-thesis for it (see docs/concept-vs-glossary.md)._')
     print("_Pass --persist-edges to write `instantiates` edges into `.claim-graph/edges.db`._")
     print('_Fails the thesis test? `--decline "<term>" --reason "..."` suppresses it for good._')
+    print('_Too many to triage by hand? `--triage` batch-classifies all candidates and auto-declines the noise (`--dry-run` to preview)._')
     return 0
 
 

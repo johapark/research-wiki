@@ -49,11 +49,15 @@ def declined_slugs() -> set[str]:
     return set(load_declines().keys())
 
 
-def add_decline(term: str, reason: str) -> str:
+def add_decline(term: str, reason: str, *, source: str = "manual") -> str:
     """Record `term` as permanently declined. Returns its slug.
 
     Overwrites any existing entry for the same slug (re-declining updates
     the reason/timestamp rather than erroring).
+
+    `source` records provenance: `"manual"` (a human ran `--decline`) or
+    `"llm-triage"` (batch classifier auto-declined it). Entries written
+    before this field existed are read back as `"manual"` via `.get`.
     """
     slug = _term_slug(term)
     declines = load_declines()
@@ -61,6 +65,7 @@ def add_decline(term: str, reason: str) -> str:
         "term": term,
         "reason": reason,
         "declined_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "source": source,
     }
     _declines_path().write_text(json.dumps(declines, ensure_ascii=False, indent=2) + "\n")
     return slug
