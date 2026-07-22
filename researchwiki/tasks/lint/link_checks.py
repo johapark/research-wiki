@@ -38,8 +38,15 @@ def build_link_graph(
         out_links[key] = tgts
         for t in tgts:
             in_links.setdefault(t, set()).add(key)
+        # Root meta pages (`index`, `log`, `views`, … — a slashless key) are
+        # catalogues/logs, not authored content: `log.md` in particular
+        # accumulates historical entries with template fragments like
+        # `[[stem]]` / `[[category/…]]` that are documentation, not real
+        # links. Their out-links still feed the graph above (the index links
+        # every paper), but their "broken" links are noise — exclude them,
+        # consistent with the root-meta exclusion in `find_orphans`.
         bad = broken_links(prose, known)
-        if bad:
+        if bad and "/" in key:
             broken.append((key, bad))
     return out_links, in_links, broken
 

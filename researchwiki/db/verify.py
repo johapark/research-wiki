@@ -18,6 +18,7 @@ from pathlib import Path
 
 from ..paths import wiki_dir
 from .connection import get_connection
+from .rebuild import _is_meta_page
 
 
 @dataclass
@@ -58,9 +59,17 @@ def verify() -> VerifyReport:
     root = wiki_dir()
     if root.exists():
         for md in sorted(root.rglob("*.md")):
-            # Files without YAML frontmatter (`index.md`, `log.md`, scratch
-            # notes) are intentionally not indexed — skip rather than
-            # report them as drift.
+            # Root bookkeeping files (`index.md`, `log.md`,
+            # `pdfs-failed-parsing.md`) are skipped by `db rebuild`
+            # (`_is_meta_page`), so they never get a `papers` row. Skip them
+            # here too — otherwise, once they carry `type: meta` frontmatter,
+            # they'd pass the frontmatter probe below and be reported as
+            # spurious `missing` drift. Single source of truth: reuse
+            # rebuild's exclusion so verify and rebuild can't disagree.
+            if _is_meta_page(md, root):
+                continue
+            # Other files without YAML frontmatter (scratch notes) are
+            # likewise not indexed — skip rather than report as drift.
             if not _has_frontmatter(md):
                 continue
             stem = md.stem
