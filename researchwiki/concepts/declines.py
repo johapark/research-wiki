@@ -22,6 +22,7 @@ import json
 import time
 from pathlib import Path
 
+from ..fsatomic import write_json_atomic
 from .candidates import _canonical_key, _term_slug
 
 DECLINES_FILENAME = ".concept-declines.json"
@@ -59,6 +60,18 @@ def declined_canon() -> set[str]:
             for e in load_declines().values() if e.get("term")}
 
 
+def _write_declines(declines: dict[str, dict]) -> None:
+    """Persist the whole list atomically.
+
+    Atomicity matters more here than for the derived caches: this file is
+    irreplaceable human judgment (or reviewed LLM triage), and `load_declines`
+    treats a corrupt file as an empty one — so a truncated write would silently
+    un-suppress every past decline with no error, and the only symptom would be
+    declined noise quietly reappearing in `candidates concepts` / `status`.
+    """
+    write_json_atomic(_declines_path(), declines)
+
+
 def add_decline(term: str, reason: str, *, source: str = "manual") -> str:
     """Record `term` as permanently declined. Returns its slug.
 
@@ -68,17 +81,38 @@ def add_decline(term: str, reason: str, *, source: str = "manual") -> str:
     `source` records provenance: `"manual"` (a human ran `--decline`) or
     `"llm-triage"` (batch classifier auto-declined it). Entries written
     before this field existed are read back as `"manual"` via `.get`.
+
+    For more than one term at a time use `add_declines` — it collapses the
+    read-modify-write into a single atomic write.
     """
-    slug = _term_slug(term)
+    return add_declines([(term, reason)], source=source)[0]
+
+
+def add_declines(pairs: list[tuple[str, str]], *,
+                 source: str = "manual") -> list[str]:
+    """Record several `(term, reason)` declines in ONE read-modify-write.
+
+    `apply_triage` can decline hundreds of terms in a run; calling
+    `add_decline` per term would re-read, re-serialize and re-write the whole
+    (growing) file each time — quadratic, and a much wider window in which an
+    interrupted run leaves the list mangled. Returns the slugs in input order.
+    """
+    if not pairs:
+        return []
     declines = load_declines()
-    declines[slug] = {
-        "term": term,
-        "reason": reason,
-        "declined_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "source": source,
-    }
-    _declines_path().write_text(json.dumps(declines, ensure_ascii=False, indent=2) + "\n")
-    return slug
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+    slugs: list[str] = []
+    for term, reason in pairs:
+        slug = _term_slug(term)
+        declines[slug] = {
+            "term": term,
+            "reason": reason,
+            "declined_at": stamp,
+            "source": source,
+        }
+        slugs.append(slug)
+    _write_declines(declines)
+    return slugs
 
 
 def remove_decline(term_or_slug: str) -> bool:
@@ -88,5 +122,5 @@ def remove_decline(term_or_slug: str) -> bool:
     if slug not in declines:
         return False
     del declines[slug]
-    _declines_path().write_text(json.dumps(declines, ensure_ascii=False, indent=2) + "\n")
+    _write_declines(declines)
     return True

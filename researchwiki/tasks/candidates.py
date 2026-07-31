@@ -129,7 +129,10 @@ def _run_concepts(argv: list[str]) -> int:
         return 0
 
     if args.triage:
-        results = triage_candidates()
+        # Honor --bridges: `status` recommends --triage off the *bridge* count,
+        # so `--bridges --triage` must scope the run to that tier rather than
+        # silently auto-declining across every tier.
+        results = triage_candidates(collect_candidates(bridges_only=args.bridges))
         if not results:
             print("_no concept candidates to triage._")
             return 0

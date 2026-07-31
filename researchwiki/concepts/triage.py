@@ -26,7 +26,7 @@ import re
 import sys
 
 from .candidates import _term_slug, collect_candidates
-from .declines import add_decline
+from .declines import add_declines
 
 TRIAGE_THRESHOLD = 12        # status recommends --triage at/above this bridge count
 CHUNK_SIZE = 40              # candidates per LLM call — bounds output tokens
@@ -119,7 +119,7 @@ def _judge_chunk(chunk: list[dict], *, use_stub: bool) -> list[dict] | None:
         return None
     try:
         resp = llm.call(
-            phase="classifier",
+            phase="concept_triage",
             prompt=_build_prompt(chunk),
             system=system,
             max_tokens=_MAX_TOKENS,
@@ -208,6 +208,7 @@ def apply_triage(results: list[dict], *, dry_run: bool = False) -> dict:
     counts: dict[str, int] = {}
     declined: list[dict] = []
     kept: list[dict] = []
+    to_write: list[tuple[str, str]] = []
     for r in results:
         v = r["verdict"]
         counts[v] = counts.get(v, 0) + 1
@@ -217,11 +218,14 @@ def apply_triage(results: list[dict], *, dry_run: bool = False) -> dict:
             # echoed `canonical` only decorates the human-readable reason.
             reason = (f"near-duplicate of '{r.get('canonical') or '?'}'"
                       if v == "alias" else r["reason"])
-            if not dry_run:
-                add_decline(r["term"], reason, source="llm-triage")
+            to_write.append((r["term"], reason))
             declined.append({"term": r["term"], "verdict": v, "reason": reason})
         else:
             kept.append({"term": r["term"], "verdict": v, "reason": r["reason"]})
+    # One atomic write for the whole batch — a triage run can decline hundreds
+    # of terms, and per-term writes would rewrite the growing file each time.
+    if not dry_run:
+        add_declines(to_write, source="llm-triage")
     return {
         "dry_run": dry_run,
         "counts": counts,

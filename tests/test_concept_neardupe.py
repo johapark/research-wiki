@@ -211,3 +211,72 @@ def test_dedup_by_canonical_collapses_cross_source():
 def test_dedup_lone_term_verbatim():
     rows = [{"term": "biases", "slug": "biases", "pages": 3, "source": "keywords"}]
     assert C._dedup_by_canonical(rows) == rows      # single-member group untouched
+
+
+# --- regressions: bugs found in review of 90aa0c6 / baaaeb4 ----------------
+
+def test_dedup_preserves_span_and_bridge_label():
+    """Cross-source collapse must not demote a bridge.
+
+    `source` outranks everything when picking the representative, so a
+    3-category claims row loses to a 1-category keywords row. `categories`
+    and `pages` describe the *concept*, not the detector, so they merge as
+    max — otherwise the term silently drops out of the bridge tier and out
+    of `status`'s bridge count.
+    """
+    kw = {"term": "foundation models", "slug": "foundation-models", "pages": 3,
+          "categories": 1, "weighted": 3.0, "sections": {},
+          "label": C._label_for(3, 1), "source": "keywords"}
+    claims = {"term": "foundation model", "slug": "foundation-model", "pages": 6,
+              "categories": 3, "weighted": 9.0, "sections": {},
+              "label": C._label_for(6, 3), "source": "claims"}
+    assert kw["label"] == "candidate"
+    assert claims["label"] == "concept-ready (bridge)"
+
+    out = C._dedup_by_canonical([kw, claims])
+    assert len(out) == 1
+    merged = out[0]
+    assert merged["source"] == "keywords"          # representative unchanged
+    assert merged["term"] == "foundation models"
+    assert merged["categories"] == 3               # span survives the collapse
+    assert merged["pages"] == 6                    # tighter lower bound on the union
+    assert merged["label"] == "concept-ready (bridge)"
+
+
+def test_dedup_never_undoes_a_glossary_demotion():
+    """A bare-acronym representative stays demoted even if merged counts rise."""
+    a = {"term": "PLM", "slug": "plm", "pages": 4, "categories": 3,
+         "weighted": 4.0, "sections": {}, "label": "glossary-suspect",
+         "source": "keywords"}
+    b = {"term": "PLMs", "slug": "plms", "pages": 9, "categories": 4,
+         "weighted": 9.0, "sections": {}, "label": "glossary-suspect",
+         "source": "claims"}
+    out = C._dedup_by_canonical([a, b])
+    assert len(out) == 1
+    assert out[0]["label"] == "glossary-suspect"
+
+
+def test_page_body_fallback_does_not_crash(monkeypatch, tmp_path):
+    """`collect_candidates`'s empty-state.db fallback used an unimported
+    `read_page` — a NameError that `n_bridge_candidates` swallowed, so a
+    fresh corpus silently reported zero candidates forever."""
+    monkeypatch.chdir(tmp_path)
+    wiki = tmp_path / "wiki" / "compbio"
+    wiki.mkdir(parents=True)
+    body = ("---\ntitle: X\ntype: paper\ncategory: [compbio]\n---\n"
+            "We compare Prime Editing against Prime Editing baselines.\n")
+    pages = []
+    for stem in ("a-2024-x", "b-2024-y", "c-2024-z"):
+        (wiki / f"{stem}.md").write_text(body)
+        pages.append(wiki / f"{stem}.md")
+
+    monkeypatch.setattr(C, "_load_paper_metadata", lambda: [])
+    monkeypatch.setattr(C, "_load_claim_rows", lambda: [])
+    monkeypatch.setattr(C, "_load_hub_aliases", lambda: [])
+    monkeypatch.setattr("researchwiki.tasks.lint.walk.all_pages", lambda: pages)
+    monkeypatch.setattr("researchwiki.categories.content_categories",
+                        lambda: {"compbio"})
+
+    out = C.collect_candidates()                      # must not raise
+    assert all(r["source"] == "page-body" for r in out)
+    assert any(r["term"] == "Prime Editing" for r in out)

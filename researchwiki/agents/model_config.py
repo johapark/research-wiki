@@ -114,6 +114,12 @@ _FALLBACK_PHASES: dict[str, dict] = {
     "debug":             {"role": "author", "temperature": 0.2},
     "critic":            {"role": "critic"},
     "classifier":        {"role": "classifier"},
+    # Concept-hub candidate triage. Same cheap low-temp classifier role, but
+    # the role's 200-token cap is sized for the category auto-suggester's
+    # single verdict — triage returns one verdict per term for a whole
+    # CHUNK_SIZE batch. Registered here (not only in config/models.yaml) so it
+    # resolves under every RW_MODELS_CONFIG, not just the default one.
+    "concept_triage":    {"role": "classifier", "max_tokens": 3500},
     "short_name":        {"role": "proposer", "max_tokens": 32},
     "keywords":          {"role": "proposer"},
     "link_generation":   {"role": "judge", "max_tokens": 1200},

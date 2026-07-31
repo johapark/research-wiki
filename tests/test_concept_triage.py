@@ -176,3 +176,43 @@ def test_add_decline_source_backcompat(wiki):
     # default source when omitted (the manual --decline path)
     add_decline("manual term", "r3")
     assert load_declines()[_term_slug("manual term")]["source"] == "manual"
+
+
+# --- regression: atomic + batched decline writes ---------------------------
+
+def test_apply_triage_writes_declines_once(wiki, monkeypatch):
+    """`apply_triage` used to call `add_decline` per noise verdict — a full
+    read-modify-write of a growing file each time, non-atomic, so an
+    interrupted run could truncate the list (which `load_declines` then reads
+    as empty, silently un-suppressing every past decline)."""
+    from researchwiki.concepts import declines as D
+
+    calls = []
+    real = D.write_json_atomic
+    monkeypatch.setattr(D, "write_json_atomic",
+                        lambda p, o: (calls.append(p), real(p, o))[1])
+
+    cands = [_cand(t) for t in ("three datasets", "current models", "PAM site")]
+    judge = lambda chunk: [{"term": c["term"], "verdict": "fragment",
+                            "reason": "noise"} for c in chunk]
+    summary = t.apply_triage(t.triage_candidates(cands, judge_fn=judge))
+
+    assert len(summary["declined"]) == 3
+    assert len(calls) == 1                       # one write for the whole batch
+    assert set(declined_slugs()) == {_term_slug(c["term"]) for c in cands}
+
+
+def test_declines_file_is_written_atomically(wiki):
+    """No `.tmp` residue, and the file is valid JSON after a write."""
+    from researchwiki.concepts.declines import add_declines
+    add_declines([("alpha fold", "r1"), ("beta sheet", "r2")], source="llm-triage")
+    p = wiki / ".concept-declines.json"
+    assert json.loads(p.read_text())                     # parses
+    assert not list(wiki.glob(".concept-declines.json.tmp"))
+    assert load_declines()[_term_slug("alpha fold")]["source"] == "llm-triage"
+
+
+def test_add_decline_still_returns_single_slug(wiki):
+    """`add_decline` now delegates to `add_declines` — keep its contract."""
+    assert add_decline("prime editing", "r") == _term_slug("prime editing")
+    assert _term_slug("prime editing") in declined_slugs()

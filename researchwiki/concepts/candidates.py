@@ -24,11 +24,12 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
+from math import sqrt
 from pathlib import Path
 
 from ..log import log
 from ..paths import wiki_dir
-from ..wiki import read_pages, strip_non_prose
+from ..wiki import read_page, strip_non_prose
 
 
 ACRONYM_RE = re.compile(r"\b([A-Z][A-Z0-9\-]+[A-Z0-9])\b")
@@ -403,8 +404,6 @@ def find_candidates_from_claims(
         "label":         str,     # concept-ready (bridge|deep) | candidate
     }] ranked by `pages × sqrt(categories)` primary, weighted score tiebreak.
     """
-    from math import sqrt
-
     # Aggregate: term → {paper_stem → {section: count, ...}}
     # Also track (paper_stem, claim_slug) pairs per term for edge writes.
     per_term: dict[str, dict[str, dict[str, int]]] = {}
@@ -493,7 +492,7 @@ def _persist_instantiates_edges(
                         directed=True,
                         slug_scheme_version=SLUG_SCHEME_VERSION,
                         status="candidate",
-                        rationale=f"detected in claim",
+                        rationale="detected in claim",
                         judge_phase="concepts_detector",
                     ))
                     n_written += 1
@@ -632,8 +631,6 @@ def find_candidates_from_keywords(
     label, source} shape as find_candidates_from_claims so callers don't
     branch on source.
     """
-    from math import sqrt
-
     corpus_size = len(papers_meta) or None
     if existing_canon is None:   # canonical hub/alias exclusion is opt-in (real
         existing_canon = set()   # callers pass it; tests keep the exact-slug path)
@@ -730,33 +727,72 @@ def _merge_candidate_sources(
 _SOURCE_RANK = {"keywords": 2, "claims": 1, "page-body": 0}
 
 
-def _dedup_by_canonical(rows: list[dict]) -> list[dict]:
+def _dedup_by_canonical(rows: list[dict], *,
+                        corpus_size: int | None = None) -> list[dict]:
     """Collapse morphological near-dupes that survive `_merge_candidate_sources`
     because they came from different detectors (keywords "foundation models" vs
     claims "foundation model") or from the claims path's raw-token keying — the
     exact-slug merge leaves those separate. Keep ONE representative per
     `_canonical_key`: keywords source wins, then more pages, then longer term.
 
-    A dedup (pick-best), NOT a count-union: for the same concept across sources
-    the pages overlap, so keeping the higher-signal row's count is right and
-    avoids the double-count summing would cause. Single-member canonical groups
-    are returned verbatim — a lone term is never rewritten (co-occurrence-safe).
-    First-seen order is preserved so the keyword detector's ranking survives.
+    The representative supplies `term`/`slug`/`source` — that's a pick-best, so
+    the keyword detector's display form and provenance win. But `pages` and
+    `categories` are taken as the MAX across the group, because they describe
+    the *concept*, not the detector that happened to find it: each detector
+    sees a subset of the papers instantiating the term, so every row's count is
+    ≤ the true union and `max` is a valid (strictly tighter) lower bound.
+    Summing is what would double-count the overlap; `max` cannot.
+
+    Pick-best on `categories` was a silent signal loss: a claims row spanning 3
+    categories collapsed into a 1-category keywords row dropped the term out of
+    the bridge tier and out of `status`'s bridge count — the exact signal
+    concept hubs exist to surface. `label` is therefore recomputed from the
+    merged counts (an earned `glossary-suspect` demotion is never undone —
+    re-derived from the representative's own term, so a bare acronym stays
+    demoted while a real phrase form in the group rightly promotes).
+
+    `weighted` stays the representative's: it's a ranking tiebreak on
+    incommensurable scales (keyword rows use page count, claim rows use
+    SECTION_WEIGHTS), so a cross-source max would be meaningless.
+
+    Single-member canonical groups are returned verbatim — a lone term is never
+    rewritten, and gains no keys it didn't have (co-occurrence-safe). First-seen
+    order is preserved so the keyword detector's ranking survives.
     """
     def rank(r: dict) -> tuple:
         return (_SOURCE_RANK.get(r.get("source", ""), 0), r.get("pages", 0),
                 len(r.get("term", "")))
 
     best: dict[str, dict] = {}
+    members: dict[str, list[dict]] = {}
     order: list[str] = []
     for r in rows:
         ck = _canonical_key(r["term"])
         if ck not in best:
             best[ck] = r
+            members[ck] = [r]
             order.append(ck)
-        elif rank(r) > rank(best[ck]):
+            continue
+        members[ck].append(r)
+        if rank(r) > rank(best[ck]):
             best[ck] = r
-    return [best[ck] for ck in order]
+
+    out: list[dict] = []
+    for ck in order:
+        group = members[ck]
+        rep = best[ck]
+        if len(group) == 1:
+            out.append(rep)          # verbatim — no merged keys added
+            continue
+        merged = dict(rep)
+        merged["pages"] = max(r.get("pages", 0) for r in group)
+        merged["categories"] = max(r.get("categories", 0) for r in group)
+        merged["label"] = _label_for(
+            merged["pages"], merged["categories"],
+            term=merged.get("term"), corpus_size=corpus_size,
+        )
+        out.append(merged)
+    return out
 
 def _persist_keyword_instantiates(
     keyword_rows: list[dict], claim_rows: list[dict],
@@ -920,7 +956,13 @@ def collect_candidates(
         # Cross-source near-dupe collapse (keywords "foundation models" vs
         # claims "foundation model"): the exact-slug merge above leaves these
         # separate; fold them to one representative per canonical key.
-        combined = _dedup_by_canonical(combined)
+        combined = _dedup_by_canonical(combined, corpus_size=corpus_size)
+        # Re-sort: the collapse can lift a row's pages/categories (and so its
+        # label), which invalidates the per-detector ordering it arrived with.
+        # Same key both detectors sort by, so the ranking contract holds.
+        combined.sort(key=lambda r: (r["label"] == "glossary-suspect",
+                                     -(r["pages"] * sqrt(max(r["categories"], 1))),
+                                     -r["weighted"], r["term"]))
         if persist_edges:
             # Keyword-anchored edges for candidates surfaced by keywords.
             _persist_keyword_instantiates(keyword_rows, claim_rows_data, papers_meta)
@@ -993,8 +1035,8 @@ def _persist_regex_only_edges(regex_only: list[dict], claim_rows: list[dict]) ->
                 text = claim.get("text") or ""
                 if not text:
                     continue
-                for slug, term in needed.items():
-                    if needed_res[slug].search(text):
+                for slug, matcher in needed_res.items():
+                    if matcher.search(text):
                         upsert_edge(conn, Edge(
                             src_stem=claim["paper_stem"],
                             src_slug=claim["claim_slug"],
