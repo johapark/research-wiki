@@ -219,3 +219,90 @@ def test_strict_combined_margin_below_epsilon_falls_through():
                  n_drift=0, mean_bm25=20.0)
     # combined gain 0.005 < EPSILON 0.01; bm25 tied → no improvement.
     assert is_strict_improvement(revised, prior) is False
+
+
+# ────────────────────────────────────────────────────────────────────
+# Phase 2: the blend must not be less informative than either axis alone.
+#
+# Rounding the *output* of a weighted average halves any single-axis delta
+# before bucketing, so with salience flat between drafts — the common case:
+# median within-paper spread 0.017, and 46% of papers had every draft within
+# 0.01 — a semantic difference had to exceed 0.02 to reach the key at all.
+# Replaying 127 historical tournaments found 9 where semantic separated the
+# drafts but the combined bucket tied. Quantizing the axes *before* blending
+# restored 7 of those.
+# ────────────────────────────────────────────────────────────────────
+
+from researchwiki.agents.fitness import (
+    ANCHOR_CONFIDENCE_FULL,
+    salience_confidence,
+)
+
+
+def test_quantized_blend_keeps_semantic_separation_when_salience_is_flat():
+    """The core regression. Under the old key both drafts blended to 0.60 and
+    the winner was decided by coherence; the 0.01 fidelity edge was discarded
+    even though salience contributed nothing to the comparison."""
+    better = _d(semantic_score=0.51, salience_score=0.70, n_anchors=20,
+                coherence_score=0.10, n_drift=0, n_graded=10,
+                mean_bm25=20.0, weakest_score=5.0)
+    worse = _d(semantic_score=0.50, salience_score=0.70, n_anchors=20,
+               # Higher coherence: under the old key this won the tie.
+               coherence_score=0.90, n_drift=0, n_graded=10,
+               mean_bm25=20.0, weakest_score=5.0)
+    assert round(0.5 * 0.51 + 0.5 * 0.70, 2) == round(0.5 * 0.50 + 0.5 * 0.70, 2), \
+        "premise: the old output-rounded blend tied these two"
+    assert tournament_key(better) > tournament_key(worse)
+
+
+def test_axes_within_one_bucket_still_tie_so_coherence_decides():
+    """The complement: quantizing must not turn every float wobble into a
+    separation, or coherence and coverage never get to break a real near-tie."""
+    a = _d(semantic_score=0.802, salience_score=0.601, n_anchors=20,
+           coherence_score=0.95, n_drift=0, n_graded=10,
+           mean_bm25=20.0, weakest_score=5.0)
+    b = _d(semantic_score=0.799, salience_score=0.604, n_anchors=20,
+           coherence_score=0.10, n_drift=0, n_graded=10,
+           mean_bm25=20.0, weakest_score=5.0)
+    assert tournament_key(a)[0] == tournament_key(b)[0]
+    assert tournament_key(a) > tournament_key(b)   # coherence breaks it
+
+
+# ---------- salience confidence weighting ----------
+
+def test_thin_denominator_dilutes_salience_toward_fidelity():
+    """A salience score over 2 anchors shouldn't swing selection as hard as one
+    over 40. Same scores, different denominators → different blends."""
+    thin = {"semantic_score": 0.80, "salience_score": 0.20, "n_anchors": 2}
+    thick = {"semantic_score": 0.80, "salience_score": 0.20, "n_anchors": 40}
+    assert combined_quality(thin) > combined_quality(thick)
+    # ...and the thin one sits nearer pure fidelity.
+    assert abs(combined_quality(thin) - 0.80) < abs(combined_quality(thick) - 0.80)
+
+
+def test_full_confidence_at_threshold_is_the_parity_blend():
+    at = {"semantic_score": 0.80, "salience_score": 0.60,
+          "n_anchors": ANCHOR_CONFIDENCE_FULL}
+    assert combined_quality(at) == SEM_WEIGHT * 0.80 + SAL_WEIGHT * 0.60
+
+
+def test_missing_n_anchors_means_unknown_not_zero():
+    """Back-compat: a score dict without `n_anchors` (pre-dating the key, or
+    hand-built) must keep full salience weight rather than silently collapsing
+    to fidelity-only."""
+    assert combined_quality({"semantic_score": 0.80, "salience_score": 0.60}) == \
+        SEM_WEIGHT * 0.80 + SAL_WEIGHT * 0.60
+    assert salience_confidence({}) == 1.0
+
+
+def test_salience_confidence_is_clamped():
+    assert salience_confidence({"n_anchors": 0}) == 0.0
+    assert salience_confidence({"n_anchors": 1000}) == 1.0
+    assert salience_confidence({"n_anchors": 5}) == 0.5
+
+
+def test_zero_anchor_confidence_falls_back_to_fidelity():
+    """conf 0 zeroes the salience weight; the blend must not divide by zero."""
+    q = combined_quality({"semantic_score": 0.80, "salience_score": 0.20,
+                          "n_anchors": 0})
+    assert q == 0.80

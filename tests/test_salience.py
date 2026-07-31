@@ -73,13 +73,19 @@ def test_limitation_cue_detection():
 
 def test_synthesize_fixture_abstract_seeds_headline_claims():
     pdf_text = "irrelevant"
+    # Sentences are full-length on purpose: real abstract prose runs a median
+    # 164 chars per sentence, and anchors below `_ANCHOR_MIN_CHARS` are dropped
+    # as extraction artifacts (see `anchor_is_substantive`).
     sections = {
-        "abstract": "We introduce Folddisco. It searches structural motifs. "
-                    "Performance is 20× faster than prior tools. "
-                    "We benchmark on PDB.",
+        "abstract": "We introduce Folddisco, a structural motif search tool "
+                    "for proteome-scale queries. It searches structural motifs "
+                    "by indexing residue-pair geometry rather than aligning "
+                    "whole structures. Performance is 20-fold faster than "
+                    "prior tools on the same hardware. We benchmark on the "
+                    "full PDB and on AlphaFold-predicted structures.",
     }
     f = synthesize_fixture("foo-2026-bar", pdf_text, sections)
-    # Every abstract sentence is a critical anchor — 4 sentences here.
+    # Each substantive abstract sentence is a critical anchor — 4 here.
     assert len(f.headline_claims) == 4
     assert all(it.importance == "critical" for it in f.headline_claims
                if it.id.startswith("abstract-"))
@@ -160,15 +166,18 @@ def test_score_salience_zero_anchors_returns_none_score():
 
 def test_score_salience_full_match():
     sections = {
-        "abstract": "Folddisco is a structural motif search tool. "
-                    "It is 20-fold faster than pyScoMotif.",
+        "abstract": "Folddisco is a structural motif search tool that indexes "
+                    "residue-pair geometry for proteome-scale queries. "
+                    "It is 20-fold faster than pyScoMotif on the same "
+                    "PDB-scale benchmark set.",
     }
     # Page body repeats every significant token from each anchor — should
     # match cleanly (overlap >= 0.75 and numbers preserved).
     page_body = (
         "## Summary\n\n"
-        "Folddisco is a structural motif search tool that achieves "
-        "20-fold speedup over pyScoMotif on PDB-scale benchmarks.\n"
+        "Folddisco is a structural motif search tool that indexes residue-pair "
+        "geometry for proteome-scale queries, and it is 20-fold faster than "
+        "pyScoMotif on the same PDB-scale benchmark set.\n"
     )
     r = score_salience("stem", "", sections, page_body)
     assert r.n_anchors == 2
@@ -190,12 +199,13 @@ def test_score_salience_miss_surfaces_missed_anchors():
 
 
 def test_score_salience_per_axis_only_populated_axes():
+    abstract = ("Method foo solves the bar problem efficiently by reusing the "
+                "baz decomposition at every recursion level.")
     sections = {
-        "abstract": "Method foo solves the bar problem efficiently.",
+        "abstract": abstract,
         # No results, discussion, captions
     }
-    r = score_salience("stem", "", sections,
-                      "Method foo solves the bar problem efficiently.")
+    r = score_salience("stem", "", sections, abstract)
     # Only headline_claims should appear in per_axis (capabilities and
     # limitations had zero items so they're omitted).
     assert "headline_claims" in r.per_axis
@@ -279,15 +289,185 @@ def test_score_salience_use_semantic_false_falls_back_to_token():
     """`use_semantic=False` should produce the same scores as before the
     semantic path was added — preserves the token-only behavior path."""
     sections = {
-        "abstract": "Folddisco is a structural motif search tool. "
-                    "It is 20-fold faster than pyScoMotif.",
+        "abstract": "Folddisco is a structural motif search tool that indexes "
+                    "residue-pair geometry for proteome-scale queries. "
+                    "It is 20-fold faster than pyScoMotif on the same "
+                    "PDB-scale benchmark set.",
     }
     page_body = (
         "## Summary\n\n"
-        "Folddisco is a structural motif search tool that achieves "
-        "20-fold speedup over pyScoMotif on PDB-scale benchmarks.\n"
+        "Folddisco is a structural motif search tool that indexes residue-pair "
+        "geometry for proteome-scale queries, and it is 20-fold faster than "
+        "pyScoMotif on the same PDB-scale benchmark set.\n"
     )
     r = score_salience("stem", "", sections, page_body, use_semantic=False)
     # Token overlap is high here; both anchors should match without
     # semantic.
     assert r.n_match >= 1
+
+
+# ────────────────────────────────────────────────────────────────────
+# Abstract-anchor guards.
+#
+# `critical` carries weight 3, and in this fixture the critical tier IS the
+# abstract — a median 75% of the weighted denominator (p90 94%) on a 353-paper
+# measurement. So whatever `extract_abstract` over-reaches into becomes the
+# score. Each case below is a shape observed in the live corpus.
+# ────────────────────────────────────────────────────────────────────
+
+from researchwiki.grade.salience import (
+    _MAX_ABSTRACT_ANCHORS,
+    _MIN_WORDS_PER_SENTENCE,
+    anchor_is_substantive,
+)
+
+
+def _abs_ids(fixture):
+    return [it.id for it in fixture.headline_claims if it.id.startswith("abstract-")]
+
+
+# ---------- guard 1: prose check ----------
+
+def test_reference_slab_abstract_is_rejected_wholesale():
+    """cheng-2023: extraction returns bibliography text where the abstract
+    should be — "sentences" averaging ~4 words. No page can ever cover these
+    anchors, so the score is unreachable rather than merely low (measured
+    ceiling ~0.21).
+
+    The two title-only entries here are the reason the prose check exists as a
+    separate guard: they're long enough in characters and shaped like claims, so
+    `anchor_is_substantive` passes them. Only the slab-level words-per-sentence
+    ratio identifies them as bibliography.
+    """
+    slab = " ".join([
+        "Genome-wide association analysis of coronary artery disease.",
+        "Molecular architecture of the human chromatin remodelling complex.",
+        "A global reference for human genetic variation. Nature 526, 68 (2015).",
+        "Deep learning of genomic contexts from sequence alone. Cell 187, 1 (2024).",
+        "Mach. Learn. Res. 12, 2825 (2011).", "Genome Res. 27, 722 (2017).",
+        "Bioinformatics 34, 3094 (2018).", "J. Comput. Biol. 7, 203 (2000).",
+        "Nat. Methods 15, 475 (2018).", "Science 381, eadg7492 (2023).",
+    ])
+    # Premise: the per-sentence filter alone would let entries through, so a
+    # pass below can only come from the slab-level prose check.
+    survivors = [s for s in _split_sentences(slab) if anchor_is_substantive(s)]
+    assert len(survivors) >= 2, survivors
+    f = synthesize_fixture("cheng-2023-x", "", {"abstract": slab})
+    assert _abs_ids(f) == []
+
+
+def test_one_word_abstract_fragment_is_rejected():
+    """yi-2026: a single title fragment came through as the whole abstract.
+    Caught by either guard — the per-sentence length floor gets there first."""
+    f = synthesize_fixture("yi-2026-x", "", {"abstract": "Introduction"})
+    assert _abs_ids(f) == []
+
+
+def test_ordinary_prose_abstract_clears_the_prose_check():
+    prose = (
+        "We present a method for detecting somatic variants in low-coverage "
+        "sequencing data using a learned error model. Across 12 tumour types "
+        "the model improved precision at fixed recall relative to two widely "
+        "used callers."
+    )
+    f = synthesize_fixture("stem", "", {"abstract": prose})
+    assert len(_abs_ids(f)) == 2
+    assert (len(prose.split()) / 2) >= _MIN_WORDS_PER_SENTENCE
+
+
+# ---------- guard 2: substance filter + cap ----------
+
+def test_masthead_and_author_lines_are_not_anchors():
+    """bjornsson-2020's abstract region opens with the journal masthead, a DOI
+    line, a copyright notice and a credential-laden author list. All are
+    guaranteed misses that inflate the weighted denominator."""
+    for junk in (
+        "Circulation: Genomic and Precision Medicine is available at "
+        "www.ahajournals.org/journal/circgen Circ Genom Precis Med. 2021;14:e00",
+        "DOI: 10.1161/CIRCGEN.120.003029 February 2021 Correspondence to: "
+        "Unnur Thorsteinsdottir, PhD, deCODE Genetics/Amgen, Inc",
+        "For Sources of Funding and Disclosures, see page 47. "
+        "© 2020 American Heart Association, Inc.",
+        "Olafsdottir, MD; Sebastian Niehus, MSc; Birte Kehr, PhD; "
+        "Gardar Sveinbjornsson, MSc; Steinunn Gudmundsdottir, MSc",
+        "Key Words: cardiovascular disease genetics lipids microRNA "
+        "polyadenylation Downloaded from http://ahajournals.org by on June 1",
+    ):
+        assert anchor_is_substantive(junk) is False, junk[:50]
+
+
+def test_real_finding_survives_the_substance_filter():
+    assert anchor_is_substantive(
+        "Mean level of LDL cholesterol was 74% lower in del2.5 carriers than "
+        "in 101851 noncarriers, a difference of 2.48 mmol/L."
+    ) is True
+
+
+def test_cap_counts_eligible_sentences_not_raw_index():
+    """The ordering regression, from bjornsson-2020: its abstract region runs 28
+    sentences whose leading 12 are masthead and author list, with "BACKGROUND:"
+    landing at index 12 — exactly at the cap. A cap on raw sentence index keeps
+    only the junk and discards every finding (measured 0.24 -> 0.06); filtering
+    first inverts that to 0.24 -> 0.34.
+
+    The junk block here is one longer than `_MAX_ABSTRACT_ANCHORS` so
+    cap-before-filter yields an empty abstract tier, which is the failure mode
+    this pins. bjornsson-2020 is the only paper in the corpus with a junk lead
+    that long, so the margin is thin in practice and worth a guard.
+    """
+    junk = [
+        "Circulation: Genomic and Precision Medicine is available at "
+        f"www.ahajournals.org/journal/circgen Circ Genom Precis Med, page {i}."
+        for i in range(_MAX_ABSTRACT_ANCHORS - 2)
+    ] + [
+        "DOI: 10.1161/CIRCGEN.120.003029 February 2021 Correspondence to: "
+        "Unnur Thorsteinsdottir, PhD, deCODE Genetics.",
+        "Halldorsson, MSc; Asgeir Sigurdsson, BSc; Hakon Jonsson, PhD; "
+        "Eva F. Olafsdottir, MD; Birte Kehr, PhD.",
+        "© 2020 American Heart Association, Inc. For Sources of Funding and "
+        "Disclosures, see page 47 of this issue.",
+    ]
+    real = [
+        "To date, a gain-of-function mutation in LDLR with a large effect on "
+        "LDL cholesterol levels has not been described.",
+        "We analyzed whole-genome sequencing data from 43202 Icelanders and "
+        "genotyped structural variants against that reference.",
+        "We discovered a 2.5-kb deletion overlapping the 3' untranslated "
+        "region of LDLR in seven heterozygous carriers.",
+    ]
+    assert len(junk) > _MAX_ABSTRACT_ANCHORS  # premise of the regression
+    f = synthesize_fixture("bjornsson-2020-x", "", {"abstract": " ".join(junk + real)})
+    kept = [it.verbalization for it in f.headline_claims
+            if it.id.startswith("abstract-")]
+    assert len(kept) == len(real)
+    for r in real:
+        assert any(r.split(",")[0][:40] in k for k in kept), r[:40]
+
+
+def test_abstract_anchors_are_capped_at_the_configured_maximum():
+    """Over-capture into the introduction is the common case: 42% of corpus
+    abstracts hit extract_abstract's 4000-char cap, median 17 sentences / 467
+    words where a real abstract is 5-12 / 150-350."""
+    sents = [
+        f"Finding number {i} shows that the described approach improves "
+        f"downstream accuracy on the held-out evaluation split."
+        for i in range(25)
+    ]
+    f = synthesize_fixture("stem", "", {"abstract": " ".join(sents)})
+    assert len(_abs_ids(f)) == _MAX_ABSTRACT_ANCHORS
+
+
+def test_short_abstract_is_not_capped_and_ids_track_source_position():
+    """Ids stay pinned to the original sentence index, so an anchor id remains
+    traceable back into the extracted abstract even where the filter left gaps."""
+    sents = [
+        "Copyright: 2019 the Authors, distributed under a Creative Commons "
+        "Attribution License permitting unrestricted reuse.",
+        "We introduce a graph-based caller that resolves segmental duplications "
+        "missed by linear-reference pipelines.",
+        "Precision improved from 0.71 to 0.93 on the benchmark truth set "
+        "across all three evaluated sample preparations.",
+    ]
+    f = synthesize_fixture("stem", "", {"abstract": " ".join(sents)})
+    # Sentence 0 is boilerplate → dropped; 1 and 2 keep their source indices.
+    assert _abs_ids(f) == ["abstract-1", "abstract-2"]

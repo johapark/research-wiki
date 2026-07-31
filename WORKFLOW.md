@@ -52,8 +52,10 @@ inbox/raw-paper.pdf
 │                   token-overlap + cosine) + coherence (structural   │
 │                   conformance)                                      │
 │  6. tournament    deterministic argmax on combined-quality scalar   │
-│                   (0.5·semantic + 0.5·salience), bucketed; tail     │
-│                   axes coherence → drift → coverage → bm25          │
+│                   (0.5·semantic + 0.5·salience, each axis bucketed  │
+│                   to 0.01 first, salience down-weighted when its    │
+│                   anchor count is thin); tail axes coherence →      │
+│                   drift → coverage → bm25                           │
 │  7. critic        translate weak-claim flags into revision notes    │
 │  8. evolve        revise the winning draft against critic notes;    │
 │                   keep iff combined-quality improves (the same      │
@@ -143,10 +145,30 @@ bi-encoder cosines (fidelity); `sal` is salience-recall against PDF-anchor
 synthetic fixture; `coh` is the structural-conformance score (0..1, sum of
 weights of passing checks); `bm25` is the page-level mean of per-claim top-1
 BM25 retrieval scores. The tournament keys on `combined-quality = 0.5·sem +
-0.5·sal` bucketed to 2 decimals — so a draft with low semantic but high
-salience can beat a high-semantic-low-salience peer if the combined number
-wins. The lexicographic tail (coherence → -drift → n_graded → bm25 →
-weakest_score) decides ties.
+0.5·sal` — so a draft with low semantic but high salience can beat a
+high-semantic-low-salience peer if the combined number wins. The lexicographic
+tail (coherence → -drift → n_graded → bm25 → weakest_score) decides ties.
+
+Two details of that blend matter when you're reading a tournament outcome that
+looks wrong:
+
+- **Each axis is rounded to 0.01 before blending**, not the blend afterwards.
+  Rounding the output made the primary *less* informative than either axis
+  alone: a weighted average halves a single-axis delta, and salience is usually
+  flat between drafts of the same paper (median spread 0.017; 46% of papers have
+  every draft within 0.01), so a semantic difference had to exceed 0.02 to
+  survive bucketing. Quantizing the inputs keeps the 0.01 granularity that lets
+  coherence break genuine ties while a 0.01 move on *either* axis still reaches
+  the key.
+- **Salience is confidence-weighted by `n_anchors`**, ramping to full weight at
+  10 anchors (`fitness.ANCHOR_CONFIDENCE_FULL`) and the blend renormalized. 9%
+  of historical drafts had fewer than 10 anchors and 2% fewer than 5, where the
+  score is a ratio over too small a denominator to swing selection at full
+  strength; those dilute toward fidelity instead.
+
+`salience_score` values are **not comparable across the 2026-07 abstract-anchor
+guards** (below) — the guards changed the denominator, so `insights` history
+straddling that change mixes two scales.
 
 Each `[agent] X → Y` line is one phase committing one row to the
 `ingest_iterations` table — the audit trail is durable as the run
@@ -383,7 +405,7 @@ researchwiki/
 │   │   └── synthesis.py    #     Synthesis/idea page vs. CITED PDFs (categorical
 │   │                       #     verdicts: supported/weak/composite/misattributed)
 │   ├── salience.py         #   PDF-anchor recall (synthetic ContentFixture from
-│   │                       #     abstract / Results / captions, fed through scorer)
+│   │                       #     abstract / Results / captions, fed through scorer).
 │   ├── coherence.py        #   Page-shape contract (sections, word count,
 │   │                       #     bullets, wikilink density). No PDF, no LLM.
 │   ├── grounding.py        #   Citation-presence check on every claim-shaped unit
@@ -406,7 +428,9 @@ researchwiki/
 │   ├── runner.py           #   13-phase state-machine driver
 │   ├── context.py          #   Shared phase Context (each phase reads/writes it)
 │   ├── fitness.py          #   Tournament + improvement-rule lenses;
-│   │                       #     `combined_quality` = 0.5·semantic + 0.5·salience
+│   │                       #     `combined_quality` = 0.5·semantic + 0.5·salience,
+│   │                       #     salience down-weighted below 10 anchors; selection
+│   │                       #     quantizes each axis to 0.01 before blending
 │   ├── llm.py              #   LLM API wrapper (provider-routed; real + stub)
 │   ├── model_config.py     #   Per-role model assignments from config/models.*.yaml
 │   ├── relay.py            #   chat-relay provider client
@@ -576,6 +600,52 @@ speed — that hasn't changed across model swaps.
 - **Cross-link verifier strips a real wikilink.** Means the candidate
   wasn't on the verified list. Either accept it as a topical-not-cited
   paper, or update the candidate list manually.
+- **`sal` is low on a page that reads complete.** Usually the anchor set,
+  not the page. `salience_score` is recall against a fixture synthesized from
+  PDF structure, and the `critical` tier — weight 3 in
+  `scorer.IMPORTANCE_WEIGHTS` — is the abstract, a median 75% of the weighted
+  denominator (p90 94%). So whatever `pdf.sections.extract_abstract`
+  over-reaches into becomes the score, and it over-reaches at both ends: 42% of
+  corpus abstracts hit its 4000-char cap (median 17 sentences / 467 words where
+  a real abstract is 5–12 / 150–350), bleeding into the introduction, and
+  occasionally at the front into the masthead and author list. Front-matter is
+  a *guaranteed* miss — a page should omit a funding disclaimer — so it inflated
+  the denominator with content no page could earn credit for: measured at 62%
+  of papers carrying at least one, median 4.0% of the weighted denominator,
+  p90 14.5%, max 79%.
+
+  Three guards in `grade/salience.py` bound this, and the **order matters**:
+
+  1. `_abstract_is_prose` rejects the whole region when it averages under 10
+     words per sentence — the bibliography-slab and title-fragment shapes,
+     whose implied ceiling was ~0.21 (unreachable, not merely low).
+  2. `anchor_is_substantive` drops per-sentence artifacts: under 60 chars,
+     boilerplate regex hits, lowercase-initial mid-clause fragments, two or
+     more academic credentials, three or more semicolons.
+  3. `_MAX_ABSTRACT_ANCHORS = 12`, applied to the *survivors of step 2 in
+     document order* — **not** to the raw sentence index. `bjornsson-2020` is
+     the case that decides this: its abstract region runs 28 sentences whose
+     leading 12 are masthead and author list, with `BACKGROUND:` at index 12,
+     so a raw positional cap keeps only junk and discards every finding
+     (0.24 → 0.06). Filtering first inverts it to 0.24 → 0.34.
+
+  12 is calibrated against the hand-curated `benchmark-fixtures/`: of curated
+  headline items that localize to an abstract sentence at all, 100% land in the
+  first 10 (max index 8), so the cap discards nothing a human judged
+  load-bearing. Against an all-sentences baseline on a 58-paper sample, the
+  three guards together move median salience 0.322 → 0.344 (mean 0.319 → 0.340;
+  29 papers up, 11 down, 18 unchanged). The gains are the
+  structurally-penalized tail — `chen-2025` +0.16, `christian-2026` +0.16,
+  `jaganathan-2019` +0.16, `bjornsson-2020` +0.10. The 11 that scored lower
+  moved little (worst -0.07) and are pages that had been earning credit against
+  introduction bleed.
+
+  Tightening `extract_abstract` itself was tried and rejected: preferring a
+  ≤400-word paragraph in its path-2 (largest-paragraph) branch changed the
+  abstract pick on 13/58 papers, and on `chen-2025` picked a *different*
+  paragraph (543 → 52 words) rather than a shorter correct one. The anchor
+  filter covers the same ground without touching extraction that other
+  consumers share.
 
 ---
 

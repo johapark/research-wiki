@@ -23,11 +23,15 @@ load-bearing.
 
 Anchor sources and axis assignments (each silently skipped when absent):
 
-  abstract (all)      → headline_claims (importance: critical) — the
-                        author-condensed summary; every abstract sentence
-                        is treated as a critical anchor. Extraction handles
-                        both explicit `Abstract` headers and the headerless
-                        Nature-family case via `sections.extract_abstract`.
+  abstract (first N)  → headline_claims (importance: critical) — the
+                        author-condensed summary. Extraction handles both
+                        explicit `Abstract` headers and the headerless
+                        Nature-family case via `sections.extract_abstract`,
+                        then two filters run (see `anchor_is_substantive` and
+                        `_MAX_ABSTRACT_ANCHORS`): non-findings are dropped and
+                        the survivors capped, because the extracted region
+                        routinely over-reaches into the masthead or the
+                        introduction.
   results §1 (1-2 s)  → headline_claims (high)
   discussion §1+§last → headline_claims (high), routed to limitations when
                         the sentence carries a limitations cue
@@ -96,6 +100,142 @@ _CAPTION_HEADER_RE = re.compile(
 
 # Default top-K missed anchors to surface in the report.
 _TOP_K_MISSED = 5
+
+# ---------- abstract-anchor guards ----------
+#
+# The abstract tier dominates this score: `critical` carries weight 3 in
+# `scorer.IMPORTANCE_WEIGHTS`, so on a 353-paper corpus measurement the
+# abstract accounted for a median 75% of the weighted denominator (p90 94%).
+# That makes the abstract region's extraction quality the single biggest
+# driver of `salience_score`, and the region is noisy in two distinct ways —
+# hence two guards, applied in this order.
+
+# Guard 1: prose check. A handful of PDFs yield a non-prose slab where the
+# abstract should be — `cheng-2023` returned bibliography text ("Nature 562,
+# 203-209 (2018). doi:... pmid:...", "Mach.", "Learn." — 100 "sentences" at 4.2
+# words each), `yi-2026` a one-word title fragment. Their implied salience
+# ceiling was ~0.21: no page could ever cover those anchors, so the score is
+# unreachable rather than merely low. Corpus-wide, words-per-sentence has a
+# median of 23.5 and only 3/353 papers fall below 10 — a clean separator with no
+# cluster near the line.
+#
+# Scope, measured honestly: on the current corpus this guard is not what saves
+# those papers. Of 268 papers with a recoverable abstract, one (`yi-2026`) falls
+# below the floor, and the per-sentence filter below already empties it;
+# `cheng-2023` now extracts no abstract at all. What guard 1 uniquely catches is
+# the shape the per-sentence filter is blind to by construction: bibliography
+# entries that are long in *characters* and claim-shaped ("Molecular
+# architecture of the human chromatin remodelling complex.") but short in words.
+# Only the slab-level ratio identifies those as a reference list. Kept as a
+# categorical backstop — cheap, and when it trips every draft of that paper is
+# otherwise scored against noise.
+_MIN_WORDS_PER_SENTENCE = 10.0
+
+# Guard 2: anchor count cap, applied to the *substantive* sentences (see
+# `anchor_is_substantive`) in document order — NOT to the raw sentence index.
+# The ordering is load-bearing. Extraction over-reaches at both ends: usually
+# into the introduction (42% of abstracts hit `extract_abstract`'s 4000-char
+# cap; median 17 sentences / 467 words where a real abstract is 5-12 / 150-350),
+# but sometimes at the *front* — `bjornsson-2020` yields 27 sentences whose
+# first 12 are the journal masthead and author list, with "BACKGROUND:" landing
+# at index 12. A raw first-12 cap there keeps only the junk and discards the
+# whole abstract (measured: 0.24 → 0.06). Filtering first inverts that to
+# 0.24 → 0.34.
+#
+# 12 is calibrated against the hand-curated fixtures in `benchmark-fixtures/`:
+# of the curated headline items that localize to an abstract sentence at all,
+# 100% land in the first 10 (max index 8), so the cap discards nothing a human
+# curator judged load-bearing. Re-measured with the shipped rules against an
+# all-sentences baseline on a 58-paper sample (token-overlap verdicts): median
+# 0.322 → 0.344, mean 0.319 → 0.340, 29 papers up / 11 down / 18 unchanged. The
+# gains are the structurally-penalized tail — chen-2025 +0.16, christian-2026
+# +0.16, jaganathan-2019 +0.16, bjornsson-2020 +0.10. The 11 that scored lower
+# moved little (worst -0.07, chin-2019) and are pages that had been earning
+# credit against introduction bleed.
+_MAX_ABSTRACT_ANCHORS = 12
+
+# Minimum anchor length. On commentary and opinion pieces the "abstract" region
+# is body prose and short rhetorical asides come through as load-bearing ("We
+# can't measure everything." — 28 chars). Cheap because real abstract prose is
+# long: across a 50-paper sample the median abstract sentence runs 164 chars and
+# only 7.1% fall under 60. Inspecting that slice, the clear majority are
+# artifacts — running citations ("Circulation. 2026;153:1928-1939."), author
+# fragments, emails, "All rights reserved", mid-clause splitter debris — against
+# a minority of real-but-minor findings ("We also report results on the BEIR
+# benchmark."). Net-positive on the denominator, at the cost of occasionally
+# forgiving a terse claim.
+_ANCHOR_MIN_CHARS = 60
+
+# Front-matter the PDF's first block routinely bleeds into the abstract region.
+# These are guaranteed misses — a page *should* omit a funding disclaimer — so
+# they inflate the weighted denominator with content no page can earn credit
+# for. Measured contribution: 62% of papers carry at least one, a median 4.0%
+# of the weighted denominator, p90 14.5%, max 79%.
+_BOILERPLATE_RE = re.compile(
+    r"""
+    doi:\s*10\.                     # inline DOI
+  | \bEditor:\s                     # handling-editor line
+  | \bReceived\b.{0,40}\bAccepted\b # submission-history run
+  | \bCopyright:?\s                 # copyright notice
+  | ©\s*\d{4}                       # copyright glyph + year
+  | \bAll\ rights\ reserved\b
+  | \bhad\ no\ role\ in\ study\ design
+  | \bCompeting\ interests?\b
+  | \bopen[-\ ]access\ article\b
+  | \bcreativecommons\.org
+  | \bcorrespondence\ (to|should\ be\ addressed)\b
+  | \be-?mail:\s
+  | \bis\ available\ at\ (www|http)  # journal masthead line
+  | \bDownloaded\ from\ http         # PDF footer
+  | \bKey\ ?[Ww]ords:\s              # trailing keyword list
+  | \bSources\ of\ Funding\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# Academic credentials — two or more in one "sentence" means the splitter is
+# chewing through an author list ("Halldorsson, MSc; Asgeir Sigurdsson, BSc;
+# Gudny A."), not a claim.
+_CREDENTIAL_RE = re.compile(
+    r"\b(PhD|MSc|BSc|MD|DPhil|MPH|DVM|PharmD|MBBS)\b"
+)
+
+
+def anchor_is_substantive(text: str) -> bool:
+    """Is this sentence a checkable finding, rather than an extraction artifact?
+
+    Applied to abstract-derived anchors before they enter the fixture, so junk
+    stays out of the weighted denominator. Also consumed by the critic
+    (`agents.phases.revise.coverage_gaps`), where a missed anchor becomes an
+    *additive* instruction to the author — there a bad anchor makes the page
+    worse rather than merely mis-scored, so both callers want the same rule and
+    it lives here, next to the extraction it compensates for.
+
+    Deliberately conservative: it removes shapes that are never findings, not
+    shapes that merely look unimportant.
+    """
+    text = (text or "").strip()
+    if len(text) < _ANCHOR_MIN_CHARS:
+        return False
+    if _BOILERPLATE_RE.search(text):
+        return False
+    # Lowercase-initial anchors start mid-clause ("near zero as recall
+    # increases, which indicates...") — a splitter artifact, so the "missing"
+    # content is a fragment of a sentence the page may already cover in full.
+    if not (text[0].isupper() or text[0].isdigit()):
+        return False
+    if len(_CREDENTIAL_RE.findall(text)) >= 2:
+        return False
+    if text.count(";") >= 3:
+        return False
+    return True
+
+
+def _abstract_is_prose(text: str, sentences: list[str]) -> bool:
+    """Reject a non-prose slab masquerading as an abstract (guard 1)."""
+    if not sentences:
+        return False
+    return (len(text.split()) / len(sentences)) >= _MIN_WORDS_PER_SENTENCE
 
 
 @dataclass
@@ -179,11 +319,20 @@ def synthesize_fixture(
 
     abstract = sections.get("abstract", "").strip()
     if abstract:
-        # Every abstract sentence is a critical anchor — the abstract is the
-        # author-condensed summary, so each sentence carries equal weight as
-        # a load-bearing claim the page should cover.
-        for i, s in enumerate(_split_sentences(abstract)):
-            headline.append(_make_item(f"abstract-{i}", "critical", s))
+        # Abstract sentences are the `critical` tier — the author-condensed
+        # summary, where "the page doesn't mention this" is a defect rather
+        # than a choice. Two guards keep the tier honest; see their constants
+        # for the calibration. Anchor ids stay tied to the ORIGINAL sentence
+        # index so an id remains traceable back to the extracted abstract even
+        # though the sequence now has gaps.
+        sentences = _split_sentences(abstract)
+        if _abstract_is_prose(abstract, sentences):
+            eligible = [
+                (i, s) for i, s in enumerate(sentences)
+                if anchor_is_substantive(s)
+            ]
+            for i, s in eligible[:_MAX_ABSTRACT_ANCHORS]:
+                headline.append(_make_item(f"abstract-{i}", "critical", s))
 
     results = sections.get("results", "").strip()
     if results:
