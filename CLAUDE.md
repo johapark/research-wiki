@@ -56,7 +56,9 @@ Then `researchwiki check-coverage <page>` — recall of wiki papers ranking high
 
 ## Editing this file
 
-CLAUDE.md loads every turn — keep it lean. Trigger-gated procedures live in `prompts/{slug}.md`; leave a one-line pointer here with the trigger condition. Don't inline workflows that won't run on the current turn.
+This file loads every turn — keep it lean. Trigger-gated procedures live in `prompts/{slug}.md`; leave a one-line pointer here with the trigger condition. Don't inline workflows that won't run on the current turn.
+
+**`AGENTS.md` is a symlink to this file** — don't "fix" it into a separate document. Codex CLI (and Cursor, Aider, Continue, Gemini CLI, Cody, …) auto-load a repo-level instruction file but do *not* follow markdown links out of it, so a pointer file would leave every non-Claude agent running without the Four Rules. The symlink is what guarantees each one gets this contract verbatim instead of a suggestion to go read it. Same reason applies to any future tool-specific filename (`.cursorrules`, `GEMINI.md`): symlink it here rather than copying, so the contract can't drift per-tool.
 
 ---
 
@@ -267,6 +269,8 @@ Per-phase provider comes from `config/models.yaml`. **`RW_LLM_PROVIDER`** is a g
 **Anthropic-compatible third parties (e.g. z.ai GLM)**: use `provider: anthropic` with `ANTHROPIC_BASE_URL` stopping at the host root (z.ai: `https://api.z.ai/api/anthropic`, **no** trailing `/v1`). Free tiers may 429 the parallel author phase — drop to `-n 1`.
 
 **Gemini free tier (`config/models.gemini.yaml`)**: observed ceiling is ~5 requests/minute on the Flash model, shared per-project (not per-key) — `agent ingest`'s default 4 batch workers × 2 parallel author drafts blows through it. Pass `-w 1` to serialize the batch; add `-n 1` if 429s persist.
+
+**`chat-relay` provider** — when the user sets `RW_LLM_PROVIDER=chat-relay`, `researchwiki` has no API key of its own and instead relays each prompt to *you* to fill. Read [`prompts/chat-relay.md`](./prompts/chat-relay.md) for that protocol; it's a specialized worker role and fires only under that env var.
 
 ### Ingest — add a new paper
 
