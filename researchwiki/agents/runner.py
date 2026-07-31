@@ -246,15 +246,20 @@ def run_ingest(
         ctx.winner = _phase_tournament(ctx, conn)
         log(f"tournament → winner draft {ctx.winner.iteration_id}", tag="agent")
 
-        # Phase 5.5: critic + evolve loop. Skip when there are no weak claims —
-        # don't burn tokens critiquing a draft the grader is happy with.
+        # Phase 5.5: critic + evolve loop. Skip when the grader found neither a
+        # weakly-supported claim (precision) nor an uncovered load-bearing PDF
+        # anchor (recall) — don't burn tokens critiquing a draft it's happy with.
+        # Both axes have to gate the loop: weak claims alone let the worst-recall
+        # drafts exit here, since a page that omits content has less text to be
+        # weak about.
         for round_num in range(ctx.max_evolve):
             ctx.next_iter()
             critique = _phase_critic(ctx, conn, ctx.winner)
-            if not critique.weak_claims:
-                log(f"critic  → no weak claims, skipping evolve", tag="agent")
+            if not critique.weak_claims and not critique.coverage_gaps:
+                log(f"critic  → no weak claims or coverage gaps, skipping evolve", tag="agent")
                 break
-            log(f"critic  → flagged {len(critique.weak_claims)} weak claims "
+            log(f"critic  → flagged {len(critique.weak_claims)} weak claims, "
+                  f"{len(critique.coverage_gaps)} coverage gaps "
                   f"({critique.cost_input_tokens} in / {critique.cost_output_tokens} out)", tag="agent")
 
             ctx.next_iter()
@@ -531,6 +536,11 @@ def _phase_critic(ctx: Context, conn, draft):
         metadata=ctx.metadata,
         use_stub=ctx.use_stub,
     )
+    n_weak, n_gaps = len(critique.weak_claims), len(critique.coverage_gaps)
+    if n_weak or n_gaps:
+        reason = f"flagged {n_weak} weak claims, {n_gaps} coverage gaps"
+    else:
+        reason = "no weak claims or coverage gaps; pass-through"
     write_iteration(
         attempt_id=ctx.attempt_id,
         paper_stem=ctx.paper_stem,
@@ -539,11 +549,8 @@ def _phase_critic(ctx: Context, conn, draft):
         role="critic",
         parent_iteration_id=draft.iteration_id,
         critic_notes=critique.notes,
-        decision="observed" if not critique.weak_claims else "kept",
-        decision_reason=(
-            f"flagged {len(critique.weak_claims)} weak claims"
-            if critique.weak_claims else "no weak claims; pass-through"
-        ),
+        decision="kept" if (n_weak or n_gaps) else "observed",
+        decision_reason=reason,
         model_used=critique.model,
         cost_input_tokens=critique.input_tokens,
         cost_output_tokens=critique.output_tokens,

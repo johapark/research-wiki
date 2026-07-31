@@ -56,7 +56,9 @@ inbox/raw-paper.pdf
 │                   to 0.01 first, salience down-weighted when its    │
 │                   anchor count is thin); tail axes coherence →      │
 │                   drift → coverage → bm25                           │
-│  7. critic        translate weak-claim flags into revision notes    │
+│  7. critic        translate weak-claim flags into revision notes,   │
+│                   plus triage of uncovered critical PDF anchors     │
+│                   (recall gaps; ≥2 eligible fires the loop alone)   │
 │  8. evolve        revise the winning draft against critic notes;    │
 │                   keep iff combined-quality improves (the same      │
 │                   primary scalar; salience-only gains accepted)     │
@@ -131,7 +133,7 @@ You'll see something like (excerpted, real output from a recent ingest):
 [agent] grade   → draft 2890 sem=0.71 sal=0.34 coh=1.00 bm25=29.87
 [agent] grade   → draft 2891 sem=0.74 sal=0.30 coh=1.00 bm25=33.72
 [agent] tournament → winner draft 2891
-[agent] critic     → flagged 1 weak claims (low semantic in Results)
+[agent] critic     → flagged 1 weak claims, 2 coverage gaps
 [agent] evolve     → revised draft, sem=0.78 sal=0.34 (combined-quality improved; kept)
 [agent] gate       → passed (combined-quality ≥ 0.55, no drift, KC≥4, n_graded≥6)
 [agent] promote    → wiki/cgt/du-2025-a-versatile-crisprcas9-system-off-target.md (3 back-links added)
@@ -406,6 +408,8 @@ researchwiki/
 │   │                       #     verdicts: supported/weak/composite/misattributed)
 │   ├── salience.py         #   PDF-anchor recall (synthetic ContentFixture from
 │   │                       #     abstract / Results / captions, fed through scorer).
+│   │                       #     `anchor_is_substantive` is shared with the critic —
+│   │                       #     anchors are both denominator and author instruction
 │   ├── coherence.py        #   Page-shape contract (sections, word count,
 │   │                       #     bullets, wikilink density). No PDF, no LLM.
 │   ├── grounding.py        #   Citation-presence check on every claim-shaped unit
@@ -639,6 +643,12 @@ speed — that hasn't changed across model swaps.
   `jaganathan-2019` +0.16, `bjornsson-2020` +0.10. The 11 that scored lower
   moved little (worst -0.07) and are pages that had been earning credit against
   introduction bleed.
+
+  Anchors reach the author as well as the grader — `phases.revise.coverage_gaps`
+  turns an uncovered critical anchor into an *additive* instruction — so the
+  same substance test filters both. A bad anchor there makes the page worse
+  rather than merely mis-scored. It still runs on read because pages graded
+  before the guards landed carry the old junk in their stored `missed_anchors`.
 
   Tightening `extract_abstract` itself was tried and rejected: preferring a
   ≤400-word paragraph in its path-2 (largest-paragraph) branch changed the

@@ -15,6 +15,13 @@ from ...grade.fidelity.paper import grade_page
 from ...grade.support import Classifier, check_support, unsupported_claims
 from .draft import _wrap_with_frontmatter
 
+# Per-anchor text budget for the `missed_anchors` entries carried in the
+# aggregate. The list is already capped at `salience._TOP_K_MISSED` entries, so
+# this bounds one grade row's `grader_scores` JSON at a few KB. Generous enough
+# that the critic sees a whole abstract sentence (the longest useful anchors run
+# ~600 chars); anything longer is a run-on the sentence splitter failed on.
+_ANCHOR_TEXT_CAP = 700
+
 
 @dataclass
 class ClaimDetail:
@@ -103,6 +110,20 @@ def grade_draft(
     n_anchors = sal.n_anchors if sal is not None else 0
     n_anchors_matched = sal.n_match if sal is not None else 0
     n_anchors_missed = sal.n_miss if sal is not None else 0
+    # The missed anchors themselves — not just the count. Without these the
+    # recall axis is measurable but not *actionable*: the critic can only flag
+    # claims that ARE on the page (every `ClaimDetail.is_weak()` predicate is a
+    # precision test), so an omission produced no revision signal and the
+    # evolve loop broke on "no weak claims". Carried in the aggregate rather
+    # than a new return value because the aggregate already travels to the
+    # critic on `draft.scores` and is persisted as `grader_scores` — which also
+    # makes "which anchors do we systematically miss?" answerable after the
+    # fact. Text is truncated: the critic prompt truncates anyway, and this
+    # lands in every grade row in the DB.
+    missed_anchors = [
+        {**m, "text": (m.get("text") or "")[:_ANCHOR_TEXT_CAP]}
+        for m in (sal.missed_anchors if sal is not None else [])
+    ]
 
     aggregate = {
         "n_claims": report.n_claims,
@@ -119,6 +140,7 @@ def grade_draft(
         "n_anchors": n_anchors,
         "n_anchors_matched": n_anchors_matched,
         "n_anchors_missed": n_anchors_missed,
+        "missed_anchors": missed_anchors,
     }
     details = [
         ClaimDetail(

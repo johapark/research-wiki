@@ -12,8 +12,9 @@ in response to critic notes — distinct from the "memory evolution" step
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from ...grade.salience import anchor_is_substantive
 from .. import llm, prompt_lib
 from .draft import Draft
 from .grade import ClaimDetail
@@ -24,13 +25,69 @@ from .grade import ClaimDetail
 @dataclass
 class CritiqueOutput:
     """Result of a critic call. notes is the user-facing message; weak_claims
-    is the deterministic list of claims the grader flagged as weak (used as
-    the source of truth for whether to skip evolve)."""
+    is the deterministic list of claims the grader flagged as weak, and
+    coverage_gaps the eligible load-bearing PDF anchors the draft omitted.
+    Together they are the source of truth for whether to skip evolve — the
+    first covers precision defects, the second recall defects."""
     notes: str
     weak_claims: list[ClaimDetail]
     model: str
     input_tokens: int
     output_tokens: int
+    coverage_gaps: list[dict] = field(default_factory=list)
+
+
+# Minimum eligible critical misses before a coverage gap alone justifies an
+# evolve round. Calibrated on a 44-page random sample of the live corpus
+# (seed 7), counting post-filter: at 2, the trigger fires on 39% of pages,
+# catches all 7 scoring below 0.55 salience (median salience 0.58 among firing
+# pages vs 0.72 among quiet ones), and trips only 1 of the 12 healthiest pages
+# (salience >= 0.75). At 1 it fires on ~60%, mostly on pages whose single miss
+# is an extraction artifact; at 3 it misses genuine cases like hickey-2023 at
+# 0.54. A false fire costs one evolve+grade round but cannot damage the page:
+# `fitness.is_evolve_improvement` still gates whether the revision is kept.
+_COVERAGE_GAP_TRIGGER = 2
+
+
+def coverage_gaps(scores: dict | None) -> list[dict]:
+    """Eligible missed salience anchors from a graded draft's score dict.
+
+    The grader measures recall (`salience_score`) but every `ClaimDetail.
+    is_weak()` predicate is a *precision* test — it can only flag claims that
+    are already on the page. So an omission used to produce no revision signal
+    at all, and the evolve loop broke out on "no weak claims" precisely on the
+    pages with the worst coverage: on a live-corpus sample, drafts scoring
+    below 0.5 salience got a silent critic 82% of the time versus 60% above
+    it. Writing less was rewarded with less critique.
+
+    Only `critical` anchors qualify. In the synthetic fixture those are exactly
+    the abstract sentences (`grade/salience.py`), which is the one tier where
+    "the page doesn't mention this" is a defect rather than a choice — figure
+    captions and extended-data anchors are legitimately skippable. The list
+    `_missed_anchors` returns is already sorted critical-first and truncated to
+    `_TOP_K_MISSED`, so counting criticals in it decides the trigger without
+    needing a wider report.
+
+    Filtering is deliberately conservative: these anchors become *additive*
+    instructions, and a bad one makes the page worse rather than merely
+    unchanged. The LLM triages what survives (see `_CRITIC_SYSTEM`); this pass
+    only removes shapes no author should ever be told to cover.
+
+    The substance test itself lives in `grade.salience` — the same rule now
+    filters the fixture at synthesis time, so a shape that can't earn credit in
+    the denominator also can't reach the author as an instruction. Anchors from
+    pages graded before that landed still carry the junk, which is why this
+    filter runs on read as well.
+    """
+    anchors = (scores or {}).get("missed_anchors") or []
+    return [m for m in anchors if _anchor_is_eligible(m)]
+
+
+def _anchor_is_eligible(m: dict) -> bool:
+    """One anchor's eligibility as an additive revision instruction."""
+    if m.get("importance") != "critical":
+        return False
+    return anchor_is_substantive(m.get("text") or "")
 
 
 def critic(
@@ -39,28 +96,41 @@ def critic(
     metadata: dict,
     use_stub: bool = False,
 ) -> CritiqueOutput:
-    """Critic phase — identify weak claims in a winning draft.
+    """Critic phase — identify weak claims and coverage gaps in a winning draft.
 
     The deterministic grader has already flagged weak claims (low semantic
-    similarity, negation mismatch, or numeric drift). The critic's job is
-    to translate that mechanical signal
-    into actionable revision notes the author phase can consume on the next
-    pass. We deliberately give the critic the FACTS (which claim, what the
-    grader said) rather than asking it to discover weaknesses on its own —
-    that keeps the LLM accountable to the grader's evidence rather than
-    inventing concerns.
+    similarity, negation mismatch, or numeric drift) and the load-bearing PDF
+    anchors the draft never covered. The critic's job is to translate that
+    mechanical signal into actionable revision notes the author phase can
+    consume on the next pass. We deliberately give the critic the FACTS (which
+    claim, what the grader said) rather than asking it to discover weaknesses
+    on its own — that keeps the LLM accountable to the grader's evidence rather
+    than inventing concerns.
+
+    Coverage gaps are the one place the critic exercises judgment rather than
+    translation: the anchors are extracted structurally, so some are
+    front-matter or rhetorical asides that a page is right to omit. The critic
+    triages them and stays silent on the ones that aren't real findings.
     """
     weak = [c for c in draft.claim_details if c.is_weak()]
-    if not weak:
+    gaps = coverage_gaps(draft.scores)
+    if len(gaps) < _COVERAGE_GAP_TRIGGER:
+        # Below the trigger, gaps ride along only when the critic is already
+        # firing for weak claims — one uncovered anchor is as likely to be an
+        # extraction artifact as a real omission, and isn't worth a round on
+        # its own.
+        gaps = gaps if weak else []
+    if not weak and not gaps:
         return CritiqueOutput(
-            notes="no weak claims detected; draft passes grader thresholds",
+            notes="no weak claims or coverage gaps detected; draft passes grader thresholds",
             weak_claims=[],
             model="(skipped)",
             input_tokens=0,
             output_tokens=0,
+            coverage_gaps=[],
         )
 
-    prompt = _build_critic_prompt(weak, draft.text, metadata)
+    prompt = _build_critic_prompt(weak, draft.text, metadata, gaps)
     resp = llm.call(
         phase="critic",
         prompt=prompt,
@@ -73,36 +143,62 @@ def critic(
         model=resp.model,
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
+        coverage_gaps=gaps,
     )
 
 
 _CRITIC_SYSTEM = """\
-You are a critic for a research-paper wiki. The grader has flagged specific
-claims as weakly supported by the source PDF — flags include: low semantic
-similarity to the retrieved evidence chunks, numeric values not present in
-the PDF, and asserted negations the source doesn't echo. Your job is to
-translate those mechanical flags into concrete revision instructions the
-author can act on.
+You are a critic for a research-paper wiki. The grader gives you two kinds of
+evidence about a draft page, and they pull in opposite directions.
 
-For each flagged claim, output one bullet:
+## Grader flags — claims that ARE on the page but are weakly supported
+Flags include: low semantic similarity to the retrieved evidence chunks,
+numeric values not present in the PDF, and asserted negations the source
+doesn't echo. For each flagged claim, output one bullet:
 - Quote the problematic phrase from the claim verbatim.
 - Say whether to (a) remove the claim, (b) soften / rephrase to match what the
   PDF actually supports, or (c) replace the unmatched number with a value
   that does appear in the PDF.
-- Keep notes terse — the author re-reads the draft, not your prose.
 
-Do NOT introduce new concerns the grader didn't flag. The grader is the source
-of truth; you are its translator.
+Do NOT introduce new concerns about these claims that the grader didn't flag.
+On this axis the grader is the source of truth; you are its translator.
+
+## Coverage gaps — sentences from the PDF the page never covered
+These are pulled structurally from the paper's own abstract, so the extraction
+is imperfect and you MUST triage before instructing anything. Stay silent on a
+gap when it is:
+- journal front-matter (editors, submission dates, copyright, funding
+  disclaimers, competing-interest statements);
+- a rhetorical aside, quotation, or narrative sentence rather than a finding
+  (common in commentary and opinion pieces);
+- a fragment of a sentence, or content the draft already states in other words.
+
+For a gap that IS a real, checkable finding the page omits, output one bullet:
+- Name where in the draft it belongs (which section).
+- State the finding to add in one clause, grounded in the anchor's wording.
+- Never invent numbers or entities the anchor doesn't contain.
+
+Emitting nothing for the coverage-gap block is a correct and expected outcome.
+Adding filler to satisfy a bad anchor is worse than leaving the gap.
+
+Keep notes terse — the author re-reads the draft, not your prose.
 """
 
 
-def _build_critic_prompt(weak: list[ClaimDetail], draft_text: str, metadata: dict) -> str:
+def _build_critic_prompt(
+    weak: list[ClaimDetail],
+    draft_text: str,
+    metadata: dict,
+    gaps: list[dict] | None = None,
+) -> str:
     parts = [
         "# Draft (unchanged after tournament)",
         draft_text[:4000],
         "",
         "# Grader flags (ordered by section + position)",
     ]
+    if not weak:
+        parts.append("(none — no claim on the page is weakly supported)")
     for c in weak:
         sem_s = f"{c.semantic:.2f}" if c.semantic is not None else "n/a"
         line = f"- [{c.section}#{c.position}] (sem={sem_s}, BM25={c.bm25:.1f}"
@@ -113,11 +209,23 @@ def _build_critic_prompt(weak: list[ClaimDetail], draft_text: str, metadata: dic
         line += ")"
         parts.append(line)
         parts.append(f"  text: {c.text[:300]}")
+    if gaps:
+        parts.extend([
+            "",
+            "# Coverage gaps — PDF sentences the draft never covered",
+            "Triage each: skip front-matter, asides, fragments, and anything "
+            "the draft already says. Instruct only on real omitted findings.",
+        ])
+        for g in gaps:
+            parts.append(f"- [{g.get('id', '?')}] ({g.get('axis', '?')})")
+            parts.append(f"  text: {(g.get('text') or '')[:400]}")
     parts.extend([
         "",
         "# Output format",
-        "One bullet per flagged claim. Quote the problem phrase verbatim. Say "
-        "remove / soften-to / replace-with. No prose intro or outro.",
+        "One bullet per flagged claim: quote the problem phrase verbatim, say "
+        "remove / soften-to / replace-with. Then one bullet per coverage gap "
+        "you judged real: say add-to <section> and what to add. No prose intro "
+        "or outro.",
     ])
     return "\n".join(parts)
 
