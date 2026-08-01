@@ -33,6 +33,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from ..errors import EnvironmentFailure
+
 
 # A wikilink: `[[anything]]`. We don't validate the *target* here (that's the
 # cross-link verifier in researchwiki.agents.phases), but we DO validate a
@@ -130,12 +132,14 @@ class Unit:
         return (not self.is_claim) or self.has_citation
 
 
-class ClaimDBUnavailable(RuntimeError):
+class ClaimDBUnavailable(EnvironmentFailure):
     """Raised when state.db can't be reached to resolve `[[stem#slug]]` anchors.
 
     Distinguishes an environment failure (DB locked/missing) from a genuine
     empty resolution, so callers don't misread "DB down" as "every anchor is
-    dangling" and spuriously fail a grounded page.
+    dangling" and spuriously fail a grounded page. Inheriting
+    `EnvironmentFailure` extends that same distinction to the exit code when no
+    caller catches it: 2, not 3.
     """
 
 

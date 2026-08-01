@@ -14,7 +14,6 @@ early with no alerts.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from ..log import log
 from ..search.refs import format_claim_ref

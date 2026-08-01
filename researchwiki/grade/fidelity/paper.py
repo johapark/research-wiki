@@ -23,23 +23,32 @@ from ...wiki import Page, read_page
 from ...paths import wiki_dir, resolve_pdf
 from ...pdf.text import extract_pdf
 from ..parser import Claim, parse_claims
-from ..primitives import (
-    NUMERIC_TOKEN_RE,
-    NEGATION_RE,
-    normalize_numeric as _normalize_numeric,
-    check_numerics as _check_numerics,
-    negation_mismatch as _negation_mismatch,
-)
+from ..primitives import normalize_numeric as _normalize_numeric, check_numerics as _check_numerics, negation_mismatch as _negation_mismatch
 from ...index.pdf_chunks import build_pdf_index, query_pdf, get_chunk_embeddings, MAX_PDF_PAGES
 from ...index import embeddings as semantic_mod
 from ...pdf.sections import anchor_sections
-from ..salience import SalienceReport, score_salience, synthesize_fixture
+from ..salience import SalienceReport, score_salience
 
 try:
     from ...db.connection import get_connection as _db_connection
     _DB_AVAILABLE = True
 except Exception:
     _DB_AVAILABLE = False
+
+
+# The three names `fidelity/__init__.py` re-exports, plus `_normalize_numeric`.
+# That last one is re-exported rather than used here: it's the primitive whose
+# behavior `tests/test_numeric_drift.py` pins, and the test reaches for it through
+# this module because this is where the numeric-drift veto is assembled. Listing
+# it makes the unused-import guard (tests/test_no_unused_imports.py) read the
+# re-export as intentional rather than dead. Nothing in the repo star-imports, so
+# this list is documentation, not machinery.
+__all__ = [
+    "ClaimScore",
+    "PaperFidelityReport",
+    "grade_page",
+    "_normalize_numeric",
+]
 
 
 @dataclass

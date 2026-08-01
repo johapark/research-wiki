@@ -129,9 +129,11 @@ def test_agent_ingest_single_pdf_does_not_batch(wiki, monkeypatch):
         raise RuntimeError("single-path was reached")
     monkeypatch.setattr(agent_cli, "run_ingest", raiser)
     rc = agent_cli.main(["ingest", pdfs[0]])
-    # Generic exception handler returns 2 after printing traceback. What
-    # matters: the batch driver was never entered.
-    assert rc == 2
+    # The RuntimeError falls through to the generic handler, which returns 3
+    # (internal bug) after printing the traceback — not 2, which the contract
+    # reserves for environment failures. What matters here: the batch driver
+    # was never entered.
+    assert rc == 3
     assert calls == []
     assert not (wiki / ".ingest").exists() or not any(
         (wiki / ".ingest").glob("batch-*"))
@@ -156,7 +158,7 @@ def test_agent_ingest_batch_rejects_per_pdf_overrides(wiki, monkeypatch, capsys)
     monkeypatch.setattr(_ingest_batch, "_worker",
                         _stub_worker({p: 0 for p in pdfs}))
     rc = agent_cli.main(["ingest", "--doi", "10.1/x", *pdfs])
-    assert rc == 2
+    assert rc == 1  # bad command line → 1, per the exit-code contract
     err = capsys.readouterr().err
     assert "per-PDF" in err
     assert "--doi" in err
@@ -218,6 +220,73 @@ def test_agent_ingest_resume_no_retry_skips_failures(wiki, monkeypatch):
     assert touched == []
 
 
+@pytest.mark.parametrize("rc", [1, 3])
+def test_resume_default_does_not_retry_deterministic_failures(wiki, monkeypatch, rc, capsys):
+    """A worker subprocess re-runs the same argv every time, so a code-1
+    (bad flag) or code-3 (internal bug) failure would fail identically on
+    retry — `--resume` without `--no-retry` must leave those alone rather
+    than burning a retry on something that can't change. Only code 2
+    (environment error — state.db locked, index missing, provider
+    unreachable) is worth re-running automatically."""
+    pdfs = _make_pdfs(wiki, ["ok.pdf", "boom.pdf"])
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({pdfs[1]: rc}))
+    agent_cli.main(["ingest", *pdfs])
+    batch_dir = _only_batch(wiki)
+
+    touched: list[str] = []
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({}, calls=touched))
+    rc_resume = agent_cli.main(["ingest", "--resume", str(batch_dir)])
+    assert rc_resume == 1  # failed set still non-empty
+    assert touched == []  # not retried
+    assert "boom.pdf" in capsys.readouterr().err
+
+    state = json.loads((batch_dir / "checkpoint.json").read_text())
+    assert pdfs[1] in state["failed"]  # left in place, not silently dropped
+
+
+def test_resume_default_retries_environment_failures(wiki, monkeypatch):
+    """The complement of the above: code 2 is exactly the class `--resume`
+    should still auto-retry."""
+    pdfs = _make_pdfs(wiki, ["ok.pdf", "flaky.pdf"])
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({pdfs[1]: 2}))
+    agent_cli.main(["ingest", *pdfs])
+    batch_dir = _only_batch(wiki)
+
+    touched: list[str] = []
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({}, calls=touched))
+    rc = agent_cli.main(["ingest", "--resume", str(batch_dir)])
+    assert rc == 0
+    assert touched == [pdfs[1]]
+
+
+def test_resume_missing_returncode_stays_retryable(wiki, monkeypatch):
+    """A checkpoint written before this feature existed (or a worker killed by
+    a signal rather than returning normally) has no reliable exit code — that
+    case must keep retrying, matching the pre-existing behavior, rather than
+    silently stop retrying anything without a recognized code."""
+    pdfs = _make_pdfs(wiki, ["ok.pdf", "legacy-failure.pdf"])
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({pdfs[1]: 2}))
+    agent_cli.main(["ingest", *pdfs])
+    batch_dir = _only_batch(wiki)
+
+    # Simulate a pre-existing checkpoint with no `returncode` field.
+    state = json.loads((batch_dir / "checkpoint.json").read_text())
+    del state["failed"][pdfs[1]]["returncode"]
+    (batch_dir / "checkpoint.json").write_text(json.dumps(state))
+
+    touched: list[str] = []
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({}, calls=touched))
+    rc = agent_cli.main(["ingest", "--resume", str(batch_dir)])
+    assert rc == 0
+    assert touched == [pdfs[1]]
+
+
 # ---------- `researchwiki ingest` (digest path) ----------
 
 def test_ingest_digest_workers_opts_into_batch(wiki, monkeypatch):
@@ -259,6 +328,9 @@ def test_ingest_digest_workers_rejects_doi(wiki, monkeypatch):
     pdfs = _make_pdfs(wiki, ["a.pdf", "b.pdf"])
     monkeypatch.setattr(_ingest_batch, "_worker",
                         _stub_worker({p: 0 for p in pdfs}))
+    # The digest path rejects via `parser.error`, so argparse's own 2 escapes
+    # this module. `__main__.main` is where that gets remapped onto the
+    # contract's 1 — see test_exit_codes.py::test_argparse_usage_error_remapped.
     with pytest.raises(SystemExit) as e:
         ingest_cli.main(["-w", "2", "--doi", "10.1/x", *pdfs])
     assert e.value.code == 2
@@ -286,9 +358,11 @@ def test_ingest_digest_resume_replays_subcommand(wiki, monkeypatch):
 # ---------- shared: input validation, CLI misuse ----------
 
 def test_missing_pdf_rejected(wiki):
+    # A path that doesn't exist is a bad command line (1), not a broken
+    # environment (2) — `_resolve_inputs` is validating argv, not the disk.
     with pytest.raises(SystemExit) as e:
         agent_cli.main(["ingest", "/does/not/exist.pdf", "/also/nope.pdf"])
-    assert e.value.code == 2
+    assert e.value.code == 1
 
 
 def test_non_pdf_rejected(wiki, tmp_path):
@@ -297,17 +371,19 @@ def test_non_pdf_rejected(wiki, tmp_path):
     pdfs = _make_pdfs(wiki, ["a.pdf"])
     with pytest.raises(SystemExit) as e:
         agent_cli.main(["ingest", pdfs[0], str(txt)])
-    assert e.value.code == 2
+    assert e.value.code == 1
 
 
-def test_resume_bad_dir_returns_2(wiki, tmp_path):
+def test_resume_bad_dir_returns_1(wiki, tmp_path):
+    # `--resume <not a batch dir>` is a bad command line, so code 1 per the
+    # exit-code contract — not 2, which means the environment is broken.
     rc = agent_cli.main(["ingest", "--resume", str(tmp_path / "nope")])
-    assert rc == 2
+    assert rc == 1
 
 
-def test_agent_ingest_no_args_returns_2(wiki, capsys):
+def test_agent_ingest_no_args_returns_1(wiki, capsys):
     rc = agent_cli.main(["ingest"])
-    assert rc == 2
+    assert rc == 1
     assert "need PDF" in capsys.readouterr().err
 
 

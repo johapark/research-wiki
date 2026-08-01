@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 
 from ..providers.orcid import ORCID_ID_RE, lookup_by_id, search_by_name
 

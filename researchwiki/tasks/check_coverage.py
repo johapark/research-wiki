@@ -89,7 +89,7 @@ def main(argv: list[str]) -> int:
 
     try:
         from ..search import get_default_backend, SearchBackendUnavailable
-    except Exception as e:
+    except ImportError as e:
         print(f"check-coverage: search backend import failed: {e}", file=sys.stderr)
         return 2
     try:
@@ -99,9 +99,11 @@ def main(argv: list[str]) -> int:
         print("check-coverage: search index not built — run `researchwiki reindex`.",
               file=sys.stderr)
         return 2
-    except Exception as e:
-        print(f"check-coverage: search backend probe failed: {e}", file=sys.stderr)
-        return 2
+    # No broad `except Exception` below: SearchBackendUnavailable (an
+    # EnvironmentFailure) is the one recoverable failure mode for a probe query
+    # and it's caught above with an actionable message. Anything else is a bug
+    # in the query path — let it reach the CLI funnel for a traceback and code 3
+    # rather than reporting a real bug as "search backend probe failed".
 
     known = {page_key(p) for p in all_pages()}
     unreferenced = unreferenced_top_hits(backend, md, seed, known, top_n=args.top_n)

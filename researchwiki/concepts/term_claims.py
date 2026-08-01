@@ -18,7 +18,6 @@ from __future__ import annotations
 import re
 
 from ..log import log
-from ..paths import wiki_dir
 
 # Term-slug function is defined in candidates.py — imported to avoid duplication.
 from .candidates import _load_paper_metadata, _term_slug

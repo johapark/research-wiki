@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 
 from ..log import log
 from ..providers.pubmed import retraction_status

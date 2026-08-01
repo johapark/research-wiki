@@ -78,16 +78,26 @@ def _run_reconcile(as_json: bool) -> int:
     scheme version drift."""
     try:
         from ..db.connection import get_connection
-    except Exception as e:
-        print(f"claim-graph reconcile: state.db unreachable — {e}", file=sys.stderr)
+    except ImportError as e:
+        # Only the *import* is guarded here — a failure at this point is a
+        # broken install, not an unreachable DB (the old message said "state.db
+        # unreachable", which described the wrong thing). The DB call itself is
+        # below and raises StateDBUnavailable, which the funnel maps to 2.
+        print(f"claim-graph reconcile: cannot load the DB module — {e}", file=sys.stderr)
         return 2
     edges = open_edges_db()
-    state = get_connection()
     try:
-        stats = reconcile(edges, state)
+        # Inside the try: `get_connection` raises StateDBUnavailable on a locked
+        # or unopenable DB, and that path is reachable enough now that it needs
+        # to not leak `edges`. Previously the try started one line lower, so a
+        # DB failure left the edges DB open on the way out.
+        state = get_connection()
+        try:
+            stats = reconcile(edges, state)
+        finally:
+            state.close()
     finally:
         edges.close()
-        state.close()
 
     if as_json:
         print(json.dumps({

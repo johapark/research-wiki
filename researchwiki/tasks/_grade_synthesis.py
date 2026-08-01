@@ -115,16 +115,26 @@ def main(argv: list[str]) -> int:
 
     path = Path(args.path)
     if not path.exists():
+        # 2, not the contract's usual 1 for a bad argument. This command is one
+        # of the three page gates (`check-grounding`, `grade synthesis`,
+        # `check-coverage`), and for all three exit 1 means "the gate found
+        # something" — the outcome CLAUDE.md tells the author to act on. Folding
+        # a mistyped path into that code would make a workflow that retries on
+        # nonzero loop forever on a filename typo. The three agree on 2 here;
+        # `tests/test_exit_codes.py::test_page_gates_agree_on_missing_path` pins it.
         print(f"researchwiki grade synthesis: file not found: {path}", file=sys.stderr)
         return 2
 
-    try:
-        report = grade_synthesis(
-            path, semantic=not args.no_semantic, fine_grained=args.fine_grained,
-        )
-    except Exception as e:
-        print(f"researchwiki grade synthesis: error: {e}", file=sys.stderr)
-        return 2
+    # No try/except around this call on purpose. An unreachable state.db or an
+    # unbuilt index raises `EnvironmentFailure`, which the CLI funnel reports as
+    # 2 with a clean message; anything else is a bug in the grader and should
+    # reach the funnel's generic handler for a traceback and code 3. This site
+    # used to catch `Exception` and return 2 for both, which reported grader
+    # bugs as "environment error" and hid the traceback that would have
+    # identified them.
+    report = grade_synthesis(
+        path, semantic=not args.no_semantic, fine_grained=args.fine_grained,
+    )
 
     if args.json:
         print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))

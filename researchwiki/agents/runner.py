@@ -16,7 +16,6 @@ explanation in the conversation log for the design rationale.
 
 from __future__ import annotations
 
-import json
 import time
 import uuid
 from pathlib import Path

@@ -17,6 +17,35 @@ def strip_diacritics(s: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
+def slugify_phrase(s: str) -> str:
+    """Canonical page-slug form for a free-text phrase (synthesis titles,
+    concept terms). Shared so a scaffolded page's filename and the edge target
+    that points at it can't drift apart.
+
+    Applies the same two normalizations stem derivation does, in the same
+    order, before reducing to `[a-z0-9-]`:
+
+      1. NFKD-fold and drop combining marks, so an accented letter becomes its
+         ASCII base rather than vanishing (CLAUDE.md's naming rule: `García` →
+         `garcia`). Deleting it instead yielded `garca`.
+      2. Map every Unicode dash (category Pd — en/em dash, non-breaking and
+         figure hyphens) to ASCII `-`. These are common in publisher-set
+         titles, and deleting them welded words together: `k‑mers` → `kmers`,
+         `CRISPR–Cas9` → `crisprcas9`.
+
+    Remaining punctuation is deleted rather than replaced with a separator,
+    which is what keeps possessives and decimals intact (`Claude's` →
+    `claudes`, `PubTator 3.0` → `pubtator-30`). Verified against all 33
+    concept + synthesis pages on disk: no existing slug changes.
+    """
+    s = strip_diacritics(s or "")
+    s = "".join("-" if unicodedata.category(c) == "Pd" else c for c in s)
+    s = s.lower().strip()
+    s = re.sub(r"[^a-z0-9\s\-]", "", s)
+    s = re.sub(r"\s+", "-", s)
+    return re.sub(r"-+", "-", s).strip("-")
+
+
 def first_author_surname(authors: list[str]) -> str:
     """Extract last name from 'First M. Last' or 'F. M. Last' strings."""
     if not authors:

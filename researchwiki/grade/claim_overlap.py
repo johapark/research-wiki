@@ -16,7 +16,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 try:
-    import numpy as np
     _NUMPY = True
 except ImportError:
     _NUMPY = False

@@ -21,14 +21,12 @@ and `attach.attach_after_ingest()` (attaches a paper to existing hubs).
 
 from __future__ import annotations
 
-import json
 import re
-from collections import defaultdict
 from math import sqrt
 from pathlib import Path
 
 from ..log import log
-from ..paths import wiki_dir
+from ..stems import slugify_phrase
 from ..wiki import read_page, strip_non_prose
 
 
@@ -234,13 +232,11 @@ def _label_for(pages: int, categories: int, *,
     return "candidate"
 
 def _term_slug(term: str) -> str:
-    """Canonical slug for a detected term — same shape `_slugify` produces
-    for hub filenames, so a scaffolded page's slug == the edge target."""
-    s = term.lower().strip()
-    s = re.sub(r"[^a-z0-9\s\-]", "", s)
-    s = re.sub(r"\s+", "-", s)
-    s = re.sub(r"-+", "-", s).strip("-")
-    return s
+    """Canonical slug for a detected term — same shape `tasks.synthesize.
+    _slugify` produces for hub filenames, so a scaffolded page's slug == the
+    edge target. Both now delegate to one shared helper rather than keeping
+    two copies in sync by hand."""
+    return slugify_phrase(term)
 
 
 # Suffixes where a trailing "s" is part of the stem, not a plural marker —
@@ -1060,12 +1056,19 @@ def _persist_regex_only_edges(regex_only: list[dict], claim_rows: list[dict]) ->
         log(f"regex instantiates persistence skipped: {type(e).__name__}: {e}",
             tag="concepts")
 
-def n_bridge_candidates() -> int:
+def n_bridge_candidates() -> int | None:
     """Fast count of bridge-tier candidates (span ≥ 2). Used by `status`.
 
-    Silent on any error — status must never fail because a helper hiccupped.
+    Never raises — `status` must not fail because a helper hiccupped. But it
+    returns **None**, not 0, when the scan breaks: CLAUDE.md makes the count
+    `status` prints the trigger for scaffolding a hub, and `status` prints
+    nothing at 0, so reporting a crash as 0 made "the scan died" indistin-
+    guishable from "nothing to do" — the trigger would silently stop firing.
+    None lets the caller say so out loud. The reason still goes to the log.
     """
     try:
         return len(collect_candidates(bridges_only=True))
-    except Exception:
-        return 0
+    except Exception as e:
+        log(f"bridge-candidate scan failed: {type(e).__name__}: {e}",
+            tag="concepts")
+        return None

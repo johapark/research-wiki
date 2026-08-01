@@ -37,7 +37,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .walk import all_pages
 
 
 # Contract thresholds. Deliberately conservative — a hub with 39 authored

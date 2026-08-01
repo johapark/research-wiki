@@ -18,12 +18,10 @@ sentence-transformers model.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
 import sqlite3
-import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -33,13 +31,7 @@ import numpy as np
 
 from ..db import get_connection
 from ..paths import wiki_root
-from .fixture import (
-    ExpectedClaim,
-    ExpectedPage,
-    Importance,
-    NegativeAnchor,
-    RetrievalFixture,
-)
+from .fixture import Importance, RetrievalFixture
 from ..log import log
 
 

@@ -16,9 +16,7 @@ Both share the term↔claim substrate in `term_claims`.
 
 from __future__ import annotations
 
-import json
 import re
-import sys
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
@@ -31,7 +29,6 @@ from ..fsatomic import update_locked, write_text_atomic
 from ..wiki import commit_page, find_stem_collision, read_page, read_pages, strip_non_prose
 # Reuse the synthesis scaffolder's slug + dominant-category helpers.
 from ..tasks.synthesize import _dominant_category, _slugify
-from .candidates import _term_slug
 from .term_claims import (
     _matching_claims,
     _page_mentions,

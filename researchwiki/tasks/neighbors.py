@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import json as _json
 import sys
-from pathlib import Path
 
 from ..log import log
 from ..paths import wiki_dir
@@ -181,7 +180,7 @@ def main(argv: list[str]) -> int:
         except ValueError:
             print(f"neighbors: invalid --year {args.year!r}; "
                   f"expected YYYY or YYYY-YYYY", file=sys.stderr)
-            return 2
+            return 1
 
     provider = get_default_provider()
     article = ScholarlyArticle(doi=doi)

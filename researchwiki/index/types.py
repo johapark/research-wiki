@@ -12,9 +12,16 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from ..errors import EnvironmentFailure
 
-class SearchBackendUnavailable(RuntimeError):
-    """Raised when the index doesn't exist yet (e.g., pre-reindex first run)."""
+
+class SearchBackendUnavailable(EnvironmentFailure):
+    """Raised when the index doesn't exist yet (e.g., pre-reindex first run).
+
+    `EnvironmentFailure` (still a `RuntimeError`, so existing handlers are
+    unaffected) is what makes this exit 2 rather than 3 when no caller catches
+    it — the many callers that *do* catch it to degrade gracefully keep working.
+    """
 
 
 @dataclass

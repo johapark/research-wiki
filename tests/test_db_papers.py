@@ -86,8 +86,9 @@ def test_json_output(seeded_db, capsys):
     assert {r["stem"] for r in data} == {"a-2024-x", "b-2026-y"}
 
 
-def test_bad_year_exits_2(seeded_db, capsys):
-    assert _run(["papers", "--year", "abc"]) == 2
+def test_bad_year_exits_1(seeded_db, capsys):
+    # Malformed --year is a user-input error (1), not an environment one (2).
+    assert _run(["papers", "--year", "abc"]) == 1
 
 
 def test_no_match_tsv_exits_1(seeded_db, capsys):

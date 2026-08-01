@@ -37,12 +37,10 @@ Function contract:
 
 from __future__ import annotations
 
-import sys
 from typing import Callable
 from ...log import log
 
 try:
-    import numpy as np
     _NUMPY_AVAILABLE = True
 except ImportError:
     _NUMPY_AVAILABLE = False

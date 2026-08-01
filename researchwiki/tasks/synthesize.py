@@ -30,12 +30,12 @@ import argparse
 import re
 from collections import Counter
 from datetime import date
-from pathlib import Path
 
 from ..categories import PAGE_TYPE_DIRS
 from ..fsatomic import write_text_atomic
 from ..log import append_log_md, log
 from ..paths import wiki_dir
+from ..stems import slugify_phrase
 from ..wiki import commit_page, find_stem_collision, read_pages
 
 
@@ -60,11 +60,11 @@ def _dominant_category(referenced: list[str]) -> str:
 
 
 def _slugify(title: str) -> str:
-    s = title.lower().strip()
-    s = re.sub(r"[^a-z0-9\s\-]", "", s)
-    s = re.sub(r"\s+", "-", s)
-    s = re.sub(r"-+", "-", s).strip("-")
-    return s
+    """Page slug for a synthesis title. Thin alias over the shared helper —
+    `concepts.candidates._term_slug` must produce byte-identical output for the
+    same input, or a scaffolded hub's filename stops matching the edge that
+    points at it. Sharing one implementation is what enforces that."""
+    return slugify_phrase(title)
 
 
 def _resolve_paper(stem_or_link: str, known: dict[str, str]) -> str | None:

@@ -257,22 +257,23 @@ def _comparator_check(items: list[FixtureItem], page_body: str) -> AxisReport:
     """
     # A relation with a blank/whitespace comparator can't be comparator-checked
     # (and `comparator.split()[0]` below would IndexError on it), so exclude it.
-    relational = [it for it in items if it.relation and it.relation.comparator.split()]
+    # Carry the relation alongside the item so the loops below don't have to
+    # re-narrow `it.relation` away from None on every access — the filter here
+    # already guarantees it. (This used to need an `assert rel is not None` in
+    # each loop, which `python -O` strips.)
+    relational = [(it, it.relation) for it in items
+                  if it.relation and it.relation.comparator.split()]
     # Collect ALL distinct comparator first-words across the fixture so we can
     # check whether an OTHER fixture's comparator is closer to a given ratio
     # — a useful proxy for "page paired ratio with the wrong baseline."
     all_comparators: set[str] = set()
-    for it in relational:
-        rel = it.relation
-        assert rel is not None
+    for _it, rel in relational:
         first = re.sub(r"[^\w-].*$", "", rel.comparator.split()[0])
         if first:
             all_comparators.add(first.lower())
 
     verdicts: list[ItemVerdict] = []
-    for it in relational:
-        rel = it.relation
-        assert rel is not None
+    for it, rel in relational:
         ratio_pat = re.compile(re.escape(rel.ratio), re.IGNORECASE)
         comparator_first = re.sub(
             r"[^\w-].*$", "", rel.comparator.split()[0]

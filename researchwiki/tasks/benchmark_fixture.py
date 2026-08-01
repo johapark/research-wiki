@@ -407,8 +407,11 @@ def main(argv: list[str]) -> int:
         return 0
 
     if not args.stem:
+        # Nothing to score — a missing positional, so code 1. The sibling sites
+        # below already return 1 for `--compare-config` without `--repeat` and
+        # for an unknown page.
         parser.print_help(sys.stderr)
-        return 2
+        return 1
 
     try:
         fixture = load_fixture(args.stem)
@@ -440,7 +443,14 @@ def main(argv: list[str]) -> int:
         return _run_retrieval_fixture(fixture, args)
 
     # ── from here, content-coverage path (the original behavior) ─────
-    assert isinstance(fixture, ContentFixture)
+    # A real precondition, not a narrowing hint: `fixture` comes from parsing a
+    # YAML file, so a third fixture type would reach here and be scored by the
+    # wrong path. Raised rather than asserted so `python -O` can't strip it.
+    if not isinstance(fixture, ContentFixture):
+        raise TypeError(
+            f"unsupported fixture type {type(fixture).__name__}; the "
+            "content-coverage path needs a ContentFixture"
+        )
 
     if args.llm:
         _warn_if_judge_matches_author()
@@ -456,7 +466,7 @@ def main(argv: list[str]) -> int:
                 "each arm needs multiple replicates for the paired diff.",
                 file=sys.stderr,
             )
-            return 2
+            return 1
         if args.page:
             print(
                 "warning: --compare-config ignores --page (each arm re-drafts "
@@ -576,7 +586,7 @@ def main(argv: list[str]) -> int:
         page_path = Path(args.page)
         if not page_path.exists():
             print(f"error: page not found: {page_path}", file=sys.stderr)
-            return 2
+            return 1
     else:
         try:
             page_path = _resolve_page_path(args.stem)

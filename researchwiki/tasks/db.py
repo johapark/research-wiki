@@ -121,7 +121,7 @@ def _cmd_query(args) -> int:
         sql = args.sql
     else:
         print("researchwiki db query: provide a SQL string or --file FILE", file=sys.stderr)
-        return 2
+        return 1
 
     # Fail early with a helpful message when the DB doesn't exist yet —
     # `mode=ro` refuses to auto-create, and `get_connection()`'s side-effect
@@ -210,7 +210,7 @@ def _cmd_papers(args) -> int:
         else:
             print(f"researchwiki db papers: --year expects YYYY or YYYY-YYYY (got {y!r})",
                   file=sys.stderr)
-            return 2
+            return 1
     if args.category:
         where.append("category = ?")
         params.append(args.category)

@@ -572,20 +572,24 @@ def main(argv: list[str]) -> int:
         print()
 
     # --- concept-hub candidates (opportunity signal; not a defect)
-    try:
-        from ..concepts import TRIAGE_THRESHOLD, n_bridge_candidates
-        n_bridges = n_bridge_candidates()
-        if n_bridges >= TRIAGE_THRESHOLD:
-            print(f"Concept-hub candidates: {n_bridges} bridge term(s) — likely dominated by "
-                  "extraction noise. Batch-triage with "
-                  "`researchwiki candidates concepts --triage` (--dry-run to preview).")
-            print()
-        elif n_bridges > 0:
-            print(f"Concept-hub candidates: {n_bridges} bridge term(s) with no hub yet "
-                  "(`researchwiki candidates concepts --bridges`)")
-            print()
-    except Exception:
-        pass
+    # No outer try/except here: `n_bridge_candidates` already swallows its own
+    # failures and reports them as None, so wrapping it again would only hide a
+    # bug in these three prints.
+    from ..concepts import TRIAGE_THRESHOLD, n_bridge_candidates
+    n_bridges = n_bridge_candidates()
+    if n_bridges is None:
+        print("Concept-hub candidates: scan failed — count unknown "
+              "(`researchwiki candidates concepts --bridges` for the error)")
+        print()
+    elif n_bridges >= TRIAGE_THRESHOLD:
+        print(f"Concept-hub candidates: {n_bridges} bridge term(s) — likely dominated by "
+              "extraction noise. Batch-triage with "
+              "`researchwiki candidates concepts --triage` (--dry-run to preview).")
+        print()
+    elif n_bridges > 0:
+        print(f"Concept-hub candidates: {n_bridges} bridge term(s) with no hub yet "
+              "(`researchwiki candidates concepts --bridges`)")
+        print()
 
     print("For the full citation-graph report run: researchwiki audit")
     return 0

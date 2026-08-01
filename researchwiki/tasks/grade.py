@@ -157,11 +157,13 @@ def _run_paper(argv: list[str]) -> int:
             include_salience=not args.no_salience,
         )
     except FileNotFoundError as e:
+        # A missing PDF or page for the given stem — the argument was wrong.
         print(f"researchwiki grade paper: {e}", file=sys.stderr)
         return 1
-    except Exception as e:
-        print(f"researchwiki grade paper: error: {e}", file=sys.stderr)
-        return 2
+    # No broad `except Exception: return 2` below it: state.db / index failures
+    # raise `EnvironmentFailure` and the funnel reports those as 2, while a bug
+    # in the grader now gets code 3 and a traceback instead of being mislabelled
+    # an environment error.
 
     if args.json:
         print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
@@ -406,4 +408,4 @@ def main(argv: list[str]) -> int:
 
     print(f"researchwiki grade: unknown target '{target}'. "
           f"Available: paper, synthesis, regression", file=sys.stderr)
-    return 2
+    return 1

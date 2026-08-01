@@ -11,7 +11,6 @@ from __future__ import annotations
 import sys
 from datetime import date
 
-from .paths import wiki_root
 
 
 def log(msg: str, tag: str = "ingest") -> None:

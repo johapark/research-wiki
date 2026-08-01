@@ -390,6 +390,8 @@ CLI wrappers around PubMed / bioRxiv / ORCID. Usage, YAML-recording rules, and w
 | **2** | Environment error: missing index, provider unreachable, disk unreadable. |
 | **3** | Reserved: internal bug / uncaught exception. |
 
+**Page-gate exception.** For the three page gates — `check-grounding`, `grade synthesis`, `check-coverage` — **1 means "the gate found something"** (the review-triggering outcome), so bad input (missing page) is **2**, not 1. All three agree; don't "align" one to the table above (`tests/test_exit_codes.py::test_page_gates_agree_on_missing_path` pins it).
+
 ---
 
 ## Search — full-text + See-Also

@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..fsatomic import write_text_atomic
-from ..paths import inbox_dir, papers_dir, wiki_dir, wiki_root
+from ..paths import inbox_dir, papers_dir, wiki_dir
 
 
 # Promotion gates — all must pass.

@@ -85,7 +85,7 @@ def _cmd_ingest(args) -> int:
     if not args.pdfs:
         print("researchwiki agent ingest: need PDF path(s) (or --resume BATCH_DIR)",
               file=sys.stderr)
-        return 2
+        return 1
 
     # Resolve n_drafts once, before batch reconstruction or single-PDF run:
     # CLI `-n` wins; else the models config's `ingest.n_drafts`; else 1 (single
@@ -113,11 +113,11 @@ def _cmd_ingest(args) -> int:
                   file=sys.stderr)
             print("  fix: run these PDFs one at a time, or drop the flags.",
                   file=sys.stderr)
-            return 2
+            return 1
         if args.auto_promote and args.force_sandbox:
             print("researchwiki agent ingest: --auto-promote and --force-sandbox "
                   "are mutually exclusive", file=sys.stderr)
-            return 2
+            return 1
         from . import _ingest_batch
         return _ingest_batch.new_batch(
             args.pdfs, ["agent", "ingest"],
@@ -131,7 +131,7 @@ def _cmd_ingest(args) -> int:
     if args.auto_promote and args.force_sandbox:
         print("researchwiki agent ingest: --auto-promote and --force-sandbox are mutually exclusive",
               file=sys.stderr)
-        return 2
+        return 1
     if args.auto_promote:
         promote_mode = "always"
     elif args.force_sandbox:
@@ -211,10 +211,13 @@ def _cmd_ingest(args) -> int:
         )
         return 2
     except Exception as e:
+        # Nothing more specific matched, and we're already printing a stack
+        # trace — that's the definition of code 3 (internal bug), not an
+        # environment failure the caller could act on.
         print(f"researchwiki agent ingest: error: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
-        return 2
+        return 3
 
     print()
     log(f"attempt_id   = {ctx.attempt_id}", tag="agent")

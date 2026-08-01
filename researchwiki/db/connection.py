@@ -25,6 +25,43 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+from ..errors import EnvironmentFailure
+
+
+class StateDBUnavailable(EnvironmentFailure):
+    """state.db couldn't be opened, or its schema bootstrap failed.
+
+    `get_connection` has ~70 call sites and almost none of them guard it, so
+    before this existed a locked DB, a full disk, or an unreadable XDG data dir
+    surfaced as a bare `sqlite3.OperationalError` — which the CLI funnel could
+    only classify as exit 3, "internal bug". This makes it 2, "look at the
+    machine", which is what it always was.
+
+    Scope is deliberately narrow: only the sqlite3 errors that describe the
+    *machine* map here. `sqlite3.Error` is the root of the whole hierarchy and
+    includes `ProgrammingError` (wrong SQL / wrong binding count),
+    `InterfaceError` (API misuse), `IntegrityError` and `DataError` — all of
+    which mean our code is wrong, not the disk. Catching those here would
+    report a bug as an environment error, which is the exact inversion
+    `EnvironmentFailure` exists to remove; `_BUG_SHAPED_SQLITE_ERRORS` keeps
+    them out.
+    """
+
+
+# sqlite3 exceptions that indicate a defect in *our* SQL or API use rather than
+# a problem with the machine. Re-raised unwrapped by `get_connection` so they
+# reach the CLI funnel's generic handler (exit 3 + traceback), which is what
+# actually helps diagnose them. Note these are all `sqlite3.DatabaseError`
+# subclasses except InterfaceError, so they must be caught *before* the broader
+# DatabaseError arm.
+_BUG_SHAPED_SQLITE_ERRORS = (
+    sqlite3.ProgrammingError,
+    sqlite3.InterfaceError,
+    sqlite3.IntegrityError,
+    sqlite3.DataError,
+    sqlite3.InternalError,
+)
+
 
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -108,14 +145,54 @@ def get_connection(path: Path | str | None = None) -> sqlite3.Connection:
     set it explicitly here so the intent survives if a caller ever opens
     the DB with an explicit `timeout=0`.
     """
-    target = Path(path) if path is not None else db_path()
-    conn = sqlite3.connect(str(target))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA busy_timeout = 5000")
-    conn.execute("PRAGMA foreign_keys = ON")
-    init_schema(conn)
+    # `db_path()` is inside the guard, not before it: it does `mkdir(parents=True)`
+    # under ~/.local/share and may `shutil.copy2` the legacy DB, so "can't create
+    # the data dir" and "disk filled during migration" originate *here*. Those are
+    # the most likely failures on a fresh machine and the most clearly
+    # environmental things in this module — leaving them outside meant the guard
+    # covered the easy cases and missed the motivating ones.
+    target: Path | None = None
+    conn: sqlite3.Connection | None = None
+    try:
+        target = Path(path) if path is not None else db_path()
+        conn = sqlite3.connect(str(target))
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA foreign_keys = ON")
+        init_schema(conn)
+    except _BUG_SHAPED_SQLITE_ERRORS:
+        # Our SQL or our API use is wrong. Let it reach the funnel as exit 3
+        # with a traceback rather than mislabelling it an environment error.
+        _close_quietly(conn)
+        raise
+    except (sqlite3.DatabaseError, OSError) as e:
+        # DatabaseError covers OperationalError (locked / unopenable / disk full
+        # / readonly) and a bare DatabaseError ("file is not a database" —
+        # corruption); OSError covers the db_path() filesystem work above.
+        # Bug-shaped DatabaseError subclasses were already re-raised.
+        _close_quietly(conn)
+        where = f" at {target}" if target is not None else ""
+        raise StateDBUnavailable(f"cannot open state.db{where}: {e}") from e
     return conn
+
+
+def _close_quietly(conn: sqlite3.Connection | None) -> None:
+    """Best-effort close for a half-initialized connection.
+
+    `get_connection` opens the connection before running the schema bootstrap,
+    so a failure in `init_schema` used to leave it open. CPython's refcounting
+    collects it soon after, but "soon" is long enough to hold a WAL lock that
+    the sibling workers of a 4-way `agent ingest` batch then contend on.
+    Swallows its own errors — we're already unwinding a failure and the
+    original exception is the one worth propagating.
+    """
+    if conn is None:
+        return
+    try:
+        conn.close()
+    except Exception:
+        pass
 
 
 def init_schema(conn: sqlite3.Connection) -> None:

@@ -12,7 +12,6 @@ import time
 from pathlib import Path
 
 from ...paths import ingest_dir
-from ...wiki import strip_non_prose
 from .walk import extract_links, page_key
 
 

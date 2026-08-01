@@ -87,14 +87,14 @@ def _resolve_inputs(paths: list[str]) -> list[str]:
         path = Path(p).expanduser().resolve()
         if not path.exists():
             print(f"ingest-batch: not found: {p}", file=sys.stderr)
-            sys.exit(2)
+            sys.exit(1)
         if path.suffix.lower() != ".pdf":
             print(f"ingest-batch: not a PDF: {p}", file=sys.stderr)
-            sys.exit(2)
+            sys.exit(1)
         out.append(str(path))
     if not out:
         print("ingest-batch: no PDFs given", file=sys.stderr)
-        sys.exit(2)
+        sys.exit(1)
     seen: set[str] = set()
     return [x for x in out if not (x in seen or seen.add(x))]
 
@@ -115,6 +115,28 @@ def _worker(pdf_path: str, batch_dir: Path, subcommand: list[str],
         proc = subprocess.run(cmd, stdout=log_fp, stderr=subprocess.STDOUT, check=False)
     status = "completed" if proc.returncode == 0 else "failed"
     return {"input": pdf_path, "status": status, "returncode": proc.returncode}
+
+
+def _should_retry(record: dict) -> bool:
+    """Decide whether a failed PDF is worth re-running on `--resume`.
+
+    Each worker is a fresh `researchwiki <subcommand> <pdf>` subprocess with
+    the same argv every time, so its exit code (the contract in CLAUDE.md's
+    Exit-code contract section) tells us whether a retry can plausibly change
+    anything:
+      1  bad argv — same flags, same failure, every time. Not retryable.
+      2  environment error (state.db locked, index missing, provider
+         unreachable) — exactly the transient class a retry might clear.
+      3  internal bug — deterministic given the same input; a retry hits the
+         same code path. Not retryable (unlike 2, nothing external caused it).
+    A missing/unrecognized code (older checkpoint written before this existed,
+    or the worker was killed by a signal rather than returning normally) stays
+    retryable — that's the pre-existing behavior, and a signal kill (OOM,
+    Ctrl-C forwarded to the child) is itself the kind of transient condition
+    a retry is meant to survive.
+    """
+    rc = record.get("returncode")
+    return rc not in (1, 3)
 
 
 # Regexes matching lines the per-worker subprocess emits during ingest.
@@ -229,7 +251,11 @@ def _run_batch(batch_dir: Path, pending: list[str], workers: int,
     state.setdefault("completed", {})
     state.setdefault("failed", {})
 
-    total = len(state["completed"]) + len(pending)
+    # `failed` is in the denominator because `resume_batch` can now hold back
+    # non-retryable failures (exit 1 / 3) instead of queueing them. Without it
+    # the `[i/N]` line would silently start counting a smaller batch than the
+    # user submitted, which reads as "some inputs vanished".
+    total = len(state["completed"]) + len(state["failed"]) + len(pending)
     done_before = len(state["completed"])
     if not pending:
         print(f"nothing pending ({done_before}/{total} already complete)")
@@ -349,28 +375,48 @@ def resume_batch(batch_dir: Path, no_retry: bool,
     passthrough flags so semantics don't drift across a restart.
 
     Retried failures re-enter the queue (dropped from `failed` so the retry
-    either promotes to `completed` or overwrites with a fresh failure).
-    `--no-retry` leaves failures where they are.
+    either promotes to `completed` or overwrites with a fresh failure) —
+    but only when `_should_retry` judges the recorded exit code worth
+    re-running (code 2, environment error; not 1 or 3, both deterministic
+    given the same argv). `--no-retry` overrides this and leaves every
+    failure where it is, retryable or not.
     """
+    # Both of these mean the `--resume` argument points somewhere that isn't a
+    # batch directory — a bad command line, not a broken environment.
     if not batch_dir.is_dir():
         print(f"ingest-batch: not a directory: {batch_dir}", file=sys.stderr)
-        return 2
+        return 1
     plan_path = batch_dir / "plan.json"
     if not plan_path.exists():
         print(f"ingest-batch: no plan.json in {batch_dir}", file=sys.stderr)
-        return 2
+        return 1
     plan = json.loads(plan_path.read_text())
     state = _read_checkpoint(batch_dir)
     completed = set((state.get("completed") or {}).keys())
     failed = set((state.get("failed") or {}).keys())
 
     pending: list[str] = []
+    skipped_non_retryable: list[str] = []
     for pdf in plan["inputs"]:
         if pdf in completed:
             continue
-        if pdf in failed and no_retry:
-            continue
+        if pdf in failed:
+            if no_retry:
+                continue
+            if not _should_retry(state["failed"][pdf]):
+                skipped_non_retryable.append(pdf)
+                continue
         pending.append(pdf)
+
+    if skipped_non_retryable:
+        print(f"ingest-batch: {len(skipped_non_retryable)} failure(s) not retried "
+              f"— exit code 1 (bad input) or 3 (internal bug), so the same argv "
+              f"would fail the same way. Fix the cause, then re-run the PDF "
+              f"directly to see the error:", file=sys.stderr)
+        for pdf in skipped_non_retryable:
+            print(f"    · {Path(pdf).name}  "
+                  f"(see {(batch_dir / f'worker-{Path(pdf).stem}.log').name})",
+                  file=sys.stderr)
 
     if not no_retry and failed:
         state.setdefault("failed", {})

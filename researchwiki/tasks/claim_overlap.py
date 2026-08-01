@@ -18,7 +18,10 @@ Usage:
   researchwiki claim-overlap <stem> --json
 
 Exit codes: 0 = ran (including "no candidates"); 1 = unknown stem; 2 = env
-(DB/bi-encoder unreachable — nothing to do).
+(state.db or the search index unreachable — nothing to do). A missing
+bi-encoder dependency is *not* 2: it's an ImportError, which propagates to the
+CLI funnel as 3 with a traceback, because a broken install needs the traceback
+to diagnose rather than a one-line "environment error".
 """
 
 from __future__ import annotations
@@ -320,11 +323,10 @@ def main(argv: list[str]) -> int:
     except LookupError:
         print(f"researchwiki claim-overlap: no wiki page for stem `{args.stem}`", file=sys.stderr)
         return 1
-    except Exception as e:
-        # DB or bi-encoder unreachable (numpy/torch import, embedding load, or
-        # state.db access) — environment failure per the exit-code contract.
-        print(f"researchwiki claim-overlap: {type(e).__name__}: {e}", file=sys.stderr)
-        return 2
+    # Deliberately no `except Exception: return 2` here. state.db and the search
+    # index raise `EnvironmentFailure`, which the funnel already reports as 2;
+    # an ImportError on numpy/torch is a broken install, which the funnel's
+    # code-3 traceback diagnoses far better than a one-line message would.
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))

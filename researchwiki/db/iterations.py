@@ -11,7 +11,6 @@ import json
 import sqlite3
 import time
 from dataclasses import dataclass
-from typing import Any
 
 from .connection import get_connection
 

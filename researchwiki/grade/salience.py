@@ -51,7 +51,7 @@ same posture as `fidelity.BM25_FLOOR`. Calibrate against
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
 # Direct (non-lazy) imports work now that `benchmark/__init__.py` no longer

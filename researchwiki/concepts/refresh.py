@@ -11,12 +11,10 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
-from ..log import append_log_md, log
 from ..paths import wiki_dir
 from ..fsatomic import write_text_atomic
-from ..wiki import commit_page, read_page, read_pages
+from ..wiki import commit_page, read_page
 from .term_claims import _best_claim_slug
 
 # Edge statuses that must not resurface into a refreshed hub: a human-rejected
@@ -36,8 +34,6 @@ def refresh_concept(slug: str, *, dry_run: bool = False) -> dict:
     Returns a stats dict with counts + the draft path. When no typed edges
     span ≥2 categories, returns with `n_bridges_found=0` and writes no file.
     """
-    from math import inf
-    from collections import defaultdict
 
     cdir = wiki_dir() / "concepts"
     hub_path = cdir / f"{slug}.md"

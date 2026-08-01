@@ -224,4 +224,4 @@ def main(argv: list[str]) -> int:
 
     print(f"researchwiki candidates: unknown target '{target}'. "
           f"Available: concepts, synthesis", file=sys.stderr)
-    return 2
+    return 1

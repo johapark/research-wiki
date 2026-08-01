@@ -589,7 +589,6 @@ def main(argv: list[str]) -> int:
                 f"{sorted(content_categories())}. Omit --category to auto-classify."
             )
 
-    import sys
 
     successes: list[Path] = []
     skipped: list[str] = []
