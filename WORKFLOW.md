@@ -290,6 +290,120 @@ final go/no-go" — keeps load-bearing pages from drifting silently.
 
 ---
 
+## Migrating an existing corpus
+
+The ingest above starts from a PDF. If you already have LLM-generated paper pages
+— from an older release of this framework, or a simpler "PDF in → summary page
+out" generator — `researchwiki migrate` brings them in *without* re-authoring the
+prose. Re-ingesting would overwrite the text you migrated in order to keep.
+
+Scope, and it's enforced rather than advised: **one paper-derived page per PDF,
+and the PDF must be present.** A page that isn't one-paper-shaped has nothing to
+extract claims from and no PDF to grade against, so `migrate` blocks it instead
+of landing an unciteable stub. Arbitrary note vaults don't belong here.
+
+### Why heading names decide everything
+
+Claim extraction is a **markdown parse, not a PDF read**. `parse_claims` splits
+the body and looks up four *exact* H2 names from `grade.parser.SECTION_KEYS`:
+
+```
+## Key Contributions    ## Results    ## Limitations    ## Methodology and Architecture
+```
+
+A page whose findings live under `## Findings` yields **zero claims**. It then
+can't be cited (no `[[stem#slug]]` anchor exists), `grade synthesis` can't verify
+a citation to it — and `lint`'s `ungraded_papers` can't see it either, because
+that check JOINs `claims` and a page with none is invisible. Meanwhile
+`backfill hook` succeeds on it and everything else stays quiet. That combination
+is why the command exists, and why `lint` grew `zero_claim_papers`.
+
+So `migrate` normalizes headings **before** the first commit. That ordering isn't
+stylistic: `claim_slug` is content-addressed on `(section, normalized text)`, and
+`db rebuild` NULLs every grader column whose claim text changed. Rewrite a graded
+page's body and you've silently thrown away its grading, with no way to mark
+claims graded again short of re-running the grader.
+
+### The phases
+
+| Phase | Writes | Cost |
+|---|---|---|
+| `migrate preflight [src]` | nothing | local; hard-fails if the embedding model is unavailable |
+| `migrate inspect <src>` | run dir only | local; per-page classification |
+| `migrate apply [--dry-run]` | `wiki/` + `papers/` | **zero tokens** |
+| `migrate verify` | nothing | local |
+
+```bash
+researchwiki migrate preflight ~/old-wiki/pages
+researchwiki migrate inspect  ~/old-wiki/pages --category compbio
+researchwiki migrate apply --dry-run
+diff -u ~/old-wiki/pages/<name>.md .ingest/migrate-*/staged/<stem>.md
+researchwiki migrate apply
+researchwiki db rebuild && researchwiki reindex
+researchwiki migrate verify
+researchwiki grade regression --missing-only --no-salience    # free; the long run
+# ------------------------- token boundary -------------------------
+researchwiki backfill doi && researchwiki backfill keywords
+researchwiki backfill hook -w 6
+researchwiki db rebuild && researchwiki reindex
+```
+
+Everything above the boundary costs **no API tokens** — including grading, which
+is pypdfium2 + Tantivy BM25 + a local CPU bi-encoder. For ~200 papers budget
+20–40 minutes of local CPU and ~76 MB of `.grade-cache`, against roughly $0.30 of
+Haiku calls for hooks below the line. Cross-linking (`claim-overlap`, ~200–2000
+judge calls at the `--top 10` default) is the dominant cost and is deliberately
+*not* a phase — run it later, `--top 4` for a bulk import.
+
+`preflight` refuses to proceed when the local embedding model is missing. The BGE
+weights aren't installed by `pip install -e .` — they're a ~133 MB HuggingFace
+download on first use — and when they're absent grading degrades to BM25-only
+*silently*, which would mean re-grading every paper afterwards.
+
+### Reading `inspect` before you apply
+
+```
+## fixable (1)
+
+- doe2023.md
+    stem   doe-2023-deep-mutational-scanning-of-a-receptor
+    claims 0 → 2
+    graded renames: Key Findings→Key Contributions, Benchmarks→Results
+```
+
+`claims N → M` is the number that matters: the page is parsed as-is and again
+after the rewrite, in memory. `0 → 2` means the rename is doing real work. A
+`type: paper` page still reading `0 → 0` gets blocked rather than imported.
+
+Verdicts are `compliant` (no rewrite needed) · `fixable` (confident renames) ·
+`needs-human` (ambiguous heading, or frontmatter that disagrees with itself) ·
+`blocked` (no frontmatter, no PDF, not one-paper-shaped) · `duplicate` (DOI
+already in the corpus).
+
+Two things `migrate` refuses to guess. **Ambiguous headings**: mapping
+`## Results and Discussion` onto `Results` imports discussion prose as graded
+claims, and renaming `## References` to `Related Papers` fills it with entries
+that aren't wikilinks — both reported, neither rewritten without
+`--accept-ambiguous`. **Conflicting frontmatter**: `year: 2024` alongside
+`date: 2023-11-02` is a real disagreement, so it goes to `needs-human` rather
+than a coin flip. Required values (`title`/`authors`/`year`) are never invented;
+`doi`/`venue` are flagged for the lookup path, which is `backfill doi`.
+
+### Rollback
+
+`wiki/` and `papers/` are gitignored, so git can't undo a migration. Four layers
+instead: the source corpus is never mutated (rewrites happen on copies under
+`.ingest/migrate-<ts>/staged/`), `--dry-run` writes only there, `apply` tars any
+target it would overwrite into the run dir, and the journal records each
+completed step so `apply` resumes rather than redoing. That run directory is the
+rollback path and it lives under gitignored `.ingest/` — move it somewhere durable
+for a large run.
+
+Full procedure, failure-mode table and the manual fallback:
+[`prompts/migration-backfill.md`](./prompts/migration-backfill.md).
+
+---
+
 ## Querying the wiki
 
 Three retrieval modes via `researchwiki search`:
@@ -833,7 +947,8 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `attach <category/stem> <file>` | Attach a supplementary file to an existing page; copies into `papers/{stem}.supp/`, updates YAML. |
 | `neighbors <doi-or-stem>` | S2 citation-graph neighbors. `--mode references\|citations\|recommendations\|all`, `--year`, `--needs-ingest`. Structured fields only. |
 | `evolve <category/stem>` | Neighboring synthesis pages to edit in light of a paper → proposals in `.ingest/{stem}-evolution-proposals/`. |
-| `backfill <keywords\|doi>` | One-shot: populate the named field on paper pages predating it (keywords via LLM; doi via Semantic Scholar → Crossref). |
+| `backfill <hook\|keywords\|doi>` | One-shot: populate the named field on existing pages (hook + keywords via LLM from page prose; doi via Semantic Scholar → Crossref with a sanity check). |
+| `migrate <preflight\|inspect\|apply\|verify>` | Bulk-import one-paper-per-PDF markdown from an older release or a simpler LLM wiki. Zero tokens; normalizes H2 headings and frontmatter keys before committing so claim extraction works. See `prompts/migration-backfill.md`. |
 | `synthesize --title [...] [--papers]` | Scaffold `wiki/synthesis/{slug}.md`. Idea/reference pages are manual. |
 | `candidates <concepts\|synthesis>` | Surface opportunity signals: un-scaffolded concept hubs (concepts) or uncovered paper clusters warranting a synthesis page (synthesis). |
 | `reindex [--no-semantic]` | Rebuild Tantivy + semantic index from `wiki/`. |
@@ -862,6 +977,8 @@ so an Obsidian vault opened there can browse it).
 | Dropped ≥2 PDFs in `inbox/` | `researchwiki agent ingest inbox/*.pdf` (auto-batches with checkpoint/resume) |
 | Batch ingest crashed mid-run | `researchwiki agent ingest --resume .ingest/batch-<ts>/` |
 | Edited a wiki page manually | `researchwiki db rebuild && researchwiki reindex` |
+| Have paper pages from an older/simpler wiki | `researchwiki migrate preflight <src>`, then `inspect` (see *Migrating an existing corpus*) |
+| A paper page yields no citable claims | `researchwiki lint --json \| jq .zero_claim_papers` — almost always non-canonical H2 headings |
 | Want to find synthesis pages affected by a recent paper | `researchwiki evolve <category/stem>` |
 | Want to know what to ingest next | `researchwiki audit --json` |
 | Want to find pages with sparse keywords | `researchwiki lint --json \| jq .missing_keywords` |

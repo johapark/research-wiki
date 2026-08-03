@@ -14,7 +14,14 @@ Skip steps the user has already completed: if `researchwiki --version` succeeds,
 pip install -e .                             # core + claim grader + Anthropic SDK
 ```
 
-The default install includes torch + sentence-transformers + BGE bi-encoder (~2 GB) and the Anthropic SDK. If the user wants to skip loading the grader weights at runtime, tell them to pass `--no-semantic` to `agent ingest` / `reindex` — draft selection falls back to BM25 and pages land in the sandbox for manual promotion.
+That pulls every Python dependency: `pypdfium2`, `tantivy`, `pyyaml`, `numpy`, torch + transformers + sentence-transformers (~2 GB), and the Anthropic SDK. Optional extras: `pip install -e '.[mcp]'` for `mcp-serve`, `.[dev]` for pytest.
+
+**Two things `pip install` does *not* give you:**
+
+- **The BGE bi-encoder weights.** `BAAI/bge-small-en-v1.5` is a ~133 MB HuggingFace download fetched on **first use** and cached under `~/.cache/huggingface/`. `index/embeddings.py` only switches to offline mode once that cache exists, so the first run needs network. If it fails, `_get_model()` swallows the error and every claim grades **BM25-only, silently** — a corpus graded that way has to be re-graded once the model lands. Warm it up and verify with `researchwiki migrate preflight`, which hard-fails when the model is unavailable.
+- **`curl`.** `backfill doi`'s Crossref fallback shells out to it (`tasks/backfill.py`), inside an `except Exception: return None` — so on a slim container it just quietly stops matching. `which curl` to check.
+
+If the user genuinely wants to skip the grader weights, `--no-semantic` on `agent ingest` / `reindex` / `grade` falls back to BM25 — draft selection degrades and pages land in the sandbox for manual promotion.
 
 ## Step 2 — Pick a provider
 
@@ -102,4 +109,6 @@ Summarize the new page (Summary section + key contributions in 2–3 sentences) 
 
 ## Step 7 — Confirm
 
-`researchwiki status` should show non-zero `Pages:` and zero `inbox/ PDFs awaiting ingest`. If both check out, setup is done — tell the user what they can do next (drop more PDFs, ask cross-paper questions, file ideas).
+`researchwiki status` should show non-zero `Pages:`, zero `inbox/ PDFs awaiting ingest`, and `Structured DB: in sync`. Also confirm the semantic index built — `status` prints its model and page count; if it's missing, `reindex` was skipped or the embedding model isn't available (Step 1). `researchwiki migrate preflight` is the direct check.
+
+If those hold, setup is done — tell the user what they can do next (drop more PDFs, ask cross-paper questions, file ideas). If they have an existing corpus of paper pages from an older wiki, point them at [`migration-backfill.md`](./migration-backfill.md).
