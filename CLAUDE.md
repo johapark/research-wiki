@@ -273,6 +273,14 @@ Per-phase provider comes from `config/models.yaml`. **`RW_LLM_PROVIDER`** is a g
 
 **`chat-relay` provider** — when the user sets `RW_LLM_PROVIDER=chat-relay`, `researchwiki` has no API key of its own and instead relays each prompt to *you* to fill. Read [`prompts/chat-relay.md`](./prompts/chat-relay.md) for that protocol; it's a specialized worker role and fires only under that env var.
 
+### API pricing — `config/pricing.yaml`
+
+Per-million-token rates for Anthropic + OpenAI models, carrying an **`as_of:` date** and its `sources:` URLs. Read by `researchwiki.pricing`; used by `status`'s cost rollup and `insights`' per-model spend, both of which print the date beside the figure.
+
+`pricing.resolve(model)` matches by **longest prefix**, so the dated build IDs the API returns (`claude-haiku-4-5-20251001`) resolve to their family. Unknown model → `None` → `$0.00`, which is right for a local backend; `status` separately names any *cloud* model missing from the table so a stale file is visible rather than a silently understated bill. Sonnet 5's introductory rate is time-boxed via `until:` and lapses on the stated date.
+
+**The figure is an upper bound**: `ingest_iterations` records only input/output totals, so prompt-cache hits (0.1× input, and the author phase caches) can't be subtracted. To refresh: open both `sources:` URLs, correct rates, **bump `as_of:` in the same edit**, never delete retired models (old rows still reference them), then `pytest tests/test_pricing.py`.
+
 ### Ingest — add a new paper
 
 **Default path: `researchwiki agent ingest`.** Handles pypdfium2 extraction, DOI detection, S2 lookup, LLM-reconcile, stem derivation, `mv` to `papers/`, page authoring, atomic back-link apply, and `researchwiki evolve`. Tags `ingested-via-agent`; logs `ingest_iterations` to the state DB.

@@ -468,11 +468,19 @@ Pending evolution proposals: 1 dir(s), 1 total file(s)
   Review and apply, then `rm -rf` the directory.
 
 Ingest cost (last 7 days):
-  attempts:           7
-  total tokens:       20K input + 31K output
-  mean per attempt:   7K tokens
-  estimated cost:     $0.00  (default models unpriced in the estimator)
+  attempts:           11
+  total tokens:       603K input + 108K output
+  mean per attempt:   65K tokens
+  estimated cost:     $1.91  (rates as of 2026-08-03; upper bound — ignores prompt-cache hits)
+    claude-haiku-4-5-20251001     300K in,      15K out
+    claude-sonnet-5            304K in,      92K out
 ```
+
+Rates come from [`config/pricing.yaml`](./config/pricing.yaml), which carries an
+`as_of:` date printed beside every dollar figure. A model absent from the table
+counts as $0.00 — correct for a local backend, so `status` separately names any
+*cloud* model that's missing rather than letting a stale table quietly understate
+the bill.
 
 `lint` reports orphans, broken wikilinks, missing back-links, stale
 syntheses (by mtime, by content via topic-seed search, and by audit-count
@@ -656,6 +664,18 @@ This is by design — the markdown layer is what survives.
 ## Costs and trade-offs
 
 ### Per-ingest cost
+
+Rates live in [`config/pricing.yaml`](./config/pricing.yaml) (Anthropic + OpenAI,
+USD per million tokens) with an `as_of:` date and the `sources:` URLs they were
+read from. `researchwiki.pricing` resolves a model by **longest prefix**, so the
+dated build IDs the APIs return resolve to their family — the estimator used to
+key on bare family names and silently priced those at $0.00. Time-boxed rates are
+expressed with `until:` (Sonnet 5's introductory pricing lapses 2026-08-31).
+
+Every printed figure is an **upper bound**: `ingest_iterations` records only
+input/output totals, and a prompt-cache hit costs 0.1× input, so runs with
+`cache_prompt=True` really cost less than shown. To refresh, correct the rates and
+bump `as_of:` in the same edit.
 
 Absolute cost is **config-dependent** — it rides on whichever
 `config/models.*.yaml` file `RW_MODELS_CONFIG` selects and that provider's

@@ -1,0 +1,113 @@
+# API pricing, USD per million tokens. Read by `researchwiki/pricing.py`; used by
+# `researchwiki status` (7-day cost rollup) and `researchwiki insights` (per-model
+# spend). Data only — no code change needed to correct a rate.
+#
+# Rates rot. `as_of` is the date the numbers below were last checked against the
+# sources, and every surface that prints a dollar figure prints that date beside
+# it, so a stale table is visible rather than silently wrong.
+#
+# ---------------------------------------------------------------------------
+# TO REFRESH
+#   1. Open both `source` URLs below.
+#   2. Correct any changed rate. Add new models; do NOT delete retired ones —
+#      old `ingest_iterations` rows still reference them and would silently
+#      re-price to $0.00.
+#   3. Bump `as_of` in the SAME edit. A rate change without a date bump is
+#      indistinguishable from a table nobody has checked.
+#   4. `python3 -m pytest tests/test_pricing.py`
+# ---------------------------------------------------------------------------
+#
+# WHAT THIS ESTIMATE IGNORES, and which direction it errs:
+#   * Prompt caching. The `claims` / `ingest_iterations` schema records only
+#     input and output token totals — there is no cache-read/write breakdown to
+#     read. Anthropic charges 0.1x base input for a cache hit, and the author
+#     phase passes `cache_prompt=True`, so real spend on cached runs is LOWER
+#     than what we print. The estimate is an upper bound, not a bill.
+#   * Batch API (50% off both directions). Nothing here uses it today.
+#   * Long-context surcharges, fast mode, and data-residency multipliers.
+#   * Server-side tools (e.g. web search at $10/1,000 searches).
+#
+# Local models (LM Studio, Ollama, gemma-*, qwen-*) have no per-token price and
+# are deliberately absent — `pricing.py` returns None for an unknown model and
+# callers render $0.00, which is correct for a model running on your own machine.
+
+as_of: "2026-08-03"
+
+sources:
+  anthropic: "https://platform.claude.com/docs/en/about-claude/pricing"
+  openai: "https://developers.openai.com/api/docs/pricing"
+
+# Multipliers relative to base input, for reference. Not applied automatically —
+# see "WHAT THIS ESTIMATE IGNORES" above.
+modifiers:
+  anthropic:
+    cache_write_5m: 1.25
+    cache_write_1h: 2.0
+    cache_read: 0.1
+    batch: 0.5
+
+models:
+  # ---- Anthropic ----------------------------------------------------------
+  # Keys are model-ID prefixes. A dated ID like
+  # `claude-haiku-4-5-20251001` resolves to `claude-haiku-4-5` — see
+  # `pricing.resolve()`.
+  claude-fable-5:      {in: 10.0, out: 50.0, provider: anthropic}
+  claude-mythos-5:     {in: 10.0, out: 50.0, provider: anthropic}
+  claude-opus-5:       {in: 5.0,  out: 25.0, provider: anthropic}
+  claude-opus-4-8:     {in: 5.0,  out: 25.0, provider: anthropic}
+  claude-opus-4-7:     {in: 5.0,  out: 25.0, provider: anthropic}
+  claude-opus-4-6:     {in: 5.0,  out: 25.0, provider: anthropic}
+  claude-opus-4-5:     {in: 5.0,  out: 25.0, provider: anthropic}
+  claude-opus-4-1:     {in: 15.0, out: 75.0, provider: anthropic}   # deprecated
+  claude-opus-4:       {in: 15.0, out: 75.0, provider: anthropic}   # retired
+  # Sonnet 5 is on introductory pricing that EXPIRES. `until` is inclusive; once
+  # today is past it, `pricing.py` falls through to the entry with no `until`.
+  # This is the one rate in the table that changes on a calendar date rather
+  # than on a vendor announcement.
+  claude-sonnet-5:
+    - {in: 2.0, out: 10.0, provider: anthropic, until: "2026-08-31",
+       note: "introductory pricing"}
+    - {in: 3.0, out: 15.0, provider: anthropic,
+       note: "standard, from 2026-09-01"}
+  claude-sonnet-4-6:   {in: 3.0,  out: 15.0, provider: anthropic}
+  claude-sonnet-4-5:   {in: 3.0,  out: 15.0, provider: anthropic}
+  claude-sonnet-4:     {in: 3.0,  out: 15.0, provider: anthropic}   # retired
+  claude-haiku-4-5:    {in: 1.0,  out: 5.0,  provider: anthropic}
+  claude-haiku-3-5:    {in: 0.8,  out: 4.0,  provider: anthropic}   # retired
+
+  # ---- OpenAI -------------------------------------------------------------
+  # Short-context standard rates. Long-context tiers cost more and aren't
+  # modelled; see the source URL.
+  gpt-5.6-sol:         {in: 5.0,   out: 30.0,  provider: openai}
+  gpt-5.6-terra:       {in: 2.0,   out: 12.0,  provider: openai}
+  gpt-5.6-luna:        {in: 0.2,   out: 1.2,   provider: openai}
+  gpt-5.5-pro:         {in: 30.0,  out: 180.0, provider: openai}
+  gpt-5.5-cyber:       {in: 12.5,  out: 75.0,  provider: openai}
+  gpt-5.5:             {in: 5.0,   out: 30.0,  provider: openai}
+  gpt-5.4-pro:         {in: 30.0,  out: 180.0, provider: openai}
+  gpt-5.4-mini:        {in: 0.75,  out: 4.5,   provider: openai}
+  gpt-5.4-nano:        {in: 0.2,   out: 1.25,  provider: openai}
+  gpt-5.4:             {in: 2.5,   out: 15.0,  provider: openai}
+  gpt-5.3-codex:       {in: 1.75,  out: 14.0,  provider: openai}
+  gpt-5.3-chat-latest: {in: 1.75,  out: 14.0,  provider: openai}
+  gpt-5.2-chat-latest: {in: 1.75,  out: 14.0,  provider: openai}
+  gpt-5.2-pro:         {in: 21.0,  out: 168.0, provider: openai}
+  gpt-5.2:             {in: 1.75,  out: 14.0,  provider: openai}
+  gpt-5.1:             {in: 1.25,  out: 10.0,  provider: openai}
+  gpt-5-pro:           {in: 15.0,  out: 120.0, provider: openai}
+  gpt-5-mini:          {in: 0.25,  out: 2.0,   provider: openai}
+  gpt-5-nano:          {in: 0.05,  out: 0.4,   provider: openai}
+  gpt-5-search-api:    {in: 1.25,  out: 10.0,  provider: openai}
+  gpt-5:               {in: 1.25,  out: 10.0,  provider: openai}
+  gpt-4.1-mini:        {in: 0.4,   out: 1.6,   provider: openai}
+  gpt-4.1-nano:        {in: 0.1,   out: 0.4,   provider: openai}
+  gpt-4.1:             {in: 2.0,   out: 8.0,   provider: openai}
+  gpt-4o-mini:         {in: 0.15,  out: 0.6,   provider: openai}
+  gpt-4o:              {in: 2.5,   out: 10.0,  provider: openai}
+  o4-mini:             {in: 1.1,   out: 4.4,   provider: openai}
+  o3-pro:              {in: 20.0,  out: 80.0,  provider: openai}
+  o3-mini:             {in: 1.1,   out: 4.4,   provider: openai}
+  o3:                  {in: 2.0,   out: 8.0,   provider: openai}
+  o1-pro:              {in: 150.0, out: 600.0, provider: openai}
+  o1:                  {in: 15.0,  out: 60.0,  provider: openai}
+  chat-latest:         {in: 5.0,   out: 30.0,  provider: openai}

@@ -24,22 +24,15 @@ from ..paths import (
     inbox_dir, ingest_dir, papers_dir, search_index_dir, semantic_cache_dir,
     wiki_dir, wiki_root,
 )
+from .. import pricing
 from ..wiki import read_pages
 
 
-# Model pricing — public Anthropic rates per million tokens. Used only for
-# the cost-estimate line in `status`; values rot, but the user can mentally
-# re-multiply if rates change. See https://www.anthropic.com/pricing.
-#
-# When you re-verify rates against Anthropic's current published pricing,
-# update both _PRICING and _PRICING_AS_OF in the same edit so the label in
-# the status output reflects the date of the last verification.
-_PRICING_AS_OF = "2026-05"
-_PRICING = {
-    "claude-opus-4-7":    {"in": 15.00, "out": 75.00},
-    "claude-sonnet-4-6":  {"in":  3.00, "out": 15.00},
-    "claude-haiku-4-5":   {"in":  0.80, "out":  4.00},
-}
+# Model pricing moved to `config/pricing.yaml`, read via `researchwiki.pricing`.
+# It was a dict literal here keyed on bare family names, which meant the dated
+# build IDs the API actually returns (`claude-haiku-4-5-20251001`) missed the
+# lookup and priced at $0.00 — and two of its three rates were a release behind.
+# Data now lives in data, and `pricing.resolve()` matches by longest prefix.
 
 # `other`-saturation warning lives in researchwiki.categories — same helper
 # is called from status (here) and from both ingest paths (digest + agent)
@@ -217,9 +210,7 @@ def _recent_ingest_costs(days: int = 7) -> dict:
         slot = by_model.setdefault(model, {"in": 0, "out": 0})
         slot["in"] += in_tok
         slot["out"] += out_tok
-        rates = _PRICING.get(model)
-        if rates:
-            usd += (in_tok / 1_000_000) * rates["in"] + (out_tok / 1_000_000) * rates["out"]
+        usd += pricing.estimate_usd(model, in_tok, out_tok)
 
     total_in = sum(s["in"] for s in by_model.values())
     total_out = sum(s["out"] for s in by_model.values())
@@ -230,6 +221,10 @@ def _recent_ingest_costs(days: int = 7) -> dict:
         "total_output": total_out,
         "by_model": by_model,
         "estimated_usd": usd,
+        "pricing_as_of": pricing.as_of(),
+        # Cloud models absent from the table price at $0.00, which is
+        # indistinguishable from a local model unless we say so.
+        "unpriced_models": pricing.unpriced_models(by_model),
     }
 
 
@@ -579,7 +574,14 @@ def main(argv: list[str]) -> int:
         print(f"  attempts:           {n_a}")
         print(f"  total tokens:       {in_k:,.0f}K input + {out_k:,.0f}K output")
         print(f"  mean per attempt:   {per_paper:,.0f}K tokens")
-        print(f"  estimated cost:     ${costs['estimated_usd']:.2f}  (Anthropic {_PRICING_AS_OF} rates)")
+        print(f"  estimated cost:     ${costs['estimated_usd']:.2f}  "
+              f"(rates as of {costs.get('pricing_as_of') or 'unknown'}; "
+              f"upper bound — ignores prompt-cache hits)")
+        if costs.get("unpriced_models"):
+            # Local models are legitimately $0.00. A *cloud* model missing from
+            # the table is a silently understated bill, so name it.
+            print(f"  NOT priced:         {', '.join(costs['unpriced_models'])} "
+                  f"→ counted as $0.00 (add to config/pricing.yaml if billed)")
         for model, slot in sorted(costs["by_model"].items()):
             print(f"    {model:<22} {slot['in']/1000:>7,.0f}K in, "
                   f"{slot['out']/1000:>7,.0f}K out")
