@@ -147,7 +147,12 @@ tags: []
 
     preamble = pdf_text[:3500]
 
-    # Draft index.md line
+    # Draft catalog line. `hook` here is seeded verbatim from S2 prose, so it is
+    # a DRAFT only and must never be written into a page's `hook:` field — Rule 1
+    # allows `tldr` for drafting and cross-checking, not for persisting. The
+    # digest prompt asks for a rewrite, and `lint`'s `missing_hook` keeps the page
+    # on the review queue until one lands; that is what lets us skip a
+    # provenance field entirely.
     hook_source = tldr or abstract or ""
     hook = hook_source.split(". ")[0].strip()
     if hook and not hook.endswith("."):
@@ -224,7 +229,7 @@ These are raw PDF excerpts. Compress / summarize them when filling Key Contribut
 
 {ref_block}
 
-## Draft index.md entry (polish the short name; verify one-liner)
+## Draft catalog entry (pick the short name; REWRITE the hook)
 
 Target section: `## {category_hint or "TODO-category"}`.
 
@@ -232,7 +237,9 @@ Target section: `## {category_hint or "TODO-category"}`.
 {index_line_draft}
 ```
 
-The short name is a TODO — pick the most recognizable handle (e.g., "Evo 2", "MMseqs2", "Cas9-EDVs", "Bridge RNAs"). The one-line hook is seeded from the TLDR / abstract; compress to one sentence if needed.
+The short name is a TODO — pick the most recognizable handle (e.g., "Evo 2", "MMseqs2", "Cas9-EDVs", "Bridge RNAs").
+
+**The hook must be rewritten, not pasted.** It is seeded verbatim from the Semantic Scholar `tldr` / `abstract`, which Rule 1 permits only as a draft or cross-check — persisting it into the page would put unattributed upstream prose in the wiki. Rewrite it in your own words from the PDF: **result-first** — method + scale + the distinguishing finding — because its job is to separate this paper from the ~40 others in its category section. Target 1–2 sentences (≤400 chars).
 
 ---
 
@@ -247,7 +254,7 @@ The short name is a TODO — pick the most recognizable handle (e.g., "Evo 2", "
    - **Limitations** (≤100 words): Discussion section + obvious gaps.
    - **Related Papers** (≤6 entries): use both the **outgoing** and **incoming** cross-link candidates above. For each one, use `[[wikilink]]`; include the direction of citation in the one-liner.
 3. **For every INCOMING cross-link**, open the citing wiki page and add a `[[wikilink]]` back to the new page in its Related Papers section. This closes the graph — both ends of the edge should reference each other.
-4. Paste the draft `index.md` line into the right category section (polish the short name).
+4. Set `hook:` in the new page's YAML to your rewritten gloss (quote the value — hooks routinely contain `[[wikilinks]]` and `:`), then add the catalog line to the right `index.md` section. `researchwiki lint` lists any page still missing a `hook:`.
 5. No Glossary section, no Document Information section (YAML has everything).
 6. Delete this digest file when done: `rm .ingest/{stem}-digest.md`.
 """

@@ -71,9 +71,9 @@ def inbox_dir() -> Path:
     return wiki_root() / "inbox"
 
 
-# The three bookkeeping markdown files live INSIDE wiki/ (not at the repo
-# root) so an Obsidian vault opened on `wiki/` sees them. Wikilinks from
-# these files into wiki/<category>/<stem> resolve cleanly inside the vault.
+# The bookkeeping markdown files live INSIDE wiki/ (not at the repo root) so an
+# Obsidian vault opened on `wiki/` sees them. Wikilinks from these files into
+# wiki/<category>/<stem> resolve cleanly inside the vault.
 def index_path() -> Path:
     """Catalog page — `wiki/index.md`. LLM-maintained; gitignored."""
     return wiki_dir() / "index.md"
@@ -84,9 +84,12 @@ def log_path() -> Path:
     return wiki_dir() / "log.md"
 
 
-def pdfs_failed_parsing_path() -> Path:
-    """Ledger of PDFs that pypdfium2 couldn't extract — `wiki/pdfs-failed-parsing.md`."""
-    return wiki_dir() / "pdfs-failed-parsing.md"
+# `pdfs_failed_parsing_path()` was removed with the `wiki/pdfs-failed-parsing.md`
+# ledger. Extraction failures are recorded per page in YAML `pdf_extraction_note:`
+# and surfaced by `researchwiki status`, so there is no separate file to keep in
+# sync — the old one had drifted to nonexistent while pages still carried the
+# marker, which made the status count read a silent zero. `db rebuild` still
+# skips the filename (see `_META_FILENAMES`) for wikis that already have one.
 
 
 def ingest_dir() -> Path:

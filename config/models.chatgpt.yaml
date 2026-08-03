@@ -60,7 +60,7 @@ phases:
   debug:            {role: author, temperature: 0.2}
   critic:           {role: critic}
   classifier:       {role: classifier}
-  short_name:       {role: proposer, max_tokens: 32}
+  short_name:       {role: proposer, max_tokens: 220}
   keywords:         {role: proposer}
   link_generation:  {role: judge, max_tokens: 1200}
   memory_evolution: {role: judge, max_tokens: 3000}

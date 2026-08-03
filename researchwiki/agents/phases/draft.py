@@ -12,6 +12,7 @@ look like a wiki page" helper — used by grade (for scoring) and by commit
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from .. import llm, prompt_lib
@@ -30,6 +31,8 @@ class Draft:
     scores: dict = field(default_factory=dict)
     claim_details: list = field(default_factory=list)   # list[ClaimDetail]
     stance: str = "balanced"   # drafting stance that produced it (see DRAFT_STANCES)
+    handle: str = ""   # 1-4 word short name, from the author trailer
+    hook: str = ""     # result-first catalog gloss, from the author trailer
 
 
 # Instruction-level draft diversity. Each parallel author draft is given a
@@ -84,6 +87,13 @@ def author(
     commit phase using `metadata`. The grader scores KC + Results; Related
     Papers is graded separately by the cross-link verifier at commit.
 
+    The author also emits a HANDLE/HOOK trailer after the sections, which
+    `split_gloss_trailer` parses off here: `Draft.text` is always the clean body,
+    and the two catalog fields ride on `Draft.handle` / `Draft.hook`. Producing
+    them here rather than in a follow-up proposer call costs no extra request and
+    gives the gloss the full source sections as context instead of only the
+    already-drafted page.
+
     System prompt selection (via `prompt_lib.load_author_system`):
       - paper_type == 'review'  → prompts/author-system-review.md
       - else                    → prompts/author-system-research.md
@@ -123,13 +133,16 @@ def author(
         use_stub=use_stub,
         cache_prompt=True,
     )
+    body, handle, hook = split_gloss_trailer(resp.text)
     return Draft(
-        text=resp.text,
+        text=body,
         model=resp.model,
         temperature=resp.temperature,
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
         stance=stance_name,
+        handle=handle,
+        hook=hook,
     )
 
 
@@ -320,8 +333,64 @@ def _build_author_prompt(
         "",
         "## Related Papers",
         "<≤6 [[wikilink]] entries from the candidate list above, OR '(none)'>",
+        "",
+        "Then, after the sections, a final line `---` followed by exactly these "
+        "two catalog fields. They are not page sections — they are metadata for "
+        "the wiki's index, and they are stripped from the page body before it is "
+        "graded.",
+        "",
+        "HANDLE: <1-4 word handle a researcher would use to refer to this paper "
+        "in conversation — prefer the system / tool / method name (e.g. 'Bridge "
+        "RNAs', 'MMseqs2', 'AlphaFold 3', 'PE8'). Write TODO if there is no "
+        "obvious handle.>",
+        "HOOK: <one to two sentences, ≤400 characters, on ONE line. This is the "
+        "paper's line in a catalog of ~400 papers, so its job is to separate it "
+        "from the ~40 others in its category. Write it RESULT-FIRST: method + "
+        "scale + the distinguishing finding. Lead with what the paper found, not "
+        "what it asked. Keep the concrete numbers that distinguish it (cohort "
+        "size, error rate, speedup). Do NOT restate the research question and do "
+        "NOT open with 'This study/paper/review'.",
+        "",
+        "  Good HOOK: Updated NanoSeq compatible with whole-exome capture (<5 "
+        "errors per 10^9 bp); 1,042 oral epithelium samples reveal 46 genes under "
+        "positive selection and >62,000 driver mutations.",
+        "  Bad HOOK:  This study investigates somatic mutation and selection in "
+        "normal tissues using duplex sequencing.>",
     ])
     return "\n".join(parts)
+
+
+# The author emits HANDLE/HOOK as a trailer after a final `---` rule. Parsed and
+# stripped in `author()` so every downstream consumer — tournament, critic,
+# verify_crosslinks, the graders, promote — sees only the six sections. Stripping
+# at the source is what keeps a format slip from leaking metadata into the page.
+_TRAILER_RE = re.compile(
+    r"\n-{3,}\s*\n+\s*HANDLE\s*:(?P<handle>.*?)\n+\s*HOOK\s*:(?P<hook>.*?)\s*\Z",
+    re.IGNORECASE | re.DOTALL,
+)
+_HOOK_MAX_CHARS = 400
+
+
+def split_gloss_trailer(text: str) -> tuple[str, str, str]:
+    """-> (body without trailer, handle, hook).
+
+    Degrades per-field rather than raising: a missing or malformed trailer
+    yields ('', '') and leaves the body untouched, so the handle falls back to
+    'TODO' and `hook:` is simply omitted from YAML — which puts the page on
+    `lint`'s `missing_hook` queue instead of committing a bad gloss.
+    """
+    m = _TRAILER_RE.search(text)
+    if not m:
+        return text, "", ""
+    handle = " ".join(m.group("handle").split()).strip().strip("\"'*").rstrip(".,;:")
+    hook = " ".join(m.group("hook").split()).strip().strip("\"'*")
+    if len(handle) > 40:
+        handle = ""
+    if len(hook) > _HOOK_MAX_CHARS * 2:
+        # Wildly over budget means the model ignored the format, not that it was
+        # merely verbose; a 1000-char "hook" is a paragraph and not usable here.
+        hook = ""
+    return text[: m.start()].rstrip() + "\n", handle, hook
 
 
 def _wrap_with_frontmatter(

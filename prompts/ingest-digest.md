@@ -3,7 +3,7 @@
 **Default path is `researchwiki agent ingest`** (see CLAUDE.md → Operations → Ingest). Use the digest path **only** when:
 
 - **Recovery**: re-ingest with `--doi`/`--title`/`--authors` overrides after stem-derivation failure (see [`recovery.md`](./recovery.md)).
-- **Unextractable PDFs**: `pypdfium2` returns near-empty/gibberish; build from S2 `abstract`. Add to `pdfs-failed-parsing.md`; set `pdf_extraction_note:` + `abstract_source: semantic-scholar`.
+- **Unextractable PDFs**: `pypdfium2` returns near-empty/gibberish; build from S2 `abstract`. Set `pdf_extraction_note:` (say what the page was built from instead) + `abstract_source: semantic-scholar`. Those two fields are the whole record — `researchwiki status` lists every page carrying the note, so there's no ledger file to update.
 - **Special page types**: synthesis (`researchwiki synthesize`), reference docs (manual) — neither uses ingest paths.
 - **Custom voice**: rare; agent's framing doesn't fit. Justify in `log.md`.
 

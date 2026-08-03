@@ -74,7 +74,7 @@ The graph view should render paper ↔ paper relationships, not the scaffolding 
 
 Files to exclude:
 
-- **Wiki root bookkeeping** — `index.md` (catalogs every paper), `log.md` (mentions every stem in ingest entries), `views.md` (Dataview blocks list every paper), `pdfs-failed-parsing.md` (parse-failure stubs).
+- **Wiki root bookkeeping** — `index.md` (catalogs every paper), `log.md` (mentions every stem in ingest entries), `views.md` (Dataview blocks list every paper).
 - **Workflow prompts** — everything under `prompts/` (init, ingest-digest, idea-page-author, recategorize, recovery, lookups, cross-link-discovery, export-shareable, audit-refresh, plus system prompts). Reference docs about how to run the framework; not corpus content.
 - **Benchmark harness** — everything under `benchmark-fixtures/` (fixture YAMLs, README, PLAN, CALIBRATION, LICENSES, retrieval/README). Test infrastructure, not knowledge.
 - **Test fixtures** — everything under `tests/` (HALLUCINATED grader-test pages). Deliberately-wrong pages used for grader-regression testing.
@@ -85,7 +85,7 @@ Dot-prefixed dirs (`.agent-output/`, `.eval-*/`, `.pytest_cache/`) are ignored b
 The fix is one line in the vault's graph config. Open `.obsidian/graph.json` (create it if Obsidian hasn't written one yet — this file is per-user gitignored, so seeding it is fine) and set the `search` field to a combined exclusion:
 
 ```json
-{ "search": "-path:\"index.md\" -path:\"log.md\" -path:\"views.md\" -path:\"pdfs-failed-parsing.md\" -path:\"prompts/\" -path:\"benchmark-fixtures/\" -path:\"tests/\" -path:\"CLAUDE.md\" -path:\"README.md\" -path:\"AGENTS.md\" -path:\"WORKFLOW.md\"" }
+{ "search": "-path:\"index.md\" -path:\"log.md\" -path:\"views.md\" -path:\"prompts/\" -path:\"benchmark-fixtures/\" -path:\"tests/\" -path:\"CLAUDE.md\" -path:\"README.md\" -path:\"AGENTS.md\" -path:\"WORKFLOW.md\"" }
 ```
 
 Use `path:` (substring match on the full path) rather than `file:` (basename match) so a single `-path:"prompts/"` filters everything under that directory, and so the filter works whether the vault is opened at the repo root or at `wiki/`. Every filtered file stays browsable via the file tree, global search, and cmd-click on wikilinks — they just don't render as nodes in the graph pane. Reversible by clearing the `search` field.

@@ -78,7 +78,7 @@ Research/
     ├── ideas/              # Forward-looking design proposals
     ├── concepts/           # Single-term hub notes (bridge nodes)
     ├── references/         # Regulatory guidance, protocols, whitepapers, books
-    └── index.md, log.md, pdfs-failed-parsing.md
+    └── index.md, log.md
 ```
 
 **Invariant**: `papers/` holds only canonically-named PDFs. Raw drops live in `inbox/`. A non-empty `inbox/` is the backlog.
@@ -239,10 +239,11 @@ Single-term **hub note** — a mini-synthesis around one recurring concept (surf
 
 ### 6. Log / meta pages
 
-- `index.md` — page catalogue, by category.
+- `index.md` — page catalogue, by category. Bullet prose comes from each page's `hook:` field (Step 3), so the file is regenerable rather than hand-maintained.
 - `log.md` — chronological record.
-- `pdfs-failed-parsing.md` — PDFs needing replacement.
 - `wiki/synthesis/suggested-additions.md` — gap map from `researchwiki audit`.
+
+**PDFs needing replacement** are not a file. A page whose PDF wasn't text-extractable records that in its own YAML `pdf_extraction_note:` (plus `abstract_source:` for what it was built from instead); `researchwiki status` lists them under *Workflow state*.
 
 ### Page-type discipline
 
@@ -299,7 +300,13 @@ researchwiki agent ingest --resume .ingest/batch-<ts>/          # resume after a
 
 **Step 2.6 — Concept-hub attachment.** Agent path auto-runs `concepts.attach_after_ingest` (right after claim-overlap): the new paper joins any existing `wiki/concepts/` hub whose `topic_seed` term appears in a **contribution claim** (key_contributions / results / methodology sections — a body-prose-only mention isn't enough; those log as near-misses). The spoke bullet cites the specific matching claim via `[[stem#slug]]`; `referenced_papers`/`concept_span` refresh on the hub, and a reciprocal `[[concepts/<slug>]]` lands on the paper (tagged `auto-added; concept-link`). No-ops until concept pages exist. Digest path: run nothing here (attachment is agent-only); new bridge concepts instead surface via `researchwiki candidates concepts --bridges` — span-≥2 terms are labeled `concept-ready (bridge)`. Scaffold one with `researchwiki concepts "<term>"` (see [`prompts/concept-page-author.md`](./prompts/concept-page-author.md)); creation stays review-gated (it writes prose → both gates). To backfill slug citations on existing hubs after new claims land, `researchwiki concepts --upgrade-spokes` rewrites bare `[[stem]]` spokes to `[[stem#slug]]` (idempotent).
 
-**Step 3 — Update `index.md`** — `[[category/stem]] — **Short name** (*Venue* year): one-sentence hook.` (Neither ingest path auto-updates `index.md`.)
+**Step 3 — Set `hook:` on the new page.** The catalog gloss `index.md` renders after the citation: `[[category/stem]] — **Short name** (*Venue* year): {hook}`. Write it **result-first** — method + scale + the distinguishing finding — because its job is to separate this paper from the ~40 others in its category section; restating the paper's *question* (what sentence 1 of `## Summary` gives you) fails that job. Quote the value: hooks routinely contain `[[wikilinks]]` and `:`, both of which break unquoted. Advisory ceilings, `lint`-warned and **never auto-truncated**: **paper 400** chars (1–2 sentences), **concept / synthesis / reference 1000**, **idea 2000**.
+
+**Agent ingest writes `hook:` automatically.** The author phase emits a `HANDLE:`/`HOOK:` trailer after the six sections; `phases.draft.split_gloss_trailer` parses it off the body (so the critic and graders only ever see the sections) and the *same* string lands in both YAML `hook:` and the `index.md` bullet — they can't drift. Costs no extra LLM call, and the author has the source sections in context. Malformed or missing → field omitted, page lands on `lint`'s `missing_hook`; nothing is ever salvaged from a Summary slice.
+
+**Rule 1**: the hook is generated from PDF-grounded page prose, never from an S2 `tldr` — that's why a persisted `hook:` needs no provenance field. The digest path's *draft* gloss **is** `tldr`-seeded, so rewrite it before it becomes `hook:`; never paste it through.
+
+**Backfill / migration**: for pages that predate the field or arrive from another framework, `phases.commit.propose_short_name` derives both fields from an existing page body in one lightweight call — no re-run of the author phase, no rewriting of reviewed prose.
 
 **Step 4 — Append to `log.md`** (auto-handled).
 
@@ -378,7 +385,7 @@ CLI wrappers around PubMed / bioRxiv / ORCID. Usage, YAML-recording rules, and w
 ### Agent output — prefer `--json`
 
 - `search --json` → `[{key, stem, category, page_type, title, score, rrf_score, bm25_rank, bm25_score, semantic_rank, semantic_score, snippet}]`; `--see-also` adds `see_also`.
-- `lint --json` → `{pages_scanned, invalid_frontmatter, orphans, broken_wikilinks, missing_backlinks, page_type_mismatches, category_yaml_drift, stale_synthesis, stale_by_content, stale_by_audit_count, stale_evolution_proposals, missing_keywords, missing_doi, stem_year_drift, unquoted_wikilink_lists, supplementary_missing_on_disk, supplementary_orphaned_files, dangling_claim_anchors, concept_contract_violations, ungraded_papers, db_drift, cross_paper_contradictions, p2_entries_with_anchor_hits, fix_applied}`. Concept-hub candidates: `candidates concepts --json` → `[{term, slug, pages, categories, weighted, label, source, sections}]` — `label` is the triage signal (`concept-ready (bridge)` / `concept-ready (deep)` / `candidate` / `glossary-suspect`). Contract violations are advisory (Definition ≥40 words, span≥2 hubs need Cross-domain connections, Definition shouldn't paraphrase a spoke).
+- `lint --json` → `{pages_scanned, invalid_frontmatter, orphans, broken_wikilinks, missing_backlinks, page_type_mismatches, category_yaml_drift, stale_synthesis, stale_by_content, stale_by_audit_count, stale_evolution_proposals, missing_keywords, missing_hook, hook_too_long, missing_doi, stem_year_drift, unquoted_wikilink_lists, supplementary_missing_on_disk, supplementary_orphaned_files, dangling_claim_anchors, concept_contract_violations, ungraded_papers, db_drift, cross_paper_contradictions, p2_entries_with_anchor_hits, fix_applied}`. Concept-hub candidates: `candidates concepts --json` → `[{term, slug, pages, categories, weighted, label, source, sections}]` — `label` is the triage signal (`concept-ready (bridge)` / `concept-ready (deep)` / `candidate` / `glossary-suspect`). Contract violations are advisory (Definition ≥40 words, span≥2 hubs need Cross-domain connections, Definition shouldn't paraphrase a spoke).
 - `audit --json` → `{papers_skipped_no_doi, papers_intentional_no_doi, total_paper_pages, papers, cross_wiki_citations, edge_summary, recommended_additions, shared_citation_anchors, anchor_groups, s2_missing}`; `categories`/`category_breadth`/`count_normalized` are per-entry fields nested inside `recommended_additions`/`shared_citation_anchors`, not top-level.
 
 ### Exit-code contract

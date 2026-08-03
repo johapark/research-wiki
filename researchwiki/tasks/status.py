@@ -233,18 +233,23 @@ def _recent_ingest_costs(days: int = 7) -> dict:
     }
 
 
-def _failed_parsing_entries(root) -> list[str]:
-    from ..paths import pdfs_failed_parsing_path
-    path = pdfs_failed_parsing_path()
-    if not path.exists():
-        return []
-    entries = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        # Lines shaped like: - **{stem}**
-        m = re.match(r"\s*-\s+\*\*([a-z0-9-]+)\*\*\s*$", line)
-        if m:
-            entries.append(m.group(1))
-    return entries
+def _failed_parsing_entries(pages) -> list[tuple[str, str]]:
+    """Pages whose source PDF wasn't text-extractable → [(page key, note), ...].
+
+    Read from each page's YAML `pdf_extraction_note:` — the marker
+    `prompts/ingest-digest.md` already tells the unextractable-PDF path to set.
+    This replaces a scan of a hand-maintained `wiki/pdfs-failed-parsing.md`
+    ledger, which had drifted to the point of not existing at all while pages
+    still carried the marker, so the count silently read zero. Page YAML is the
+    thing that can't fall out of sync with the pages.
+    """
+    out: list[tuple[str, str]] = []
+    for p in pages:
+        note = str(p.fm.get("pdf_extraction_note") or "").strip()
+        if note:
+            out.append((f"{p.category}/{p.stem}", note))
+    out.sort()
+    return out
 
 
 def main(argv: list[str]) -> int:
@@ -267,9 +272,12 @@ def main(argv: list[str]) -> int:
     # housekeeping pages (e.g. the Dataview dashboard at `wiki/views.md`,
     # category "wiki") can't leak in as a "paper".
     PAGE_TYPE_DIRS = ("synthesis", "references", "ideas", "concepts")
+    # Held rather than consumed inline: the extraction-failure scan below reads
+    # frontmatter these Page objects already carry, so it costs no second walk.
+    wiki_pages = read_pages()
     papers = [
         {"stem": p.stem, "category": p.category}
-        for p in read_pages()
+        for p in wiki_pages
         if p.fm.get("type") == "paper" and p.category not in PAGE_TYPE_DIRS
     ]
 
@@ -362,7 +370,7 @@ def main(argv: list[str]) -> int:
 
     inbox_files = _pending_pdfs(inbox_dir())
     ingest_files = _pending_digests(ingest_dir())
-    failed = _failed_parsing_entries(root)
+    failed = _failed_parsing_entries(wiki_pages)
 
     all_pages = []
     for p in papers:
@@ -448,8 +456,14 @@ def main(argv: list[str]) -> int:
     if len(ingest_files) > 5:
         print(f"    ... ({len(ingest_files) - 5} more)")
     print(f"  PDFs failed parsing:            {len(failed)}")
-    for s in failed[:5]:
-        print(f"    - {s}")
+    for key, note in failed[:8]:
+        # The note is the actionable half — it says what the page was built from
+        # instead of the PDF, so a replacement PDF has something to fix.
+        note_short = note if len(note) <= 60 else note[:57].rstrip() + "…"
+        print(f"    - {key}")
+        print(f"        {note_short}")
+    if len(failed) > 8:
+        print(f"    ... ({len(failed) - 8} more)")
     print()
 
     print(f"Recent additions (top {args.recent} by file mtime):")

@@ -28,6 +28,7 @@ class ShortNameOutput:
     model: str
     input_tokens: int
     output_tokens: int
+    hook: str = ""
 
 
 def propose_short_name(
@@ -36,11 +37,25 @@ def propose_short_name(
     draft_text: str,
     use_stub: bool = False,
 ) -> ShortNameOutput:
-    """Ask Sonnet for a memorable 1–4-word handle for the paper.
+    """Derive a paper's short handle and catalog hook from an existing page.
 
-    Output is constrained to a single line of plain text. The handle is used
-    as the `**short-name**` in the index.md auto-entry. Failures fall back to
-    'TODO' so the user can fill it in manually.
+    **Not on the ingest path.** A fresh ingest gets both fields for free from the
+    author's HANDLE/HOOK trailer (`phases.draft.split_gloss_trailer`), which has
+    the source sections in context and costs no extra request. This is the
+    standalone route for pages that already exist without them: backfilling the
+    wiki's pre-`hook:` papers, or importing pages from another framework where
+    re-running the full author phase would be wasteful and would rewrite prose
+    that is already reviewed.
+
+    Takes `draft_text` — the page body — as its only prose input. That keeps it
+    Rule 1-clean by construction: the body is already PDF-grounded, and no
+    Semantic Scholar `tldr`/`abstract` reaches the hook, so a persisted `hook:`
+    needs no provenance field. Never pass upstream prose here.
+
+    Failures degrade per-field: the handle falls back to 'TODO', the hook to ''
+    (then omitted from YAML, leaving the page on `lint`'s `missing_hook` queue).
+    The hook is never salvaged from a Summary slice — that yields the paper's
+    question instead of its finding, which is the failure this field replaced.
     """
     if use_stub:
         return ShortNameOutput(name="TODO", model="stub", input_tokens=0, output_tokens=0)
@@ -50,20 +65,35 @@ def propose_short_name(
         f"Year: {metadata.get('year') or '(unknown)'}",
         f"Authors: {metadata.get('authors') or '(unknown)'}",
         "",
-        "Page summary excerpt:",
-        _extract_summary_for_short_name(draft_text)[:1200],
+        "Page excerpt:",
+        _extract_gloss_context(draft_text)[:3000],
         "",
-        "Task: propose a recognisable 1-4 word handle for this paper that a "
-        "researcher would use to refer to it in conversation. Examples of good "
-        "handles from other papers in this wiki: 'Co-Scientist', 'PaperOrchestra', "
-        "'AlphaFold 3', 'Bridge RNAs', 'SHAPEIT5', 'CRISPResso2', 'PE8', 'MMseqs2'.",
+        "Task: produce two things for this paper's entry in a catalog of ~400 papers.",
         "",
-        "Rules:",
-        "  - Output exactly one line: just the handle, no quotes, no markdown, "
-        "    no leading bullet, no explanation.",
-        "  - Prefer the system / tool / method name (e.g. 'PaperOrchestra' > "
-        "    'Multi-Agent Paper Writing System').",
-        "  - If the paper has no obvious handle, return 'TODO'.",
+        "1. HANDLE — a recognisable 1-4 word handle a researcher would use to refer "
+        "to it in conversation. Examples from other papers in this wiki: "
+        "'Co-Scientist', 'PaperOrchestra', 'AlphaFold 3', 'Bridge RNAs', 'SHAPEIT5', "
+        "'CRISPResso2', 'PE8', 'MMseqs2'. Prefer the system / tool / method name "
+        "('PaperOrchestra' > 'Multi-Agent Paper Writing System'). If there is no "
+        "obvious handle, output 'TODO'.",
+        "",
+        "2. HOOK — a one-to-two sentence gloss, at most 400 characters. Its job is to "
+        "separate this paper from the ~40 others in its category, so write it "
+        "RESULT-FIRST: method + scale + the distinguishing finding. Lead with what "
+        "the paper found, not what it asked. Keep concrete numbers where they "
+        "distinguish (cohort size, error rate, speedup). Do NOT restate the "
+        "research question, do NOT open with 'This study/paper/review', and do not "
+        "write a generic topic description.",
+        "",
+        "   Good: 'Updated NanoSeq compatible with whole-exome capture (<5 errors "
+        "per 10^9 bp); 1,042 oral epithelium samples reveal 46 genes under positive "
+        "selection and >62,000 driver mutations.'",
+        "   Bad:  'This study investigates somatic mutation and selection in normal "
+        "tissues using duplex sequencing.'",
+        "",
+        "Output format — exactly two lines, no markdown, no quotes, no bullets:",
+        "HANDLE: <handle>",
+        "HOOK: <hook>",
     ])
 
     try:
@@ -76,31 +106,69 @@ def propose_short_name(
         log(f"short_name LLM call failed: {type(e).__name__}: {e}", tag="agent")
         return ShortNameOutput(name="TODO", model="(failed)", input_tokens=0, output_tokens=0)
 
-    # Guard against empty output: a thinking model can spend its whole token
-    # budget on reasoning and return no content, leaving splitlines() == [] —
-    # indexing [0] there crashed the whole ingest after a good page was drafted.
-    # Empty falls through to the "TODO" handle (short_name is non-critical).
-    lines = resp.text.strip().strip('"').strip("'").strip("*").splitlines()
-    name = lines[0].strip() if lines else ""
-    name = name.rstrip(".,;:")
-    if len(name) > 40 or not name:
-        log(f"short_name unusable (got {name[:60]!r}); falling back to TODO",
+    # Both fields are parsed defensively and independently. A thinking model can
+    # spend its whole budget on reasoning and return no content at all — indexing
+    # into an empty splitlines() there used to crash the ingest after a good page
+    # had already been drafted.
+    name, hook = _parse_gloss_response(resp.text)
+    if not name:
+        log(f"short_name unusable (got {resp.text[:60]!r}); falling back to TODO",
             tag="agent")
         name = "TODO"
+    if not hook:
+        log("hook unusable; leaving it unset for lint to flag", tag="agent")
     return ShortNameOutput(
         name=name,
+        hook=hook,
         model=resp.model,
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
     )
 
 
-def _extract_summary_for_short_name(draft_text: str) -> str:
-    """Pull the Summary section body for the short-name prompt."""
-    m = re.search(r"^##\s+Summary\s*$\s*(.+?)(?=^##\s+|\Z)", draft_text, re.MULTILINE | re.DOTALL)
+_HANDLE_LINE_RE = re.compile(r"^\s*HANDLE\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+_HOOK_LINE_RE = re.compile(r"^\s*HOOK\s*:\s*(.+?)\s*\Z", re.IGNORECASE | re.MULTILINE | re.DOTALL)
+_HOOK_MAX_CHARS = 400
+
+
+def _parse_gloss_response(text: str) -> tuple[str, str]:
+    """-> (handle, hook), either possibly ''. Mirrors `draft.split_gloss_trailer`
+    so both routes accept the same output shape and enforce the same bounds."""
+    m = _HANDLE_LINE_RE.search(text)
+    handle = ""
     if m:
-        return m.group(1).strip()
-    return draft_text[:1200]
+        handle = m.group(1).strip().strip("\"'*").rstrip(".,;:")
+        if len(handle) > 40:
+            handle = ""
+
+    m = _HOOK_LINE_RE.search(text)
+    hook = ""
+    if m:
+        hook = " ".join(m.group(1).split()).strip().strip("\"'*")
+        # Wildly over budget means the format was ignored, not merely verbose;
+        # a 1000-char "hook" is a paragraph and unusable in a catalog line.
+        if len(hook) > _HOOK_MAX_CHARS * 2:
+            hook = ""
+    return handle, hook
+
+
+def _extract_gloss_context(draft_text: str) -> str:
+    """Page context for the handle + hook prompt: Summary plus Key Contributions.
+
+    Summary alone is what the retired index-line generator used, and it reliably
+    yields the paper's *question*. The contributions carry the findings and the
+    numbers a result-first hook needs, so both sections go in.
+    """
+    wanted = ("Summary", "Key Contributions")
+    out: list[str] = []
+    for heading in wanted:
+        m = re.search(
+            rf"^##\s+{re.escape(heading)}\s*$\s*(.+?)(?=^##\s+|\Z)",
+            draft_text, re.MULTILINE | re.DOTALL,
+        )
+        if m:
+            out.append(f"## {heading}\n{m.group(1).strip()}")
+    return "\n\n".join(out) if out else draft_text[:3000]
 
 
 # ---------- keyword proposal ----------

@@ -120,7 +120,8 @@ _FALLBACK_PHASES: dict[str, dict] = {
     # CHUNK_SIZE batch. Registered here (not only in config/models.yaml) so it
     # resolves under every RW_MODELS_CONFIG, not just the default one.
     "concept_triage":    {"role": "classifier", "max_tokens": 3500},
-    "short_name":        {"role": "proposer", "max_tokens": 32},
+    # 220, not 32: this phase emits a HANDLE line plus a <=400-char HOOK.
+    "short_name":        {"role": "proposer", "max_tokens": 220},
     "keywords":          {"role": "proposer"},
     "link_generation":   {"role": "judge", "max_tokens": 1200},
     "memory_evolution":  {"role": "judge", "max_tokens": 3000},

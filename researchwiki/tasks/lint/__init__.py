@@ -62,7 +62,9 @@ from .walk import all_pages, page_key
 from .yaml_checks import (
     find_category_drift,
     find_invalid_frontmatter,
+    find_hook_too_long,
     find_missing_doi,
+    find_missing_hook,
     find_missing_keywords,
     find_page_type_mismatches,
     find_stem_year_drift,
@@ -93,6 +95,7 @@ def main(argv: list[str]) -> int:
                              "page_type_mismatches, category_yaml_drift, stale_synthesis, stale_by_content, "
                              "stale_by_audit_count, p2_entries_with_anchor_hits, "
                              "stale_evolution_proposals, missing_keywords, "
+                             "missing_hook, hook_too_long, "
                              "ungraded_papers, dangling_claim_anchors, "
                              "concept_contract_violations, db_drift, "
                              "cross_paper_contradictions, fix_applied.")
@@ -131,6 +134,8 @@ def main(argv: list[str]) -> int:
     missing_doi = find_missing_doi(pages, pages_fm)
     stem_year_drift = find_stem_year_drift(pages, pages_fm)
     missing_keywords = find_missing_keywords(pages, pages_fm)
+    missing_hook = find_missing_hook(pages, pages_fm)
+    hook_too_long = find_hook_too_long(pages, pages_fm)
     unquoted_wikilinks = find_unquoted_wikilink_lists(pages)
 
     # --- staleness
@@ -170,6 +175,7 @@ def main(argv: list[str]) -> int:
             stale_by_audit_count=stale_by_audit_count,
             p2_anchor_hits=p2_anchor_hits, stale_proposals=stale_proposals,
             missing_keywords=missing_keywords, missing_doi=missing_doi,
+            missing_hook=missing_hook, hook_too_long=hook_too_long,
             stem_year_drift=stem_year_drift, unquoted_wikilinks=unquoted_wikilinks,
             supp_yaml_missing=supp_yaml_missing, supp_orphans=supp_orphans,
             ungraded_papers=ungraded_papers,
@@ -188,6 +194,7 @@ def main(argv: list[str]) -> int:
         stale_by_audit_count=stale_by_audit_count,
         p2_anchor_hits=p2_anchor_hits, stale_proposals=stale_proposals,
         missing_keywords=missing_keywords, missing_doi=missing_doi,
+        missing_hook=missing_hook, hook_too_long=hook_too_long,
         stem_year_drift=stem_year_drift, unquoted_wikilinks=unquoted_wikilinks,
         supp_yaml_missing=supp_yaml_missing, supp_orphans=supp_orphans,
         ungraded_papers=ungraded_papers,
@@ -244,6 +251,11 @@ def _emit_json(**kw) -> int:
         ],
         "missing_keywords": [
             {"page": key, "n_keywords": n} for key, n in kw["missing_keywords"]
+        ],
+        "missing_hook": kw["missing_hook"],
+        "hook_too_long": [
+            {"page": key, "chars": n, "ceiling": cap}
+            for key, n, cap in kw["hook_too_long"]
         ],
         "missing_doi": kw["missing_doi"],
         "stem_year_drift": kw["stem_year_drift"],
@@ -465,6 +477,40 @@ def _emit_prose(**kw) -> int:
             print(f"- ... and {len(missing_keywords) - 20} more")
     else:
         print("_all paper pages carry ≥3 keywords._")
+    print()
+
+    missing_hook = kw["missing_hook"]
+    print(f"## Catalog pages missing a hook ({len(missing_hook)})")
+    if missing_hook:
+        print("Pages with no `hook:` — the one-line gloss `index.md` renders "
+              "after the citation. Agent ingest writes it from the author's "
+              "HOOK trailer, so a page here either predates the field, came "
+              "from another framework, or had a malformed trailer (the field "
+              "is left unset rather than salvaged from a Summary slice, which "
+              "would state the paper's question instead of its finding). "
+              "Write a result-first gloss — method + scale + distinguishing "
+              "finding — to clear the entry.")
+        for key in missing_hook[:20]:
+            print(f"- {key}")
+        if len(missing_hook) > 20:
+            print(f"- ... and {len(missing_hook) - 20} more")
+    else:
+        print("_every catalog page carries a hook._")
+    print()
+
+    hook_too_long = kw["hook_too_long"]
+    print(f"## Hooks over the advisory ceiling ({len(hook_too_long)})")
+    if hook_too_long:
+        print("Hooks longer than their page type's ceiling (paper 400, "
+              "concept / synthesis / reference 1000, idea 2000 chars). "
+              "Advisory: a long hook is index bloat, not a defect, and nothing "
+              "truncates it — trimming is the author's call.")
+        for key, n, cap in hook_too_long[:20]:
+            print(f"- {key} — {n} chars (ceiling {cap})")
+        if len(hook_too_long) > 20:
+            print(f"- ... and {len(hook_too_long) - 20} more")
+    else:
+        print("_every hook is within its ceiling._")
     print()
 
     unquoted_wikilinks = kw["unquoted_wikilinks"]

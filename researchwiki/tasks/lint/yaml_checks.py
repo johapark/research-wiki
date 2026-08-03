@@ -7,6 +7,8 @@ flags a structural mismatch.
   - missing_doi: paper-type page without a DOI / no_doi_reason
   - stem_year_drift: stem-encoded year ≠ YAML year
   - missing_keywords: paper page with <3 keywords
+  - missing_hook: catalog page with no `hook:` gloss
+  - hook_too_long: `hook:` past its page type's advisory ceiling
 """
 
 from __future__ import annotations
@@ -26,6 +28,28 @@ except ImportError:
 
 REFERENCE_TYPES = ("guidance", "protocol", "whitepaper", "book")
 _STEM_YEAR_RE = re.compile(r"^[a-z0-9-]+?-(\d{4})[a-z]?-")
+
+# Page types that carry no `index.md` bullet and so need no `hook:`. Everything
+# else under a category dir is catalogued and does. Exempting by explicit type
+# (rather than requiring by type) keeps the 23 pages that predate the `type:`
+# requirement in scope instead of silently excusing them.
+HOOK_EXEMPT_TYPES = ("meta", "dashboard")
+
+# Advisory `hook:` ceilings in characters, by page type — mirrors the spec table
+# in CLAUDE.md Step 3, itself derived from observed practice. Reported, never
+# enforced: silently shortening a hand-written gloss is the failure mode the
+# `hook:` field exists to remove, so lint warns and leaves the text alone.
+HOOK_MAX_CHARS = {
+    "paper": 400,
+    "synthesis": 1000,
+    "concept": 1000,
+    "guidance": 1000,
+    "protocol": 1000,
+    "whitepaper": 1000,
+    "book": 1000,
+    "idea": 2000,
+}
+HOOK_MAX_DEFAULT = 1000
 
 
 def find_invalid_frontmatter(
@@ -280,4 +304,65 @@ def find_missing_keywords(
         if n_kw < 3:
             out.append((page_key(md), n_kw))
     out.sort()
+    return out
+
+
+def _catalog_pages(
+    pages: list[Path], pages_fm: dict[Path, dict],
+) -> list[tuple[Path, str, str]]:
+    """Pages that get an `index.md` bullet → (path, page type, hook text).
+
+    Skips root-level bookkeeping (`index.md`, `log.md`, `views.md`,
+    `pdfs-failed-parsing.md`), which produce slashless page keys, and any page
+    whose declared type is explicitly exempt.
+    """
+    out: list[tuple[Path, str, str]] = []
+    for md in pages:
+        key = page_key(md)
+        if "/" not in key:
+            continue
+        fm = pages_fm.get(md, {})
+        ptype = str(fm.get("type") or "paper").strip().strip("\"'")
+        if ptype in HOOK_EXEMPT_TYPES:
+            continue
+        hook = str(fm.get("hook") or "").strip()
+        out.append((md, ptype, hook))
+    return out
+
+
+def find_missing_hook(
+    pages: list[Path], pages_fm: dict[Path, dict],
+) -> list[str]:
+    """Catalog pages with no `hook:` — the one-line gloss `index.md` renders
+    after the citation (CLAUDE.md Step 3).
+
+    Agent ingest writes the field automatically from the author's HANDLE/HOOK
+    trailer, so a page appearing here means one of three things: it predates the
+    field, it came from another framework, or the author's trailer was missing or
+    malformed and the field was deliberately left unset rather than salvaged from
+    a Summary slice (which yields the paper's question, not its finding).
+
+    Backfill route for all three: `phases.commit.propose_short_name` derives the
+    handle and hook from an existing page body in one lightweight call.
+    """
+    out = [page_key(md) for md, _, hook in _catalog_pages(pages, pages_fm) if not hook]
+    out.sort()
+    return out
+
+
+def find_hook_too_long(
+    pages: list[Path], pages_fm: dict[Path, dict],
+) -> list[tuple[str, int, int]]:
+    """Pages whose `hook:` exceeds the advisory ceiling for their page type.
+
+    Returns (page key, actual chars, ceiling), longest first. Advisory only —
+    a long hook is index bloat, not a defect, and trimming is a judgement call
+    left to the author.
+    """
+    out: list[tuple[str, int, int]] = []
+    for md, ptype, hook in _catalog_pages(pages, pages_fm):
+        cap = HOOK_MAX_CHARS.get(ptype, HOOK_MAX_DEFAULT)
+        if hook and len(hook) > cap:
+            out.append((page_key(md), len(hook), cap))
+    out.sort(key=lambda row: (-row[1], row[0]))
     return out

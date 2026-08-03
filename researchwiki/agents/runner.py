@@ -843,28 +843,37 @@ def _phase_commit(ctx: Context, conn) -> Path:
         log(f"verify   ⚠ {w}", tag="agent")
 
     if gate.promoted:
-        # Short-name proposal — only worth the LLM call when we're committing
-        # to the wiki (sandbox pages don't appear in index.md anyway).
+        # Short name + catalog hook come from the winning draft's HANDLE/HOOK
+        # trailer, which `phases.draft.author` already parsed off the body — no
+        # separate proposer call. An author that skipped or mangled the trailer
+        # leaves these empty: the handle degrades to 'TODO' and `hook:` is
+        # omitted, which puts the page on `lint`'s `missing_hook` queue rather
+        # than committing a gloss nobody wrote.
+        short_name = (ctx.winner.handle if ctx.winner else "") or "TODO"
+        hook = (ctx.winner.hook if ctx.winner else "") or ""
         ctx.next_iter()
-        sn_out = phases.propose_short_name(
-            metadata=ctx.metadata,
-            draft_text=cleaned_text,
-            use_stub=ctx.use_stub,
-        )
         write_iteration(
             attempt_id=ctx.attempt_id,
             paper_stem=ctx.paper_stem,
             pdf_filename=ctx.pdf_filename,
             iteration=ctx.iteration,
             role="short_name",
-            decision="kept" if sn_out.name != "TODO" else "rejected",
-            decision_reason=f"proposed: {sn_out.name!r}",
-            model_used=sn_out.model,
-            cost_input_tokens=sn_out.input_tokens,
-            cost_output_tokens=sn_out.output_tokens,
+            decision="kept" if short_name != "TODO" else "rejected",
+            decision_reason=(
+                f"from author trailer: {short_name!r}; "
+                f"hook={'yes' if hook else 'MISSING'} ({len(hook)} chars)"
+            ),
+            model_used=(ctx.winner.model if ctx.winner else None),
+            cost_input_tokens=0,
+            cost_output_tokens=0,
             conn=conn,
         )
-        log(f"shortname → {sn_out.name!r}", tag="agent")
+        log(f"shortname → {short_name!r}", tag="agent")
+        if hook:
+            log(f"hook      → {hook[:88]}{'…' if len(hook) > 88 else ''}", tag="agent")
+        else:
+            log("hook      ⚠ author emitted no usable HOOK; lint will flag it",
+                tag="agent")
 
         # Keywords — same pattern as short_name, written into YAML for the
         # search index (BM25 + semantic) and for `lint` quality checks.
@@ -937,7 +946,8 @@ def _phase_commit(ctx: Context, conn) -> Path:
             candidates=[c for c in ctx.crosslink_candidates if c.verified],
             source_pdf_path=ctx.pdf_path,
             attempt_id=ctx.attempt_id,
-            short_name=sn_out.name,
+            short_name=short_name,
+            hook=hook,
             keywords=kw_out.keywords,
             author_model=author_model_id,
         )

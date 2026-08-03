@@ -187,21 +187,13 @@ def _count_key_contributions(body: str) -> int:
     )
 
 
-def _extract_summary_first_sentence(body: str, max_chars: int = 200) -> str:
-    summary = _extract_section(body, "summary")
-    if not summary:
-        return ""
-    # Strip any leading > callout block (e.g. AAP banner).
-    cleaned_lines = [
-        ln for ln in summary.splitlines()
-        if not ln.lstrip().startswith(">") and ln.strip()
-    ]
-    text = " ".join(cleaned_lines)
-    # First sentence — break on '. ' followed by capital, or just take first 200 chars.
-    m = re.search(r"^(.+?[.!?])\s+[A-Z]", text)
-    if m:
-        return m.group(1)[:max_chars]
-    return text[:max_chars].rstrip(" ,;:")
+# `_extract_summary_first_sentence` used to build the index gloss from sentence 1
+# of `## Summary`, sliced to 200 chars. It was removed with the `hook:` field:
+# a Summary opener states the paper's *question*, not its finding, and the slice
+# landed after the sentence match, so 97 of 244 generated entries ended mid-word.
+# The gloss now comes from the author's HOOK trailer (see
+# `phases.draft.split_gloss_trailer`) and is never derived from page prose — if
+# no hook is available the field is left unset for `lint` to flag.
 
 
 def detect_publication_status(
@@ -248,12 +240,26 @@ def _detect_senior_authors(authors_str: str | None) -> str | None:
     return parts[-1] if len(parts) < 6 else f"{parts[-2]}, {parts[-1]}"
 
 
+def _yaml_dq(value: str) -> str:
+    """Double-quoted YAML scalar, collapsed to one line.
+
+    Used for `hook:`, where quoting is load-bearing rather than cosmetic: hooks
+    routinely contain `[[wikilinks]]`, which PyYAML parses as a nested flow
+    sequence when unquoted (the failure `lint` reports as
+    `unquoted_wikilink_lists`), and `:` / `#`, which break a bare scalar.
+    """
+    flat = " ".join(str(value).split())
+    escaped = flat.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def _build_frontmatter(
     metadata: dict,
     stem: str,
     category: str,
     body: str,
     short_name: str | None = None,
+    hook: str | None = None,
     category_strength: str = "strong",
     keywords: list[str] | None = None,
     author_model: str | None = None,
@@ -330,6 +336,12 @@ def _build_frontmatter(
         fm_lines.append(f"publication_status: {pub_status}")
     if short_name and short_name != "TODO":
         fm_lines.append(f"short_name: {short_name}")
+    # `hook:` is always double-quoted — hooks routinely contain `[[wikilinks]]`
+    # (which YAML reads as a nested flow sequence when bare) and `:`. Omitted
+    # entirely when the author gave us nothing, so `lint`'s `missing_hook` picks
+    # the page up rather than us committing an empty field.
+    if hook:
+        fm_lines.append(f"hook: {_yaml_dq(hook)}")
     # Keywords — render only when we got enough quality items;
     # `render_keywords_yaml` returns None below the floor and we'd rather
     # write no field than a half-list lint would flag immediately.
@@ -453,10 +465,10 @@ def _append_index_entry(
     title: str,
     year: int | str | None,
     venue: str | None,
-    summary_first_sentence: str,
+    hook: str,
     short_name: str | None = None,
 ) -> bool:
-    """Append `- [[category/stem]] — **{short_name}** (...): {summary}` under the
+    """Append `- [[category/stem]] — **{short_name}** (...): {hook}` under the
     `## {category}` section in wiki/index.md. Returns True if updated, False
     if the catalog doesn't exist or the section is missing."""
     from ..paths import index_path as _index_path_fn
@@ -473,9 +485,18 @@ def _append_index_entry(
     handle = short_name if short_name and short_name != "TODO" else "**TODO short-name**"
     handle_md = f"**{handle}**" if not handle.startswith("**") else handle
     title_str = title or stem
+    # The gloss is the page's own `hook:` — the same string, verbatim, so the
+    # bullet and the YAML can't drift. The old path sliced sentence 1 of the
+    # Summary to 200 chars, which stated the paper's question and cut mid-word on
+    # 97 of 244 entries. When the author gave us no hook we say so plainly rather
+    # than substituting a Summary slice, and `lint`'s `missing_hook` queues it.
+    if hook:
+        gloss = hook
+    else:
+        gloss = "_(no hook — set `hook:` on the page)_"
     line = (
         f"- [[{category}/{stem}]] — {handle_md} — *{title_str}*{citation_paren}: "
-        f"{summary_first_sentence}. *Auto-ingested by agent — refine when reviewed.*"
+        f"{gloss}"
     )
 
     def _splice(text: str) -> str:
@@ -560,6 +581,7 @@ def promote_to_wiki(
     source_pdf_path: Path,
     attempt_id: str,
     short_name: str | None = None,
+    hook: str | None = None,
     keywords: list[str] | None = None,
     author_model: str | None = None,
 ) -> PromotionResult:
@@ -588,6 +610,7 @@ def promote_to_wiki(
     full_page = _build_frontmatter(
         metadata, stem, category, draft_text,
         short_name=short_name,
+        hook=hook,
         category_strength=cat_strength,
         keywords=keywords,
         author_model=author_model,
@@ -616,15 +639,15 @@ def promote_to_wiki(
     res.backlinks_added = added
     res.backlinks_skipped = skipped
 
-    # index.md.
-    summary_first = _extract_summary_first_sentence(draft_text)
+    # index.md — same `hook` string that went into the page's YAML, so the
+    # bullet and the frontmatter cannot drift.
     if _append_index_entry(
         stem=stem,
         category=category,
         title=metadata.get("title") or stem,
         year=metadata.get("year"),
         venue=metadata.get("venue"),
-        summary_first_sentence=summary_first,
+        hook=hook or "",
         short_name=short_name,
     ):
         res.index_updated = True

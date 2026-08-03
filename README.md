@@ -132,14 +132,14 @@ wiki/
 ├── synthesis/     ← cross-paper field maps (triggered by a query)
 ├── ideas/         ← forward-looking design proposals (manual only)
 ├── references/    ← regulatory guidance, protocols, whitepapers (manual)
-├── index.md, log.md, pdfs-failed-parsing.md   ← bookkeeping
+├── index.md, log.md                          ← bookkeeping
 ```
 
 - **`{category}/` — paper pages.** One per PDF, `{author}-{year}-{first-5-title-words}.md`. Strict contract (Summary, Key Contributions, Methodology, Results, Limitations, Related Papers); every claim source-supported (Rule 1). Q&A starts here.
 - **`synthesis/` — cross-paper field maps (retrospective).** Trajectories, status snapshots, method comparisons. Triggered when a non-trivial cross-paper answer is worth keeping — the primary way the wiki compounds. Lint flags stale ones; `candidates synthesis` finds uncovered clusters.
 - **`ideas/` — design proposals (manual).** Propose **what could be built** (vs synthesis's what *exists*). Structure: **Background** (source-supported motivation) → **Opportunities** (the design, from wiki-grounded principles) → **Plans** (staged, with checkpoints) → **Caveats** (failure modes). `status:` lifecycle `open → scoping → validated | superseded | abandoned`. No auto-generation — ask explicitly.
 - **`references/` — non-peer-reviewed.** Guidance (FDA/EMA/ICH), protocols, whitepapers, textbooks. Manual (no S2 metadata). Cross-links describe **methodological alignment**, not citation.
-- **Bookkeeping.** `index.md` (curated catalog), `log.md` (auto-appended history), `pdfs-failed-parsing.md` (extraction-failure ledger). All inside `wiki/` so `[[wikilinks]]` resolve in Obsidian.
+- **Bookkeeping.** `index.md` (curated catalog), `log.md` (auto-appended history). Both inside `wiki/` so `[[wikilinks]]` resolve in Obsidian. A PDF that wouldn't text-extract is recorded on the page itself via YAML `pdf_extraction_note:` and listed by `researchwiki status` — there's no separate ledger to keep current.
 - **`papers/{stem}.pdf` + `papers/{stem}.supp/`.** Canonical PDFs + supplementary attachments (listed under `supplementary:` YAML). The LLM `Read`s these on demand (Rule 3).
 
 See [CLAUDE.md Page Types](./CLAUDE.md) for the full contracts.
@@ -159,7 +159,7 @@ See [CLAUDE.md Page Types](./CLAUDE.md) for the full contracts.
 
 Tracked: `researchwiki/` (package + CLI), `prompts/`, `config/` **templates** (your `config/models.yaml` is gitignored), `tests/`, docs (`CLAUDE.md`, `README.md`, `WORKFLOW.md`), `pyproject.toml`, `.gitignore`, and the `inbox/` `papers/` `wiki/` **shells** (`.gitkeep` only).
 
-Gitignored (your library stays local): `papers/*.pdf` + `.supp/`, `wiki/{category}/*.md`, `inbox/*.pdf`, the `wiki/` bookkeeping files (`index.md`, `log.md`, `pdfs-failed-parsing.md`), and repo-root caches (`.ingest/`, `.s2-cache/`, `.crossref-cache/`, `.web-cache/`, `.tantivy-index/`, `.semantic-cache/`, `.grade-cache/`, `.agent-output/`, `.suggest-splits-stamp`).
+Gitignored (your library stays local): `papers/*.pdf` + `.supp/`, `wiki/{category}/*.md`, `inbox/*.pdf`, the `wiki/` bookkeeping files (`index.md`, `log.md`), and repo-root caches (`.ingest/`, `.s2-cache/`, `.crossref-cache/`, `.web-cache/`, `.tantivy-index/`, `.semantic-cache/`, `.grade-cache/`, `.agent-output/`, `.suggest-splits-stamp`).
 
 ## Development & validation
 
