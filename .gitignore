@@ -12,6 +12,8 @@ inbox/*
 !inbox/.gitkeep
 wiki/*
 !wiki/.gitkeep
+# Obsidian Web Clipper drops — per-user captured content, never part of the repo.
+Clippings/
 # Local-only shareable artifacts.
 share/
 # Default scaffold subdirs — committed (via .gitkeep) so every clone has the
