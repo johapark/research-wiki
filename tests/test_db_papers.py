@@ -99,8 +99,11 @@ def test_no_match_exits_0_in_both_modes(seeded_db, capsys):
     assert _run(["papers", "--category", "nonexistent", "--json"]) == 0
 
 
-def test_reversed_year_range_normalized(seeded_db, capsys):
-    # `--year 2026-2024` (lo > hi) used to BETWEEN-match nothing silently;
-    # a reversed range is an obvious typo, so it's normalized to 2024-2026.
-    assert _run(["papers", "--year", "2026-2024", "--count"]) == 0
-    assert capsys.readouterr().out.strip() == "2"
+def test_reversed_year_range_errors(seeded_db, capsys):
+    # `--year 2026-2024` (lo > hi) would BETWEEN-match nothing silently; a
+    # reversed range is malformed input (same class as non-numeric --year), so
+    # it's a user error (exit 1) with a suggestion, not a silent normalization.
+    assert _run(["papers", "--year", "2026-2024", "--count"]) == 1
+    err = capsys.readouterr().err
+    assert "reversed" in err
+    assert "2024-2026" in err

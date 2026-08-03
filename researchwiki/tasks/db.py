@@ -211,9 +211,14 @@ def _cmd_papers(args) -> int:
         if "-" in y and all(part.strip().isdigit() for part in y.split("-", 1)):
             lo, hi = (int(part) for part in y.split("-", 1))
             if lo > hi:
-                # BETWEEN with lo > hi silently matches nothing; a reversed
-                # range is an obvious typo, so just normalize it.
-                lo, hi = hi, lo
+                # BETWEEN with lo > hi silently matches nothing. Don't guess
+                # the intent — a reversed range is malformed input, same class
+                # as a non-numeric --year, so error (exit 1) rather than
+                # normalizing. A swapped lo/hi in a caller's script is a bug
+                # worth surfacing, not papering over.
+                print(f"researchwiki db papers: --year range is reversed "
+                      f"({y}); did you mean {hi}-{lo}?", file=sys.stderr)
+                return 1
             where.append("year BETWEEN ? AND ?")
             params += [lo, hi]
         elif y.isdigit():
