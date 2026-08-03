@@ -152,7 +152,7 @@ def _load_yaml() -> tuple[dict[str, ModelConfig], dict[str, dict]] | None:
     except ImportError:
         return None
     try:
-        data = yaml.safe_load(path.read_text())
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except Exception as e:
         log(f"could not parse {path}: {e}", tag="model-config")
         return None
@@ -206,7 +206,7 @@ def _ingest_settings() -> dict:
         return {}
     try:
         import yaml
-        data = yaml.safe_load(path.read_text())
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
     if not isinstance(data, dict):
@@ -272,7 +272,7 @@ def base_url() -> str | None:
         return _FALLBACK_BASE_URL
     try:
         import yaml
-        data = yaml.safe_load(path.read_text())
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except Exception:
         return None
     if not isinstance(data, dict):

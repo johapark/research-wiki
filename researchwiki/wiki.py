@@ -165,7 +165,9 @@ def read_wiki_dois() -> dict[str, str]:
     """Return {doi_lower: category/stem} for each paper page with a `doi:` line."""
     out: dict[str, str] = {}
     for p in read_pages(exclude_synthesis=True):
-        doi = p.fm.get("doi", "").lower()
+        # `doi:` with no value parses as None (the .get default doesn't apply
+        # when the key exists), so coerce before lowering.
+        doi = str(p.fm.get("doi") or "").lower()
         if doi:
             out[doi] = p.key
     return out

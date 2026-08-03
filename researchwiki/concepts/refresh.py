@@ -206,7 +206,7 @@ def upgrade_spokes(*, dry_run: bool = False) -> dict:
         term = str(cpage.fm.get("topic_seed") or cpage.fm.get("title") or "").strip().strip('"').strip("'")
         if not term:
             continue
-        text = cp.read_text()
+        text = cp.read_text(encoding="utf-8")
         # Only operate within `## How it appears across the corpus` section.
         m = re.search(
             r"(## How it appears across the corpus\n)(.*?)(?=\n## |\Z)",

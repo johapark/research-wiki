@@ -400,7 +400,7 @@ def _seed_batch_dir(root: Path, worker_stem_to_log: dict[str, str]) -> tuple[Pat
     for stem, log_body in worker_stem_to_log.items():
         pdf = str((root / "inbox" / f"{stem}.pdf").resolve())
         completed[pdf] = {"input": pdf, "status": "completed", "returncode": 0}
-        (batch_dir / f"worker-{stem}.log").write_text(log_body)
+        _ingest_batch._worker_log_path(batch_dir, pdf).write_text(log_body)
     return batch_dir, {"completed": completed, "failed": {}}
 
 
@@ -485,8 +485,7 @@ def test_run_batch_calls_epilogue_on_clean_completion(wiki, monkeypatch, capsys)
     pdfs = _make_pdfs(wiki, ["p1.pdf"])
 
     def worker(pdf_path, batch_dir, subcommand, extra_args):
-        stem = Path(pdf_path).stem
-        (batch_dir / f"worker-{stem}.log").write_text(
+        _ingest_batch._worker_log_path(batch_dir, pdf_path).write_text(
             "[agent] evolve   → 3 proposal(s) at /path/to/p1-evolution-proposals/  "
             "(knn=8 above_thr=4 judged=4 actionable=3)\n"
         )

@@ -46,12 +46,44 @@ def slugify_phrase(s: str) -> str:
     return re.sub(r"-+", "-", s).strip("-")
 
 
+# Tokens that mark a consortium/collaboration byline rather than a personal
+# name. Per CLAUDE.md's issuer rules, these get slugged whole
+# (`1000 Genomes Project` → `1000-genomes-project`) instead of reduced to a
+# trailing token (`project`).
+_CONSORTIUM_TOKENS = frozenset({
+    "project", "consortium", "consortia", "network", "initiative",
+    "collaboration", "collaborative", "group", "alliance", "program",
+    "programme",
+})
+
+
 def first_author_surname(authors: list[str]) -> str:
-    """Extract last name from 'First M. Last' or 'F. M. Last' strings."""
+    """Extract the last name from the first author string.
+
+    Handles three shapes:
+      - "First M. Last" / "F. M. Last" → `last`
+      - "Last, First" (comma = surname-first, common in bibliographic exports)
+        → `last`
+      - consortium bylines ("1000 Genomes Project") → the whole name slugged,
+        per CLAUDE.md's consortium rule, rather than a trailing token
+        (`project`).
+    """
     if not authors:
         return "unknown"
-    raw = authors[0]
-    raw = strip_diacritics(raw).strip()
+    raw = strip_diacritics(authors[0]).strip()
+    if not raw:
+        return "unknown"
+
+    # Consortium byline: slug the whole name (keeps hyphenated surnames working
+    # since those don't carry a consortium token).
+    if any(tok in _CONSORTIUM_TOKENS for tok in re.findall(r"[a-z0-9]+", raw.lower())):
+        slug = slugify_phrase(raw)
+        return slug or "unknown"
+
+    # "Last, First" — the surname is the part before the first comma.
+    if "," in raw:
+        raw = raw.split(",", 1)[0].strip()
+
     parts = raw.split()
     if not parts:
         return "unknown"

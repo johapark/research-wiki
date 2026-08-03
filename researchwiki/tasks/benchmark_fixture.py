@@ -632,7 +632,7 @@ def main(argv: list[str]) -> int:
                 pdf_path = resolve_pdf(args.stem)
                 from ..pdf.text import extract_pdf
                 paper_text, _ = extract_pdf(pdf_path, max_pages=80)
-                page_body = page_path.read_text()
+                page_body = page_path.read_text(encoding="utf-8")
                 style_report = compute_style(page_body, paper_text)
             except Exception as e:
                 print(

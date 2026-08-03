@@ -97,7 +97,7 @@ def _do_check_grounding(page_path: str, strict: bool) -> dict:
     if not p.exists():
         return {"error": f"file not found: {p}"}
     try:
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
     except OSError as e:
         return {"error": str(e)}
     permissive = not strict

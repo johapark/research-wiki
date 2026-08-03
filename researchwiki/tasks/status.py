@@ -101,7 +101,7 @@ def _index_status() -> tuple[dict, dict]:
     meta = sdir / "pages_meta.json"
     if meta.exists():
         try:
-            obj = json.loads(meta.read_text())
+            obj = json.loads(meta.read_text(encoding="utf-8"))
             semantic["exists"] = True
             semantic["n_pages"] = len(obj.get("rows", []))
             semantic["dim"] = obj.get("dim", 0)
@@ -239,7 +239,7 @@ def _failed_parsing_entries(root) -> list[str]:
     if not path.exists():
         return []
     entries = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         # Lines shaped like: - **{stem}**
         m = re.match(r"\s*-\s+\*\*([a-z0-9-]+)\*\*\s*$", line)
         if m:
@@ -287,7 +287,7 @@ def main(argv: list[str]) -> int:
     all_link_targets = known_pages | set().union(*page_type_sets.values())
 
     def _scan_links(page_path: Path, src_key: str) -> set[str]:
-        text = page_path.read_text()
+        text = page_path.read_text(encoding="utf-8")
         targets: set[str] = set()
         for link in _extract_wikilinks(text):
             if link == src_key:

@@ -85,9 +85,12 @@ _FOOTNOTE_DEF_RE = re.compile(r"^[ \t]*\[\^([^\]\s]+)\]:[ \t]*(.*)$", re.MULTILI
 _FOOTNOTE_REF_RE = re.compile(r"\[\^([^\]\s]+)\]")
 _WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 # Claim anchor extractor (matches `[[stem#slug]]` and `[[category/stem#slug]]`,
-# with optional `|alias`). Groups: 1=stem, 2=slug.
+# with optional `|alias`). Groups: 1=stem, 2=slug. The slug is restricted to
+# the shape claim_graph.slug emits (2–3-char lowercase prefix, dash, hash) so
+# an Obsidian heading link (`[[page#Definition]]`) isn't parsed as a claim
+# anchor — mirrors grade/grounding.py's `_CLAIM_ANCHOR_RE`.
 _CLAIM_ANCHOR_RE = re.compile(
-    r"\[\[([^\]\|#\s]+)#([^\]\|\s]+)(?:\|[^\]]+)?\]\]"
+    r"\[\[([^\]\|#\s]+)#([a-z0-9]{2,3}-[a-z0-9-]+)(?:\|[^\]]+)?\]\]"
 )
 
 # ISO dates (`2026-06-09`, `2026-06`) are not fidelity-checkable quantities —
@@ -469,7 +472,7 @@ def grade_synthesis(
                 but NOT in the cited claim's text triggers `anchor_misattributed`.
     """
     path = Path(page_path)
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
 
     permissive = grounding._is_idea_page(text)  # idea pages: model-prior units OK
     units = grounding.parse_units(text, permissive=permissive)

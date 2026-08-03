@@ -91,6 +91,16 @@ def test_bad_year_exits_1(seeded_db, capsys):
     assert _run(["papers", "--year", "abc"]) == 1
 
 
-def test_no_match_tsv_exits_1(seeded_db, capsys):
-    # TSV mode with zero rows → exit 1 (no-result-where-expected).
-    assert _run(["papers", "--category", "nonexistent"]) == 1
+def test_no_match_exits_0_in_both_modes(seeded_db, capsys):
+    # Zero rows → exit 0: `db papers` is read-only, and the contract says
+    # "Zero results still 0 for read-only tools". TSV and --json must agree —
+    # previously TSV exited 1 while --json exited 0 for the same query.
+    assert _run(["papers", "--category", "nonexistent"]) == 0
+    assert _run(["papers", "--category", "nonexistent", "--json"]) == 0
+
+
+def test_reversed_year_range_normalized(seeded_db, capsys):
+    # `--year 2026-2024` (lo > hi) used to BETWEEN-match nothing silently;
+    # a reversed range is an obvious typo, so it's normalized to 2024-2026.
+    assert _run(["papers", "--year", "2026-2024", "--count"]) == 0
+    assert capsys.readouterr().out.strip() == "2"

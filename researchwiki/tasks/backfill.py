@@ -53,7 +53,7 @@ def _normalise_author(s: str) -> str:
 def _insert_after_key(page_path: Path, new_line: str, after_key: str) -> None:
     """Insert `new_line` immediately after the first frontmatter line whose
     key is `after_key`. No-op with a warning if the anchor is missing."""
-    text = page_path.read_text()
+    text = page_path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
         print(f"          → no frontmatter; skipped {page_path.name}", file=sys.stderr)
         return
@@ -72,7 +72,7 @@ def _insert_after_key(page_path: Path, new_line: str, after_key: str) -> None:
 
 def _replace_or_insert(page_path: Path, key: str, value: str, after_key: str = "year") -> None:
     """Replace an existing `key: ...` line (any value) or insert after `after_key:`."""
-    text = page_path.read_text()
+    text = page_path.read_text(encoding="utf-8")
     new_line = f"{key}: {value}"
     if re.search(rf"^{key}:\s*.*$", text, re.MULTILINE):
         text = re.sub(rf"^{key}:\s*.*$", new_line, text, count=1, flags=re.MULTILINE)
@@ -101,7 +101,7 @@ def _find_keyword_candidates() -> list[Path]:
 def _insert_keywords_line(page_path: Path, keywords_line: str) -> None:
     """Insert `keywords: [...]` immediately before the existing `tags:` line
     (schema convention). Fallback: end of frontmatter."""
-    text = page_path.read_text()
+    text = page_path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
         print(f"          → no frontmatter; skipped {page_path.name}", file=sys.stderr)
         return

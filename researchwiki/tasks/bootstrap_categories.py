@@ -65,7 +65,7 @@ def _adaptive_max_categories(n_papers: int) -> int:
 
 def _load_prompt_system() -> str:
     path = wiki_root() / "prompts" / "bootstrap-categories-system.md"
-    return path.read_text()
+    return path.read_text(encoding="utf-8")
 
 
 def _build_user_prompt(bag: list[dict], max_cats: int) -> str:

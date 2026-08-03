@@ -55,6 +55,25 @@ def test_extract_strips_alias_suffix():
     assert got == [("stem-a", "kc-abcd1234")]
 
 
+def test_extract_ignores_obsidian_heading_links():
+    # `[[page#Heading]]` is an Obsidian section link, not a claim anchor. The
+    # heading fragment doesn't match the slug shape (prefix-hexhash), so it must
+    # not be treated as an anchor that can never resolve and falsely fails
+    # grounding.
+    text = ("See [[concepts/base-editing#Definition]] and "
+            "[[synthesis/off-target#How it appears across the corpus]].")
+    assert extract_claim_anchors(text) == []
+
+
+def test_heading_link_grounds_as_plain_wikilink():
+    # A claim citing only an Obsidian heading link is grounded (the link is a
+    # real wiki citation), NOT flagged as a dangling claim anchor.
+    text = f"{LONG_CLAIM}. [[compbio/stem-a#Definition]]"
+    report = check(text, valid_anchors=set())
+    assert report.total_claims == 1
+    assert report.grounded_claims == 1
+
+
 # ---------- grounding with anchor validation ----------
 
 

@@ -166,6 +166,21 @@ def test_write_statement_is_refused(tmp_path, monkeypatch, capsys):
             f"stderr for {sql!r} was: {err!r}"
 
 
+def test_missing_sql_file_is_user_error(tmp_path, monkeypatch, capsys):
+    """`db query --file` pointing at a nonexistent path is a user-input error
+    (exit 1) with a one-line message, not the exit-3 traceback an uncaught
+    FileNotFoundError would produce via the CLI funnel."""
+    main_db = tmp_path / "state.db"
+    _empty_state_db(main_db)
+    monkeypatch.setattr(db_task, "db_path", lambda: main_db)
+
+    rc = db_task._cmd_query(_Args(None, file=str(tmp_path / "nope.sql")))
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "cannot read --file" in err
+    assert "Traceback" not in err
+
+
 def test_non_write_error_is_friendly(tmp_path, monkeypatch, capsys):
     """A missing-table error renders as a one-line stderr message, not a raw
     Python traceback. A bad table name is user input → exit 1."""

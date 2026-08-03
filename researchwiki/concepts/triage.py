@@ -112,7 +112,7 @@ def _judge_chunk(chunk: list[dict], *, use_stub: bool) -> list[dict] | None:
     from ..paths import wiki_root
 
     try:
-        system = (wiki_root() / "prompts" / TRIAGE_SYSTEM_FILENAME).read_text()
+        system = (wiki_root() / "prompts" / TRIAGE_SYSTEM_FILENAME).read_text(encoding="utf-8")
     except OSError as e:
         print(f"  concept-triage: prompt file unreadable ({e}) — keeping chunk",
               file=sys.stderr)

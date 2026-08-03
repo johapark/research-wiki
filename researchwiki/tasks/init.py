@@ -149,7 +149,7 @@ def _upsert_env(path: Path, updates: dict[str, str]) -> None:
     updates."""
     if not updates:
         return
-    lines = path.read_text().splitlines() if path.exists() else []
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     remaining = dict(updates)
     out: list[str] = []
     for raw in lines:
@@ -205,7 +205,7 @@ def _current_provider(models_yaml: Path) -> str | None:
     first `provider:` value. Returns None if the file is absent/unreadable."""
     if not models_yaml.exists():
         return None
-    for raw in models_yaml.read_text().splitlines():
+    for raw in models_yaml.read_text(encoding="utf-8").splitlines():
         s = raw.strip()
         if s.startswith("provider:"):
             return s.split(":", 1)[1].strip().strip("\"'")
@@ -286,7 +286,7 @@ def _step_provider(root: Path) -> None:
 
 def _warn_gitignore(root: Path) -> None:
     gi = root / ".gitignore"
-    if gi.exists() and ".env" in gi.read_text():
+    if gi.exists() and ".env" in gi.read_text(encoding="utf-8"):
         return
     print("⚠ .env does not appear to be gitignored — add it before committing so your "
           "key doesn't reach GitHub.")

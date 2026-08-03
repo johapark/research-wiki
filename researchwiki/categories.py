@@ -99,7 +99,7 @@ def _stamp_path() -> Path:
 def write_stamp() -> None:
     """Touch the dismissal stamp. Called when the warning is surfaced (so it
     won't repeat for the decay window) and when `suggest-splits` runs."""
-    _stamp_path().write_text(str(int(time.time())))
+    _stamp_path().write_text(str(int(time.time())), encoding="utf-8")
 
 
 def stamp_age_days() -> float | None:
@@ -108,7 +108,7 @@ def stamp_age_days() -> float | None:
     if not p.exists():
         return None
     try:
-        ts = int(p.read_text().strip())
+        ts = int(p.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None
     return (time.time() - ts) / 86400.0
@@ -174,7 +174,7 @@ def write_divergence_stamp() -> None:
     """Touch the divergence dismissal stamp — called when the status warning is
     surfaced and when `suggest-splits --category/--all` runs, so the nudge
     suppresses for the decay window."""
-    _divergence_stamp_path().write_text(str(int(time.time())))
+    _divergence_stamp_path().write_text(str(int(time.time())), encoding="utf-8")
 
 
 def divergence_stamp_age_days() -> float | None:
@@ -183,7 +183,7 @@ def divergence_stamp_age_days() -> float | None:
     if not p.exists():
         return None
     try:
-        ts = int(p.read_text().strip())
+        ts = int(p.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None
     return (time.time() - ts) / 86400.0

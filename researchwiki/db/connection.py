@@ -204,7 +204,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     `PRAGMA table_info` and apply each missing column once. Cheap and adds
     no per-call overhead on warm DBs.
     """
-    sql = _SCHEMA_PATH.read_text()
+    sql = _SCHEMA_PATH.read_text(encoding="utf-8")
     conn.executescript(sql)
     _migrate(conn)
     conn.commit()

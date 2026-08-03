@@ -375,7 +375,7 @@ def _refresh_generated_at(text: str) -> str:
 
 def _parse_proposal_frontmatter(md_path: Path) -> dict:
     """Extract the key/value pairs from a proposal file's frontmatter."""
-    text = md_path.read_text()
+    text = md_path.read_text(encoding="utf-8")
     m = re.match(r"(?s)^---\n(.*?)\n---\n", text)
     if not m:
         return {}
@@ -435,7 +435,7 @@ def apply_promotions(*, verbose: bool = False) -> ApplyStats:
                     continue
                 # Re-derive the bullet from the proposal file body — humans
                 # may have edited it during review.
-                text = pf.read_text()
+                text = pf.read_text(encoding="utf-8")
                 bm = re.search(r"## Draft bullet\n+((?:- .+\n?)+(?:    - .+\n?)*)",
                                text)
                 if bm is None:
@@ -461,7 +461,7 @@ def apply_promotions(*, verbose: bool = False) -> ApplyStats:
                 relation = fm.get("relation", "contradicts")
                 accepted = _accepted_headings_for(relation)
                 default = _target_heading_for(relation)
-                orig = target_path.read_text()
+                orig = target_path.read_text(encoding="utf-8")
                 # Idempotent: a prior run may have crashed after the page write
                 # but before pf.unlink() below, leaving the edge un-promoted and
                 # the proposal on disk. Re-inserting would duplicate the bullet,

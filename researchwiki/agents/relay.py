@@ -91,7 +91,7 @@ def _write_atomic_json(path: Path, data: dict) -> None:
     """Write JSON via tmp + rename — eliminates the partial-read race."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
 
 
@@ -322,7 +322,7 @@ def call_chat_relay(
         _poll_until_exists(response_path, timeout)
 
         try:
-            data = json.loads(response_path.read_text())
+            data = json.loads(response_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             # File-level corruption is the user's problem to fix manually —
             # retry-via-protocol won't help because the chat already wrote it.

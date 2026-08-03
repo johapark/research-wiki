@@ -275,9 +275,15 @@ def process_one(src_pdf: Path, category_hint: str | None, no_move: bool,
         doi = detect_doi(pdf_meta, pdf_text)
         log(f"DOI detected: {doi}")
 
+    # Compute the wiki DOI index once and reuse it for both the dedup check
+    # here and the cross-link intersection after the provider calls — nothing
+    # writes a wiki page in between, so a second full rglob+YAML walk would
+    # only re-derive the identical dict.
+    wiki_dois = read_wiki_dois()
+
     # Dedup layer 1: DOI already in wiki? Skip before any provider calls.
     if doi:
-        existing = read_wiki_dois().get(doi.lower())
+        existing = wiki_dois.get(doi.lower())
         if existing:
             log(f"SKIP (duplicate): DOI {doi} is already in wiki as [[{existing}]]. "
                 f"PDF left in inbox/ for manual deletion.")
@@ -359,7 +365,6 @@ def process_one(src_pdf: Path, category_hint: str | None, no_move: bool,
     recs = provider.get_recommendations(article)
     log(f"provider refs={len(refs)} cites={len(citations)} recs={len(recs)}")
 
-    wiki_dois = read_wiki_dois()
     refs_raw = [r.raw for r in refs]
 
     # Fallback chain for when S2 `/references` is empty. Springer Nature and

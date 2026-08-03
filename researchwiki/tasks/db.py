@@ -116,7 +116,15 @@ def _cmd_verify(args) -> int:
 
 def _cmd_query(args) -> int:
     if args.file:
-        sql = open(args.file).read()
+        # A user-supplied path that doesn't exist (or isn't readable) is a
+        # user-input error (exit 1), not the exit-3 traceback an uncaught
+        # OSError would produce via the funnel.
+        try:
+            sql = open(args.file, encoding="utf-8").read()
+        except OSError as e:
+            print(f"researchwiki db query: cannot read --file {args.file}: {e}",
+                  file=sys.stderr)
+            return 1
     elif args.sql:
         sql = args.sql
     else:
@@ -202,6 +210,10 @@ def _cmd_papers(args) -> int:
         y = args.year.strip()
         if "-" in y and all(part.strip().isdigit() for part in y.split("-", 1)):
             lo, hi = (int(part) for part in y.split("-", 1))
+            if lo > hi:
+                # BETWEEN with lo > hi silently matches nothing; a reversed
+                # range is an obvious typo, so just normalize it.
+                lo, hi = hi, lo
             where.append("year BETWEEN ? AND ?")
             params += [lo, hi]
         elif y.isdigit():
@@ -243,7 +255,10 @@ def _cmd_papers(args) -> int:
     finally:
         conn.close()
     _render_rows(cols, rows, args.json)
-    return 0 if rows or args.json else 1
+    # Zero rows is still exit 0: `db papers` is a read-only tool, and the
+    # contract (CLAUDE.md, Exit-code contract) says zero results are success
+    # for those. Also keeps TSV and --json modes agreeing on the exit code.
+    return 0
 
 
 def _cmd_path(_args) -> int:

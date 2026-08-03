@@ -61,7 +61,7 @@ def get_claim_embeddings(rows: list[dict]):
     if npy_path.exists() and meta_path.exists():
         try:
             cached_vecs = np.load(npy_path)
-            meta = json.loads(meta_path.read_text())
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
             for i, m in enumerate(meta):
                 cached_index[m["id"]] = {"row": i, "hash": m["hash"]}
         except Exception:
@@ -104,6 +104,6 @@ def _persist(rows: list[dict], vecs, npy_path: Path, meta_path: Path) -> None:
         npy_path.parent.mkdir(parents=True, exist_ok=True)
         np.save(npy_path, vecs)
         meta = [{"id": _identity(r), "hash": _text_hash(r["text"])} for r in rows]
-        meta_path.write_text(json.dumps(meta, ensure_ascii=False))
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass  # cache is best-effort; a write failure just means we re-embed next time

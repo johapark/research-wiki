@@ -793,20 +793,27 @@ def _phase_commit(ctx: Context, conn) -> Path:
         )
         # DEBUG operator: when the gate rejects on a structural issue
         # (numeric drift, too few KC bullets, too few graded claims) we
-        # try one targeted repair pass before falling back to sandbox.
-        # Skipped under --auto-promote (caller already overrode the gate)
-        # and --force-sandbox (gate is informational only there).
-        if (
-            not gate.promoted
-            and ctx.promote_mode == "auto"
-            and ctx.max_debug > 0
-        ):
-            structural_issues = phases.detect_structural_gate_issues(gate.reasons)
-            if structural_issues:
+        # try up to `max_debug` targeted repair passes before falling back
+        # to sandbox. Skipped under --auto-promote (caller already overrode
+        # the gate) and --force-sandbox (gate is informational only there).
+        if not gate.promoted and ctx.promote_mode == "auto":
+            for _ in range(ctx.max_debug):
+                if gate.promoted:
+                    break
+                structural_issues = phases.detect_structural_gate_issues(gate.reasons)
+                if not structural_issues:
+                    break
+                prior_gate = gate
                 cleaned_text, n_kc, gate, verification = _phase_debug(
                     ctx, conn, cleaned_text, n_kc, gate, verification,
                     issues=structural_issues,
                 )
+                if gate is prior_gate:
+                    # _phase_debug reverted (repair didn't strictly improve)
+                    # and handed back the same gate object — another pass
+                    # would re-run the identical repair against the same
+                    # winner. Stop burning the budget.
+                    break
 
         # Opt-in per-claim entailment veto (grade.support). Off unless
         # --verify-claim-entailment is set. Runs on the FINAL winner/text —
@@ -1018,7 +1025,6 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # user to re-categorize from scratch on every false-positive
         # sandbox.
         from .phases import _wrap_with_frontmatter
-        from . import promote as promote_mod
         ctx.sandbox_dir.mkdir(parents=True, exist_ok=True)
         # Stem may be None when reconcile fails outright. Disambiguate the
         # fallback name with the attempt-id short hash so two failed

@@ -314,7 +314,7 @@ def load_fixture(stem: str) -> Fixture:
         raise FileNotFoundError(
             f"Fixture not found: {path}. Available: {find_fixtures()}"
         )
-    raw = yaml.safe_load(path.read_text())
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: top-level YAML must be a mapping, got {type(raw).__name__}")
 

@@ -39,7 +39,7 @@ def _read(path_str: str) -> str:
             f"Prompt file not found: {p}. "
             f"Expected location: prompts/<name>.md at repo root."
         )
-    return p.read_text().rstrip() + "\n"
+    return p.read_text(encoding="utf-8").rstrip() + "\n"
 
 
 def load_prompt(name: str, *, override_path: str | Path | None = None) -> str:

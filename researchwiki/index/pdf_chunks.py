@@ -157,7 +157,7 @@ def _build_embeddings_cache(idx_dir: Path, chunk_texts: list[str]) -> None:
         "n_chunks": int(embs.shape[0]),
         "chunk_texts": chunk_texts,
     }
-    (idx_dir / EMBEDDINGS_META_FILENAME).write_text(json.dumps(meta))
+    (idx_dir / EMBEDDINGS_META_FILENAME).write_text(json.dumps(meta), encoding="utf-8")
 
 
 def get_chunk_embeddings(stem: str) -> tuple[np.ndarray, list[str]] | None:
@@ -183,7 +183,7 @@ def get_chunk_embeddings(stem: str) -> tuple[np.ndarray, list[str]] | None:
         if not emb_path.exists():
             return None
     embs = np.load(emb_path)
-    meta = json.loads(meta_path.read_text())
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
     return embs, list(meta.get("chunk_texts") or [])
 
 

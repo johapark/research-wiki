@@ -778,7 +778,7 @@ def auto_apply_proposal(
     if not target_path.exists():
         return (False, f"target page missing: {prop.target_key}")
 
-    body = target_path.read_text()
+    body = target_path.read_text(encoding="utf-8")
 
     if source_link in body:
         return (False, "source already linked in target body")

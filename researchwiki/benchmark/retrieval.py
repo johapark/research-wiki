@@ -567,7 +567,7 @@ def _load_or_build_claim_cache(
     npy, meta = _claim_cache_paths(model_name)
     if npy.exists() and meta.exists():
         try:
-            meta_d = json.loads(meta.read_text())
+            meta_d = json.loads(meta.read_text(encoding="utf-8"))
             cached_prefix = meta_d.get("doc_prefix", "")
             arr = np.load(npy)
             rows = meta_d.get("rows", [])
@@ -603,7 +603,7 @@ def _load_or_build_claim_cache(
         "built_at": int(time.time()),
         "doc_prefix": doc_prefix,
         "rows": rows,
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
     return arr, rows
 
 
@@ -625,7 +625,7 @@ def _load_or_build_page_cache(
     npy, meta = _page_cache_paths(model_name)
     if npy.exists() and meta.exists():
         try:
-            meta_d = json.loads(meta.read_text())
+            meta_d = json.loads(meta.read_text(encoding="utf-8"))
             cached_prefix = meta_d.get("doc_prefix", "")
             arr = np.load(npy)
             rows = meta_d.get("rows", [])
@@ -681,7 +681,7 @@ def _load_or_build_page_cache(
         "built_at": int(time.time()),
         "doc_prefix": doc_prefix,
         "rows": rows,
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
     return arr, rows
 
 

@@ -583,5 +583,5 @@ def score_page(
     verbalization-based axes; safe and offline. `use_llm=True` uses
     a per-item LLM judge (one call per item; ~30 calls per fixture).
     """
-    body = Path(page_path).read_text()
+    body = Path(page_path).read_text(encoding="utf-8")
     return score_text(fixture, body, page_path=str(page_path), use_llm=use_llm)

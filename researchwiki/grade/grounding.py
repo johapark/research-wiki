@@ -45,8 +45,15 @@ _WIKILINK_RE = re.compile(r"\[\[[^\]]+\]\]")
 # Extract (stem, slug) from `[[stem#slug]]` or `[[stem#slug|display]]`. The
 # stem may or may not include a `category/` prefix; both forms are used in
 # the wiki, so we accept either. Whitespace inside the anchor is disallowed.
+# The slug part is restricted to the shape claim_graph.slug emits — a 2–3-char
+# lowercase section prefix, a dash, then the hash (+ optional `-{position}`),
+# e.g. `kc-9f3a2b1c`, `res-9f3a2b1c-2` — so a standard Obsidian heading link
+# (`[[concepts/base-editing#Definition]]`, `[[page#overview]]`) is a plain
+# wikilink, not a claim anchor that can never resolve and falsely fails
+# grounding. Kept structural rather than strict-hex so a typo'd hash is still
+# caught as dangling instead of silently passing as a heading link.
 _CLAIM_ANCHOR_RE = re.compile(
-    r"\[\[([^\]\|#\s]+)#([^\]\|\s]+)(?:\|[^\]]+)?\]\]"
+    r"\[\[([^\]\|#\s]+)#([a-z0-9]{2,3}-[a-z0-9-]+)(?:\|[^\]]+)?\]\]"
 )
 _CLAIM_ID_RE = re.compile(r"\bclaim_id\s*[:=]\s*\d+\b", re.IGNORECASE)
 

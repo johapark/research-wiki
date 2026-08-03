@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import datetime as _dt
+import hashlib
 import json
 import os
 import re
@@ -62,7 +63,7 @@ def _atomic_write_json(path: Path, data: dict) -> None:
     mid-write can't leave a truncated checkpoint that fails json.loads on
     resume."""
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True))
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
     os.replace(tmp, path)
 
 
@@ -71,7 +72,7 @@ def _read_checkpoint(batch_dir: Path) -> dict:
     p = batch_dir / "checkpoint.json"
     if not p.exists():
         return {}
-    return json.loads(p.read_text())
+    return json.loads(p.read_text(encoding="utf-8"))
 
 
 def _write_checkpoint(batch_dir: Path, state: dict) -> None:
@@ -99,17 +100,28 @@ def _resolve_inputs(paths: list[str]) -> list[str]:
     return [x for x in out if not (x in seen or seen.add(x))]
 
 
+def _worker_log_path(batch_dir: Path, pdf_path: str) -> Path:
+    """Log path for one worker, keyed by basename + a short hash of the full
+    input path. The hash disambiguates two same-named PDFs from different
+    directories (inputs are absolute paths, so that's legal) — without it the
+    second worker clobbered the first's log and the epilogue misattributed
+    its evolve/concept counts. Deterministic, so `_print_batch_epilogue` and
+    `resume_batch` recompute the same name from the checkpoint's input path."""
+    digest = hashlib.sha1(pdf_path.encode("utf-8")).hexdigest()[:8]
+    return batch_dir / f"worker-{Path(pdf_path).stem}-{digest}.log"
+
+
 def _worker(pdf_path: str, batch_dir: Path, subcommand: list[str],
             extra_args: list[str]) -> dict:
     """Run one ingest subprocess. Module-level so tests can monkeypatch it.
 
-    Full per-worker output lands in `worker-{stem}.log` beside the
+    Full per-worker output lands in `worker-{stem}-{hash8}.log` beside the
     checkpoint; the returned record is deliberately minimal — resume only
     needs `input` + `status`.
     """
-    log_path = batch_dir / f"worker-{Path(pdf_path).stem}.log"
+    log_path = _worker_log_path(batch_dir, pdf_path)
     cmd = [sys.executable, "-m", "researchwiki", *subcommand, pdf_path, *extra_args]
-    with log_path.open("w") as log_fp:
+    with log_path.open("w", encoding="utf-8") as log_fp:
         log_fp.write(f"# cmd: {' '.join(cmd)}\n")
         log_fp.flush()
         proc = subprocess.run(cmd, stdout=log_fp, stderr=subprocess.STDOUT, check=False)
@@ -167,7 +179,7 @@ def _summarize_worker_log(log_path: Path) -> dict:
     out = {"evolve_actionable": 0,
            "concept_joined": [], "concept_near_missed": []}
     try:
-        text = log_path.read_text()
+        text = log_path.read_text(encoding="utf-8")
     except OSError:
         return out
     for m in _EVOLVE_ACTIONABLE_RE.finditer(text):
@@ -207,7 +219,7 @@ def _print_batch_epilogue(batch_dir: Path, state: dict) -> None:
             if not pdf:
                 continue
             stem = Path(pdf).stem
-            summary = _summarize_worker_log(batch_dir / f"worker-{stem}.log")
+            summary = _summarize_worker_log(_worker_log_path(batch_dir, pdf))
             if summary["evolve_actionable"]:
                 per_paper_evolve.append((stem, summary["evolve_actionable"]))
                 totals["evolve_actionable"] += summary["evolve_actionable"]
@@ -390,7 +402,7 @@ def resume_batch(batch_dir: Path, no_retry: bool,
     if not plan_path.exists():
         print(f"ingest-batch: no plan.json in {batch_dir}", file=sys.stderr)
         return 1
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
     state = _read_checkpoint(batch_dir)
     completed = set((state.get("completed") or {}).keys())
     failed = set((state.get("failed") or {}).keys())
@@ -415,7 +427,7 @@ def resume_batch(batch_dir: Path, no_retry: bool,
               f"directly to see the error:", file=sys.stderr)
         for pdf in skipped_non_retryable:
             print(f"    · {Path(pdf).name}  "
-                  f"(see {(batch_dir / f'worker-{Path(pdf).stem}.log').name})",
+                  f"(see {_worker_log_path(batch_dir, pdf).name})",
                   file=sys.stderr)
 
     if not no_retry and failed:

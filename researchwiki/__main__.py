@@ -26,7 +26,7 @@ def _load_dotenv() -> None:
     env_file = Path.cwd() / ".env"
     if not env_file.exists():
         return
-    for raw in env_file.read_text().splitlines():
+    for raw in env_file.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -105,6 +105,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"researchwiki: unknown command '{command}'. "
               f"Available: {', '.join(tasks)}", file=sys.stderr)
         return 1
+    # Paths resolve relative to cwd (paths.wiki_root), so running from any
+    # other directory used to silently operate on a phantom empty repo —
+    # `db rebuild` reported 0 pages, `status` an empty wiki, and connection.py
+    # minted a fresh per-repo state.db keyed on the wrong cwd. Environment
+    # error (exit 2): the fix is `cd` to the wiki root, not editing flags.
+    # `init` is exempt — it's the one command meant for a not-yet-a-wiki dir.
+    if command != "init" and not (Path.cwd() / "wiki").is_dir():
+        print(f"researchwiki {command}: no wiki/ directory under {Path.cwd()} — "
+              f"run from the wiki root (or `researchwiki init` to create one here).",
+              file=sys.stderr)
+        return 2
     try:
         module = importlib.import_module(f"researchwiki.tasks.{tasks[command]}")
     except ImportError as e:

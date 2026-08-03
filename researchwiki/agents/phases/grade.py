@@ -91,7 +91,7 @@ def grade_draft(
 
     sandbox_dir.mkdir(parents=True, exist_ok=True)
     temp_path = sandbox_dir / f"{stem}-attempt-grade.md"
-    temp_path.write_text(_wrap_with_frontmatter(draft_text, metadata, stem))
+    temp_path.write_text(_wrap_with_frontmatter(draft_text, metadata, stem), encoding="utf-8")
 
     report = grade_page(
         stem=stem,

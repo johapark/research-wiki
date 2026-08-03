@@ -39,8 +39,10 @@ def append_related_paper(
     citation-graph phrasing so existing callers (promote, `lint --fix`) are
     unchanged. The claim-overlap cross-linker passes its own marker.
 
-    Idempotent: returns False (no write) if `[[source_key]]` already appears
-    anywhere in the target's body. Creates the section if missing. Otherwise
+    Idempotent: returns False (no write) if the target's body already links
+    the source in ANY wikilink form — `[[category/stem]]`, bare `[[stem]]`
+    (the form CLAUDE.md mandates in tables), an aliased `[[stem|…]]`, or a
+    claim anchor `[[stem#slug]]`. Creates the section if missing. Otherwise
     inserts the bullet at the section's tail (before the next heading).
 
     Returns True iff the file was modified.
@@ -50,12 +52,18 @@ def append_related_paper(
 
     source_link = f"[[{source_key}]]"
     bullet = f"- {source_link} — {note}"
+    # Any wikilink whose target resolves to the source paper: optional
+    # `category/` prefix, then the bare stem, terminated by `]`, `|`, or `#`.
+    stem = source_key.rsplit("/", 1)[-1]
+    already_linked_re = re.compile(
+        r"\[\[(?:[^\]\|#]*/)?" + re.escape(stem) + r"[\]\|#]"
+    )
 
     def _splice(text: str) -> str:
         # Idempotent: returning `text` unchanged signals update_locked to skip
         # the write. Concurrent ingests editing the same target page are
         # serialized by the flock, so this read-modify-write can't be clobbered.
-        if source_link in text:
+        if already_linked_re.search(text):
             return text
         m = _RELATED_HEADING_RE.search(text)
         if not m:

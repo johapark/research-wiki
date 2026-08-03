@@ -269,7 +269,7 @@ def main(argv: list[str]) -> int:
             cache_dir = s2_cache_dir()
             cache_dir.mkdir(exist_ok=True)
             snapshot = cache_dir / f"audit-{date.today().isoformat()}.json"
-            snapshot.write_text(json.dumps(out, indent=2))
+            snapshot.write_text(json.dumps(out, indent=2), encoding="utf-8")
             log(f"snapshot cached: {snapshot.name}", tag="audit")
         except OSError as e:
             log(f"snapshot write failed: {e}", tag="audit")

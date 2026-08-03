@@ -212,7 +212,7 @@ def run(
 
     new_page = pages[stem]
     new_key = new_page.key
-    new_body = new_page.path.read_text() if new_page.path.exists() else ""
+    new_body = new_page.path.read_text(encoding="utf-8") if new_page.path.exists() else ""
     judge = judge_fn or _default_judge
 
     applied, coincidence, skipped, judge_failed = [], [], [], []
@@ -223,7 +223,7 @@ def run(
         ex_key = ex.key
         # Already linked either direction → no judge call, no work.
         if f"[[{ex_key}]]" in new_body or f"[[{new_key}]]" in (
-            ex.path.read_text() if ex.path.exists() else ""
+            ex.path.read_text(encoding="utf-8") if ex.path.exists() else ""
         ):
             skipped.append({"existing": ex_key, "reason": "already-linked", "cosine": cand.cosine})
             continue
@@ -250,7 +250,7 @@ def run(
             wrote_ex = append_related_paper(ex.path, new_key, note=_NOTE)
             record["wrote"] = {"new_page": wrote_new, "existing_page": wrote_ex}
             if wrote_new:  # keep in-memory body current so a later candidate sees the link
-                new_body = new_page.path.read_text()
+                new_body = new_page.path.read_text(encoding="utf-8")
             # Typed edge lands regardless of whether the wikilink was already
             # present — the edge cache is orthogonal to Related Papers.
             if relation is not None:

@@ -983,7 +983,7 @@ def collect_candidates(
         if md.parent.name not in content_cats:
             continue
         p = read_page(md)
-        body = p.body if p else md.read_text()
+        body = p.body if p else md.read_text(encoding="utf-8")
         paper_prose[md] = strip_non_prose(body)
 
     legacy_rows = find_concept_candidates(paper_prose, known_stems)

@@ -137,7 +137,7 @@ def build_index(pages: list[Page] | None = None) -> dict | None:
         "built_at": int(time.time()),
         "rows": rows,
     }
-    (out_dir / PAGES_META).write_text(json.dumps(meta, indent=2))
+    (out_dir / PAGES_META).write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return {"n_pages": len(rows), "model": meta["model"], "dim": meta["dim"]}
 
 
@@ -148,7 +148,7 @@ def _write_empty(out_dir: Path) -> None:
         "dim": 0,
         "built_at": int(time.time()),
         "rows": [],
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
 
 
 def _load() -> tuple[np.ndarray, list[dict]] | None:
@@ -157,7 +157,7 @@ def _load() -> tuple[np.ndarray, list[dict]] | None:
     meta = out_dir / PAGES_META
     if not npy.exists() or not meta.exists():
         return None
-    rows = json.loads(meta.read_text()).get("rows", [])
+    rows = json.loads(meta.read_text(encoding="utf-8")).get("rows", [])
     arr = np.load(npy)
     if arr.shape[0] != len(rows):
         # Index is corrupt or partially written — caller should rebuild.

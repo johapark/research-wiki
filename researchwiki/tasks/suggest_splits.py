@@ -157,7 +157,7 @@ def _read_paper_excerpt(row: dict) -> str:
     """Pull a short excerpt from the wiki page (title + summary section)."""
     page_path = wiki_root() / "wiki" / row["category"] / f"{row['stem']}.md"
     try:
-        text = page_path.read_text()
+        text = page_path.read_text(encoding="utf-8")
     except OSError:
         return row.get("title") or ""
     # Best-effort: extract the Summary section
@@ -240,7 +240,7 @@ def _call_judge(
 
     from ..agents import llm
 
-    system = (wiki_root() / "prompts" / system_filename).read_text()
+    system = (wiki_root() / "prompts" / system_filename).read_text(encoding="utf-8")
     user = _build_cluster_prompt(rows, source_category=source_category)
     try:
         # Same max_tokens override as bootstrap-categories — the classifier

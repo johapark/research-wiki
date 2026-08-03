@@ -38,6 +38,23 @@ def test_surname_empty_list_is_unknown():
     assert first_author_surname([]) == "unknown"
 
 
+def test_surname_comma_order():
+    # "Last, First" (bibliographic export order) → surname is before the comma.
+    assert first_author_surname(["Liao, Wen-Wei"]) == "liao"
+    assert first_author_surname(["García-López, Ana"]) == "garcia-lopez"
+
+
+def test_surname_consortium_slugged_whole():
+    # Consortium bylines slug the whole name per CLAUDE.md, not a trailing token.
+    assert first_author_surname(["1000 Genomes Project"]) == "1000-genomes-project"
+    assert first_author_surname(["The ENCODE Consortium"]) == "the-encode-consortium"
+
+
+def test_surname_blank_string_is_unknown():
+    assert first_author_surname([""]) == "unknown"
+    assert first_author_surname(["   "]) == "unknown"
+
+
 # ---------- derive_title_part ----------
 
 def test_title_first_five_words():

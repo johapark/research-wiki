@@ -103,7 +103,7 @@ def _insert_supplementary(
     *filename* — if a file with this name is already listed, raise so the
     caller can prompt for `--replace`.
     """
-    text = page_path.read_text()
+    text = page_path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
         raise ValueError(f"{page_path}: missing YAML frontmatter")
     yaml_end = text.find("\n---\n", 4)
