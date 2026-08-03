@@ -1,20 +1,30 @@
-"""Backfill missing YAML fields on paper pages.
+"""Backfill missing YAML fields on existing pages.
 
-✅ Use when: lint reports `missing_keywords` or `missing_doi` and you want to
-   mass-populate the fields without re-ingesting.
-❌ Don't use: as part of a normal ingest — the ingest pipeline already
-   produces both fields at reconcile / promote time.
+✅ Use when: lint reports `missing_keywords` / `missing_doi` / `missing_hook`,
+   or pages arrived from another framework without this framework's fields, and
+   you want to mass-populate without re-ingesting.
+❌ Don't use: as part of a normal ingest — the pipeline already produces these
+   at reconcile / author / promote time.
 
 Targets (each has its own flags — run `backfill <target> --help`):
 
-  researchwiki backfill keywords   # LLM-generated keywords
+  researchwiki backfill keywords   # LLM-generated keywords (batched)
   researchwiki backfill doi        # DOI lookup via Semantic Scholar, Crossref fallback
+  researchwiki backfill hook       # LLM-generated catalog gloss (+ short_name)
 
-Both accept `--dry-run` and `--limit N`; `keywords` also has `--batch-size N`
-(default 10) and `--reindex`. See per-target `--help` for the full list.
+All accept `--dry-run` and `--limit N`; `keywords` adds `--batch-size N`
+(default 10), `hook` adds `-w/--workers N`, and all three take `--reindex`.
 
-Exit code: 0 always (per-page failures are reported inline; a failed lookup
-leaves the page unchanged).
+Two derivation styles live here deliberately. `keywords` and `hook` read the
+page body — prose that is already PDF-grounded, so no provenance field is needed
+under Rule 1. `doi` cannot work that way: an LLM asked for a DOI invents a
+plausible one, so it goes to S2/Crossref and every hit clears `_sanity_ok`
+(author, year, title overlap) before it is written. When adding a target, decide
+which style it is; if the value isn't legible in the page, it needs a lookup and
+a sanity check, not a prompt.
+
+Exit code: 0 always (per-page failures are reported inline; a failed lookup or
+call leaves the page unchanged).
 """
 
 from __future__ import annotations
@@ -205,6 +215,178 @@ def _run_keywords(args: argparse.Namespace) -> int:
     print(f"  Failed:           {failed}")
     if args.dry_run and not failed:
         print(f"  (dry run — re-run without --dry-run to commit)")
+
+    if args.reindex and written:
+        print()
+        print("Rebuilding indexes...")
+        from . import reindex
+        reindex.main([])
+
+    return 0
+
+
+# ---------- HOOK (+ short_name) ----------
+
+
+# A page needs some prose for a gloss to summarise. Below this the model would be
+# inventing rather than reading, so we skip and say so.
+_MIN_BODY_CHARS = 200
+
+
+def _find_hook_candidates() -> list[Path]:
+    """Catalog pages with no `hook:`, straight from lint's own check.
+
+    Delegated rather than re-filtered locally (the way `_find_keyword_candidates`
+    does) because "needs a hook" is broader than "is a paper": synthesis, idea,
+    concept and reference pages all get an `index.md` bullet and so all need the
+    field. Sharing the predicate means `backfill hook` and `lint`'s
+    `missing_hook` can't drift apart about which pages have a gap.
+    """
+    from .lint.walk import all_pages, page_key
+    from .lint.yaml_checks import find_missing_hook
+
+    pages = all_pages()
+    pages_fm: dict[Path, dict] = {}
+    for p in pages:
+        pg = read_page(p)
+        pages_fm[p] = pg.fm if pg else {}
+    wanted = set(find_missing_hook(pages, pages_fm))
+    return sorted(p for p in pages if page_key(p) in wanted)
+
+
+def _insert_hook_lines(page_path: Path, hook: str, short_name: str) -> bool:
+    """Write `hook:` (and `short_name:` when supplied) into the frontmatter.
+
+    Anchors after `short_name:` if present, else `title:` — both single-line
+    scalars on every page, so the insert never lands inside a block scalar (e.g.
+    concept pages' `concept_thesis: |`). Returns True when the file was written.
+    """
+    from ..agents.promote import _yaml_dq
+
+    text = page_path.read_text(encoding="utf-8")
+    if not text.startswith("---\n"):
+        print(f"          → no frontmatter; skipped {page_path.name}", file=sys.stderr)
+        return False
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        print(f"          → unterminated frontmatter; skipped {page_path.name}", file=sys.stderr)
+        return False
+
+    fm_lines = [ln for ln in text[4:end].split("\n")
+                if not re.match(r"^hook\s*:", ln)]
+    new_lines = [f"hook: {_yaml_dq(hook)}"]
+    if short_name:
+        new_lines.append(f"short_name: {short_name}")
+
+    anchor = None
+    for key in ("short_name", "title"):
+        for idx, line in enumerate(fm_lines):
+            if line.startswith(f"{key}:"):
+                anchor = idx
+                break
+        if anchor is not None:
+            break
+    if anchor is None:
+        print(f"          → no `short_name:`/`title:` anchor; skipped {page_path.name}",
+              file=sys.stderr)
+        return False
+
+    fm_lines[anchor + 1:anchor + 1] = new_lines
+    write_text_atomic(page_path, "---\n" + "\n".join(fm_lines) + "\n---\n" + text[end + 5:])
+    return True
+
+
+def _propose_one_hook(page_path: Path, want_short: bool) -> dict:
+    """One LLM call for one page. Returns a plain dict so it can cross threads."""
+    from ..agents.phases import propose_short_name
+
+    page = read_page(page_path)
+    if page is None:
+        return {"path": page_path, "key": page_path.name, "status": "failed",
+                "reason": "unreadable / no frontmatter"}
+    key = page.key
+    if len((page.body or "").strip()) < _MIN_BODY_CHARS:
+        return {"path": page_path, "key": key, "status": "skipped",
+                "reason": f"body under {_MIN_BODY_CHARS} chars — nothing to gloss"}
+
+    out = propose_short_name(
+        metadata={"title": page.str_field("title"), "year": page.str_field("year"),
+                  "authors": page.str_field("authors")},
+        draft_text=page.body or "",
+    )
+    if out.model == "(failed)":
+        return {"path": page_path, "key": key, "status": "failed",
+                "reason": "LLM call failed"}
+    has_short = bool(page.str_field("short_name").strip())
+    short = out.name if (want_short and out.name != "TODO" and not has_short) else ""
+    if not out.hook:
+        return {"path": page_path, "key": key, "status": "skipped",
+                "reason": "no usable HOOK in the response"}
+    return {"path": page_path, "key": key, "status": "ok",
+            "hook": out.hook, "short_name": short,
+            "title": page.str_field("title", "(no title)")}
+
+
+def _run_hooks(args: argparse.Namespace) -> int:
+    if args.workers < 1:
+        print("--workers must be ≥1", file=sys.stderr)
+        return 1
+
+    candidates = _find_hook_candidates()
+    if args.limit:
+        candidates = candidates[:args.limit]
+
+    if not candidates:
+        print("No pages missing a hook. Nothing to backfill.")
+        return 0
+
+    print(f"Backfilling hooks for {len(candidates)} page(s) "
+          f"with {args.workers} worker(s)"
+          f"{' (dry run)' if args.dry_run else ''}.")
+    print()
+
+    written = skipped = failed = 0
+    t0 = time.time()
+
+    # The Anthropic SDK is sync, so threads give IO concurrency. Each call is
+    # independent and only its own page is written, so there's nothing to race.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        results = list(pool.map(
+            lambda p: _propose_one_hook(p, not args.no_short_name), candidates))
+
+    for i, res in enumerate(results, 1):
+        print(f"[{i}/{len(candidates)}] {res['key']}")
+        if res["status"] != "ok":
+            print(f"          → {res['reason']}")
+            if res["status"] == "failed":
+                failed += 1
+            else:
+                skipped += 1
+            continue
+        print(f"          → hook ({len(res['hook'])}): {res['hook'][:150]}"
+              f"{'…' if len(res['hook']) > 150 else ''}")
+        if res["short_name"]:
+            print(f"          → short_name: {res['short_name']}")
+        if args.dry_run:
+            continue
+        if _insert_hook_lines(res["path"], res["hook"], res["short_name"]):
+            written += 1
+        else:
+            skipped += 1
+
+    dt = time.time() - t0
+    print()
+    print(f"Done in {dt:.1f}s.")
+    print(f"  Wrote hooks:     {written}")
+    print(f"  Skipped:         {skipped}")
+    print(f"  Failed:          {failed}")
+    if args.dry_run and written == 0:
+        print(f"  (dry run — re-run without --dry-run to commit)")
+    if not args.dry_run and written:
+        print()
+        print("Frontmatter changed — run `researchwiki db rebuild` "
+              "(and `reindex`, or pass --reindex next time).")
 
     if args.reindex and written:
         print()
@@ -417,7 +599,7 @@ def _run_dois(args: argparse.Namespace) -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="researchwiki backfill",
-        description="Backfill missing YAML fields on paper pages.",
+        description="Backfill missing YAML fields on existing pages.",
     )
     subs = parser.add_subparsers(dest="target", required=True, metavar="TARGET")
 
@@ -436,6 +618,17 @@ def main(argv: list[str]) -> int:
     doi.add_argument("--reindex", action="store_true",
                      help="After backfill, run `researchwiki reindex`.")
     doi.set_defaults(func=_run_dois)
+
+    hook = subs.add_parser("hook",
+                           help="LLM-generated catalog gloss (+ short_name) from page prose.")
+    _add_common_flags(hook)
+    hook.add_argument("-w", "--workers", type=int, default=4,
+                      help="Concurrent LLM calls (default 4). Lower for rate-limited providers.")
+    hook.add_argument("--no-short-name", action="store_true",
+                      help="Write only hook:, never add a missing short_name:.")
+    hook.add_argument("--reindex", action="store_true",
+                      help="After backfill, run `researchwiki reindex`.")
+    hook.set_defaults(func=_run_hooks)
 
     args = parser.parse_args(argv)
     return int(args.func(args) or 0)

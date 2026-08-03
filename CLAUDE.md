@@ -306,13 +306,19 @@ researchwiki agent ingest --resume .ingest/batch-<ts>/          # resume after a
 
 **Rule 1**: the hook is generated from PDF-grounded page prose, never from an S2 `tldr` — that's why a persisted `hook:` needs no provenance field. The digest path's *draft* gloss **is** `tldr`-seeded, so rewrite it before it becomes `hook:`; never paste it through.
 
-**Backfill / migration**: for pages that predate the field or arrive from another framework, `phases.commit.propose_short_name` derives both fields from an existing page body in one lightweight call — no re-run of the author phase, no rewriting of reviewed prose.
+**Backfill** — `researchwiki backfill hook` for pages that predate the field. See Operations → Backfill.
 
 **Step 4 — Append to `log.md`** (auto-handled).
 
 **Step 5 — Check stale syntheses.** `researchwiki lint --json`; inspect `stale_synthesis`, `stale_by_content`, `p2_entries_with_anchor_hits`. Refresh or leave a one-liner in `log.md`.
 
 **Step 6 — Memory-evolution proposals.** Agent path auto-runs `researchwiki evolve`; digest path doesn't (run manually). Actionable proposals land under `.ingest/{stem}-evolution-proposals/`. **You are the reviewer** — read each proposal + target synthesis, verify patches against the source paper (numbers, framing, superlatives drift), one-paragraph verdict per proposal, ask user permission (one yes/no covers all from a single ingest unless specified). On approval: apply, `rm -rf` the proposal dir, update synthesis `generated_at:` (the citation lands in the body — synthesis/idea have no `referenced_papers:`). Skip when `evolve` returned zero verdicts or paper is a reference doc.
+
+### Backfill — fill missing YAML on pages that already exist
+
+`researchwiki backfill <target>` populates a field without re-authoring prose. Targets: **`hook`** (catalog gloss + `short_name`, `-w N`), **`keywords`** (batched), **`doi`** (S2 → Crossref, sanity-checked). All take `--dry-run`, `--limit N`, `--reindex`; each selects its work list from the matching `lint` check. Always `--dry-run --limit 5` first, and `db rebuild && reindex` after.
+
+When importing pages from another framework, or backfilling more than a handful, read [`prompts/migration-backfill.md`](./prompts/migration-backfill.md) — full workflow, verification table, failure modes. **The trap it exists for**: claim extraction keys on exact H2 names (`## Key Contributions` / `## Results` / `## Limitations` / `## Methodology and Architecture`), so a page with different headings yields zero claims, is uncitable, and is *invisible* to `lint`'s `ungraded_papers` (which skips zero-claim pages).
 
 ### Recovery — re-ingest after a broken ingest
 

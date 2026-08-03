@@ -1,0 +1,178 @@
+# Migration & backfill — importing pages, filling missing YAML
+
+Trigger: user brings in `.md` pages written by another tool (Obsidian vault, Zotero export, a different wiki framework, an older version of this one), **or** `lint --json` reports `missing_hook` / `missing_keywords` / `missing_doi` on pages that already exist. Backfill fills fields on pages that are already on disk; it never re-authors prose.
+
+**Why backfill rather than re-ingest.** `agent ingest` rewrites the whole page from the PDF. For imported or hand-written prose that's the opposite of what you want — you migrated the text in order to keep it. Backfill reads whatever prose is there and adds only its own fields. Re-ingest instead when the *prose* is the problem (see [`recovery.md`](./recovery.md)).
+
+---
+
+## The one thing that silently fails
+
+**Claim extraction keys on exact H2 headings.** `researchwiki/grade/parser.py` reads only:
+
+```
+## Key Contributions      ## Results      ## Limitations
+## Methodology and Architecture     (prose-level extraction too)
+```
+
+A page with `## Findings`, `## Contributions`, `## Abstract`, or `## What they did` yields **zero claims**. That page then:
+
+- can't be cited — `researchwiki claims` has nothing to return, so `[[stem#claim_slug]]` anchors don't exist
+- can't be verified — `check-grounding` / `grade synthesis` have nothing to check a synthesis citation against
+- **doesn't appear in `lint`'s `ungraded_papers`**, which excludes zero-claim pages by design (`db_checks.py`: "Excludes pages with zero claims")
+
+So the page looks migrated, `backfill hook` succeeds on it (the hook prompt tolerates any headings), `lint` is quiet — and it is inert as evidence. Nothing warns you.
+
+Detect it directly:
+
+```bash
+researchwiki db query "SELECT stem, category FROM papers
+  WHERE page_type='paper' AND page_path LIKE '%/wiki/%'
+    AND stem NOT IN (SELECT DISTINCT paper_stem FROM claims)"
+```
+
+Expect zero rows. Any row is a paper page contributing no citable evidence — rename its headings to the four above and `db rebuild`. **Do this before backfilling anything else**: heading renames are mechanical, and everything downstream depends on them.
+
+---
+
+## Migration workflow
+
+### 1. Land the files
+
+```bash
+# PDFs → papers/{stem}.pdf, pages → wiki/{category}/{stem}.md
+```
+
+- Stems follow *File Naming Convention* in `CLAUDE.md` (`{surname}-{year}-{first-5-title-words}`). Mismatched stems aren't fatal but break `pdf_path` resolution and make `lint`'s `stem_year_drift` noisy.
+- **Directory is the canonical category** — `db rebuild` reads the parent dir and ignores YAML `category:`. A category exists only if `wiki/<category>/` exists; create dirs first or pages land nowhere valid.
+- Copy, never symlink, PDFs.
+
+### 2. Give every page a frontmatter block with `title:`
+
+Hard prerequisite. Backfill anchors inserts after `short_name:`/`title:`, and a page with no `---` fence is **refused**, not repaired — it won't invent a header. Minimum viable:
+
+```yaml
+---
+title: "Exact title as printed on the PDF"
+type: paper
+---
+```
+
+`type:` matters more than it looks: `db rebuild` defaults a missing `type:` to `paper`, so a synthesis page without it gets treated as a paper, has claims extracted from it, and shows up in paper-only queries.
+
+### 3. Fix the H2 headings
+
+Per the section above. Everything else is recoverable later; this isn't, quietly.
+
+### 4. Backfill, cheapest signal first
+
+```bash
+researchwiki db rebuild && researchwiki reindex   # so selection sees the new pages
+
+researchwiki backfill hook --dry-run --limit 5    # judge tone before paying for 250
+researchwiki backfill hook -w 6
+researchwiki backfill keywords                    # batched, 10 pages/call
+researchwiki backfill doi                         # S2 → Crossref, sanity-checked
+
+researchwiki db rebuild && researchwiki reindex   # frontmatter changed
+```
+
+Always dry-run first — it makes real LLM calls but writes nothing. Reference figures from the 253-page run on this corpus: Haiku, 6 workers, **84s, ~$0.40, 0 failures**, 252/253 hooks inside the 400-char ceiling.
+
+### 5. Grade, so the pages become citable
+
+```bash
+researchwiki lint --json | python3 -c "import json,sys; print(len(json.load(sys.stdin)['ungraded_papers']))"
+researchwiki grade regression --missing-only
+```
+
+Claims are extracted by `db rebuild`, but they arrive **ungraded** — no score against the source PDF. Ungraded claims can't ground a synthesis page. This is the expensive step (one grader pass per paper), so run it after step 4, and re-check the zero-claim query first: grading can't fix a page that produced no claims.
+
+### 6. Verify
+
+```bash
+researchwiki lint --json    # then read the keys below
+researchwiki status
+```
+
+| Key | Expect after migration | If not |
+|---|---|---|
+| `missing_hook` | 0 | re-run `backfill hook`; check `--dry-run` output for skips |
+| `missing_keywords` | 0 | `backfill keywords`; <5 kept → LLM found too little prose |
+| `missing_doi` | small | no confident match; set `no_doi_reason:` if genuinely DOI-less |
+| `ungraded_papers` | 0 | `grade regression --missing-only` |
+| `invalid_frontmatter` | 0 | unquoted `': '` in a value — quote it |
+| `page_type_mismatches` | 0 | `type:` disagrees with the directory |
+| `category_yaml_drift` | 0 | YAML `category:` ≠ parent dir; dir wins |
+| `broken_wikilinks` | 0 | imported links point at pages that didn't come along |
+| `orphans` | low | imported pages often arrive with no inbound links |
+| `unquoted_wikilink_lists` | 0 | quote `[[..]]` list items or Obsidian renders "?" |
+
+Then the zero-claim query from the top. `lint --fix` will insert missing back-links (tagged `auto-added; refine`); it won't touch anything else here.
+
+### 7. Wire the imported pages into the graph
+
+Migrated pages arrive with no relationship to the existing corpus:
+
+```bash
+researchwiki claim-overlap <stem>          # per new stem; LLM-judged reciprocal links
+researchwiki audit --json                  # S2 citation graph → missing cross-links
+researchwiki candidates concepts --bridges # new pages may complete a bridge concept
+```
+
+`claim-overlap` needs graded claims, so it only works after step 5.
+
+---
+
+## Backfill target reference
+
+| Target | Source | Writes | Notes |
+|---|---|---|---|
+| `hook` | page body | `hook:`, `short_name:` | `-w N` workers (default 4), `--no-short-name` |
+| `keywords` | page body | `keywords:` | `--batch-size N` (default 10); needs ≥5 kept or skips |
+| `doi` | S2 → Crossref | `doi:`, `arxiv_id:` | every hit clears author + year + title-overlap checks |
+
+All accept `--dry-run`, `--limit N`, `--reindex`. Selection comes from the matching `lint` check, so `backfill` and `lint` can't disagree about which pages have a gap.
+
+**Adding a target** (`researchwiki/tasks/backfill.py`): decide which of two styles it is. Prose-derived (`hook`, `keywords`) reads the body — already PDF-grounded, so Rule 1 needs no provenance field. Lookup-derived (`doi`) is for values *not legible in the page*: an LLM asked for a DOI invents a plausible one, so it needs a real lookup plus a sanity check that can reject a wrong match. If you can't write the sanity check, the field doesn't belong here.
+
+---
+
+## Failure modes
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `no frontmatter; skipped` | no `---` fence | add one with `title:` (step 2) |
+| `no short_name:/title: anchor` | frontmatter has neither | add `title:` |
+| `body under 200 chars` | stub page | write prose, or accept no hook |
+| `no usable HOOK in the response` | model ignored the format | re-run just that page |
+| every call failed | provider config | check `RW_MODELS_CONFIG`, API key, base URL |
+| hook reads like a topic, not a finding | thin body prose | the gloss can only be as specific as the page |
+| `hook_too_long` | over the per-type ceiling | advisory; trim by hand, nothing truncates |
+
+Rate-limited providers: drop `-w` to 1–2. Gemini free tier is ~5 req/min shared per project; z.ai free tiers 429 under parallelism.
+
+---
+
+## Backups — `wiki/` is gitignored
+
+Git cannot roll back a bad backfill. Tar the targets first:
+
+```bash
+researchwiki lint --json | python3 -c "
+import json,sys
+for k in json.load(sys.stdin)['missing_hook']: print(f'wiki/{k}.md')" > /tmp/targets.txt
+tar -czf .ingest/backup-pre-backfill.tar.gz -T /tmp/targets.txt
+tar -tzf .ingest/backup-pre-backfill.tar.gz | wc -l    # verify the count
+```
+
+`.ingest/` is gitignored scratch — clearing it removes the only rollback path. Move the archive somewhere durable if the migration is large.
+
+---
+
+## Don't use backfill for
+
+- **A fresh ingest.** `agent ingest` writes `hook`/`short_name`/`keywords` during authoring at no extra call.
+- **Wrong metadata on an existing page.** That's [`recovery.md`](./recovery.md) — re-ingest with `--doi`/`--title` overrides so the stem and back-links re-derive.
+- **`doi` on papers that genuinely have none.** Set `no_doi_reason: "<why>"`; `lint` and `audit` then skip them.
+- **Fabricating anything.** No target invents affiliations, funding, dates, or numbers. If a field isn't in the page or in a whitelisted API, leave it empty and let `lint` carry the gap.
