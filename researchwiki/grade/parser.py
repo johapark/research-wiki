@@ -43,13 +43,28 @@ CROSSREF_HINT_RE = re.compile(
     r"superseded by|extends?|builds?\s+on|contrasts?\s+with)\b",
     re.IGNORECASE,
 )
-# Sections graded for claim coverage. Order matches the typical wiki page
-# layout. `methodology and architecture` is prose-heavy, so the parser
-# runs both bullet- and sentence-level extraction on it.
-GRADED_SECTIONS = {
-    "key contributions", "results", "limitations",
-    "methodology and architecture",
-}
+# Sections graded for claim coverage, as (on-page H2 lowercased, DB section
+# key) pairs. Order matches the typical wiki page layout. `methodology and
+# architecture` is prose-heavy, so the parser runs both bullet- and
+# sentence-level extraction on it.
+#
+# This is THE list that decides whether a page yields claims at all — matching
+# is exact, so a page whose findings sit under `## Findings` produces nothing.
+# `parse_claims` iterates it, and `researchwiki.migrate.sections` asserts its
+# alias table covers it, so the two can't drift.
+SECTION_KEYS: tuple[tuple[str, str], ...] = (
+    ("key contributions", "key_contributions"),
+    ("results", "results"),
+    ("limitations", "limitations"),
+    ("methodology and architecture", "methodology"),
+)
+# Canonical on-page spellings, for callers that render or validate headings.
+ON_PAGE_H2: tuple[str, ...] = (
+    "Key Contributions", "Results", "Limitations", "Methodology and Architecture",
+)
+# Derived, not hand-maintained — it was previously a second copy of the same
+# four names that nothing read.
+GRADED_SECTIONS = {name for name, _ in SECTION_KEYS}
 PROSE_GRADED_SECTIONS = {"methodology and architecture"}
 
 # Min sentence length for prose extraction. Cuts transitions ("This is
@@ -215,13 +230,7 @@ def parse_claims(page: Page) -> list[Claim]:
     sections = _split_sections(page.body)
     claims: list[Claim] = []
 
-    section_keys = (
-        ("key contributions", "key_contributions"),
-        ("results", "results"),
-        ("limitations", "limitations"),
-        ("methodology and architecture", "methodology"),
-    )
-    for name, key in section_keys:
+    for name, key in SECTION_KEYS:
         section_body = sections.get(name)
         if not section_body:
             continue

@@ -27,3 +27,27 @@ import pytest
 def _no_dotenv_leak(monkeypatch):
     from researchwiki import __main__ as cli
     monkeypatch.setattr(cli, "_load_dotenv", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_state_db(tmp_path, monkeypatch):
+    """Point `state.db` at a per-test temp file.
+
+    Same class of trap as `_no_dotenv_leak`, and invisible at the call site for
+    the same reason. `db_path()` resolves from the *current working directory*
+    (`_repo_key()` over `wiki_root()`), so any test that reaches a write path
+    lands in the developer's real per-repo DB. `backlinks.append_related_paper`
+    is the live example: it calls `commit_page` → `db.upsert_page` whenever it
+    actually appends (`backlinks.py:81`), so `test_appends_when_absent` — the one
+    backlinks test where the append succeeds — inserted a `papers` row keyed on a
+    pytest tmp dir into the real DB on every suite run. That row then showed up
+    as `db_drift.extra` in `researchwiki lint` and as a phantom zero-claim paper,
+    i.e. the suite manufactured corpus defects.
+
+    `RESEARCHWIKI_DB_PATH` is the documented override and wins over the per-repo
+    path (`db/connection.py:91-95`). Nothing memoizes it, so a per-test value
+    takes effect immediately. Tests that assert on path *resolution* already
+    `monkeypatch.delenv` it (see `tests/test_db_path.py`), and monkeypatch
+    unwinds in LIFO order, so this fixture doesn't fight them.
+    """
+    monkeypatch.setenv("RESEARCHWIKI_DB_PATH", str(tmp_path / "_state" / "state.db"))

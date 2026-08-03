@@ -196,7 +196,8 @@ def _run_synthesis(argv: list[str]) -> int:
 
 
 def _run_regression_pipeline(persist: bool, semantic: bool,
-                             missing_only: bool = False) -> list[dict]:
+                             missing_only: bool = False,
+                             include_salience: bool = True) -> list[dict]:
     """Re-grade every paper page; diff against persisted per-claim scores.
 
     Returns one dict per paper:
@@ -208,6 +209,12 @@ def _run_regression_pipeline(persist: bool, semantic: bool,
     With `missing_only=True`, restrict to papers with at least one gradable
     claim (is_cross_ref=0) whose `last_graded_at` is NULL — mirrors the
     "N papers need backfill" count in `researchwiki status`.
+
+    `include_salience=False` skips the recall pass, which costs a synthetic
+    ContentFixture plus a fresh per-page body embedding on every paper. It is
+    free in tokens but not in wall-clock, and a bulk backfill of already-
+    authored pages only needs the fidelity columns populated so claims become
+    citable — it is not gating on PDF-anchor recall.
     """
     from ..db.connection import get_connection
     conn = get_connection()
@@ -251,7 +258,8 @@ def _run_regression_pipeline(persist: bool, semantic: bool,
     out: list[dict] = []
     for stem in stems:
         try:
-            current = grade_page(stem, persist=persist, semantic=semantic)
+            current = grade_page(stem, persist=persist, semantic=semantic,
+                                 include_salience=include_salience)
         except Exception as e:
             out.append({"stem": stem, "error": str(e)})
             continue
@@ -374,12 +382,18 @@ def _run_regression(argv: list[str]) -> int:
                    help="Only re-grade papers with at least one un-graded claim "
                         "(last_graded_at IS NULL). Matches the 'N papers need "
                         "backfill' count in `status`.")
+    p.add_argument("--no-salience", action="store_true",
+                   help="Skip the salience (recall) pass. Costs a synthetic "
+                        "fixture + a per-page body embedding on every paper; "
+                        "skip it for a bulk backfill that only needs the "
+                        "fidelity columns populated.")
     args = p.parse_args(argv)
 
     results = _run_regression_pipeline(
         persist=not args.no_persist,
         semantic=not args.no_semantic,
         missing_only=args.missing_only,
+        include_salience=not args.no_salience,
     )
     if args.json:
         print(json.dumps(results, indent=2, ensure_ascii=False))

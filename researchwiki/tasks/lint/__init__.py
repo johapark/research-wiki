@@ -16,7 +16,7 @@ focused and individually testable:
   yaml_checks     — invalid_fm, type/category/doi/year/keywords drift
   staleness       — stale_synthesis, stale_by_content, audit_count, proposals
   audit_p2        — Priority-2 entries with audit anchor hits
-  db_checks       — ungraded_papers, db_drift
+  db_checks       — ungraded_papers, zero_claim_papers, db_drift
   supplementary   — supp YAML ↔ disk consistency
 
 The orchestrator below walks pages once, calls each check, then renders
@@ -44,7 +44,11 @@ from ...wiki import read_page, strip_non_prose
 from .audit_p2 import find_p2_anchor_hits
 from .claim_anchors import find_dangling_claim_anchors
 from .concept_contract import find_concept_contract_violations
-from .db_checks import db_drift_check_and_fix, find_ungraded_papers
+from .db_checks import (
+    db_drift_check_and_fix,
+    find_ungraded_papers,
+    find_zero_claim_papers,
+)
 from .link_checks import (
     apply_backlink_fixes,
     build_link_graph,
@@ -96,7 +100,8 @@ def main(argv: list[str]) -> int:
                              "stale_by_audit_count, p2_entries_with_anchor_hits, "
                              "stale_evolution_proposals, missing_keywords, "
                              "missing_hook, hook_too_long, "
-                             "ungraded_papers, dangling_claim_anchors, "
+                             "ungraded_papers, zero_claim_papers, "
+                             "dangling_claim_anchors, "
                              "concept_contract_violations, db_drift, "
                              "cross_paper_contradictions, fix_applied.")
     args = parser.parse_args(argv)
@@ -147,6 +152,7 @@ def main(argv: list[str]) -> int:
     # --- audit + db + supp + claim anchors + concept contract
     p2_anchor_hits = find_p2_anchor_hits(pages)
     ungraded_papers = find_ungraded_papers()
+    zero_claim_papers = find_zero_claim_papers()
     supp_yaml_missing, supp_orphans = find_supplementary_issues(pages, pages_fm)
     dangling_anchors = find_dangling_claim_anchors(pages_body)
     concept_contract = find_concept_contract_violations(pages, pages_body, pages_fm)
@@ -179,6 +185,7 @@ def main(argv: list[str]) -> int:
             stem_year_drift=stem_year_drift, unquoted_wikilinks=unquoted_wikilinks,
             supp_yaml_missing=supp_yaml_missing, supp_orphans=supp_orphans,
             ungraded_papers=ungraded_papers,
+            zero_claim_papers=zero_claim_papers,
             dangling_anchors=dangling_anchors,
             concept_contract=concept_contract,
             db_drift=db_drift, db_drift_fixed=db_drift_fixed,
@@ -198,6 +205,7 @@ def main(argv: list[str]) -> int:
         stem_year_drift=stem_year_drift, unquoted_wikilinks=unquoted_wikilinks,
         supp_yaml_missing=supp_yaml_missing, supp_orphans=supp_orphans,
         ungraded_papers=ungraded_papers,
+        zero_claim_papers=zero_claim_papers,
         dangling_anchors=dangling_anchors,
         concept_contract=concept_contract,
         db_drift=db_drift, db_drift_fixed=db_drift_fixed,
@@ -273,6 +281,7 @@ def _emit_json(**kw) -> int:
             for v in kw["concept_contract"]
         ],
         "ungraded_papers": kw["ungraded_papers"],
+        "zero_claim_papers": kw["zero_claim_papers"],
         "db_drift": kw["db_drift"],
         "cross_paper_contradictions": kw.get("cross_paper", []),
         "fix_applied": {
@@ -607,6 +616,24 @@ def _emit_prose(**kw) -> int:
         print()
         print("_Backfill with `researchwiki grade regression`. New ingests "
               "grade automatically; this only matters for pre-Phase-A pages._")
+        print()
+
+    zero_claim_papers = kw["zero_claim_papers"]
+    if zero_claim_papers:
+        print(f"## Paper pages with NO claims ({len(zero_claim_papers)})")
+        for p in zero_claim_papers[:20]:
+            print(f"- {p['category']}/{p['stem']}")
+        if len(zero_claim_papers) > 20:
+            print(f"- ... ({len(zero_claim_papers) - 20} more)")
+        print()
+        print("_These are inert as evidence: `claims` returns nothing for them, "
+              "no `[[stem#slug]]` anchor exists, and `grade synthesis` can't "
+              "verify a citation to them — while every other check stays quiet "
+              "(the ungraded-claims list above JOINs `claims`, so it can't see "
+              "a page with none). Almost always non-canonical H2 headings: "
+              "extraction reads only `## Key Contributions` / `## Results` / "
+              "`## Limitations` / `## Methodology and Architecture`. Rename the "
+              "heading, then `db rebuild`._")
         print()
 
     db_drift = kw["db_drift"]

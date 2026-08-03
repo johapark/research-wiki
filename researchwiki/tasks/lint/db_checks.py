@@ -44,6 +44,45 @@ def find_ungraded_papers() -> list[dict]:
     ]
 
 
+def find_zero_claim_papers() -> list[dict]:
+    """Paper-type pages that produced NO claim rows at all.
+
+    The complement of `find_ungraded_papers`, which `JOIN`s `claims` and so
+    cannot see a paper with none — a gap it documents but doesn't cover. A page
+    with zero claims is inert as evidence: `claims` returns nothing for it, no
+    `[[stem#slug]]` anchor exists, and `grade synthesis` has nothing to verify a
+    citation against. Yet `backfill hook` succeeds on it and every other check
+    stays quiet, so without this it looks fully migrated.
+
+    Near-always caused by non-canonical H2 headings: claim extraction reads only
+    the exact names in `grade.parser.SECTION_KEYS`, so a page whose findings sit
+    under `## Findings` yields nothing. The fix is renaming the heading, then
+    `db rebuild` — see `prompts/migration-backfill.md`.
+
+    Scoped to `page_path` under `wiki/` so a row left behind by a test run
+    against a tmp dir can't register as a corpus defect.
+    """
+    from ...db.safe import safe_read
+
+    def _query(conn):
+        return conn.execute(
+            """
+            SELECT p.stem, p.category
+              FROM papers p
+             WHERE p.page_type = 'paper'
+               AND p.page_path LIKE ?
+               AND NOT EXISTS (
+                     SELECT 1 FROM claims c WHERE c.paper_stem = p.stem
+                   )
+             ORDER BY p.stem
+            """,
+            (f"%{wiki_dir().name}/%",),
+        ).fetchall()
+
+    rows = safe_read(_query, default=[], label="lint.find_zero_claim_papers")
+    return [{"stem": r["stem"], "category": r["category"]} for r in rows]
+
+
 def db_drift_check_and_fix(
     apply_fix: bool,
 ) -> tuple[dict[str, list], dict[str, int]]:
