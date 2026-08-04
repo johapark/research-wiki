@@ -178,9 +178,24 @@ def test_search_backend_unavailable_is_an_environment_failure():
 # ---------- the funnel: EnvironmentFailure -> 2, uncaught elsewhere -> 3 ----------
 
 @pytest.fixture
-def fake_task(monkeypatch):
+def fake_task(monkeypatch, tmp_path):
+    """Register a synthetic task AND run from a directory that looks like a wiki.
+
+    `main()` returns 2 ("cd to the wiki root") when `Path.cwd()/"wiki"` is
+    absent, before it ever dispatches. Every test here that asserts on
+    `cli.main(...)` therefore depended on pytest being invoked from the repo
+    root — they failed from any other cwd, which is what IDE runners use.
+
+    Worse for the ones expecting 2: they *passed* from a foreign cwd, because
+    the guard returns the same code the test wanted. Establishing the wiki dir
+    is what makes those assertions measure the EnvironmentFailure path rather
+    than the guard.
+    """
     import sys
     import types
+
+    (tmp_path / "wiki").mkdir()
+    monkeypatch.chdir(tmp_path)
 
     def install(fn):
         mod = types.ModuleType("researchwiki.tasks.faketask")

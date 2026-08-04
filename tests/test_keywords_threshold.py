@@ -20,6 +20,8 @@ what enforces it). `lint` mirrors the value rather than importing it, because
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from researchwiki.agents.phases import MAX_KEYWORDS, MIN_KEYWORDS
@@ -98,12 +100,19 @@ def test_bounds_are_sane():
     assert 0 < MIN_KEYWORDS <= MAX_KEYWORDS
 
 
-@pytest.mark.parametrize("path,needle", [
+#: Repo root, derived from this file — never from the cwd. A relative
+#: `Path("CLAUDE.md")` only resolves when pytest happens to run from the repo
+#: root, which is not what IDE test runners do.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+@pytest.mark.parametrize("filename,needle", [
     ("CLAUDE.md", "5–10 short phrases"),
 ])
-def test_docs_state_the_same_range(path, needle):
+def test_docs_state_the_same_range(filename, needle):
     """CLAUDE.md said 6-10 while every prompt and the writer said 5-10."""
-    from pathlib import Path
-    text = Path(path).read_text(encoding="utf-8")
-    assert needle in text, f"{path} no longer states the {MIN_KEYWORDS}-{MAX_KEYWORDS} range"
+    text = (_REPO_ROOT / filename).read_text(encoding="utf-8")
+    assert needle in text, (
+        f"{filename} no longer states the {MIN_KEYWORDS}-{MAX_KEYWORDS} range"
+    )
     assert "6–10 short phrases" not in text

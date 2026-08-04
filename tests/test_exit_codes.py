@@ -33,6 +33,24 @@ import pytest
 from researchwiki import __main__ as cli
 
 
+@pytest.fixture(autouse=True)
+def _in_a_wiki_dir(tmp_path, monkeypatch):
+    """Run every test from a directory that looks like a wiki root.
+
+    `main()` guards on `Path.cwd()/"wiki"` being a directory and returns 2
+    ("environment error — cd to the wiki root") before dispatching. Without
+    this, every assertion below silently measured that guard instead of the
+    code under test: the file claims to be hermetic, but it was passing only
+    because pytest happened to be invoked from the repo root, and failed from
+    anywhere else — including most IDE test runners.
+
+    A tmp dir keeps it hermetic *and* exercises the real guard path rather than
+    patching it out.
+    """
+    (tmp_path / "wiki").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture
 def fake_task(monkeypatch):
     """Register a synthetic `researchwiki faketask` whose `main` we control.
