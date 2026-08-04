@@ -80,6 +80,12 @@ config/models.yaml
 .llm-relay
 .benchmark-runs
 
+# Pre-write snapshots taken by the maintainer-only repair passes in `internal/`
+# before they rewrite wiki prose. `wiki/*` is gitignored, so a bad rewrite has
+# no `git checkout` to undo it and these copies are the only recourse —
+# timestamped per run, deleted once the result has been eyeballed.
+.repair-backup-*
+
 # Editor / vault configs (user-specific)
 .obsidian/
 .claude/

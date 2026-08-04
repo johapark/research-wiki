@@ -160,7 +160,7 @@ def main(argv: list[str]) -> int:
     # --- apply fixes BEFORE rendering so stats reflect post-fix state
     fix_written: dict[str, int] = {}
     if args.fix and missing_back:
-        fix_written = apply_backlink_fixes(missing_back)
+        fix_written = apply_backlink_fixes(missing_back, pages_prose)
     db_drift, db_drift_fixed = db_drift_check_and_fix(apply_fix=args.fix)
 
     # --- opt-in cross-paper contradiction lint (LLM-call-heavy)

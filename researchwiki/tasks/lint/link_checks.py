@@ -8,6 +8,7 @@ here too.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ...paths import wiki_dir
@@ -115,8 +116,40 @@ def find_missing_backlinks(out_links: dict[str, set[str]]) -> list[tuple[str, st
     return missing
 
 
-def apply_backlink_fixes(missing_back: list[tuple[str, str]]) -> dict[str, int]:
+def _mirrored_note(src_prose: str, tgt_key: str) -> str:
+    """Direction-aware note for the back-link mirroring src→tgt.
+
+    The source page already states the relationship in its own bullet, so the
+    direction is recoverable locally — no citation lookup needed. Find the
+    line where src links tgt and invert whatever it claims.
+
+    Falls back to the weakest claim when src's prose is unavailable, when the
+    link sits outside a relationship bullet, or when the bullet is editorial
+    prose rather than a canonical phrasing. First match wins if src links tgt
+    more than once.
+    """
+    from ...backlinks import TOPICAL_NOTE, invert_relationship_note
+
+    if not src_prose:
+        return TOPICAL_NOTE
+    stem = tgt_key.rsplit("/", 1)[-1]
+    link_re = re.compile(r"\[\[(?:[^\]\|#]*/)?" + re.escape(stem) + r"[\]\|#]")
+    for line in src_prose.splitlines():
+        if link_re.search(line):
+            return invert_relationship_note(line)
+    return TOPICAL_NOTE
+
+
+def apply_backlink_fixes(
+    missing_back: list[tuple[str, str]],
+    pages_prose: dict[Path, str] | None = None,
+) -> dict[str, int]:
     """Write back-links into target pages via the shared helper.
+
+    `pages_prose` is the prose-only page text `build_link_graph` already
+    computed; it is what makes the inserted bullet state the *right*
+    direction (see `_mirrored_note`). Omitting it is supported but degrades
+    every bullet to the weakest claim.
 
     Returns {tgt: bullets_added}. Each inserted bullet is marked
     `(auto-added; refine)` so a future LLM pass can rewrite the
@@ -124,13 +157,20 @@ def apply_backlink_fixes(missing_back: list[tuple[str, str]]) -> dict[str, int]:
     """
     from ...backlinks import append_related_paper
 
+    prose_by_key = {
+        page_key(p): text for p, text in (pages_prose or {}).items()
+    }
     by_tgt: dict[str, list[str]] = {}
     for src, tgt in missing_back:
         by_tgt.setdefault(tgt, []).append(src)
     written: dict[str, int] = {}
     for tgt, srcs in sorted(by_tgt.items()):
         target_path = wiki_dir() / f"{tgt}.md"
-        n = sum(1 for src in sorted(set(srcs)) if append_related_paper(target_path, src))
+        n = 0
+        for src in sorted(set(srcs)):
+            note = _mirrored_note(prose_by_key.get(src, ""), tgt)
+            if append_related_paper(target_path, src, note=note):
+                n += 1
         if n:
             written[tgt] = n
     return written

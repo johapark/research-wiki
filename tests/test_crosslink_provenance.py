@@ -87,6 +87,143 @@ def test_every_kind_is_marked_for_refinement():
         assert "(auto-added; refine)" in note
 
 
+# ---------- `lint --fix` must mirror the direction too ----------
+#
+# Observed 2026-08-04 on a 2026 review page: 13 of its 14 auto-added bullets
+# read "cites this paper" against targets from 2019-2025, which cannot cite a
+# 2026 paper. `promote` had written the correct note on each target page, but
+# the reciprocal bullet came from `lint --fix`, which called
+# `append_related_paper` with no `note=` and so took the one hardcoded default
+# regardless of direction.
+
+from researchwiki.backlinks import (          # noqa: E402
+    CITED_BY_NOTE, CITES_NOTE, EARLIER_NOTE, MORE_RECENT_NOTE, TOPICAL_NOTE,
+    invert_relationship_note,
+)
+from researchwiki.tasks.lint import link_checks   # noqa: E402
+
+
+def test_inverting_cites_yields_cited_by():
+    """`[[T]] — cites this paper` on S means T cites S; on T, S is cited by T."""
+    assert invert_relationship_note(CITES_NOTE) == CITED_BY_NOTE
+
+
+def test_inverting_cited_by_yields_cites():
+    assert invert_relationship_note(CITED_BY_NOTE) == CITES_NOTE
+
+
+def test_inversion_is_an_involution():
+    for note in (CITES_NOTE, CITED_BY_NOTE):
+        assert invert_relationship_note(invert_relationship_note(note)) == note
+
+
+@pytest.mark.parametrize("note", [
+    "topically related (auto-added; refine)",
+    "near-duplicate claim (auto-added; claim-overlap)",
+    "instantiates this concept (auto-added; concept-link)",
+    "foundational Enformer model cited as a landmark architecture in Fig. 2",
+    "",
+])
+def test_uninvertible_notes_degrade_to_the_weakest_claim(note):
+    """Understating is safe; asserting an unchecked citation is fabrication."""
+    assert invert_relationship_note(note) == TOPICAL_NOTE
+
+
+@pytest.mark.parametrize("note", [MORE_RECENT_NOTE, EARLIER_NOTE])
+def test_recency_notes_are_not_directional_claims(note):
+    """The recency phrasings must never read as citations.
+
+    They exist to say "newer/older work on this topic" without asserting a
+    citation, which only holds while their text stays free of citation
+    language — reword either constant to contain "cites this paper" and
+    `invert_relationship_note` would start flipping it.
+    """
+    assert invert_relationship_note(note) == TOPICAL_NOTE
+    assert "(auto-added; refine)" in note
+
+
+def test_cited_by_is_not_swallowed_by_the_cites_probe():
+    """"cited by this paper" must not match on the "cites this paper" branch."""
+    assert invert_relationship_note("CITED BY THIS PAPER (auto-added)") == CITES_NOTE
+
+
+def test_mirrored_note_reads_direction_off_the_source_bullet():
+    src = (
+        "## Related Papers\n\n"
+        "- [[compbio/other-2020-thing]] — cites this paper (auto-added; refine)\n"
+        "- [[compbio/jaganathan-2019-predicting-splicing]] — cites this paper\n"
+    )
+    note = link_checks._mirrored_note(src, "compbio/jaganathan-2019-predicting-splicing")
+    assert note == CITED_BY_NOTE
+
+
+def test_mirrored_note_matches_a_bare_stem_wikilink():
+    """CLAUDE.md mandates bare `[[stem]]` in tables, so both forms must resolve."""
+    src = "- [[jaganathan-2019-predicting-splicing]] — cited by this paper\n"
+    note = link_checks._mirrored_note(src, "compbio/jaganathan-2019-predicting-splicing")
+    assert note == CITES_NOTE
+
+
+@pytest.mark.parametrize("src_prose", ["", "- [[compbio/unrelated-2020-x]] — cites this paper"])
+def test_mirrored_note_without_a_matching_bullet_is_weakest(src_prose):
+    assert link_checks._mirrored_note(src_prose, "compbio/absent-2019-y") == TOPICAL_NOTE
+
+
+def test_apply_backlink_fixes_passes_the_mirrored_note(monkeypatch, tmp_path):
+    """End to end: the bug's exact shape — a 2026 review citing a 2019 paper."""
+    seen: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "researchwiki.backlinks.append_related_paper",
+        lambda target_path, source_key, note=TOPICAL_NOTE: (
+            seen.append((source_key, note)) or True
+        ),
+    )
+    monkeypatch.setattr(link_checks, "wiki_dir", lambda: tmp_path)
+    review = tmp_path / "compbio" / "nagai-2026-review.md"
+    # Stubbed so the prose map can be keyed by a tmp_path Path; `page_key`'s
+    # own wiki-relative derivation is covered in the walk tests.
+    monkeypatch.setattr(
+        link_checks, "page_key",
+        lambda p: f"{p.parent.name}/{p.stem}",
+    )
+    prose = {review: "- [[compbio/jaganathan-2019-splicing]] — cites this paper\n"}
+
+    written = link_checks.apply_backlink_fixes(
+        [("compbio/nagai-2026-review", "compbio/jaganathan-2019-splicing")], prose
+    )
+
+    assert written == {"compbio/jaganathan-2019-splicing": 1}
+    (source_key, note), = seen
+    assert source_key == "compbio/nagai-2026-review"
+    assert note == CITED_BY_NOTE, "the 2019 paper does not cite the 2026 review"
+
+
+def test_apply_backlink_fixes_without_prose_understates(monkeypatch, tmp_path):
+    """The optional argument is a degradation, never a fabrication."""
+    seen: list[str] = []
+    monkeypatch.setattr(
+        "researchwiki.backlinks.append_related_paper",
+        lambda target_path, source_key, note=TOPICAL_NOTE: (
+            seen.append(note) or True
+        ),
+    )
+    monkeypatch.setattr(link_checks, "wiki_dir", lambda: tmp_path)
+    link_checks.apply_backlink_fixes([("compbio/a-2024-x", "compbio/b-2020-y")])
+    assert seen == [TOPICAL_NOTE]
+
+
+def test_append_related_paper_default_note_asserts_nothing(tmp_path):
+    """A caller that forgets `note=` must not fabricate a citation."""
+    from researchwiki.backlinks import append_related_paper
+
+    p = tmp_path / "t.md"
+    p.write_text("---\ntitle: t\n---\n\n## Related Papers\n\n")
+    append_related_paper(p, "cgt/smith-2024-x")
+    body = p.read_text()
+    assert "cites this paper" not in body
+    assert "topically related" in body
+
+
 # ---------- gleaning suppression ----------
 
 class _Hit:

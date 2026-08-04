@@ -1,15 +1,24 @@
 """Shared back-link helper.
 
-A "back-link" is a bullet on page B's `## Related Papers` section that says
-B was cited by paper A. Forward links — what A says about B — are editorial
-and live on A's page. Back-links are structural and live on B's page.
+A "back-link" is a bullet on page B's `## Related Papers` section recording
+that B stands in some relationship to paper A. Forward links — what A says
+about B — are editorial and live on A's page. Back-links are structural and
+live on B's page.
 
-Two callers use this:
+The relationship is directional, and the bullet states it from the reading
+page's point of view ("this paper" = the page the bullet sits on), so the
+same edge is worded differently on each end. `invert_relationship_note`
+below is what keeps the two ends consistent.
+
+Callers:
   - `agents/promote.py` at ingest commit, for every verified citation-graph
     or topical candidate the new paper has.
-  - `tasks/lint.py` `--fix` for the symmetric `missing_backlinks` finding.
+  - `tasks/lint/link_checks.py` `--fix` for the symmetric
+    `missing_backlinks` finding.
+  - `tasks/claim_overlap.py` and `concepts/scaffold.py`, which pass their
+    own markers.
 
-Both pass through the same `append_related_paper` to keep the on-disk
+All pass through the same `append_related_paper` to keep the on-disk
 convention consistent: same bullet shape, same `(auto-added; refine)` marker,
 same idempotency rule (skip if `[[source_key]]` already appears anywhere in
 the target body).
@@ -27,17 +36,66 @@ from .wiki import commit_page
 _RELATED_HEADING_RE = re.compile(r"^##\s+Related Papers\s*$", re.MULTILINE | re.IGNORECASE)
 _NEXT_HEADING_RE = re.compile(r"^##?\s+", re.MULTILINE)
 
+# Canonical relationship phrasings for auto-added bullets. `lint --fix` parses
+# these back off the page to recover an edge's direction, so `promote.py`
+# imports them instead of keeping its own literals — a divergent copy in
+# either place would silently degrade every mirrored note to TOPICAL_NOTE.
+CITES_NOTE = "cites this paper (auto-added; refine)"
+CITED_BY_NOTE = "cited by this paper (auto-added; refine)"
+TOPICAL_NOTE = "topically related (auto-added; refine)"
+
+# Recency phrasings, for edges where no citation was ever established but the
+# two pages' `year:` fields are known. These assert strictly less than a
+# citation and strictly more than TOPICAL_NOTE: "there is newer work on this"
+# is what a reader of an older page most wants from a related-papers list, and
+# it needs no evidence beyond two YAML fields. Deliberately free of citation
+# language so `invert_relationship_note` and the repair pass's claim probe both
+# read them as non-directional — which also makes rewriting them idempotent.
+MORE_RECENT_NOTE = "more recent work on this topic (auto-added; refine)"
+EARLIER_NOTE = "earlier work on this topic (auto-added; refine)"
+
+# The claim each canonical note makes, minus the marker. Probed longest-first
+# so "cited by this paper" is never mistaken for "cites this paper".
+_CITED_BY_CLAIM = "cited by this paper"
+_CITES_CLAIM = "cites this paper"
+
+
+def invert_relationship_note(source_note: str) -> str:
+    """Note for the bullet mirroring one that reads `source_note`.
+
+    A bullet on page S reading `[[T]] — cites this paper` asserts that T
+    cites S, because "this paper" resolves to the page the bullet is on.
+    The mirror bullet on T therefore has to assert the converse —
+    `[[S]] — cited by this paper` — so the direction inverts.
+
+    Anything that is not a canonical citation phrasing (LLM-authored prose,
+    the claim-overlap and concept-link markers, an absent note) degrades to
+    `TOPICAL_NOTE`. Understating a real citation is harmless; asserting an
+    unverified one is the fabrication CLAUDE.md's cross-link corollary
+    forbids, and that asymmetry is why the fallback is the weakest claim
+    rather than the most likely one.
+    """
+    text = (source_note or "").lower()
+    if _CITED_BY_CLAIM in text:
+        return CITES_NOTE
+    if _CITES_CLAIM in text:
+        return CITED_BY_NOTE
+    return TOPICAL_NOTE
+
 
 def append_related_paper(
     target_path: Path, source_key: str,
-    note: str = "cites this paper (auto-added; refine)",
+    note: str = TOPICAL_NOTE,
 ) -> bool:
     """Append a back-link bullet to `target_path`'s Related Papers section.
 
-    `source_key` is the `category/stem` of the paper that cites the target.
-    `note` is the trailing explanation on the bullet; it defaults to the
-    citation-graph phrasing so existing callers (promote, `lint --fix`) are
-    unchanged. The claim-overlap cross-linker passes its own marker.
+    `source_key` is the `category/stem` of the paper the bullet points at.
+    `note` is the trailing explanation; it defaults to the weakest claim so
+    that a caller which omits it understates the relationship rather than
+    fabricating a citation. Callers that know the direction pass one of
+    `CITES_NOTE` / `CITED_BY_NOTE` (or the result of
+    `invert_relationship_note`); claim-overlap and concepts pass their own
+    markers.
 
     Idempotent: returns False (no write) if the target's body already links
     the source in ANY wikilink form — `[[category/stem]]`, bare `[[stem]]`

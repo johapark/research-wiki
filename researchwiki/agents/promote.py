@@ -30,6 +30,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .. import backlinks as _bl
 from ..fsatomic import write_text_atomic
 from ..paths import inbox_dir, papers_dir, wiki_dir
 
@@ -460,10 +461,13 @@ def _move_pdf(
 #                     way. Claiming a citation here is a fabrication: CLAUDE.md
 #                     requires a wikilink be source-supported, and "cites this
 #                     paper" asserts exactly the support that was never checked.
+# Sourced from `backlinks` rather than spelled out here: `lint --fix` reads
+# these phrasings back off the page to recover an edge's direction, so a
+# second copy that drifted would break mirroring silently.
 _BACKLINK_NOTES = {
-    "cited_by_source": "cites this paper (auto-added; refine)",
-    "cites_source": "cited by this paper (auto-added; refine)",
-    "topical": "topically related (auto-added; refine)",
+    "cited_by_source": _bl.CITES_NOTE,
+    "cites_source": _bl.CITED_BY_NOTE,
+    "topical": _bl.TOPICAL_NOTE,
 }
 _BACKLINK_NOTE_DEFAULT = _BACKLINK_NOTES["topical"]
 
