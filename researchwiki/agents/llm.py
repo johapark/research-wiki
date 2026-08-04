@@ -181,6 +181,134 @@ def _needs_max_completion_tokens(model: str) -> bool:
     return bool(_MAX_COMPLETION_TOKENS_RE.search(model or ""))
 
 
+# --- reasoning_effort negotiation ----------------------------------------
+# Models disagree about this field's vocabulary and the disagreement is a hard
+# 400, not a warning. OpenAI o-series/GPT-5 take "minimal"; some newer models
+# take "none" and reject "minimal"; several take "xhigh"; local servers ignore
+# the field or reject it outright. A static per-model table would go stale with
+# every release, so instead we ask the server: on a 400 that names the field we
+# step to the nearest value it will accept, and remember the answer.
+#
+# Ascending order of thinking. Negotiation walks outward from the requested
+# value, preferring the *lower* side on ties — a caller that asked for less
+# thinking (disable_thinking maps here) should not be nudged upward into paying
+# for reasoning tokens it explicitly declined.
+_EFFORT_SCALE = ("none", "minimal", "low", "medium", "high", "xhigh")
+
+# Per (endpoint, model): values the server rejected, and the vocabulary it
+# advertised in an error body (when it bothered to). Process-local; the lock
+# serializes the thread pool used by batch mode. Worst case on a race is a
+# duplicate negotiation, not a wrong answer.
+_EFFORT_REJECTED: dict[tuple[str, str], set[str]] = {}
+_EFFORT_SUPPORTED: dict[tuple[str, str], set[str]] = {}
+_EFFORT_LOCK = threading.Lock()
+
+# Bounded so a server that 400s on every value can't spin. Three steps is
+# enough to cross the whole scale from any starting point and still land on
+# "omit the field", which every server accepts.
+_EFFORT_MAX_RENEGOTIATIONS = 3
+
+# "Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'."
+_EFFORT_SUPPORTED_RE = re.compile(
+    r"supported\s+values?\s+(?:are|is)\s*:?\s*(?P<list>[^.]+)", re.IGNORECASE
+)
+_QUOTED_RE = re.compile(r"['\"`]([a-z_]+)['\"`]", re.IGNORECASE)
+
+
+def _mentions_reasoning_effort(body_text: str) -> bool:
+    """True when a 400 body implicates the `reasoning_effort` field.
+
+    Deliberately narrow: a 400 that doesn't name the field is a real bad
+    request (bad model, malformed messages) and must keep failing loudly
+    rather than being masked by a retry.
+    """
+    return "reasoning_effort" in (body_text or "")
+
+
+def _parse_supported_efforts(body_text: str) -> set[str]:
+    """Pull the advertised vocabulary out of an error body, if present.
+
+    Only reads the span after "Supported values are", so the rejected value
+    quoted earlier in the same sentence isn't mistaken for a supported one.
+    Returns an empty set when the server didn't say — callers then fall back
+    to walking `_EFFORT_SCALE`.
+    """
+    m = _EFFORT_SUPPORTED_RE.search(body_text or "")
+    if not m:
+        return set()
+    return {v.lower() for v in _QUOTED_RE.findall(m.group("list"))}
+
+
+def _nearest_effort(
+    requested: str,
+    rejected: set[str],
+    supported: set[str] | None,
+) -> str | None:
+    """Closest acceptable effort to `requested`, or None to omit the field.
+
+    `supported` is the server-advertised vocabulary when known; None means
+    unknown, in which case every scale value is fair game until rejected.
+    """
+    if requested not in _EFFORT_SCALE:
+        # Vocabulary we don't model (a provider-specific token). Try it once;
+        # once rejected there's no scale position to walk from, so drop it.
+        return None if requested in rejected else requested
+    i = _EFFORT_SCALE.index(requested)
+    for j in sorted(range(len(_EFFORT_SCALE)), key=lambda j: (abs(j - i), j)):
+        cand = _EFFORT_SCALE[j]
+        if cand in rejected:
+            continue
+        if supported is not None and cand not in supported:
+            continue
+        return cand
+    return None
+
+
+def _resolve_effort(key: tuple[str, str], requested: str | None) -> str | None:
+    """Apply what we already learned about this endpoint+model."""
+    if requested is None:
+        return None
+    with _EFFORT_LOCK:
+        rejected = set(_EFFORT_REJECTED.get(key, ()))
+        supported = _EFFORT_SUPPORTED.get(key)
+        supported = set(supported) if supported else None
+    if not rejected and supported is None:
+        return requested
+    if supported is None:
+        # Rejected before, with no vocabulary offered — this endpoint doesn't
+        # take the field at all. Don't re-litigate it on every later call.
+        return None
+    return _nearest_effort(requested, rejected, supported)
+
+
+def _record_effort_rejection(
+    key: tuple[str, str], value: str, body_text: str
+) -> str | None:
+    """Record a rejection and return the next value to try (None = omit).
+
+    Two distinguishable rejections, and the difference matters:
+
+    - The server **advertised a vocabulary** ("Supported values are: …"). It
+      wants the field, just not that value — step to the nearest one it named.
+    - The server **named no alternatives**. Then it is rejecting the *field*,
+      not the value, and trying five more values is thrash that ends in the
+      same place. Drop the field, which every server accepts.
+
+    So a working request is always at most two round-trips away.
+    """
+    with _EFFORT_LOCK:
+        _EFFORT_REJECTED.setdefault(key, set()).add(value)
+        advertised = _parse_supported_efforts(body_text)
+        if advertised:
+            _EFFORT_SUPPORTED[key] = advertised
+        rejected = set(_EFFORT_REJECTED[key])
+        supported = _EFFORT_SUPPORTED.get(key)
+        supported = set(supported) if supported else None
+    if supported is None:
+        return None
+    return _nearest_effort(value, rejected, supported)
+
+
 def call_openai_compatible(
     *,
     model: str,
@@ -237,18 +365,31 @@ def call_openai_compatible(
     else:
         payload["max_tokens"] = max_tokens
         payload["temperature"] = temperature
-    if reasoning_effort is not None:
-        payload["reasoning_effort"] = reasoning_effort
-    body = json.dumps(payload).encode("utf-8")
 
     api_key = os.environ.get("OPENAI_API_KEY", "lm-studio")
     url = f"{base_url.rstrip('/')}/chat/completions"
+
+    # Start from whatever this endpoint+model has already accepted, so only the
+    # first call of a run pays for discovery.
+    effort_key = (base_url.rstrip("/"), model)
+    effort = _resolve_effort(effort_key, reasoning_effort)
+
+    def _encode_body() -> bytes:
+        if effort is not None:
+            payload["reasoning_effort"] = effort
+        else:
+            payload.pop("reasoning_effort", None)
+        return json.dumps(payload).encode("utf-8")
+
+    body = _encode_body()
     # Retry transient failures (401 / 429 / 5xx) with exponential backoff +
     # jitter. A fresh Request is built each attempt because urllib consumes the
     # body stream once. Non-retryable HTTP errors (other 4xx) and the final
     # exhausted attempt re-raise as RuntimeError, preserving prior behavior.
     data = None
-    for attempt in range(1, _RETRY_MAX_ATTEMPTS + 1):
+    attempt = 1
+    renegotiations = 0
+    while True:
         req = urllib.request.Request(
             url,
             data=body,
@@ -264,6 +405,29 @@ def call_openai_compatible(
             break
         except urllib.error.HTTPError as e:
             body_text = e.read().decode("utf-8", errors="replace")[:500]
+            # A 400 naming `reasoning_effort` is the server telling us its
+            # vocabulary. Renegotiate and resend — deliberately NOT counted
+            # against the transient-retry budget, since nothing transient
+            # happened and the next request differs.
+            if (
+                e.code == 400
+                and effort is not None
+                and renegotiations < _EFFORT_MAX_RENEGOTIATIONS
+                and _mentions_reasoning_effort(body_text)
+            ):
+                nxt = _record_effort_rejection(effort_key, effort, body_text)
+                print(
+                    f"[llm] {model} rejected reasoning_effort={effort!r}; "
+                    + (
+                        f"retrying with {nxt!r}" if nxt
+                        else "retrying without the field"
+                    ),
+                    file=sys.stderr,
+                )
+                effort = nxt
+                body = _encode_body()
+                renegotiations += 1
+                continue
             if e.code in _RETRY_STATUS and attempt < _RETRY_MAX_ATTEMPTS:
                 delay = min(
                     _RETRY_BASE_DELAY * (2 ** (attempt - 1)),
@@ -276,6 +440,7 @@ def call_openai_compatible(
                     file=sys.stderr,
                 )
                 time.sleep(delay)
+                attempt += 1
                 continue
             raise RuntimeError(
                 f"OpenAI-compatible server returned HTTP {e.code} at {url}: "
@@ -528,8 +693,11 @@ def call(
     # set one — this covers the reasoning models on that path (Gemini 2.5 via
     # Google's OpenAI shim, OpenAI o-series), which would otherwise hit the same
     # budget-consumed-by-reasoning empty-output failure on the fallback provider.
-    # Local non-reasoning servers ignore reasoning_effort (and the call retries
-    # without it if the server rejects the field); chat-relay/stub don't use it.
+    # "minimal" is the request, not the final word: models disagree about the
+    # vocabulary (some take "none" and reject "minimal"), so the transport
+    # negotiates down to whatever the server accepts and omits the field if it
+    # accepts none of them — see `_nearest_effort`. Local non-reasoning servers
+    # ignore the field; chat-relay/stub don't use it.
     if disable_thinking and reasoning_effort is None:
         reasoning_effort = "minimal"
 
