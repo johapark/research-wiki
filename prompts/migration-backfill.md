@@ -48,6 +48,37 @@ researchwiki lint --json              # expect ungraded_papers 0
 
 Only *then* is a `hook`/`keywords` backfill worth paying for — if the synced pages predate a field, that is genuinely case 1 above.
 
+### Keep the churn out of the synced folder
+
+If the repo lives inside iCloud/Dropbox, the sync daemon is the problem, and the fix is to stop giving it work. Measured on this corpus, by **file count** — which is what sync cost tracks, not bytes:
+
+| Path | Files | Sync it? |
+|---|---|---|
+| `.venv/` | **34,001** | never — machine-specific, and the pins differ per platform |
+| `.grade-cache/` + other caches | ~900 | no — all regenerable |
+| `.git/` | 288 | no — and rewritten on every command |
+| `papers/` + `wiki/` | 150 | **yes — this is the whole point** |
+
+So 96% of the sync load was a virtualenv. Relocate the rest outside the synced tree:
+
+```bash
+python3 -m venv ~/.venvs/research-wiki          # never inside the synced folder
+~/.venvs/research-wiki/bin/pip install -e '.[dev]'
+
+mv .git ~/git-repos/research-wiki.git           # git natively supports this
+printf 'gitdir: %s\n' ~/git-repos/research-wiki.git > .git
+git --git-dir=~/git-repos/research-wiki.git config core.worktree "$PWD"
+
+mkdir -p ~/.cache/research-wiki                 # caches out, symlinked back
+for d in .grade-cache .s2-cache .semantic-cache .tantivy-index \
+         .ingest .claim-graph .evolve-cache .agent-output; do
+  [ -e "$d" ] && [ ! -L "$d" ] && mv "$d" ~/.cache/research-wiki/"$d"
+  mkdir -p ~/.cache/research-wiki/"$d"; ln -sfn ~/.cache/research-wiki/"$d" "$d"
+done
+```
+
+**This is per-machine setup, and it is not optional once done anywhere.** The `.git` pointer file and the cache symlinks hold *absolute* paths and they live inside the synced tree, so they reach every other machine. A machine that syncs them without having run the block above gets a repo git cannot open and caches that fail to write. Run it on each machine, at the same paths, right after `pip install -e .`.
+
 **Two traps specific to syncing.**
 
 *The repo in a synced folder can corrupt `.git/index`.* The symptom is a wall of modified files whose staged and unstaged diffs are exact inverses, plus paths listed as both deleted and untracked. Check with `git diff HEAD --stat`: if the worktree matches HEAD, only the index is stale and plain `git reset` (no `--hard`) rebuilds it without touching a file.

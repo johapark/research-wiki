@@ -62,19 +62,23 @@ wiki/other/*
 # Gitignored so local A/B edits don't churn the repo or fight `git pull`.
 config/models.yaml
 
-# Ephemeral processing artifacts
-.ingest/
-.s2-cache/
-.crossref-cache/
-.web-cache/
-.tantivy-index/
-.grade-cache/
-.semantic-cache/
-.claim-graph/
-.evolve-cache/
-.agent-output/
-.llm-relay/
-.benchmark-runs/
+# Ephemeral processing artifacts.
+# No trailing slash: on a machine that keeps this repo inside a synced folder
+# (iCloud/Dropbox), these are relocated outside it and symlinked back in, and a
+# `dir/` pattern does NOT match a symlink — git would report every one as
+# untracked. Bare names match both the real directory and the symlink.
+.ingest
+.s2-cache
+.crossref-cache
+.web-cache
+.tantivy-index
+.grade-cache
+.semantic-cache
+.claim-graph
+.evolve-cache
+.agent-output
+.llm-relay
+.benchmark-runs
 
 # Editor / vault configs (user-specific)
 .obsidian/
