@@ -34,6 +34,30 @@ def test_surname_diacritics_stripped():
     assert first_author_surname(["Jürgen Müller"]) == "muller"
 
 
+def test_surname_nobiliary_particle_kept():
+    """`surname as printed on p.1` includes the tussenvoegsel. Regression: the
+    trailing-token rule gave `winter` for De Winter while the corpus already
+    had `van-kempen-2024-...`, so the convention contradicted itself."""
+    assert first_author_surname(["S. De Winter"]) == "de-winter"
+    assert first_author_surname(["Seppe De Winter"]) == "de-winter"
+    assert first_author_surname(["Michel van Kempen"]) == "van-kempen"
+    assert first_author_surname(["Florestan De Moor"]) == "de-moor"
+    assert first_author_surname(["Teven Le Scao"]) == "le-scao"
+
+
+def test_surname_stacked_particles_kept():
+    assert first_author_surname(["Laurens Van Den Berg"]) == "van-den-berg"
+
+
+def test_surname_two_token_byline_is_never_particle_split():
+    """`bin` and `di` are particles in Arabic and Italian names but ordinary
+    given names in Chinese ones. A two-token byline is given name + surname, so
+    the walk-left must not consume the first token."""
+    assert first_author_surname(["Bin Liu"]) == "liu"
+    assert first_author_surname(["Di Liu"]) == "liu"
+    assert first_author_surname(["Da Chen"]) == "chen"
+
+
 def test_surname_empty_list_is_unknown():
     assert first_author_surname([]) == "unknown"
 

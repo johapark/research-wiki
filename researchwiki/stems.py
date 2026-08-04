@@ -92,6 +92,16 @@ _CONSORTIUM_TOKENS = frozenset({
 })
 
 
+# Nobiliary particles (tussenvoegsels) that belong to the surname rather than
+# the given name, so CLAUDE.md's "surname as printed on p.1" keeps them:
+# `S. De Winter` → `de-winter`, not `winter`. Matches the corpus precedent set
+# by `van-kempen-2024-fast-and-accurate-protein-structure`.
+_SURNAME_PARTICLES = frozenset({
+    "de", "van", "von", "del", "della", "di", "da", "du", "la", "le",
+    "den", "der", "ten", "ter", "dos", "das", "bin", "ibn",
+})
+
+
 def first_author_surname(authors: list[str]) -> str:
     """Extract the last name from the first author string.
 
@@ -122,7 +132,15 @@ def first_author_surname(authors: list[str]) -> str:
     parts = raw.split()
     if not parts:
         return "unknown"
-    surname = parts[-1].lower()
+    # Walk left across nobiliary particles: `S. De Winter` → de-winter,
+    # `L. Van Den Berg` → van-den-berg. The `i > 1` floor never consumes the
+    # first token, which is what keeps a two-token byline safe — `Bin Liu` and
+    # `Di Liu` are given name + surname, not particle + surname, and `bin`/`di`
+    # are in the particle set for Arabic and Italian names.
+    i = len(parts) - 1
+    while i > 1 and parts[i - 1].lower().strip(".") in _SURNAME_PARTICLES:
+        i -= 1
+    surname = "-".join(parts[i:]).lower()
     surname = re.sub(r"[^a-z0-9-]", "", surname)
     return surname or "unknown"
 
