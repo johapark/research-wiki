@@ -13,6 +13,8 @@ pip install -e '.[dev]'
 python -m pytest -q          # should be green before you change anything
 ```
 
+**If your checkout lives in a synced folder** (iCloud/Dropbox — the maintainer's does, because `wiki/` and `papers/` sync there), put the venv somewhere else: `python3 -m venv ~/.venvs/research-wiki`. A venv is ~34,000 files and will dominate the sync queue, at which point the daemon starts losing races against your own writes — a stale `.git/index` that reports every tracked file as modified, and `<name> 2.py` conflict copies of files you just edited. See [`prompts/migration-backfill.md`](./prompts/migration-backfill.md) § *Keep the churn out of the synced folder*.
+
 Optional extras: `.[mcp]` for the read-only MCP server. The semantic grader pulls
 `sentence-transformers` and downloads a ~133 MB model on first use — not needed
 for the test suite.

@@ -37,7 +37,8 @@ Nothing here triggers the usual way: the user hands you no pages, so read this w
 The sequence, all of it token-free after the install:
 
 ```bash
-pip install -e .                      # see init.md Step 1 — nothing below works first
+python3 -m venv ~/.venvs/research-wiki        # see init.md Step 1 — outside the repo
+~/.venvs/research-wiki/bin/pip install -e .   # nothing below works before this
 researchwiki migrate preflight        # fetches the BGE weights (~133 MB, first use)
 researchwiki db rebuild && researchwiki reindex
 researchwiki grade regression --missing-only --no-salience

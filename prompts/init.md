@@ -2,19 +2,33 @@
 
 Read this file when a fresh clone needs setup: every `wiki/{category}/` is empty, no PDFs in `papers/`, and the user signals they're new (*"set this up"*, *"initialize"*, *"how do I start"*). Walk through the steps below; surface each decision to the user — do not run silently.
 
-> **Scripted alternative:** `researchwiki init` is an interactive terminal wizard that performs these same steps (provider → categories → dashboard → confirm) by prompting the user directly. It's the human-run complement to this LLM-guided path — point the user to it if they'd rather drive setup themselves; the steps below are the conversational equivalent and stay in sync with it.
+> **Scripted alternative:** `researchwiki init` is an interactive terminal wizard covering **Steps 2, 3, 4 and 7** (provider → categories → dashboard → confirm) by prompting the user directly. It's the human-run complement to this LLM-guided path — point the user to it if they'd rather drive setup themselves.
+>
+> It is not a substitute for this file. Step 1 (install) it cannot do — the wizard is itself part of the package being installed — and it does not touch Step 5 (graph filter) or Step 6 (first ingest). Note also that the wizard's own on-screen numbering starts at its provider step, so its "Step 1" is this file's Step 2.
 
 Skip steps the user has already completed: if `researchwiki --version` succeeds, skip Step 1; if a provider is configured and reachable, skip Step 2; if `wiki/{category}/` directories were already populated by a prior init attempt, skip Step 3.
 
 ## Step 1 — Install
 
-`researchwiki --version` first. If missing:
+`researchwiki --version` first — and trust only that. `python -m researchwiki` *appears* to work from the repo root even with nothing installed, because the package imports from the working directory; it then prints a wall of `could not load task 'X': No module named 'yaml'` warnings, which reads like a broken install rather than a missing one.
+
+If it's missing, **install into a virtualenv, and put that virtualenv outside the repo**:
 
 ```bash
-pip install -e .                             # core + claim grader + Anthropic SDK
+python3 -m venv ~/.venvs/research-wiki
+~/.venvs/research-wiki/bin/pip install -e .   # core + claim grader + Anthropic SDK
 ```
 
-That pulls every Python dependency: `pypdfium2`, `tantivy`, `pyyaml`, `numpy`, torch + transformers + sentence-transformers (~2 GB), and the Anthropic SDK. Optional extras: `pip install -e '.[mcp]'` for `mcp-serve`, `.[dev]` for pytest.
+Both halves of that matter.
+
+- **A venv, not the ambient interpreter.** Bare `pip install -e .` installs into whatever Python is active — frequently a shared conda `base`. This project pulls ~2 GB (torch + transformers + sentence-transformers), and its constraints are platform-specific: on x86_64 macOS, torch caps at 2.2.2, which forces `transformers<5` and `numpy<2` (see the install-time failure table in [`migration-backfill.md`](./migration-backfill.md)). Those pins have no business in an environment other projects share.
+- **Outside the repo, not `.venv/` inside it.** A venv is ~34,000 files. If the repo sits in iCloud/Dropbox — a normal setup here, since `wiki/` and `papers/` want syncing — an in-repo venv becomes 96% of the sync load and starves the daemon, which then loses races against concurrent writes: stale `.git/index`, `<name> 2.md` conflict copies. `migration-backfill.md` § *Keep the churn out of the synced folder* has the measurements and the matching relocations for `.git` and the caches. Do those at the same time if the repo is synced.
+
+Venvs bake absolute paths into `bin/` and `pyvenv.cfg`, so pick the location now — moving one later means recreating it.
+
+That install pulls every Python dependency: `pypdfium2`, `tantivy`, `pyyaml`, `numpy`, torch + transformers + sentence-transformers, and the Anthropic SDK. Optional extras: `pip install -e '.[mcp]'` for `mcp-serve`, `.[dev]` for pytest.
+
+`researchwiki` will not be on `PATH` in new shells — invoke it as `~/.venvs/research-wiki/bin/researchwiki`, activate the venv, or alias it.
 
 **Two things `pip install` does *not* give you:**
 

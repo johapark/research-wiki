@@ -40,10 +40,13 @@ Taxonomy comes from *your* papers: `researchwiki bootstrap-categories` derives c
 ```bash
 git clone git@github.com:johapark/research-wiki.git
 cd research-wiki
-pip install -e .                          # core + claim grader + Anthropic SDK
+python3 -m venv ~/.venvs/research-wiki    # outside the repo — see below
+~/.venvs/research-wiki/bin/pip install -e .   # core + claim grader + Anthropic SDK
 ```
 
-This exposes `researchwiki` on your `PATH`. Everything most users need — pypdfium2, tantivy, the bi-encoder grader, and the Anthropic SDK — is in the default install. Extras: **`[mcp]`** (MCP server for Claude Desktop), **`[dev]`** (pytest). To skip the ~2 GB grader weights at runtime, pass `--no-semantic` to `agent ingest` (draft selection falls back to BM25; pages land in the sandbox for manual promotion) or use the digest path (no grading).
+Activate the venv (or call `~/.venvs/research-wiki/bin/researchwiki`) to get the CLI — a venv is not on `PATH` otherwise. Everything most users need — pypdfium2, tantivy, the bi-encoder grader, and the Anthropic SDK — is in the default install. Extras: **`[mcp]`** (MCP server for Claude Desktop), **`[dev]`** (pytest). To skip the ~2 GB grader weights at runtime, pass `--no-semantic` to `agent ingest` (draft selection falls back to BM25; pages land in the sandbox for manual promotion) or use the digest path (no grading).
+
+**Why a venv, and why not `.venv/` in the repo.** Bare `pip install -e .` lands in whatever interpreter is active — often a shared conda `base` — and this project's ~2 GB of pins are platform-specific (on x86_64 macOS torch caps at 2.2.2, forcing `transformers<5` and `numpy<2`). And a venv is ~34,000 files: if you keep the repo in iCloud/Dropbox so `wiki/` and `papers/` sync, an in-repo venv becomes the overwhelming majority of the sync load and starves the daemon into corrupting `.git/index` and spawning `<name> 2.md` conflict copies. [`prompts/migration-backfill.md`](./prompts/migration-backfill.md) has the measurements plus the matching relocations for `.git` and the caches.
 
 ### Providers
 
