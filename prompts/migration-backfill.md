@@ -21,6 +21,45 @@ Both assumptions the tooling relies on: **one page per paper**, and **the PDF is
 
 ---
 
+## New machine, same wiki
+
+The third source, and the most common one: **nothing is being migrated at all.** The repo syncs to a second computer — code via git, `wiki/` + `papers/` via Dropbox/iCloud/rsync — and the pages arrive already correct. What's absent is everything *derived*, none of which travels.
+
+Nothing here triggers the usual way: the user hands you no pages, so read this when `researchwiki` is missing from a synced checkout, or when `lint` reports large round-number gaps (`ungraded_papers` ≈ every paper) on a wiki that was healthy elsewhere.
+
+| Derived state | Lives at | Why it can't sync |
+|---|---|---|
+| claim grades, ingest telemetry | `~/.local/share/researchwiki/repos/<name>-<hash>/state.db` | outside the repo *and* outside the vault — per-machine by construction |
+| full-text / semantic indexes | `.tantivy-index/`, `.semantic-cache/` | gitignored; rebuilt by `reindex` |
+| chunk indexes | `.grade-cache/` | gitignored; rebuilt on demand |
+| the package itself | `.venv/` | gitignored |
+
+The sequence, all of it token-free after the install:
+
+```bash
+pip install -e .                      # see init.md Step 1 — nothing below works first
+researchwiki migrate preflight        # fetches the BGE weights (~133 MB, first use)
+researchwiki db rebuild && researchwiki reindex
+researchwiki grade regression --missing-only --no-salience
+researchwiki lint --json              # expect ungraded_papers 0
+```
+
+**`db rebuild` re-extracts claims but lands them ungraded** — the grades were in `state.db`, which stayed on the old machine. Until `grade regression` finishes, every claim is uncitable: no synthesis page can ground against it, and `claim-overlap` has nothing to compare. On a corpus of 64 papers this took ~4 min and zero tokens, so there is no reason to defer it.
+
+Only *then* is a `hook`/`keywords` backfill worth paying for — if the synced pages predate a field, that is genuinely case 1 above.
+
+**Two traps specific to syncing.**
+
+*The repo in a synced folder can corrupt `.git/index`.* The symptom is a wall of modified files whose staged and unstaged diffs are exact inverses, plus paths listed as both deleted and untracked. Check with `git diff HEAD --stat`: if the worktree matches HEAD, only the index is stale and plain `git reset` (no `--hard`) rebuilds it without touching a file.
+
+*`preflight` verifies the model **loads**, not that it **works**.* `is_available()` calls `_get_model()`, which returns a constructed `SentenceTransformer` and stops there. The encode path is where `embed_texts` crosses into NumPy via `convert_to_numpy=True` — so a torch↔NumPy ABI mismatch (torch built against NumPy 1.x, NumPy 2.x installed) loads fine, prints `embedding model OK`, and breaks on first real use. If you see `Failed to initialize NumPy: _ARRAY_API not found` anywhere in the output, treat preflight's pass as meaningless and pin `numpy<2`. Confirm for real with:
+
+```bash
+python -c "from researchwiki.index import embeddings; print(embeddings.embed_texts(['probe']).shape)"
+```
+
+---
+
 ## The one thing that silently fails
 
 **Claim extraction keys on exact H2 headings.** `researchwiki/grade/parser.py` reads only:
@@ -211,6 +250,13 @@ All accept `--dry-run`, `--limit N`, `--reindex`. Selection comes from the match
 | `hook_too_long` | over the per-type ceiling | advisory; trim by hand, nothing truncates |
 
 Rate-limited providers: drop `-w` to 1–2. Gemini free tier is ~5 req/min shared per project; z.ai free tiers 429 under parallelism.
+
+**Install-time, on a fresh machine.** `pip install -e .` resolves against unbounded floors (`torch>=2.0`, `transformers>=4.30`, `numpy>=1.24`), so the versions you get depend on what your platform still has wheels for. Where torch is capped below current — x86_64 macOS tops out at **2.2.2** — pip happily pairs that old torch with a current transformers/NumPy and the result doesn't import.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `NameError: name 'torch' is not defined` from `transformers/integrations/tensor_parallel.py` at import | transformers 5.x against a torch too old for it | `pip install 'transformers<5' 'sentence-transformers<4'` |
+| `Failed to initialize NumPy: _ARRAY_API not found` (a *warning* — import still succeeds) | torch compiled against NumPy 1.x, NumPy 2.x installed | `pip install 'numpy<2'`; see the preflight trap above — this one passes preflight |
 
 ---
 
