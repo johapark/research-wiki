@@ -180,9 +180,16 @@ class TantivySearchBackend(SearchBackend):
         searcher = idx.searcher()
         # Use parse_query_lenient so punctuation in the seed text doesn't blow up.
         # The lenient parser returns (query, errors); we ignore errors.
+        #
+        # It has to be the Index METHOD, not the module-level function: in
+        # tantivy 0.26 `tantivy.parse_query_lenient` takes only (query), so
+        # passing schema + fields raised TypeError on every call and dropped
+        # every seed into the strict fallback below — which then died on the
+        # punctuation the lenient parser was chosen to absorb. `search --like`
+        # reported "No hits." for those pages rather than an error.
         try:
-            parsed, _errors = tantivy.parse_query_lenient(
-                _sanitize_query(text), idx.schema, QUERY_FIELDS
+            parsed, _errors = idx.parse_query_lenient(
+                _sanitize_query(text), QUERY_FIELDS
             )
         except Exception:
             # Fallback: try the strict parser on a heavily-sanitized text
