@@ -204,7 +204,24 @@ def detect_publication_status(
     """Cheap rules-based publication-status detection.
 
     Returns one of: 'arxiv-preprint', 'biorxiv-preprint', 'medrxiv-preprint',
-    'accelerated-article-preview', or None for a regular published paper.
+    'accelerated-article-preview', 'proof-pdf', or None for a regular
+    published paper.
+
+    Only two text fingerprints mean "not yet the peer-reviewed final version":
+    Nature's AAP banner and the accepted-manuscript disclaimer. Two earlier
+    fingerprints were dropped/retargeted because neither indicates a preview —
+    together they mislabeled 80 of 83 flagged pages:
+
+    - `"advance access"` was removed. It is OUP's online-first program, which
+      publishes the *final* copyedited version ahead of pagination — and the
+      string also appears in OUP's unfilled LaTeX template
+      (`Advance Access Publication Date: Day Month Year`), so it flagged an
+      arXiv preprint typeset in the Bioinformatics class as a journal preview.
+    - the `Published online: xx xx xxxx` placeholder now returns 'proof-pdf'.
+      It marks a Springer *proof* of the final version, downloaded before the
+      online date was stamped — the article is or will be published normally,
+      so calling it a preview overstated the case. 'proof-pdf' says only what
+      the file is; re-download to clear it.
     """
     if doi:
         d = doi.lower()
@@ -216,15 +233,15 @@ def detect_publication_status(
             return "biorxiv-preprint"
 
     head = (pdf_text or "")[:6000].lower()
-    if "accelerated article preview" in head or "advance access" in head:
+    if "accelerated article preview" in head:
         return "accelerated-article-preview"
     if "this is a pdf file of a peer-reviewed paper that has been accepted" in head:
         return "accelerated-article-preview"
-    # Nature's accelerated previews ship with a literal placeholder in the
-    # publication-online field — the only fingerprint visible in the
-    # extracted text once typeset article numbers are stripped.
+    # Typeset proof of the final version: Springer leaves the publication-online
+    # field as a literal placeholder until the online date is assigned. Not a
+    # preview — see the docstring.
     if re.search(r"published\s+online:\s*x{1,2}\s+x{1,3}\s+x{2,4}", head):
-        return "accelerated-article-preview"
+        return "proof-pdf"
     return None
 
 

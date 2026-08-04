@@ -201,3 +201,43 @@ def test_biorxiv_doi_detected():
 
 def test_published_doi_is_none():
     assert detect_publication_status(None, "10.1126/science.ado2243") is None
+
+
+# ---------- detect_publication_status (text branch) ----------
+
+def test_aap_banner_detected():
+    text = "nature\nACCELERATED ARTICLE PREVIEW\nSome title"
+    assert detect_publication_status(text, None) == "accelerated-article-preview"
+
+
+def test_accepted_manuscript_disclaimer_detected():
+    text = ("This is a PDF file of a peer-reviewed paper that has been accepted "
+            "for publication.")
+    assert detect_publication_status(text, None) == "accelerated-article-preview"
+
+
+def test_placeholder_online_date_is_proof_not_preview():
+    """A Springer proof of the *final* version — typeset and copyedited, just
+    downloaded before the online date was stamped. Regression: this used to
+    return 'accelerated-article-preview' and mislabeled 72 pages."""
+    text = ("Received: 29 January 2026\nAccepted: 9 June 2026\n"
+            "Published online: xx xx xxxx\n")
+    assert detect_publication_status(text, None) == "proof-pdf"
+
+
+def test_advance_access_is_not_a_preview():
+    """OUP's Advance Access publishes the final copyedited version ahead of
+    pagination. Regression: this used to return 'accelerated-article-preview'
+    and mislabeled 8 pages, one of them a preprint."""
+    text = "Bioinformatics, 2024\nAdvance Access Publication Date: 5 July 2024\n"
+    assert detect_publication_status(text, None) is None
+
+
+def test_oup_template_boilerplate_is_not_a_preview():
+    """An arXiv preprint typeset in the OUP Bioinformatics class carries the
+    unfilled template line. The DOI branch should win when a DOI is known, but
+    even without one this must not read as a journal preview (li-2026)."""
+    text = ("TBD, 2026, pp. 1-7\ndoi: TBD\n"
+            "Advance Access Publication Date: Day Month Year\nPREPRINT\n")
+    assert detect_publication_status(text, None) is None
+    assert detect_publication_status(text, "10.48550/arXiv.2606.15357") == "arxiv-preprint"
