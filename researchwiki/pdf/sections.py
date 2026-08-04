@@ -37,7 +37,19 @@ SECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("abstract", re.compile(rf"(?im)^\s*{_LINE_PREFIX}abstract\s*$")),
     ("introduction", re.compile(rf"(?im)^\s*{_LINE_PREFIX}(introduction|background)\s*$")),
     ("methods", re.compile(rf"(?im)^\s*{_LINE_PREFIX}(materials\s+and\s+methods|methods?|experimental\s+procedures?)\s*$")),
-    ("results", re.compile(rf"(?im)^\s*{_LINE_PREFIX}(results?)\s*$")),
+    # `experiments` and friends are aliased onto `results` rather than given
+    # their own key: ML/arXiv papers head their quantitative section
+    # "9 Experiments" / "Empirical Evaluation" where a Nature-family paper
+    # writes "Results", and every downstream consumer (author grounding, the
+    # 12000-char `_SECTION_BUDGETS["results"]` keyword input) already keys off
+    # `results`. A separate key would need budget + consumer changes to carry
+    # the same content. Since `anchor_sections` keeps only the FIRST match per
+    # name, a paper with both headings still anchors on whichever comes first.
+    ("results", re.compile(
+        rf"(?im)^\s*{_LINE_PREFIX}"
+        r"(results?|experiments?|experimental\s+results|"
+        r"empirical\s+(?:results|evaluation|study)|evaluation)\s*$"
+    )),
     ("discussion", re.compile(rf"(?im)^\s*{_LINE_PREFIX}(discussion|conclusions?)\s*$")),
     ("references", re.compile(rf"(?im)^\s*{_LINE_PREFIX}(references|bibliography)\s*$")),
 ]
