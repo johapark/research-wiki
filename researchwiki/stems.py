@@ -12,7 +12,42 @@ STOP_WORDS = {
 }
 
 
+# Latin letters NFKD cannot help with. An accented letter like `í` decomposes
+# into `i` + a combining mark, so dropping the mark leaves the ASCII base. These
+# do not decompose at all — the stroke, bar or ligature is part of the codepoint
+# — so they survive NFKD intact and are then deleted by the `[^a-z0-9\s-]` pass
+# in `slugify_phrase`, silently removing a letter from the middle of a name.
+#
+# Observed 2026-08-04: `Szałata` → `szaata`, an author page whose stem was
+# missing an `l`. Left unmapped, `Đurić` → `uric` and `Løken` → `lken` — the
+# first loses its leading letter, which is the one a reader scans for.
+#
+# Only characters with an unambiguous single-letter or standard two-letter
+# romanization are listed. Anything genuinely contested stays out.
+_TRANSLITERATE = str.maketrans({
+    "ł": "l", "Ł": "L",     # Polish
+    "ø": "o", "Ø": "O",     # Danish / Norwegian
+    "đ": "d", "Đ": "D",     # Croatian / Serbian / Vietnamese
+    "ħ": "h", "Ħ": "H",     # Maltese
+    "ŧ": "t", "Ŧ": "T",     # Sámi
+    "ı": "i", "İ": "I",     # Turkish dotless / dotted
+    "ß": "ss",
+    "æ": "ae", "Æ": "AE",
+    "œ": "oe", "Œ": "OE",
+    "þ": "th", "Þ": "TH",   # Icelandic thorn
+    "ð": "d", "Ð": "D",     # Icelandic eth
+})
+
+
 def strip_diacritics(s: str) -> str:
+    """Fold a string to its ASCII-letter skeleton.
+
+    Two mechanisms, because one is not enough: NFKD handles anything that
+    decomposes into a base letter plus combining marks, and `_TRANSLITERATE`
+    handles the Latin letters that do not decompose. Transliteration runs first
+    so a mapped letter carrying an additional accent still reaches NFKD.
+    """
+    s = (s or "").translate(_TRANSLITERATE)
     nfkd = unicodedata.normalize("NFKD", s)
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 

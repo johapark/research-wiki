@@ -38,6 +38,25 @@ def test_surname_empty_list_is_unknown():
     assert first_author_surname([]) == "unknown"
 
 
+def test_surname_non_decomposable_letters_transliterate():
+    """NFKD folds `í` to `i`, but has nothing to say about `ł`, `ø` or `đ`.
+
+    Those carry the stroke inside the codepoint, so they survived NFKD and were
+    then deleted by the ASCII-only pass — removing a letter from the middle of
+    a name. Observed 2026-08-04: Szałata was ingested as `szaata-2024-…`.
+    """
+    assert first_author_surname(["Artur Szałata"]) == "szalata"
+    assert first_author_surname(["Kari Løken"]) == "loken"
+    # Leading letter: dropping this one is the most damaging case, since it is
+    # what a reader (and an alphabetical listing) scans for.
+    assert first_author_surname(["Ivan Đurić"]) == "duric"
+
+
+def test_surname_ligatures_expand_to_two_letters():
+    assert first_author_surname(["Hans Straße"]) == "strasse"
+    assert first_author_surname(["Æsa Þórsdóttir"]) == "thorsdottir"
+
+
 def test_surname_comma_order():
     # "Last, First" (bibliographic export order) → surname is before the comma.
     assert first_author_surname(["Liao, Wen-Wei"]) == "liao"
@@ -136,6 +155,13 @@ def test_slugify_folds_diacritics_to_ascii_base():
         "garcia-lopez-pangenome-methods"
     assert slugify_phrase("Jürgen Müller prime editing") == \
         "jurgen-muller-prime-editing"
+
+
+def test_slugify_transliterates_what_nfkd_cannot():
+    """Same failure as the surname path — page slugs must agree with stems."""
+    assert slugify_phrase("Szałata transformers review") == \
+        "szalata-transformers-review"
+    assert slugify_phrase("Đurić Løken methods") == "duric-loken-methods"
 
 
 def test_slugify_maps_unicode_dashes_to_ascii_hyphen():
