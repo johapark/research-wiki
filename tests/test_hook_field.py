@@ -19,15 +19,17 @@ question instead of its finding, 97 of them cut mid-word by a 200-char slice.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
+from researchwiki.agents import runner
 from researchwiki.agents.phases.commit import (
     _extract_gloss_context,
     _parse_gloss_response,
 )
-from researchwiki.agents.phases.draft import split_gloss_trailer
+from researchwiki.agents.phases.draft import Draft, split_gloss_trailer
 from researchwiki.agents.promote import _build_frontmatter, _yaml_dq
 from researchwiki.tasks.lint.walk import all_pages
 from researchwiki.tasks.lint.yaml_checks import (
@@ -242,3 +244,72 @@ def test_hook_too_long_sorts_longest_first(tmp_wiki):
 def test_a_hook_within_its_ceiling_is_not_reported(tmp_wiki):
     _mkpage(tmp_wiki, "genomics/a-2026-a", f'type: paper\ntitle: A\nhook: "{"x" * 399}"')
     assert find_hook_too_long(*_walk(tmp_wiki)) == []
+
+
+# ---------- trailer survives a revision (runner handoff) ----------
+#
+# The author parses the trailer once, then `split_gloss_trailer` strips it from
+# `Draft.text` so no downstream consumer sees it. That makes the revision phases
+# the field's blind spot: evolve and DEBUG are prompted with the *stripped* body
+# and have no trailer of their own to parse, so a freshly-constructed Draft
+# defaults both fields to '' — and the runner's `ctx.winner = revised` swap then
+# discards the author's values. Symptom in the wild: 3 of 4 papers in one batch
+# committed with no `hook:` and `short_name: TODO`, all three of them the ones
+# whose critic flagged something. The one paper the critic passed kept its hook.
+
+def _prior_draft():
+    return Draft(
+        text=BODY, model="m", temperature=0.2, input_tokens=1, output_tokens=1,
+        iteration_id=100, handle="NanoSeq Population",
+        hook="Updated NanoSeq compatible with whole-exome capture.",
+        scores={"semantic_score": 0.60, "n_drift": 0, "mean_bm25": 4.0},
+    )
+
+
+def _revision_ctx(prior):
+    """Minimal Context stand-in for the two revision wrappers."""
+    return SimpleNamespace(
+        metadata={"paper_type": "research"}, sections={}, use_stub=False,
+        attempt_id="a", paper_stem="s", pdf_filename="s.pdf", iteration=3,
+        drafts=[prior], winner=prior, crosslink_candidates=[],
+        next_iter=lambda: None,
+    )
+
+
+def test_evolve_revision_inherits_the_authors_handle_and_hook(monkeypatch):
+    prior = _prior_draft()
+    monkeypatch.setattr(runner.phases, "evolve", lambda **kw: SimpleNamespace(
+        text="## Summary\n\nRevised prose.\n", model="m", temperature=0.2,
+        input_tokens=10, output_tokens=20,
+    ))
+    monkeypatch.setattr(runner, "write_iteration", lambda **kw: 101)
+
+    revised = runner._phase_evolve(_revision_ctx(prior), None, prior, object())
+
+    assert revised.text != prior.text, "sanity: the revision replaced the body"
+    assert revised.handle == prior.handle
+    assert revised.hook == prior.hook
+
+
+def test_debug_repair_inherits_the_authors_handle_and_hook(monkeypatch):
+    prior = _prior_draft()
+    ctx = _revision_ctx(prior)
+    monkeypatch.setattr(runner.phases, "debug", lambda **kw: SimpleNamespace(
+        text="## Summary\n\nRepaired prose.\n", model="m", temperature=0.0,
+        input_tokens=10, output_tokens=20, issues_addressed=["drift"],
+    ))
+    monkeypatch.setattr(runner, "write_iteration", lambda **kw: 102)
+    monkeypatch.setattr(runner, "_phase_grade", lambda *a, **kw: None)
+    # Revert path: the Draft is built (and appended) before the improvement
+    # gate, so the inheritance is observable without mocking promote's gates.
+    monkeypatch.setattr(runner, "_is_strict_improvement", lambda *a: False)
+
+    runner._phase_debug(
+        ctx, None, BODY, 3, SimpleNamespace(reasons=[], promoted=False), None,
+        issues=["drift"],
+    )
+
+    repaired = ctx.drafts[-1]
+    assert repaired.text != prior.text, "sanity: the repair replaced the body"
+    assert repaired.handle == prior.handle
+    assert repaired.hook == prior.hook

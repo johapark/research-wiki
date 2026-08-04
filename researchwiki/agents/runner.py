@@ -583,6 +583,14 @@ def _phase_evolve(ctx: Context, conn, prior_draft, critique):
         temperature=out.temperature,
         input_tokens=out.input_tokens,
         output_tokens=out.output_tokens,
+        # Inherit the author's catalog trailer. The evolve prompt is built from
+        # `draft.text`, which `split_gloss_trailer` already stripped, so the
+        # revision has no trailer of its own to parse — and a fresh Draft would
+        # silently default both fields to '', losing them the moment the runner
+        # swaps the winner. Inheriting is sound because evolve keeps claims the
+        # critic did not flag essentially unchanged, so the gloss still holds.
+        handle=prior_draft.handle,
+        hook=prior_draft.hook,
     )
     iter_id = write_iteration(
         attempt_id=ctx.attempt_id,
@@ -645,6 +653,11 @@ def _phase_debug(
         temperature=out.temperature,
         input_tokens=out.input_tokens,
         output_tokens=out.output_tokens,
+        # Same trailer inheritance as `_phase_evolve` — DEBUG repairs structure
+        # (drift, KC count), never the headline finding, so the author's handle
+        # and hook survive the repair.
+        handle=ctx.winner.handle,
+        hook=ctx.winner.hook,
     )
     iter_id = write_iteration(
         attempt_id=ctx.attempt_id,
@@ -878,8 +891,12 @@ def _phase_commit(ctx: Context, conn) -> Path:
         if hook:
             log(f"hook      → {hook[:88]}{'…' if len(hook) > 88 else ''}", tag="agent")
         else:
-            log("hook      ⚠ author emitted no usable HOOK; lint will flag it",
-                tag="agent")
+            # Don't blame the author here: the winning draft may be an evolve /
+            # DEBUG revision, and its trailer is inherited rather than parsed.
+            # Naming the winner's role is what makes an empty hook diagnosable.
+            log(f"hook      ⚠ no usable HOOK on the winning draft "
+                f"(iteration {ctx.winner.iteration_id if ctx.winner else '?'}); "
+                f"lint will flag it", tag="agent")
 
         # Keywords — same pattern as short_name, written into YAML for the
         # search index (BM25 + semantic) and for `lint` quality checks.
