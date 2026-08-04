@@ -36,7 +36,12 @@ import time
 import unicodedata
 from pathlib import Path
 
-from ..agents.phases import KeywordsOutput, propose_keywords_batch, render_keywords_yaml
+from ..agents.phases import (
+    MIN_KEYWORDS,
+    KeywordsOutput,
+    propose_keywords_batch,
+    render_keywords_yaml,
+)
 from ..fsatomic import write_text_atomic
 from ..stems import first_author_surname
 from ..wiki import read_page, read_pages
@@ -95,14 +100,20 @@ def _replace_or_insert(page_path: Path, key: str, value: str, after_key: str = "
 
 
 def _find_keyword_candidates() -> list[Path]:
-    """Paper pages with fewer than 3 keyword items."""
+    """Paper pages with fewer than `MIN_KEYWORDS` keyword items.
+
+    Was `>= 3` while `render_keywords_yaml` refuses to write below 5, which
+    meant a page holding 3-4 keywords was never even *selected* here — and lint
+    didn't flag it either. Three thresholds, one dead zone, nothing able to move
+    a page out of it. All four sites now read `MIN_KEYWORDS`.
+    """
     out: list[Path] = []
     for p in read_pages():
         if p.path.parent.name in ("synthesis", "references", "concepts"):
             continue
         if p.fm.get("type", "paper") != "paper":
             continue
-        if len(p.list_field("keywords")) >= 3:
+        if len(p.list_field("keywords")) >= MIN_KEYWORDS:
             continue
         out.append(p.path)
     return sorted(out)
@@ -199,7 +210,8 @@ def _run_keywords(args: argparse.Namespace) -> int:
                 continue
             rendered = render_keywords_yaml(kw_out.keywords)
             if rendered is None:
-                print(f"          → only {len(kw_out.keywords)} kept (need ≥5); skip")
+                print(f"          → only {len(kw_out.keywords)} kept "
+                      f"(need ≥{MIN_KEYWORDS}); skip")
                 skipped_low_quality += 1
                 continue
             print(f"          → {kw_out.keywords}")

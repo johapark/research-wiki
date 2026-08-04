@@ -38,6 +38,7 @@ from researchwiki.tasks.lint.walk import (
     page_key,
 )
 from researchwiki.tasks.lint.yaml_checks import (
+    MIN_KEYWORDS,
     find_category_drift,
     find_missing_doi,
     find_missing_keywords,
@@ -284,7 +285,9 @@ def test_find_missing_keywords(tmp_wiki):
     b = _mkpage(tmp_wiki, "cgt/sparse-keywords", "")
     pages = [a, b]
     fm = {
-        a: {"type": "paper", "keywords": ["one", "two", "three", "four"]},
+        # Sized off MIN_KEYWORDS so this fixture tracks the floor instead of
+        # encoding whatever it happened to be when the test was written.
+        a: {"type": "paper", "keywords": [f"kw{i}" for i in range(MIN_KEYWORDS)]},
         b: {"type": "paper", "keywords": ["one"]},
     }
     out = find_missing_keywords(pages, fm)
@@ -303,11 +306,11 @@ def test_find_missing_keywords_covers_reference_types(tmp_wiki):
     pages = [ok, thin, missing, guidance_ok, book_thin]
     fm = {
         ok: {"type": "whitepaper",
-             "keywords": ["a", "b", "c", "d", "e", "f"]},
+             "keywords": [f"kw{i}" for i in range(MIN_KEYWORDS + 1)]},
         thin: {"type": "whitepaper", "keywords": ["only-one", "two"]},
         missing: {"type": "guidance"},  # no keywords key at all
         guidance_ok: {"type": "guidance",
-                      "keywords": ["one", "two", "three"]},
+                      "keywords": [f"kw{i}" for i in range(MIN_KEYWORDS)]},
         book_thin: {"type": "book", "keywords": []},
     }
     out = find_missing_keywords(pages, fm)

@@ -1,4 +1,6 @@
-# API pricing, USD per million tokens. Read by `researchwiki/pricing.py`; used by
+# API pricing, USD per million tokens. Read by the Pricing section of
+# `researchwiki/agents/model_config.py` — the module that already owns per-phase
+# model routing, so one place holds every fact about a model. Consumed by
 # `researchwiki status` (7-day cost rollup) and `researchwiki insights` (per-model
 # spend). Data only — no code change needed to correct a rate.
 #
@@ -8,7 +10,7 @@
 #
 # ---------------------------------------------------------------------------
 # TO REFRESH
-#   1. Open both `source` URLs below.
+#   1. Open both `sources:` URLs below.
 #   2. Correct any changed rate. Add new models; do NOT delete retired ones —
 #      old `ingest_iterations` rows still reference them and would silently
 #      re-price to $0.00.
@@ -28,8 +30,10 @@
 #   * Server-side tools (e.g. web search at $10/1,000 searches).
 #
 # Local models (LM Studio, Ollama, gemma-*, qwen-*) have no per-token price and
-# are deliberately absent — `pricing.py` returns None for an unknown model and
-# callers render $0.00, which is correct for a model running on your own machine.
+# are deliberately absent — `model_config.rate_for()` returns None for an unknown
+# model and callers render $0.00, which is correct for a model running on your own
+# machine. `model_config.unpriced_models()` is what tells that apart from a cloud
+# model that is merely missing from this table.
 
 as_of: "2026-08-03"
 
@@ -49,8 +53,8 @@ modifiers:
 models:
   # ---- Anthropic ----------------------------------------------------------
   # Keys are model-ID prefixes. A dated ID like
-  # `claude-haiku-4-5-20251001` resolves to `claude-haiku-4-5` — see
-  # `pricing.resolve()`.
+  # `claude-haiku-4-5-20251001` resolves to `claude-haiku-4-5` — longest prefix
+  # wins, see `model_config.rate_for()`.
   claude-fable-5:      {in: 10.0, out: 50.0, provider: anthropic}
   claude-mythos-5:     {in: 10.0, out: 50.0, provider: anthropic}
   claude-opus-5:       {in: 5.0,  out: 25.0, provider: anthropic}
@@ -61,7 +65,8 @@ models:
   claude-opus-4-1:     {in: 15.0, out: 75.0, provider: anthropic}   # deprecated
   claude-opus-4:       {in: 15.0, out: 75.0, provider: anthropic}   # retired
   # Sonnet 5 is on introductory pricing that EXPIRES. `until` is inclusive; once
-  # today is past it, `pricing.py` falls through to the entry with no `until`.
+  # today is past it, `model_config.rate_for()` falls through to the entry with no
+  # `until`.
   # This is the one rate in the table that changes on a calendar date rather
   # than on a vendor announcement.
   claude-sonnet-5:

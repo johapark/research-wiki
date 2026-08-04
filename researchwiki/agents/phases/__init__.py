@@ -47,6 +47,8 @@ from .commit import (
     ShortNameOutput,
     propose_keywords,
     propose_keywords_batch,
+    MAX_KEYWORDS,
+    MIN_KEYWORDS,
     propose_short_name,
     render_keywords_yaml,
 )
@@ -102,7 +104,7 @@ __all__ = [
     "Draft", "ClaimDetail",
     "CrosslinkCandidate", "VerificationReport",
     "CritiqueOutput", "EvolveOutput", "DebugOutput",
-    "ShortNameOutput", "KeywordsOutput",
+    "ShortNameOutput", "KeywordsOutput", "MIN_KEYWORDS", "MAX_KEYWORDS",
     "EvolutionProposal",
     # Internal but re-exported (used by runner sandbox writer)
     "_wrap_with_frontmatter",

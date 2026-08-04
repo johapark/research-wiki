@@ -6,7 +6,7 @@ flags a structural mismatch.
   - category_drift: YAML category disagrees with parent dir
   - missing_doi: paper-type page without a DOI / no_doi_reason
   - stem_year_drift: stem-encoded year ≠ YAML year
-  - missing_keywords: paper page with <3 keywords
+  - missing_keywords: paper page with fewer than MIN_KEYWORDS keywords
   - missing_hook: catalog page with no `hook:` gloss
   - hook_too_long: `hook:` past its page type's advisory ceiling
 """
@@ -27,6 +27,20 @@ except ImportError:
 
 
 REFERENCE_TYPES = ("guidance", "protocol", "whitepaper", "book")
+
+#: Minimum acceptable `keywords:` count. Mirrors
+#: `agents.phases.commit.MIN_KEYWORDS`, which is the canonical owner because the
+#: writer is what enforces it (`render_keywords_yaml` returns None below it).
+#:
+#: Deliberately duplicated rather than imported: `tasks.lint` pulls in no
+#: `agents` module today, and importing one adds ~107 ms to a command that
+#: otherwise runs in ~1 s. `tests/test_keywords_threshold.py` asserts the two
+#: agree, so the copy can't drift — a test is the cheaper enforcement here.
+#:
+#: This used to be 3 while the writer refused below 5, which left a dead zone:
+#: a page with 3-4 keywords passed lint, so nothing flagged it, while
+#: `backfill keywords` refused to write a replacement. Nothing could move it.
+MIN_KEYWORDS = 5
 _STEM_YEAR_RE = re.compile(r"^[a-z0-9-]+?-(\d{4})[a-z]?-")
 
 # Page types that carry no `index.md` bullet and so need no `hook:`. Everything
@@ -281,7 +295,7 @@ def find_unquoted_wikilink_lists(pages: list[Path]) -> list[tuple[str, str]]:
 def find_missing_keywords(
     pages: list[Path], pages_fm: dict[Path, dict],
 ) -> list[tuple[str, int]]:
-    """Paper- and reference-type pages with empty or fewer-than-3
+    """Paper- and reference-type pages with fewer than `MIN_KEYWORDS`
     `keywords:` entries.
 
     The field is indexed by both BM25 and the semantic page index;
@@ -301,7 +315,7 @@ def find_missing_keywords(
         if ptype != "paper" and ptype not in REFERENCE_TYPES:
             continue
         n_kw = count_keywords(fm.get("keywords", ""))
-        if n_kw < 3:
+        if n_kw < MIN_KEYWORDS:
             out.append((page_key(md), n_kw))
     out.sort()
     return out

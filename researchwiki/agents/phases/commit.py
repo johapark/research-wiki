@@ -185,8 +185,11 @@ class KeywordsOutput:
 # search bar to find this paper. They sit alongside `tags:` in YAML but play a
 # different role: tags are categorical labels (`crispr`, `tool`); keywords are
 # specific phrases (`homology-directed repair`, `off-target rate`).
-_MAX_KEYWORDS = 10
-_MIN_KEYWORDS = 5
+# Public: `tasks/lint/yaml_checks.py` and `tasks/backfill.py` both need the
+# floor. The writer owns it because the writer is what enforces it — a list
+# below MIN_KEYWORDS is not written at all (see `render_keywords_yaml`).
+MAX_KEYWORDS = 10
+MIN_KEYWORDS = 5
 _MAX_KEYWORD_LEN = 50           # arbitrary; long phrases hurt BM25 IDF
 _KEYWORD_DENY = frozenset({
     # Banal terms that add no retrieval signal — every paper has these.
@@ -630,7 +633,7 @@ def _filter_keyword_list(items: list) -> list[str]:
             continue
         seen.add(key)
         out.append(kw)
-        if len(out) >= _MAX_KEYWORDS:
+        if len(out) >= MAX_KEYWORDS:
             break
     return out
 
@@ -640,10 +643,10 @@ def render_keywords_yaml(keywords: list[str]) -> str | None:
 
     Returns `keywords: [a, b, c]` style — same shape as `tags:` so Obsidian's
     Properties panel renders both consistently. None when fewer than
-    `_MIN_KEYWORDS` items pass quality filtering — better to write no field
+    `MIN_KEYWORDS` items pass quality filtering — better to write no field
     than to commit a half-list that lint would immediately flag.
     """
-    if len(keywords) < _MIN_KEYWORDS:
+    if len(keywords) < MIN_KEYWORDS:
         return None
     inner = ", ".join(keywords)
     return f"keywords: [{inner}]"
