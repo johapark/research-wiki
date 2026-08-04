@@ -186,6 +186,18 @@ def find_category_drift(
     return out
 
 
+def _is_root_bookkeeping(md: Path) -> bool:
+    """True for `index.md` / `log.md` / `views.md` / `pdfs-failed-parsing.md`.
+
+    They sit directly under `wiki/`, so their page key has no slash — the same
+    test `_catalog_pages` has always used. Worth sharing rather than
+    re-deriving: these files carry no frontmatter at all, so any check that
+    defaults a missing `type:` to `paper` will otherwise demand a DOI and
+    keywords from a catalogue or a changelog.
+    """
+    return "/" not in page_key(md)
+
+
 def find_missing_doi(pages: list[Path], pages_fm: dict[Path, dict]) -> list[str]:
     """Paper-type pages without a DOI value (or DOI is `TODO`/`none`).
 
@@ -200,6 +212,8 @@ def find_missing_doi(pages: list[Path], pages_fm: dict[Path, dict]) -> list[str]
     out: list[str] = []
     for md in pages:
         if md.parent.name in ("synthesis", "references", "concepts"):
+            continue
+        if _is_root_bookkeeping(md):
             continue
         fm = pages_fm.get(md, {})
         if fm.get("type", "paper") != "paper":
@@ -310,6 +324,8 @@ def find_missing_keywords(
     for md in pages:
         if md.parent.name in ("synthesis", "concepts", "ideas"):
             continue
+        if _is_root_bookkeeping(md):
+            continue
         fm = pages_fm.get(md, {})
         ptype = fm.get("type", "paper")
         if ptype != "paper" and ptype not in REFERENCE_TYPES:
@@ -332,8 +348,7 @@ def _catalog_pages(
     """
     out: list[tuple[Path, str, str]] = []
     for md in pages:
-        key = page_key(md)
-        if "/" not in key:
+        if _is_root_bookkeeping(md):
             continue
         fm = pages_fm.get(md, {})
         ptype = str(fm.get("type") or "paper").strip().strip("\"'")

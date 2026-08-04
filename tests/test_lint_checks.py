@@ -264,6 +264,25 @@ def test_find_missing_doi(tmp_wiki):
     assert not any(k.startswith("synthesis/") for k in missing)
 
 
+def test_root_bookkeeping_is_not_treated_as_a_paper(tmp_wiki):
+    """`index.md` / `log.md` carry no frontmatter at all.
+
+    Both checks default a missing `type:` to "paper", so without the
+    root-bookkeeping skip they demand a DOI and keywords from the catalogue
+    and the changelog — noise that never clears, because there is nothing
+    correct to write there.
+    """
+    idx = _mkpage(tmp_wiki, "index", "# Wiki Index\n")
+    log = _mkpage(tmp_wiki, "log", "## [2026-01-01] ingest | x\n")
+    views = _mkpage(tmp_wiki, "views", "")
+    paper = _mkpage(tmp_wiki, "cgt/real-paper", "")
+    pages = [idx, log, views, paper]
+    fm = {idx: {}, log: {}, views: {"type": "dashboard"}, paper: {"type": "paper"}}
+
+    assert find_missing_doi(pages, fm) == ["cgt/real-paper"]
+    assert [k for k, _ in find_missing_keywords(pages, fm)] == ["cgt/real-paper"]
+
+
 def test_find_stem_year_drift(tmp_wiki):
     p = _mkpage(tmp_wiki, "cgt/foo-2024-bar", "")
     pages = [p]
