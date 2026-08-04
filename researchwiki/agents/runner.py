@@ -398,13 +398,19 @@ def _phase_crosslinks(ctx: Context, conn) -> list:
     (its `kind` carries directional info the topical path can't recover).
     """
     t0 = time.time()
-    cite_cands = phases.crosslink_candidates(ctx.pdf_path, ctx.metadata or {})
+    cl_stats: dict = {}
+    cite_cands = phases.crosslink_candidates(
+        ctx.pdf_path, ctx.metadata or {}, stats=cl_stats
+    )
     cite_keys = frozenset(c.wikilink for c in cite_cands)
     topical_cands = phases.propose_crosslinks(
         ctx.metadata or {},
         ctx.sections or {},
         use_stub=ctx.use_stub,
         exclude_keys=cite_keys,
+        # No citation evidence anywhere in this run — don't let the
+        # second-chance pass reopen candidates pass 1 already rejected.
+        allow_gleaning=not cl_stats.get("citation_graph_unresolved", False),
     )
     cands = list(cite_cands) + list(topical_cands)
     # Drop any self-reference. On re-ingest the paper's own prior page is

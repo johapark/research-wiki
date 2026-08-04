@@ -69,7 +69,12 @@ class VerificationReport:
     broken: list[str]        # wikilinks where the target wiki/{key}.md doesn't exist
 
 
-def crosslink_candidates(pdf_path: Path, metadata: dict) -> list[CrosslinkCandidate]:
+def crosslink_candidates(
+    pdf_path: Path,
+    metadata: dict,
+    *,
+    stats: dict | None = None,
+) -> list[CrosslinkCandidate]:
     """Find wiki pages plausibly cross-linkable to the source paper.
 
     Sources, in order of trust:
@@ -80,8 +85,18 @@ def crosslink_candidates(pdf_path: Path, metadata: dict) -> list[CrosslinkCandid
     Returns at most ~20 verified candidates. The author phase gets these
     as a whitelist; the commit-phase verifier strips any wikilink not in
     this list.
+
+    `stats`, when passed, is filled with diagnostics for the caller. The one
+    that matters is `citation_graph_unresolved`: S2 knows the paper and reports
+    a nonzero `referenceCount`, but `/references` came back empty. That happens
+    for freshly-registered DOIs whose reference list S2 has not resolved yet,
+    and it is NOT the same as "this paper cites nothing in the wiki" — there is
+    simply no citation evidence either way. Observed 2026-08-04 on a Nature
+    Reviews Genetics review: referenceCount 139, `/references` data 0.
     """
     wiki_dois = read_wiki_dois()                  # {doi_lower: 'category/stem'}
+    if stats is not None:
+        stats.setdefault("citation_graph_unresolved", False)
     if not wiki_dois:
         return []
 
@@ -97,7 +112,17 @@ def crosslink_candidates(pdf_path: Path, metadata: dict) -> list[CrosslinkCandid
             article = None
 
         if article is not None:
-            for ref in provider.get_references(article):
+            refs = provider.get_references(article)
+            if not refs and (getattr(article, "reference_count", 0) or 0) > 0:
+                if stats is not None:
+                    stats["citation_graph_unresolved"] = True
+                log(
+                    f"S2 reports {article.reference_count} references but "
+                    f"/references returned none — citation graph unresolved for "
+                    f"this DOI; cross-links have no citation evidence",
+                    tag="propose_crosslinks",
+                )
+            for ref in refs:
                 ref_doi = (ref.doi or "").lower()
                 if ref_doi and ref_doi in wiki_dois and ref_doi not in seen_dois:
                     seen_dois.add(ref_doi)
@@ -231,6 +256,7 @@ def propose_crosslinks(
     k: int = SEMANTIC_K,
     use_stub: bool = False,
     exclude_keys: frozenset[str] = frozenset(),
+    allow_gleaning: bool = True,
 ) -> list[CrosslinkCandidate]:
     """Find topical crosslink candidates the citation graph misses.
 
@@ -248,6 +274,12 @@ def propose_crosslinks(
     `exclude_keys` lets the caller drop wikilinks already present in the
     citation-graph candidate list — no point asking the LLM to judge them
     again, and we avoid duplicate entries reaching the author.
+
+    `allow_gleaning=False` disables the second-chance pass. Pass it when the
+    citation graph came back unresolved (see `crosslink_candidates`'s `stats`):
+    gleaning re-opens candidates pass 1 already rejected, and doing that with
+    no citation evidence anywhere in the run is how topical adjacency gets
+    promoted into a Related Papers bullet.
     """
     if not semantic_pages.index_exists():
         return []
@@ -285,7 +317,9 @@ def propose_crosslinks(
             for h in hits[:3]
         ]
 
-    judged = _judge_candidates(metadata, sections, hits)
+    judged = _judge_candidates(
+        metadata, sections, hits, allow_gleaning=allow_gleaning
+    )
     return judged
 
 
@@ -293,6 +327,8 @@ def _judge_candidates(
     metadata: dict,
     sections: dict,
     hits: list,
+    *,
+    allow_gleaning: bool = True,
 ) -> list[CrosslinkCandidate]:
     """Two-pass LLM judge for a batch of semantic candidates.
 
@@ -352,7 +388,11 @@ def _judge_candidates(
     # borderline cases it dropped. Skip if the first pass already accepted
     # most candidates (precision was the constraint, not recall) or if there
     # are too few rejections to be worth a second call.
-    if len(out) <= 2 and len(rejected_keys) >= 3:
+    if not allow_gleaning:
+        log(f"gleaning suppressed (citation graph unresolved; pass-1: "
+            f"{len(out)} topical, {len(rejected_keys)} rejected)",
+            tag="propose_crosslinks")
+    elif len(out) <= 2 and len(rejected_keys) >= 3:
         log(f"gleaning fires (pass-1: {len(out)} topical, "
               f"{len(rejected_keys)} rejected)", tag="propose_crosslinks")
         gleaned = _gleaning_pass(metadata, sections, hits, rejected_keys, by_key)

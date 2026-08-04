@@ -432,6 +432,25 @@ def _move_pdf(
     return target, upgrade_info
 
 
+# The back-link bullet states a relationship, so it has to match how the
+# candidate was found. Keyed by `CrosslinkCandidate.kind`; the bullet is written
+# on the TARGET page and points back at the newly-ingested source paper.
+#
+#   cited_by_source — source cites the target → on the target: "cites this paper"
+#   cites_source    — target cites the source → the same wording would be
+#                     BACKWARDS, so it reverses
+#   topical         — semantic-KNN + LLM judgement, no citation evidence either
+#                     way. Claiming a citation here is a fabrication: CLAUDE.md
+#                     requires a wikilink be source-supported, and "cites this
+#                     paper" asserts exactly the support that was never checked.
+_BACKLINK_NOTES = {
+    "cited_by_source": "cites this paper (auto-added; refine)",
+    "cites_source": "cited by this paper (auto-added; refine)",
+    "topical": "topically related (auto-added; refine)",
+}
+_BACKLINK_NOTE_DEFAULT = _BACKLINK_NOTES["topical"]
+
+
 def _append_backlinks(
     candidates: list,
     source_category: str,
@@ -440,7 +459,9 @@ def _append_backlinks(
     """Append a back-link to each verified candidate's Related Papers section.
 
     Uses the shared `backlinks.append_related_paper` helper for consistent
-    on-disk convention with `lint --fix`.
+    on-disk convention with `lint --fix`. The bullet's note comes from the
+    candidate's `kind` (see `_BACKLINK_NOTES`) — an unknown kind falls back to
+    the topical phrasing, which asserts the least.
 
     Returns (added, skipped) — `skipped` covers both already-linked targets
     and missing target files.
@@ -452,7 +473,10 @@ def _append_backlinks(
     skipped: list[str] = []
     for cand in candidates:
         target_path = wiki_dir() / f"{cand.wikilink}.md"
-        if append_related_paper(target_path, source_key):
+        note = _BACKLINK_NOTES.get(
+            getattr(cand, "kind", ""), _BACKLINK_NOTE_DEFAULT
+        )
+        if append_related_paper(target_path, source_key, note=note):
             added.append(cand.wikilink)
         else:
             skipped.append(cand.wikilink)
