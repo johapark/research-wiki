@@ -5,9 +5,15 @@ judge / classifier / proposer), and each role to a (provider, model,
 temperature, max_tokens) tuple. Source of truth: `config/models.yaml` at
 the repo root.
 
+Also owns per-token **pricing** (`config/pricing.yaml`), the other half of
+"facts about a model" — see the Pricing section at the bottom.
+
 Public API:
   for_phase(name) -> ModelConfig
   for_role(name)  -> ModelConfig
+  rate_for(model) -> Rate | None
+  estimate_usd(model, in_tok, out_tok) -> float
+  pricing_as_of() -> str
   list_phases()   -> list[str]
 
 If `config/models.yaml` is missing, malformed, or PyYAML isn't installed,
@@ -22,6 +28,7 @@ Ollama, etc.), this config schema doesn't change — just edit a role's
 
 from __future__ import annotations
 
+import datetime as _dt
 import os
 import sys
 from dataclasses import dataclass, replace
@@ -409,3 +416,187 @@ def list_roles() -> list[str]:
     """Sorted list of all registered role names."""
     roles, _ = _config()
     return sorted(roles.keys())
+
+
+# ---------------------------------------------------------------------------
+# Pricing
+#
+# Per-token rates are the other half of "facts about a model", so they live here
+# beside the routing rather than in their own module — same `config/*.yaml`
+# source, same lru_cache convention, and `tasks/status.py` already imports
+# `config_path` from here.
+#
+# Data lives in `config/pricing.yaml` with an `as_of:` date. Every caller that
+# prints a dollar figure prints that date too: a rate table nobody has
+# re-checked is the normal state, and showing the date makes it visible rather
+# than silently wrong.
+# ---------------------------------------------------------------------------
+
+_PRICING_FILENAME = "pricing.yaml"
+
+#: Values `ingest_iterations.model_used` uses for "no API call happened".
+NON_MODEL_SENTINELS = frozenset({
+    "(local)", "(skipped)", "(no calls)", "(failed)", "(missing)", "stub", "",
+})
+
+
+@dataclass(frozen=True)
+class Rate:
+    """USD per million tokens for one model."""
+    model_key: str
+    input_per_mtok: float
+    output_per_mtok: float
+    provider: str = ""
+    note: str = ""
+
+    def usd(self, in_tok: int, out_tok: int) -> float:
+        return (in_tok / 1_000_000) * self.input_per_mtok + \
+               (out_tok / 1_000_000) * self.output_per_mtok
+
+
+def pricing_path() -> Path:
+    """`$RW_PRICING_CONFIG` if set, else `config/pricing.yaml` beside the package.
+
+    Unlike `config_path()`, this resolves relative to the *package*, not the
+    cwd: the rate table is shipped data, not per-wiki state, so `insights` must
+    find it from any working directory.
+    """
+    override = os.environ.get("RW_PRICING_CONFIG")
+    if override:
+        p = Path(override).expanduser()
+        return p if p.is_absolute() or p.parent != Path(".") else Path("config") / p
+    return Path(__file__).resolve().parent.parent.parent / "config" / _PRICING_FILENAME
+
+
+@lru_cache(maxsize=1)
+def _pricing() -> dict:
+    """Parsed `pricing.yaml`. Cached like `_config`; tests clear with
+    `_pricing.cache_clear()`.
+
+    A missing or malformed table yields `{}` rather than raising — `status`
+    should still print its report, just without a cost estimate.
+    """
+    try:
+        import yaml
+        with pricing_path().open(encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def pricing_as_of() -> str:
+    """Date the rates were last verified (`YYYY-MM-DD`), or '' if absent."""
+    return str(_pricing().get("as_of") or "")
+
+
+def pricing_sources() -> dict:
+    """Vendor pricing URLs the rates were read from."""
+    return dict(_pricing().get("sources") or {})
+
+
+def pricing_modifiers() -> dict:
+    """Cache / batch multipliers, for reference only.
+
+    Never applied automatically: `ingest_iterations` records just input and
+    output totals, so there is no cache-read/write split to multiply.
+    """
+    return dict(_pricing().get("modifiers") or {})
+
+
+def _pick_dated_rate(entries: list, today: _dt.date) -> dict | None:
+    """Choose among time-boxed entries for one model.
+
+    `until: YYYY-MM-DD` applies through that date inclusive; the entry with no
+    `until` is the fallback. Sonnet 5's introductory rate is the live case — it
+    lapses 2026-08-31, and a table that couldn't express that would start
+    misreporting on a specific calendar day with nothing to explain why.
+    """
+    fallback: dict | None = None
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        until = e.get("until")
+        if not until:
+            fallback = fallback or e
+            continue
+        try:
+            end = _dt.date.fromisoformat(str(until))
+        except ValueError:
+            continue
+        if today <= end:
+            return e
+    return fallback
+
+
+def rate_for(model: str, *, today: _dt.date | None = None) -> Rate | None:
+    """Rate for `model`, or None when it isn't priced.
+
+    Exact key first, then **longest matching prefix**. The prefix match is not
+    cosmetic: the recorded `model_used` is whatever the SDK echoed back, usually
+    a dated build ID. The dict this replaced was keyed on `claude-haiku-4-5`,
+    the API returns `claude-haiku-4-5-20251001`, `dict.get` missed, and 429
+    calls over 2.7M input tokens priced at $0.00 in every report. Longest —
+    rather than first — match keeps `claude-haiku-3-5` from being shadowed.
+
+    None for a local backend (LM Studio, Ollama, gemma-*, qwen-*), which has no
+    per-token price. See `unpriced_models` to tell that apart from a cloud model
+    missing from the table.
+    """
+    if not model or model in NON_MODEL_SENTINELS:
+        return None
+    table = _pricing().get("models") or {}
+    if not isinstance(table, dict):
+        return None
+    today = today or _dt.date.today()
+
+    key: str | None = None
+    if model in table:
+        key = model
+    else:
+        candidates = [k for k in table if model.startswith(k)]
+        if candidates:
+            key = max(candidates, key=len)
+    if key is None:
+        return None
+
+    entry = table[key]
+    if isinstance(entry, list):
+        entry = _pick_dated_rate(entry, today)
+    if not isinstance(entry, dict):
+        return None
+    try:
+        return Rate(
+            model_key=key,
+            input_per_mtok=float(entry["in"]),
+            output_per_mtok=float(entry["out"]),
+            provider=str(entry.get("provider") or ""),
+            note=str(entry.get("note") or ""),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def estimate_usd(model: str, in_tok: int, out_tok: int, *,
+                 today: _dt.date | None = None) -> float:
+    """Estimated USD for one model's token totals; 0.0 when unpriced.
+
+    An **upper bound**: a prompt-cache hit costs 0.1x base input and the author
+    phase passes `cache_prompt=True`, but the schema records no cache split, so
+    a cached run really cost less than this returns.
+    """
+    rate = rate_for(model, today=today)
+    return rate.usd(in_tok, out_tok) if rate else 0.0
+
+
+def unpriced_models(models) -> list[str]:
+    """Which of `models` have no rate, excluding the not-a-model sentinels.
+
+    Separates "local model, $0.00 is correct" from "cloud model missing from the
+    table, $0.00 is a lie" — `status` surfaces the second so a stale table gets
+    noticed instead of quietly understating the bill.
+    """
+    return sorted({
+        m for m in models
+        if m and m not in NON_MODEL_SENTINELS and rate_for(m) is None
+    })

@@ -667,7 +667,8 @@ This is by design — the markdown layer is what survives.
 
 Rates live in [`config/pricing.yaml`](./config/pricing.yaml) (Anthropic + OpenAI,
 USD per million tokens) with an `as_of:` date and the `sources:` URLs they were
-read from. `researchwiki.pricing` resolves a model by **longest prefix**, so the
+read from. `agents/model_config.py` — the same module that routes phases to
+models — resolves a rate by **longest prefix**, so the
 dated build IDs the APIs return resolve to their family — the estimator used to
 key on bare family names and silently priced those at $0.00. Time-boxed rates are
 expressed with `until:` (Sonnet 5's introductory pricing lapses 2026-08-31).

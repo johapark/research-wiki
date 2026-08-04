@@ -23,7 +23,7 @@ import sys
 import time
 
 # Reuse the single source of truth for pricing so cost figures match `status`.
-from .. import pricing
+from ..agents import model_config as _mc
 
 # Roles whose rows carry a real LLM model_used (others are deterministic phases
 # with model_used NULL — reconcile/extract/grade/tournament/commit).
@@ -40,8 +40,8 @@ def _fmt_tokens(n: int) -> str:
 
 def _estimate_usd(model: str, in_tok: int, out_tok: int) -> float:
     """Thin alias kept so existing call sites read unchanged; the rate table and
-    the prefix matching both live in `researchwiki.pricing`."""
-    return pricing.estimate_usd(model, in_tok, out_tok)
+    the prefix matching both live in `agents.model_config`."""
+    return _mc.estimate_usd(model, in_tok, out_tok)
 
 
 def _gather(conn, cutoff: int | None) -> dict:
@@ -161,7 +161,7 @@ def _to_json(data: dict, days: int | None) -> dict:
     return {
         "window_days": days,
         "n_attempts": data["n_attempts"],
-        "pricing_as_of": pricing.as_of(),
+        "pricing_as_of": _mc.pricing_as_of(),
         "by_model": {
             m: {
                 "calls": v["calls"], "input_tokens": v["in_tok"], "output_tokens": v["out_tok"],
@@ -227,7 +227,7 @@ def _print_report(data: dict, days: int | None) -> None:
         for d, n in sorted(data["decisions"].items(), key=lambda kv: -kv[1]):
             print(f"  {d:<16}{n:>6}")
 
-    print(f"\n(Rates as of {pricing.as_of() or 'unknown'} from config/pricing.yaml; "
+    print(f"\n(Rates as of {_mc.pricing_as_of() or 'unknown'} from config/pricing.yaml; "
           f"local/unpriced models show $0.00. Upper bound — prompt-cache hits "
           f"cost 0.1x input and aren't recorded per-call.)")
 

@@ -24,15 +24,15 @@ from ..paths import (
     inbox_dir, ingest_dir, papers_dir, search_index_dir, semantic_cache_dir,
     wiki_dir, wiki_root,
 )
-from .. import pricing
+from ..agents import model_config as _mc
 from ..wiki import read_pages
 
 
-# Model pricing moved to `config/pricing.yaml`, read via `researchwiki.pricing`.
+# Model pricing moved to `config/pricing.yaml`, read via `agents.model_config`.
 # It was a dict literal here keyed on bare family names, which meant the dated
 # build IDs the API actually returns (`claude-haiku-4-5-20251001`) missed the
 # lookup and priced at $0.00 — and two of its three rates were a release behind.
-# Data now lives in data, and `pricing.resolve()` matches by longest prefix.
+# Data now lives in data, and `model_config.rate_for()` matches by longest prefix.
 
 # `other`-saturation warning lives in researchwiki.categories — same helper
 # is called from status (here) and from both ingest paths (digest + agent)
@@ -210,7 +210,7 @@ def _recent_ingest_costs(days: int = 7) -> dict:
         slot = by_model.setdefault(model, {"in": 0, "out": 0})
         slot["in"] += in_tok
         slot["out"] += out_tok
-        usd += pricing.estimate_usd(model, in_tok, out_tok)
+        usd += _mc.estimate_usd(model, in_tok, out_tok)
 
     total_in = sum(s["in"] for s in by_model.values())
     total_out = sum(s["out"] for s in by_model.values())
@@ -221,10 +221,10 @@ def _recent_ingest_costs(days: int = 7) -> dict:
         "total_output": total_out,
         "by_model": by_model,
         "estimated_usd": usd,
-        "pricing_as_of": pricing.as_of(),
+        "pricing_as_of": _mc.pricing_as_of(),
         # Cloud models absent from the table price at $0.00, which is
         # indistinguishable from a local model unless we say so.
-        "unpriced_models": pricing.unpriced_models(by_model),
+        "unpriced_models": _mc.unpriced_models(by_model),
     }
 
 
