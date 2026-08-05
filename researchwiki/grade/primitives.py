@@ -49,6 +49,36 @@ NUMERIC_TOKEN_RE = re.compile(
 _MAGNITUDE = {"k": 1_000, "m": 1_000_000, "b": 1_000_000_000, "g": 1_000_000_000}
 _MAGNITUDE_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?([KkMmBbGg])\b")
 
+# Space-separated thousands (ISO 31-0 / SI style), which many European journals
+# typeset instead of commas — often with a non-breaking or thin space.
+# `NUMERIC_TOKEN_RE` allows `,` inside a number but not whitespace, so a PDF's
+# "1 in 300 000" tokenized as two numbers (300, 000) and a page citing "300,000"
+# was reported as numeric drift against a paper that states the figure plainly.
+# Observed 2026-08-05 on an EAS pediatric-FH consensus PDF.
+#
+# Only groups of exactly three digits are joined, so this cannot glue unrelated
+# numbers together: "2024" never starts a match (no 1-3 digit prefix is followed
+# by space+3 digits), and "8 heads" is left alone. Applied as a haystack/claim
+# pre-normalization rather than by loosening the tokenizer, which is shared with
+# the paper-page grader and the fixture scorer.
+_SPACED_THOUSANDS_RE = re.compile(
+    r"(?<![\d.])(\d{1,3})((?:[    ]\d{3})+)(?!\d)"
+)
+
+
+def collapse_spaced_thousands(text: str) -> str:
+    """Rewrite `300 000` / `1 158 017` to `300000` / `1158017`.
+
+    Value-preserving and idempotent: it only removes separators inside a
+    digit-group run, so it can make matching more permissive and never less.
+    """
+    if not text:
+        return text
+    return _SPACED_THOUSANDS_RE.sub(
+        lambda m: m.group(1) + re.sub(r"[    ]", "", m.group(2)),
+        text,
+    )
+
 # Negation lexicon. Catches the dominant contradiction failure mode: the page
 # asserts a negation that the cited evidence doesn't echo. Deliberately coarse —
 # recall over precision; callers treat it as a soft signal, not an auto-fail.
@@ -116,6 +146,11 @@ def check_numerics(
     treats a number as drift only when it is unmatched across *all* cited
     papers — catching a number ascribed to a paper that contains it nowhere.
     """
+    # Normalize space-separated thousands on both sides before tokenizing, so a
+    # page's "300,000" matches a PDF's "300 000". See collapse_spaced_thousands.
+    claim_text = collapse_spaced_thousands(claim_text)
+    retrieved_text = collapse_spaced_thousands(retrieved_text)
+    full_text = collapse_spaced_thousands(full_text)
     tokens = NUMERIC_TOKEN_RE.findall(claim_text)
     if not tokens:
         return [], []

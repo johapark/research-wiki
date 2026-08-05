@@ -187,10 +187,22 @@ def _footnote_targets(page_text: str) -> dict[str, list[str]]:
 def _wikilink_to_stem(link: str) -> str:
     """`[[compbio/abramson-2024-...]]` body → `abramson-2024-...`.
 
-    Tolerates an `|alias` suffix and a leading category path; the stem is the
-    final path segment of the link target.
+    Tolerates an `|alias` suffix, a leading category path, and a `#claim-slug`
+    fragment; the stem is the final path segment of the link target.
+
+    The fragment strip is load-bearing. CLAUDE.md's recommended claim-level
+    citation form is `[[stem#claim_slug]]`, and without stripping it the stem
+    came back as `stem#kc-9f3a2b1c`, `resolve_pdf` raised FileNotFoundError,
+    and the unit was recorded `uncited` and skipped. A page citing entirely by
+    claim anchor — i.e. following the documented practice — therefore graded
+    almost nothing while still exiting 0, which is worse than failing: the gate
+    reported success on a page it had not checked. Observed 2026-08-05: a
+    22-unit synthesis page graded 3 units, versus 35-43 on comparable
+    footnote-cited pages. `_extract_anchor_pairs` already strips the fragment,
+    so the two halves of this module disagreed about the same citation form.
     """
     target = link.split("|", 1)[0].strip()
+    target = target.split("#", 1)[0].strip()
     return target.rsplit("/", 1)[-1].strip()
 
 
