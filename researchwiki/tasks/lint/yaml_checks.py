@@ -399,3 +399,32 @@ def find_hook_too_long(
             out.append((page_key(md), len(hook), cap))
     out.sort(key=lambda row: (-row[1], row[0]))
     return out
+
+
+def find_venue_suspect(
+    pages: list[Path], pages_fm: dict[Path, dict],
+) -> list[dict]:
+    """Pages whose `venue:` names typesetting furniture rather than a journal.
+
+    Fills a real gap: `lint` had no venue check at all, which is why
+    `kim-2019-spcas9-…` shipped with `venue: Genetics` (Science Advances'
+    subject-category masthead label) while its *missing* DOI was caught
+    immediately. Ingest now refuses to adopt furniture from a masthead, so this
+    is the backstop for pages that predate that guard.
+
+    Scoped to unambiguous furniture — see `metadata_sanity.VENUE_FURNITURE` for
+    why a subject-word deny-list is not safe here. The subject-label class needs
+    provider metadata to adjudicate and therefore lives in
+    `backfill doi --verify`, which already fetches it; a purely local check
+    cannot tell *Genetics*-the-journal from GENETICS-the-section-label.
+    """
+    from ... import metadata_sanity
+    out: list[dict] = []
+    for md in pages:
+        if _is_root_bookkeeping(md):
+            continue
+        venue = str(pages_fm.get(md, {}).get("venue") or "").strip()
+        if metadata_sanity.is_venue_furniture(venue):
+            out.append({"page": page_key(md), "venue": venue})
+    out.sort(key=lambda d: d["page"])
+    return out

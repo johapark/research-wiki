@@ -33,7 +33,6 @@ import argparse
 import re
 import sys
 import time
-import unicodedata
 from pathlib import Path
 
 from ..agents.phases import (
@@ -44,6 +43,8 @@ from ..agents.phases import (
 )
 from ..fsatomic import write_text_atomic
 from ..stems import first_author_surname
+from .. import metadata_sanity
+from ..providers.crossref import verify_doi_via_crossref
 from ..wiki import read_page, read_pages
 
 
@@ -57,12 +58,11 @@ def _add_common_flags(p: argparse.ArgumentParser) -> None:
                    help="Process at most this many candidate pages.")
 
 
-def _normalise_author(s: str) -> str:
-    """Lowercase, ASCII-fold, strip non-alnum. For author-match sanity checks."""
-    if not s:
-        return ""
-    ascii_form = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
-    return re.sub(r"[^a-z0-9]", "", ascii_form.lower())
+# Author/title/year matching lives in `researchwiki.metadata_sanity` so this
+# module, `agents.phases.reconcile` and `--verify` all apply one rule. Aliased
+# rather than re-implemented; see that module's docstring for why reconcile
+# needed it.
+_normalise_author = metadata_sanity.normalise_author
 
 
 def _insert_after_key(page_path: Path, new_line: str, after_key: str) -> None:
@@ -421,7 +421,8 @@ def _find_doi_candidates() -> list[Path]:
         if p.fm.get("type", "paper") != "paper":
             continue
         doi = (p.fm.get("doi") or "").strip().lower()
-        if doi and doi not in ("todo", "none", "null"):
+        if (doi and doi not in ("todo", "none", "null")
+                and not metadata_sanity.is_placeholder_doi(doi)):
             continue
         out.append(p.path)
     return sorted(out)
@@ -487,42 +488,241 @@ def _lookup_crossref(title: str, first_author: str, wiki_year: int | None) -> tu
     return None
 
 
-_STOPWORDS = frozenset({"a","an","the","of","for","with","and","or","in","on","at","to",
-                        "from","by","as","across","over","all","that","this","these","those","is"})
+_title_tokens = metadata_sanity.title_tokens
+_sanity_ok = metadata_sanity.sanity_ok
 
 
-def _title_tokens(s: str) -> set[str]:
-    """Lowercase content-word tokens for Jaccard-style title-match sanity."""
-    if not s:
-        return set()
-    ascii_form = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
-    toks = re.findall(r"[a-z0-9]+", ascii_form.lower())
-    return {t for t in toks if len(t) > 2 and t not in _STOPWORDS}
+# Words dropped when building a venue acronym: `International Conference on
+# Machine Learning` must reduce to `icml`, not `icoml`.
+_VENUE_SKIP_WORDS = frozenset({"of", "on", "the", "and", "in", "for", "a", "an"})
 
 
-def _sanity_ok(cand_year: int | None, cand_authors: list[str], cand_title: str,
-               first_author: str, wiki_year: int | None, wiki_title: str) -> bool:
-    """Guard against wrong matches. Reject unless ALL:
-      - wiki first-author's last name appears (normalised) in a result author
-      - candidate year is within ±1 of the wiki year (or year is unknown)
-      - Jaccard(title tokens) ≥ 0.5, i.e. at least half the content words overlap
-        — catches "Liao 2025" false positives where the surname is common
-        and Crossref returns an unrelated paper with a similar-sounding title
+def _venue_agrees(page_venue: str, provider_venue: str) -> bool:
+    """Do two venue strings plausibly name the same venue?
+
+    Three passes, because the same venue is written three different ways across
+    a corpus and a naive comparison is dominated by noise rather than by findings:
+
+      1. **Substring** after normalisation — the easy majority.
+      2. **Abbreviation**, token-wise with prefix tolerance: every word of the
+         shorter side must prefix the matching word of the longer one, so
+         `Nat Biotechnol` agrees with `Nature Biotechnology`. This is how
+         provider records for journals are usually abbreviated.
+      3. **Acronym**, tested as a subsequence: the initials of the provider's
+         significant words (`icml`, `nips`) against the page's letters, which
+         tolerates the expanded forms people write by hand (`NeurIPS`).
+
+    Loose on purpose: this backs an advisory report, where a false "agrees" costs
+    a missed nudge and a false "disagrees" costs a reviewer's attention. Measured
+    on the corpus, pass 1 alone reported same-venue pairs like `NeurIPS 2025` vs
+    `Neural Information Processing Systems`.
     """
-    fa = _normalise_author(first_author)
-    if not fa:
-        return False
-    if not any(fa in _normalise_author(a) for a in cand_authors):
-        return False
-    if wiki_year is not None and cand_year is not None:
-        if abs(int(cand_year) - int(wiki_year)) > 1:
-            return False
-    wt, ct = _title_tokens(wiki_title), _title_tokens(cand_title)
-    if wt and ct:
-        overlap = len(wt & ct) / max(1, min(len(wt), len(ct)))
-        if overlap < 0.5:
-            return False
-    return True
+    a = re.sub(r"[^a-z]", "", page_venue.lower())
+    b = re.sub(r"[^a-z]", "", provider_venue.lower())
+    if not a or not b:
+        return True
+    if a in b or b in a:
+        return True
+
+    wa = [w for w in re.findall(r"[a-z]+", page_venue.lower()) if w not in _VENUE_SKIP_WORDS]
+    wb = [w for w in re.findall(r"[a-z]+", provider_venue.lower()) if w not in _VENUE_SKIP_WORDS]
+    if wa and wb and len(wa) == len(wb):
+        if all(x.startswith(y) or y.startswith(x) for x, y in zip(wa, wb)):
+            return True
+
+    for words, other in ((wb, a), (wa, b)):
+        acronym = "".join(w[0] for w in words)
+        if len(acronym) >= 3:
+            it = iter(other)
+            if all(ch in it for ch in acronym):
+                return True
+    return False
+
+
+def _pages_with_doi() -> list[Path]:
+    """Paper pages that already carry a DOI — the `--verify` work list.
+
+    Exact complement of `_find_doi_candidates`, which selects the *missing*-DOI
+    pages. A page whose DOI is wrong is invisible to every existing check: `lint`
+    only reports `missing_doi`, and a DOI that resolves looks identical to one
+    that belongs.
+    """
+    out: list[Path] = []
+    for p in read_pages():
+        if p.path.parent.name in ("synthesis", "references", "concepts"):
+            continue
+        if p.fm.get("type", "paper") != "paper":
+            continue
+        doi = (p.fm.get("doi") or "").strip().lower()
+        if not doi or doi in ("todo", "none", "null"):
+            continue
+        if metadata_sanity.is_placeholder_doi(doi):
+            continue          # reported by `_find_doi_candidates` as missing
+        out.append(p.path)
+    return sorted(out)
+
+
+def _run_doi_verify(args: argparse.Namespace) -> int:
+    """Check that each page's recorded DOI actually resolves to that paper.
+
+    Read-only by design — it reports and never rewrites. A DOI mismatch has more
+    than one possible cause (wrong DOI scavenged at ingest, a page retitled after
+    the fact, a preprint/journal pair sharing one page) and picking among them is
+    a reviewer's call, not something to guess at scale.
+
+    Motivated by `reconcile`'s URL-DOI hunt having adopted candidates on
+    resolvability alone until 2026-08-05: it validated that a DOI *exists*, not
+    that it is this paper's. On the DeepSpCas9 ingest it offered the Adam
+    optimizer's arXiv DOI, scavenged from the reference list, and only an accident
+    of Crossref coverage stopped it being written. Any page ingested before that
+    fix may carry a silently wrong DOI, and this is how you find out.
+
+    Verdicts: `ok` (provider record matches), `MISMATCH` (resolves to a different
+    paper — `metadata_sanity` says why), `unresolved` (provider has no record;
+    not evidence of a wrong DOI, commonly a fresh deposit), `skipped` (page lacks
+    the title/author needed to judge).
+    """
+    pages = _pages_with_doi()
+    if args.limit:
+        pages = pages[:args.limit]
+    if not pages:
+        print("No paper pages with a DOI. Nothing to verify.")
+        return 0
+
+    from ..providers.semantic_scholar import SemanticScholarProvider
+    provider = SemanticScholarProvider()
+
+    print(f"Verifying {len(pages)} recorded DOI(s) against Semantic Scholar.")
+    print()
+    ok = mismatch = unresolved = skipped = malformed = 0
+    bad: list[tuple[str, str, str]] = []
+    year_drift: list[tuple[str, str, str]] = []
+    bad_authors: list[tuple[str, str, str]] = []
+    provider_conflict: list[tuple[str, str, str]] = []
+    venue_drift: list[tuple[str, str, str]] = []
+    t0 = time.time()
+
+    for i, page_path in enumerate(pages, 1):
+        page = read_page(page_path)
+        if page is None:
+            skipped += 1
+            continue
+        doi = page.str_field("doi", "").strip()
+        title = page.str_field("title", "")
+        authors = page.str_field("authors", "")
+        first_author = first_author_surname([authors.split(",")[0]]) if authors else ""
+        year_str = page.str_field("year", "")
+        year = int(year_str) if year_str.isdigit() else None
+        key = f"{page_path.parent.name}/{page_path.stem}"
+
+        if not title or not first_author:
+            skipped += 1
+            continue
+        try:
+            art = provider.get_by_doi(doi)
+        except Exception:
+            art = None
+        if art is None:
+            unresolved += 1
+            continue
+
+        cand_authors = [a.get("name", "") if isinstance(a, dict) else str(a)
+                        for a in (getattr(art, "authors", None) or [])]
+        why = metadata_sanity.reject_reason(
+            getattr(art, "year", None), cand_authors,
+            getattr(art, "title", "") or "", first_author, year, title,
+        )
+        if why and why.startswith("year "):
+            # Author AND title matched, so it is the same paper; only the year
+            # disagrees. S2 frequently reports the preprint year against a page
+            # recording the journal year — four such pairs on the first sweep,
+            # off by two. That is a year problem (`lint`'s `stem_year_drift`
+            # territory), not a wrong DOI, so it must not read as one.
+            ok += 1
+            year_drift.append((key, doi, why))
+        elif why and "authors field is malformed" in why:
+            # The page can't be judged, and the defect is the page's, not the DOI's.
+            malformed += 1
+            bad_authors.append((key, doi, why))
+        elif why:
+            # Second opinion before accusing the page. One provider's DOI→record
+            # mapping is not authoritative: on the first sweep, S2 resolved
+            # `10.18653/v1/2022.findings-naacl.6` to a different NAACL Findings
+            # paper, while Crossref — the registration agency's own data —
+            # returned MultiVerS, the paper the page actually is. Reporting on S2
+            # alone would have sent a reviewer to correct a correct DOI.
+            cr = verify_doi_via_crossref(doi)
+            cr_why = None
+            if cr:
+                cr_why = metadata_sanity.reject_reason(
+                    cr.get("year"), list(cr.get("authors") or []),
+                    cr.get("title") or "", first_author, year, title,
+                )
+            if cr and not cr_why:
+                ok += 1
+                provider_conflict.append((key, doi, why))
+            else:
+                mismatch += 1
+                bad.append((key, doi, why))
+                print(f"[{i}/{len(pages)}] MISMATCH {key}")
+                print(f"          doi={doi}")
+                print(f"          s2: {why}")
+                if cr_why:
+                    print(f"          crossref agrees it's wrong: {cr_why}")
+                else:
+                    print(f"          crossref has no record either")
+        else:
+            ok += 1
+            # Same provider record, so the venue comparison is free here. A
+            # purely local check cannot make it (see `lint`'s `venue_suspect`).
+            page_venue = page.str_field("venue", "").strip()
+            prov_venue = (getattr(art, "venue", None) or "").strip()
+            if page_venue and prov_venue:
+                if not _venue_agrees(page_venue, prov_venue):
+                    venue_drift.append((key, page_venue, prov_venue))
+
+    print()
+    print(f"Done in {time.time() - t0:.1f}s.")
+    print(f"  matches:        {ok}")
+    print(f"  MISMATCHES:     {mismatch}")
+    print(f"  year-only drift:{len(year_drift)}  (same paper, provider year differs)")
+    print(f"  provider conflict: {len(provider_conflict)}  "
+          f"(S2 disagreed, Crossref confirmed the page — DOI is fine)")
+    print(f"  unjudgeable:    {malformed}  (page's `authors:` field is malformed)")
+    print(f"  unresolved:     {unresolved}  (provider has no record — not a verdict)")
+    print(f"  skipped:        {skipped}  (no title/author to judge against)")
+    if bad:
+        print()
+        print("Wrong DOIs to review:")
+        for key, doi, why in bad:
+            print(f"  - {key}\n      {doi} — {why}")
+    if provider_conflict:
+        print()
+        print(f"S2 and Crossref disagree on {len(provider_conflict)} DOI(s). Crossref "
+              f"matched the page, so the DOI is kept; S2's record is the odd one out:")
+        for key, doi, why in provider_conflict[:15]:
+            print(f"  - {key}: {doi} — s2 said {why}")
+    if year_drift:
+        print()
+        print(f"Year disagrees with the provider on {len(year_drift)} page(s) "
+              f"(advisory — author and title matched, so the DOI is right):")
+        for key, doi, why in year_drift[:25]:
+            print(f"  - {key}: {why}")
+    if bad_authors:
+        print()
+        print(f"Malformed `authors:` on {len(bad_authors)} page(s) — the DOI could not "
+              f"be judged. Fix the field (`Chuai et al.` → the real author list):")
+        for key, doi, why in bad_authors:
+            print(f"  - {key}: {why}")
+    if venue_drift:
+        print()
+        print(f"Venue disagrees with the provider on {len(venue_drift)} page(s) "
+              f"(advisory; the provider is usually right):")
+        for key, pv, sv in venue_drift[:25]:
+            print(f"  - {key}: page={pv!r} provider={sv!r}")
+    # A mismatch is a finding, not a tool failure: exit 1 so a scripted caller
+    # notices, matching the exit-code contract's "no-result-where-expected" slot.
+    return 1 if bad else 0
 
 
 def _run_dois(args: argparse.Namespace) -> int:
@@ -629,7 +829,11 @@ def main(argv: list[str]) -> int:
     _add_common_flags(doi)
     doi.add_argument("--reindex", action="store_true",
                      help="After backfill, run `researchwiki reindex`.")
-    doi.set_defaults(func=_run_dois)
+    doi.add_argument("--verify", action="store_true",
+                     help="Instead of filling missing DOIs, check the DOIs already "
+                          "recorded: does each resolve to that paper? Read-only. "
+                          "Exits 1 if any mismatch is found.")
+    doi.set_defaults(func=lambda a: _run_doi_verify(a) if a.verify else _run_dois(a))
 
     hook = subs.add_parser("hook",
                            help="LLM-generated catalog gloss (+ short_name) from page prose.")

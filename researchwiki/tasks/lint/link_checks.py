@@ -174,3 +174,35 @@ def apply_backlink_fixes(
         if n:
             written[tgt] = n
     return written
+
+
+def find_none_placeholders(pages_body: dict) -> list[str]:
+    """Pages whose `## Related Papers` holds a `(none…)` placeholder AND bullets.
+
+    The placeholder is written by the page author when it had nothing to link;
+    it becomes a lie the moment a bullet is added, and `append_related_paper`
+    used to insert underneath it rather than clearing it. 62 pages carried the
+    contradiction when this check was added — every one of them produced by that
+    path, and invisible to every other check because the links themselves are
+    fine.
+
+    Cosmetic-only, so advisory: nothing downstream reads the placeholder. The
+    insertion path now clears it (`backlinks._drop_none_placeholder`), making
+    this the backstop for pages that predate the fix or that were hand-edited.
+    """
+    from ...backlinks import NONE_PLACEHOLDER_RE
+    out: list[str] = []
+    for md, body in pages_body.items():
+        m = re.search(r"^## Related Papers\s*$", body, re.MULTILINE)
+        if not m:
+            continue
+        section = body[m.end():]
+        nxt = re.search(r"^## ", section, re.MULTILINE)
+        if nxt:
+            section = section[:nxt.start()]
+        has_placeholder = any(NONE_PLACEHOLDER_RE.match(ln) for ln in section.split("\n"))
+        has_bullet = bool(re.search(r"^- \[\[", section, re.MULTILINE))
+        if has_placeholder and has_bullet:
+            out.append(page_key(md))
+    out.sort()
+    return out

@@ -12,8 +12,10 @@ This subpackage groups checks by what they read so each module is
 focused and individually testable:
 
   walk            — page enumeration + link/yaml parsing primitives
-  link_checks     — orphans, broken_wikilinks, missing_backlinks, --fix
-  yaml_checks     — invalid_fm, type/category/doi/year/keywords drift
+  link_checks     — orphans, broken_wikilinks, missing_backlinks,
+                    none_placeholders, --fix
+  yaml_checks     — invalid_fm, type/category/doi/year/keywords drift,
+                    venue_suspect
   staleness       — stale_synthesis, stale_by_content, audit_count, proposals
   audit_p2        — Priority-2 entries with audit anchor hits
   db_checks       — ungraded_papers, zero_claim_papers,
@@ -55,6 +57,7 @@ from .db_checks import (
 )
 from .link_checks import (
     apply_backlink_fixes,
+    find_none_placeholders,
     build_link_graph,
     find_missing_backlinks,
     find_orphans,
@@ -77,6 +80,7 @@ from .yaml_checks import (
     find_page_type_mismatches,
     find_stem_year_drift,
     find_unquoted_wikilink_lists,
+    find_venue_suspect,
 )
 
 
@@ -104,6 +108,7 @@ def main(argv: list[str]) -> int:
                              "stale_by_audit_count, p2_entries_with_anchor_hits, "
                              "stale_evolution_proposals, missing_keywords, "
                              "missing_hook, hook_too_long, "
+                             "venue_suspect, none_placeholders, "
                              "ungraded_papers, zero_claim_papers, "
                              "stems_missing_claim_overlap, "
                              "duplicate_claim_sets, "
@@ -138,6 +143,7 @@ def main(argv: list[str]) -> int:
     out_links, in_links, broken = build_link_graph(pages, pages_prose, known)
     orphans = find_orphans(pages, out_links, in_links)
     missing_back = find_missing_backlinks(out_links)
+    none_placeholders = find_none_placeholders(pages_body)
 
     # --- frontmatter-shape checks
     type_mismatches = find_page_type_mismatches(pages, pages_fm)
@@ -148,6 +154,7 @@ def main(argv: list[str]) -> int:
     missing_hook = find_missing_hook(pages, pages_fm)
     hook_too_long = find_hook_too_long(pages, pages_fm)
     unquoted_wikilinks = find_unquoted_wikilink_lists(pages)
+    venue_suspect = find_venue_suspect(pages, pages_fm)
 
     # --- staleness
     stale = find_stale_synthesis(pages, pages_fm, known)
@@ -191,6 +198,7 @@ def main(argv: list[str]) -> int:
             missing_keywords=missing_keywords, missing_doi=missing_doi,
             missing_hook=missing_hook, hook_too_long=hook_too_long,
             stem_year_drift=stem_year_drift, unquoted_wikilinks=unquoted_wikilinks,
+            venue_suspect=venue_suspect, none_placeholders=none_placeholders,
             supp_yaml_missing=supp_yaml_missing, supp_orphans=supp_orphans,
             ungraded_papers=ungraded_papers,
             zero_claim_papers=zero_claim_papers,
@@ -213,6 +221,7 @@ def main(argv: list[str]) -> int:
         missing_keywords=missing_keywords, missing_doi=missing_doi,
         missing_hook=missing_hook, hook_too_long=hook_too_long,
         stem_year_drift=stem_year_drift, unquoted_wikilinks=unquoted_wikilinks,
+        venue_suspect=venue_suspect, none_placeholders=none_placeholders,
         supp_yaml_missing=supp_yaml_missing, supp_orphans=supp_orphans,
         ungraded_papers=ungraded_papers,
         zero_claim_papers=zero_claim_papers,
@@ -293,6 +302,8 @@ def _emit_json(**kw) -> int:
             for v in kw["concept_contract"]
         ],
         "ungraded_papers": kw["ungraded_papers"],
+        "venue_suspect": kw["venue_suspect"],
+        "none_placeholders": kw["none_placeholders"],
         "zero_claim_papers": kw["zero_claim_papers"],
         "stems_missing_claim_overlap": kw["stems_missing_claim_overlap"],
         # null = check skipped (claim-embedding cache cold or <50% of claims
@@ -633,6 +644,25 @@ def _emit_prose(**kw) -> int:
         print()
         print("_Backfill with `researchwiki grade regression`. New ingests "
               "grade automatically; this only matters for pre-Phase-A pages._")
+        print()
+
+    venue_suspect = kw["venue_suspect"]
+    if venue_suspect:
+        print(f"## Pages whose venue looks like page furniture ({len(venue_suspect)})")
+        print("   Fix via `backfill doi` → provider venue, or edit the field directly.")
+        for e in venue_suspect[:20]:
+            print(f"- {e['page']} — venue={e['venue']!r}")
+        print()
+
+    none_placeholders = kw["none_placeholders"]
+    if none_placeholders:
+        print(f"## Related Papers with a stale `(none)` placeholder above real bullets "
+              f"({len(none_placeholders)})")
+        print("   Cosmetic. Delete the placeholder line; nothing downstream reads it.")
+        for p_ in none_placeholders[:20]:
+            print(f"- {p_}")
+        if len(none_placeholders) > 20:
+            print(f"- ... ({len(none_placeholders) - 20} more)")
         print()
 
     zero_claim_papers = kw["zero_claim_papers"]
