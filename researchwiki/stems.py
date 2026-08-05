@@ -102,6 +102,10 @@ _SURNAME_PARTICLES = frozenset({
 })
 
 
+# `et al.` / `et al` / `and others`, with or without a preceding comma.
+_ET_AL_RE = re.compile(r"(?i)[,;]?\s*\b(?:et\s+al\.?|and\s+others)\s*\.?\s*$")
+
+
 def first_author_surname(authors: list[str]) -> str:
     """Extract the last name from the first author string.
 
@@ -116,6 +120,15 @@ def first_author_surname(authors: list[str]) -> str:
     if not authors:
         return "unknown"
     raw = strip_diacritics(authors[0]).strip()
+    if not raw:
+        return "unknown"
+
+    # `Guohui Chuai et al.` — an abbreviated byline, not a name. Without this the
+    # trailing-token walk below returns `al`, which then matches no real author:
+    # four pages recorded this way were reported as wrong-DOI mismatches by
+    # `backfill doi --verify` when the DOIs were fine. Strip the abbreviation and
+    # the first author is still right there.
+    raw = _ET_AL_RE.sub("", raw).strip().rstrip(",;")
     if not raw:
         return "unknown"
 

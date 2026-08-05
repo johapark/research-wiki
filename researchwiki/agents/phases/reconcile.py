@@ -12,6 +12,7 @@ import json
 import re
 from pathlib import Path
 
+from ... import metadata_sanity
 from ...pdf.text import detect_doi, extract_pdf, find_url_doi_candidates, pdf_shape
 from ...providers.crossref import crossref_structural_signals, verify_doi_via_crossref
 from ...providers.semantic_scholar import SemanticScholarProvider
@@ -191,6 +192,13 @@ _PREPRINT_VENUES = (
 )
 
 
+# Venue plausibility lives in `metadata_sanity` so `lint`'s `venue_suspect`
+# check applies the identical rule without importing the agents package (the
+# import-cost constraint `tasks.lint` documents elsewhere). See that module for
+# why the list is restricted to unambiguous furniture.
+_is_venue_furniture = metadata_sanity.is_venue_furniture
+
+
 def _is_preprint_venue(venue: str | None) -> bool:
     """True when `venue` names a preprint server rather than a journal."""
     v = (venue or "").lower()
@@ -245,6 +253,13 @@ def reconcile_metadata(
     seed_title = title_override or llm_meta["title"] or pdf_meta_title or pdf_first_page_title
 
     detected_doi = doi_override or llm_meta["doi"] or detect_doi(pdf_meta, text)
+    # A template placeholder is DOI-shaped and resolves nowhere. Faithful
+    # extraction is not enough: the ACM sample class prints
+    # `10.1145/nnnnnnn.nnnnnnn`, and one page shipped with it.
+    if detected_doi and metadata_sanity.is_placeholder_doi(detected_doi):
+        log(f"doi ✗ {detected_doi} is a template placeholder, not an identifier",
+            tag="reconcile")
+        detected_doi = None
 
     # URL-DOI hunt waterfall: when the canonical-form DOI scanners come up
     # empty (no override, LLM didn't find one, no `10.X/Y` in pypdf-meta or
@@ -274,18 +289,53 @@ def reconcile_metadata(
             )
             for provenance, candidate_doi in candidates:
                 cr_meta = verify_doi_via_crossref(candidate_doi)
-                if cr_meta:
-                    detected_doi = cr_meta["doi"]
-                    cr_meta_from_hunt = cr_meta
-                    sources.append(f"crossref-doi-hunt:{provenance}")
-                    log(
-                        f"doi-hunt ✓ {provenance} → {detected_doi} "
-                        f"(crossref: {(cr_meta.get('title') or '')[:60]!r}, "
-                        f"year={cr_meta.get('year')})", tag="reconcile"
-                    )
-                    break
-                else:
+                if not cr_meta:
                     log(f"doi-hunt ✗ {provenance} → {candidate_doi} (crossref miss)", tag="reconcile")
+                    continue
+                # Resolving is not the same question as belonging. A DOI
+                # scavenged out of the PDF may be a *cited* paper's, in which
+                # case Crossref happily confirms it exists — see
+                # `metadata_sanity`'s docstring for the case that motivated
+                # this. Reject unless the resolved record describes this paper.
+                why = metadata_sanity.reject_reason(
+                    cr_meta.get("year"),
+                    list(cr_meta.get("authors") or []),
+                    cr_meta.get("title") or "",
+                    llm_meta.get("first_author_surname") or "",
+                    llm_meta.get("year"),
+                    seed_title or "",
+                )
+                if why:
+                    log(f"doi-hunt ✗ {provenance} → {candidate_doi} "
+                        f"resolves but is a different paper: {why}", tag="reconcile")
+                    continue
+                detected_doi = cr_meta["doi"]
+                cr_meta_from_hunt = cr_meta
+                sources.append(f"crossref-doi-hunt:{provenance}")
+                log(
+                    f"doi-hunt ✓ {provenance} → {detected_doi} "
+                    f"(crossref: {(cr_meta.get('title') or '')[:60]!r}, "
+                    f"year={cr_meta.get('year')})", tag="reconcile"
+                )
+                break
+
+    # Title-search fallback. The URL hunt can only find a DOI the PDF happens to
+    # print; when the masthead carries none (or the only ones present belong to
+    # cited work and were just rejected above), a Semantic Scholar title match
+    # still finds it — this is exactly how `backfill doi` recovered
+    # `10.1126/sciadv.aax9249` for the DeepSpCas9 paper after the hunt came up
+    # empty. Same adoption gate as everything else here, so a near-miss title
+    # can't smuggle in the wrong record. Whitelisted fields only (Rule 1).
+    if not detected_doi and seed_title:
+        s2_doi = _doi_via_title_search(
+            seed_title,
+            llm_meta.get("first_author_surname") or "",
+            llm_meta.get("year"),
+        )
+        if s2_doi:
+            detected_doi = s2_doi
+            sources.append("s2-title-match")
+            log(f"doi-hunt ✓ s2-title-match → {s2_doi}", tag="reconcile")
 
     doi = detected_doi
 
@@ -384,7 +434,13 @@ def reconcile_metadata(
         cr_venue = cr_meta_from_hunt.get("venue") or (verify_doi_via_crossref(doi) or {}).get("venue")
         if cr_venue and not _is_preprint_venue(cr_venue):
             venue = cr_venue
-    venue = venue or llm_meta["venue_hint"]
+    if not venue and llm_meta["venue_hint"]:
+        hint = llm_meta["venue_hint"]
+        if _is_venue_furniture(hint):
+            log(f"venue ✗ masthead hint {hint!r} is page furniture, not a journal "
+                f"— leaving venue unset", tag="reconcile")
+        else:
+            venue = hint
     # Authors: trust S2 when we have it (clean list). When S2 returns
     # nothing (common for fresh arXiv preprints not yet indexed), prefer
     # pypdf's /Author metadata field over body-text scanning — the
@@ -452,6 +508,44 @@ def reconcile_metadata(
 
 
 # ---------- commentary guard ----------
+
+def _doi_via_title_search(
+    title: str, first_author: str, year: int | None
+) -> str | None:
+    """A paper's own DOI, found by matching its title on Semantic Scholar.
+
+    Returns None on any failure — no provider, no hit, or a hit that doesn't
+    pass `metadata_sanity`. Never raises: a DOI is a nice-to-have at reconcile
+    time, and an S2 outage must not fail an otherwise-good ingest.
+    """
+    if not first_author:
+        # `sanity_ok` would reject everything anyway; skip the request.
+        return None
+    try:
+        from ...providers.semantic_scholar import SemanticScholarProvider
+        art = SemanticScholarProvider().search_by_title(title)
+    except Exception:
+        return None
+    if not art:
+        return None
+    authors = [a.get("name", "") if isinstance(a, dict) else str(a)
+               for a in (getattr(art, "authors", None) or [])]
+    if not metadata_sanity.sanity_ok(
+        getattr(art, "year", None), authors, getattr(art, "title", "") or "",
+        first_author, year, title,
+    ):
+        log(f"s2-title-match ✗ {getattr(art, 'title', '')[:60]!r} "
+            f"failed the same-paper check", tag="reconcile")
+        return None
+    ext = getattr(art, "external_ids", None) or {}
+    arxiv = ext.get("ArXiv") if isinstance(ext, dict) else None
+    if arxiv:
+        # Canonical arXiv namespace beats a publisher aggregator DOI, matching
+        # `backfill doi`'s preference.
+        return f"10.48550/arXiv.{arxiv}"
+    doi = (getattr(art, "doi", None) or "").strip()
+    return doi or None
+
 
 def _detect_commentary_shape(pdf_path: Path, doi: str | None):
     """Run the commentary guard. Returns `(CommentaryVerdict, page_count)`.

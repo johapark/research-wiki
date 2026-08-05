@@ -19,6 +19,7 @@ populate as `"Nature Genetics, doi:10.xxxx/yyyy"`) and first-page text regex.
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -42,9 +43,19 @@ _ARXIV_ID_RE = re.compile(
 # WGS) recovery flow this would have prevented.
 _SSRN_ABSTRACT_RE = re.compile(r"ssrn\.com/abstract=(\d{4,12})", re.IGNORECASE)
 
-# References / Bibliography heading at the start of a line.
+# Where a paper's reference list starts. Widened after `kim-2019-spcas9-…`
+# turned out to have no match at all: Science/AAAS prints `REFERENCES AND NOTES`,
+# which the original end-anchored form rejected, so `extract_ref_dois` silently
+# fell back to `text[3000:]` on the whole Science family.
+#
+# Measured on a 90-PDF corpus sample: the original found a heading in 74, this
+# finds 80. The six gained are `REFERENCES AND NOTES`, singular `Reference`, and
+# page-number-glued forms (`78REFERENCES`, `9References`) where extraction ran a
+# running page number into the heading — hence the leading `\d+` allowance, which
+# stays safe because the whole line must still end after the heading word.
 REFS_HEADING_RE = re.compile(
-    r"(?im)^\s*(?:\d+\.\s*)?(references|bibliography|works\s+cited|literature\s+cited)\s*$"
+    r"(?im)^\s*(?:\d+\.?\s*)?(references?|bibliography|works\s+cited|literature\s+cited)"
+    r"(?:\s+(?:and|&)\s+notes?)?\s*:?\s*$"
 )
 
 # Trailing characters to strip from a DOI captured by DOI_RE — publishers often
@@ -377,7 +388,9 @@ def detect_doi(pdf_meta: dict[str, Any], pdf_text: str) -> str | None:
     return None
 
 
-def find_url_doi_candidates(pdf_text: str) -> list[tuple[str, str]]:
+def find_url_doi_candidates(
+    pdf_text: str, *, stop_at_references: bool = True
+) -> list[tuple[str, str]]:
     """Hunt for DOI candidates encoded as preprint-server URLs (not yet in
     `10.X/Y` form). Use as a fallback **after** `detect_doi` returns None.
 
@@ -400,7 +413,22 @@ def find_url_doi_candidates(pdf_text: str) -> list[tuple[str, str]]:
     Scans more text than `detect_doi` (no 4000-char cap) because page
     footers carrying the SSRN URL repeat across all pages and the first
     one may sit past the abstract block.
+
+    `stop_at_references` truncates the scan at the References heading, and is
+    the default because **every URL past that heading belongs to a different
+    paper**. Without it, `kim-2019-spcas9-activity-prediction-by-deepspcas9`
+    yielded `arxiv.org/abs/1412.6980` from its reference list — the Adam
+    optimizer, cited as the training optimizer — as a candidate for the paper's
+    own DOI. The body pages are still scanned in full, so the repeated-SSRN-
+    footer case this function exists for is unaffected: that footer appears on
+    page 1 onward, long before any reference list. Pass False to restore the
+    old whole-document behaviour.
     """
+    if stop_at_references:
+        m = REFS_HEADING_RE.search(pdf_text)
+        if m:
+            pdf_text = pdf_text[:m.start()]
+
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
 
@@ -417,6 +445,68 @@ def find_url_doi_candidates(pdf_text: str) -> list[tuple[str, str]]:
             out.append(("arxiv-url", doi))
 
     return out
+
+
+def cites_reference(path: Path, surname: str, year: int | str, *, window: int = 300) -> bool:
+    """Does this PDF's reference list contain an entry by `surname` from `year`?
+
+    Answers the one question that separates "these two papers are topically
+    related" from "this paper cites that one" — cheaply, with no LLM and no
+    network, using text we already have to read.
+
+    It exists because the alternative is a fabricated claim. `propose_crosslinks`
+    labels every unverified pairing `topical`, and `promote` then writes that
+    phrasing onto the target page; where the citation is real, the wiki
+    permanently understates a relationship it could have proven, and where a
+    later pass "upgrades" the note by guessing, it asserts support that was never
+    checked (13 such bullets were found wrong and corrected on 2026-08-05 —
+    including three claiming a 2019 paper cited work from 2023).
+
+    Match rule: the normalised surname appears in the reference section with the
+    year within `window` characters after it. That co-occurrence window is what
+    keeps "Doench 2016 (rule set 2)" in the body from satisfying a query for
+    Doench 2014 — reference entries put author and year close together, prose
+    discussion generally does not.
+
+    Deliberately not DOI-based, though `extract_ref_dois` exists: Science and
+    many other publishers print no DOIs in their reference lists, so on the very
+    PDF that motivated this the DOI route returns nothing.
+
+    Returns False on unreadable PDFs or empty inputs — never raises, and never
+    guesses. A False means "not proven", not "proven absent", so callers should
+    fall back to the weaker phrasing rather than asserting a non-citation.
+    """
+    if not surname or year in (None, ""):
+        return False
+    try:
+        pdf = pypdfium2.PdfDocument(str(path))
+    except Exception:
+        return False
+    try:
+        chunks = _extract_all_pages(pdf, max_pages=None)
+    finally:
+        pdf.close()
+    text = "\n\n".join(chunks)
+
+    m = REFS_HEADING_RE.search(text)
+    # Same fallback `extract_ref_dois` uses: past the front matter, which skips
+    # the paper's own title/abstract without needing the heading to be found.
+    section = text[m.end():] if m else text[3000:]
+    section = _fold_ascii(re.sub(r"\s+", " ", section)).lower()
+
+    needle = _fold_ascii(surname).lower()
+    if not needle:
+        return False
+    y = str(year)
+    for mm in re.finditer(re.escape(needle), section):
+        if y in section[mm.start():mm.start() + window]:
+            return True
+    return False
+
+
+def _fold_ascii(s: str) -> str:
+    """NFKD-fold to ASCII so `García` matches a reference list's `Garcia`."""
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
 
 
 def extract_ref_dois(path: Path, own_doi: str | None = None) -> list[str]:
