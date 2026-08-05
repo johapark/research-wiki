@@ -256,6 +256,51 @@ def _extract_all_pages(pdf: pypdfium2.PdfDocument, max_pages: int | None) -> lis
     return parts
 
 
+def pdf_shape(path: Path) -> tuple[int | None, str]:
+    """Return `(page_count, first_page_text)` — the cheap structural read.
+
+    Deliberately *not* folded into `extract_pdf`: callers of that function want
+    concatenated body text and don't care where the page boundaries were, while
+    the commentary guard (`agents.commentary`) needs exactly two facts — how
+    many pages the document has, and what the FIRST page alone says. Slicing
+    the first N chars off `extract_pdf`'s joined output is not a substitute: on
+    a 30-page article that slice runs into the introduction, where a sentence
+    like "as a recent News & Views argued" would trip a section-label match
+    that only belongs in a masthead.
+
+    Only page 0's textpage is materialized, so this is O(1) in document length.
+    Ligature repair is skipped (the dictionary pass costs ~1.7 MB resident and
+    the guard's patterns are plain ASCII words); interior control bytes are
+    stripped so a soft-hyphenated `News & Vi\\x02ews` still matches.
+
+    Returns `(None, "")` when the file is missing or PDFium can't parse it —
+    the guard treats unknown page count as "no structural signal" rather than
+    failing the ingest.
+    """
+    try:
+        pdf = pypdfium2.PdfDocument(str(path))
+    except Exception:
+        return None, ""
+    try:
+        n = len(pdf)
+        first = ""
+        if n:
+            page = pdf[0]
+            try:
+                tp = page.get_textpage()
+                try:
+                    first = tp.get_text_bounded() or ""
+                finally:
+                    tp.close()
+            finally:
+                page.close()
+    except Exception:
+        return None, ""
+    finally:
+        pdf.close()
+    return n, _INTERIOR_CTRL_RE.sub("", first)
+
+
 def _slash_prefix_metadata(md: dict[str, Any]) -> dict[str, Any]:
     """Normalize pypdfium2's bare-key metadata to slash-prefixed form.
 

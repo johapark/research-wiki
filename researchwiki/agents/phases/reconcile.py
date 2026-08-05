@@ -12,8 +12,8 @@ import json
 import re
 from pathlib import Path
 
-from ...pdf.text import detect_doi, extract_pdf, find_url_doi_candidates
-from ...providers.crossref import verify_doi_via_crossref
+from ...pdf.text import detect_doi, extract_pdf, find_url_doi_candidates, pdf_shape
+from ...providers.crossref import crossref_structural_signals, verify_doi_via_crossref
 from ...providers.semantic_scholar import SemanticScholarProvider
 from ...stems import derive_stem
 from .. import llm
@@ -426,6 +426,8 @@ def reconcile_metadata(
 
     paper_type = llm_meta["paper_type"] or _detect_paper_type(title, venue, text, doi=doi)
 
+    commentary, page_count = _detect_commentary_shape(pdf_path, doi)
+
     return {
         "stem": stem,
         "title": title,
@@ -436,10 +438,67 @@ def reconcile_metadata(
         "authors_origin": authors_origin,
         "publication_status": publication_status,
         "paper_type": paper_type,
+        # Commentary guard (see ..commentary). `page_type` is what the
+        # frontmatter writer emits for `type:`; `commentary_signals` is the
+        # observable record the promotion gate quotes back. Both are computed
+        # once here so no downstream phase re-derives (or disagrees about) them.
+        "page_type": commentary.page_type or "paper",
+        "commentary_signals": commentary.signals,
+        "page_count": page_count,
         "pdf_text_preview": text[:4000],
         "sources": sources,
         "prior_stem": prior_stem,
     }
+
+
+# ---------- commentary guard ----------
+
+def _detect_commentary_shape(pdf_path: Path, doi: str | None):
+    """Run the commentary guard. Returns `(CommentaryVerdict, page_count)`.
+
+    Spends a Crossref request only when a local pre-trigger already fired.
+
+    The two-step shape is the whole point: `crossref_lookup_worthwhile` answers
+    False for an ordinary multi-page article, so the common ingest path adds no
+    network call at all. When it answers True (single-page document, or page 1
+    carries a section label) we complete the signal set with Crossref's
+    `reference-count` and `page` — the only fields that make the structural
+    tiers decidable, and both already whitelisted for `ingest`.
+
+    The DOI is passed through separately and costs nothing: the news-namespace
+    tier reads it directly, so a `10.1038/d…` commentary is caught even when the
+    pre-trigger declines to spend a request.
+    """
+    from ..commentary import crossref_lookup_worthwhile, detect_commentary
+
+    page_count, first_page_text = pdf_shape(pdf_path)
+    worthwhile = crossref_lookup_worthwhile(first_page_text, page_count)
+    cr = (
+        crossref_structural_signals(doi, allow_fetch=True)
+        if (doi and worthwhile)
+        else {"reference_count": None, "page": None, "type": None, "subtype": None}
+    )
+    verdict = detect_commentary(
+        first_page_text=first_page_text,
+        page_count=page_count,
+        reference_count=cr["reference_count"],
+        crossref_page=cr["page"],
+        doi=doi,
+    )
+    if verdict.is_commentary:
+        log(
+            f"commentary ⚠ {pdf_path.name} looks like commentary, not a paper "
+            f"— signals: {', '.join(verdict.signals)}; "
+            f"crossref type={cr['type']!r} subtype={cr['subtype']!r} "
+            f"(non-discriminating by design) → suggested type: "
+            f"{verdict.page_type}", tag="reconcile"
+        )
+    elif verdict.considered:
+        log(
+            f"commentary → not commentary; saw insufficient signal(s): "
+            f"{', '.join(verdict.considered)}", tag="reconcile"
+        )
+    return verdict, page_count
 
 
 # ---------- pdf-meta cleanup helpers ----------

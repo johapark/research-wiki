@@ -129,6 +129,59 @@ def fetch_crossref_refs(doi: str, retries: int = 3, sleep_sec: float = 0.5) -> l
     return out
 
 
+def _cached_crossref_work(doi: str) -> dict | None:
+    """Read a previously-cached `/works/{doi}` payload without touching the
+    network. Returns None on cache miss.
+
+    Split out from `_fetch_crossref_work` (which is cache-*first*, network-
+    second) so callers that must not add a request — the commentary guard's
+    default path — can consult whatever the ingest already fetched and
+    otherwise degrade to "signal unknown".
+    """
+    if not doi:
+        return None
+    cache = crossref_cache_dir() / f"crossref__{safe_cache_key(doi.strip().lower())}.json"
+    return read_cache(cache)
+
+
+def crossref_structural_signals(doi: str, *, allow_fetch: bool = False) -> dict:
+    """Structural (non-prose) fields used to tell a commentary from an article.
+
+    Returns `{"reference_count": int|None, "page": str|None, "type": str|None,
+    "subtype": str|None}` — all None when the DOI isn't in the cache and
+    `allow_fetch` is False, or when Crossref doesn't know the DOI.
+
+    Whitelist note (CLAUDE.md Rule 1): every field here is structural metadata
+    Crossref already exposes to `ingest`. Nothing prose-y is read, and nothing
+    is paraphrased into a page — the fields inform one promotion decision.
+
+    `type`/`subtype` are returned for logging only. They do **not** discriminate
+    a Research Highlight from the article it summarizes: the Nature Genetics
+    highlight that motivated this function reports `type: journal-article`,
+    `subtype: None`, exactly like a 32-page primary research paper. The
+    load-bearing fields are `reference-count` (0 for the highlight) and `page`
+    (`"1458-1458"` — a one-page extent).
+
+    `allow_fetch` defaults False so calling this never costs a request; the
+    ingest opts in only after a cheap *local* pre-trigger has already fired
+    (see `agents.commentary.crossref_lookup_worthwhile`).
+    """
+    data = _cached_crossref_work(doi)
+    if data is None and allow_fetch:
+        data = _fetch_crossref_work(doi)
+    msg = ((data or {}).get("message") or {}) if data else {}
+    ref_count = msg.get("reference-count")
+    if not isinstance(ref_count, int):
+        ref_count = None
+    page = msg.get("page")
+    return {
+        "reference_count": ref_count,
+        "page": page if isinstance(page, str) and page.strip() else None,
+        "type": msg.get("type") or None,
+        "subtype": msg.get("subtype") or None,
+    }
+
+
 def verify_doi_via_crossref(doi: str) -> dict | None:
     """Confirm `doi` resolves to an indexed Crossref work; return a small
     metadata dict on hit, or None on miss / network failure.

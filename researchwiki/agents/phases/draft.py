@@ -400,6 +400,8 @@ def _wrap_with_frontmatter(
     *,
     category: str | None = None,
     category_strength: str | None = None,
+    page_type: str = "paper",
+    commentary_signals: list[str] | None = None,
 ) -> str:
     """Wrap a draft body in minimal YAML frontmatter for the grader's parser
     and the sandbox writer.
@@ -410,6 +412,15 @@ def _wrap_with_frontmatter(
     the user to recategorize from scratch on a false-positive sandbox.
     `category_strength`: 'weak' marks first-of-kind / low-confidence suggestions
     so a downstream reviewer knows to re-check before promoting.
+
+    `page_type` / `commentary_signals` come from the commentary guard (see
+    `agents.commentary`) and are passed **only by the sandbox writer**, which is
+    where a guard-blocked Research Highlight lands. Defaulting `page_type` to
+    `"paper"` keeps the grader's temp-page path (grade.py) byte-identical: the
+    grader parses claims out of this frontmatter, and re-typing its scratch file
+    would change what it scores rather than what the reviewer sees. The signal
+    list is emitted as a YAML comment so a reviewer opening
+    `.agent-output/{stem}.md` reads the verdict without consulting the log.
     """
     cat_value = f"[{category}]" if category else "[TODO]"
     # Quote the title: paper titles routinely contain a colon-space subtitle
@@ -422,9 +433,16 @@ def _wrap_with_frontmatter(
         f"authors: {metadata.get('authors') or 'unknown'}",
         f"year: {metadata.get('year') or 'unknown'}",
         f"doi: {metadata.get('doi') or 'unknown'}",
-        "type: paper",
+        f"type: {page_type or 'paper'}",
         f"category: {cat_value}",
     ]
+    if commentary_signals:
+        lines.append(
+            "# commentary guard fired: "
+            + ", ".join(commentary_signals)
+            + " — this PDF looks like a Research Highlight / News & Views about"
+            " another paper. Ingest the primary paper instead of promoting this."
+        )
     if category_strength == "weak":
         lines.append("category_suggestion_strength: weak  # first-of-kind — review")
     lines += [

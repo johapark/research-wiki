@@ -33,6 +33,7 @@ from pathlib import Path
 from .. import backlinks as _bl
 from ..fsatomic import write_text_atomic
 from ..paths import inbox_dir, papers_dir, wiki_dir
+from .commentary import gate_reason as commentary_gate_reason
 
 
 # Promotion gates — all must pass.
@@ -58,6 +59,7 @@ def should_auto_promote(
     verification,
     n_key_contributions: int = 0,
     paper_type: str = "research",
+    commentary_signals: list[str] | None = None,
 ) -> GateResult:
     """Evaluate the promotion gates. All must pass for auto-promote.
 
@@ -67,9 +69,25 @@ def should_auto_promote(
     `paper_type` is 'research' (default) or 'review'; reviews use a relaxed
     semantic-similarity threshold because their claims paraphrase other
     papers and only loosely match the source PDF.
+
+    `commentary_signals` is the (possibly empty) signal list from
+    `agents.commentary.detect_commentary`, carried on the reconcile metadata as
+    `commentary_signals`. Non-empty means the PDF is shaped like a Research
+    Highlight / News & Views *about* another paper, and the page must not land
+    as `type: paper` — the fidelity graders cannot catch this because the claims
+    genuinely are in the highlight's PDF; they're just not its contributions.
+    Unlike the other gate failures this one is **not** repairable by DEBUG (no
+    rewrite of the prose changes what the PDF is), and `detect_structural_gate_issues`
+    is an allow-list, so the reason string is inert there by construction.
     """
     fails: list[str] = []
     warnings: list[str] = []
+
+    # Checked first so it heads the reason list — it's the one failure that
+    # says "wrong document", not "weak page".
+    if commentary_signals:
+        fails.append(commentary_gate_reason(list(commentary_signals)))
+
     sem_threshold = (
         SEMANTIC_MEAN_THRESHOLD_REVIEW if paper_type == "review" else SEMANTIC_MEAN_THRESHOLD
     )
@@ -335,8 +353,17 @@ def _build_frontmatter(
             fm_lines.append(f'arxiv_id: "{arxiv_id}"')
     if venue:
         fm_lines.append(f"venue: {venue}")
+    # `type:` is normally `paper`. The commentary guard sets
+    # `metadata["page_type"] = "commentary"` when the PDF is a Research
+    # Highlight / News & Views about a different paper; honoring it here means
+    # that even a `--auto-promote` override lands a correctly-typed page rather
+    # than one that claims another group's contributions. It also stops the
+    # damage downstream: `db.rebuild` only extracts claims from `type: paper`
+    # pages, so a `commentary` page contributes nothing to the claims DB and
+    # can't be cited as if it were the primary source.
+    page_type = metadata.get("page_type") or "paper"
     fm_lines.extend([
-        "type: paper",
+        f"type: {page_type}",
         f"category: [{category}]",
         # `pdf_path` is an Obsidian wikilink to the source PDF so the property
         # renders as a click-to-open link (the vault root holds wiki/ + papers/

@@ -120,8 +120,18 @@ def run_ingest(
             conn.commit()
         log(
             f"reconcile → stem={ctx.paper_stem} year={meta.get('year')} "
-            f"type={meta.get('paper_type', 'research')}", tag="agent"
+            f"type={meta.get('paper_type', 'research')} "
+            f"pages={meta.get('page_count')}", tag="agent"
         )
+        # Commentary guard verdict, surfaced at the top of the run rather than
+        # only at the gate — the operator should know the ingest is heading for
+        # sandbox before paying for the author/grade phases.
+        if meta.get("commentary_signals"):
+            log(
+                f"reconcile ⚠ page_type={meta.get('page_type')} "
+                f"(commentary signals: {', '.join(meta['commentary_signals'])}) "
+                f"— will NOT auto-promote as type: paper", tag="agent"
+            )
 
         # Refuse silent stem renames. When reconcile's DOI lookup finds an
         # existing wiki page AND the new derived stem differs, the default
@@ -706,6 +716,7 @@ def _phase_debug(
         verification=verification,
         n_key_contributions=n_kc,
         paper_type=(ctx.metadata or {}).get("paper_type", "research"),
+        commentary_signals=(ctx.metadata or {}).get("commentary_signals"),
     )
     if new_gate.promoted:
         log("gate     → DEBUG repair passed all gates", tag="agent")
@@ -809,6 +820,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
             verification=verification,
             n_key_contributions=n_kc,
             paper_type=(ctx.metadata or {}).get("paper_type", "research"),
+            commentary_signals=(ctx.metadata or {}).get("commentary_signals"),
         )
         # DEBUG operator: when the gate rejects on a structural issue
         # (numeric drift, too few KC bullets, too few graded claims) we
@@ -848,6 +860,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
                 verification=verification,
                 n_key_contributions=n_kc,
                 paper_type=(ctx.metadata or {}).get("paper_type", "research"),
+            commentary_signals=(ctx.metadata or {}).get("commentary_signals"),
             )
 
         if ctx.promote_mode == "always" and not gate.promoted:
@@ -1072,6 +1085,11 @@ def _phase_commit(ctx: Context, conn) -> Path:
             cleaned_text, ctx.metadata, stem_for_path,
             category=cat_suggestion,
             category_strength=cat_strength,
+            # A guard-blocked Research Highlight lands here, so the sandbox page
+            # carries the suggested type + the signals that fired rather than
+            # asserting `type: paper` for a document that isn't one.
+            page_type=(ctx.metadata or {}).get("page_type") or "paper",
+            commentary_signals=(ctx.metadata or {}).get("commentary_signals"),
         ))
         if cat_suggestion:
             log(f"sandbox  → category suggested: {cat_suggestion} "
