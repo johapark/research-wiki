@@ -39,6 +39,55 @@ def _text_hash(text: str) -> str:
     return hashlib.sha1((text or "").encode("utf-8")).hexdigest()[:16]
 
 
+def load_cached_claim_embeddings(rows: list[dict]):
+    """Cache-only sibling of `get_claim_embeddings` — never loads the bi-encoder.
+
+    Returns `(vectors, row_indices)` where `vectors` is an
+    (len(row_indices), dim) L2-normalized array and `row_indices` are the
+    positions in `rows` it covers — i.e. exactly the claims already cached
+    with a matching text hash. Returns None when numpy is missing or the
+    cache is absent/unreadable/empty.
+
+    Exists because `get_claim_embeddings` calls `embeddings.is_available()`,
+    which constructs the SentenceTransformer (~3s) even when every row is a
+    cache hit, and then rewrites the cache to its row set. Neither is
+    acceptable on a read-only, always-on surface: `lint` must stay sub-second
+    and must not mutate derived state. Callers here trade recall for that —
+    a cold cache yields None and the caller skips its check rather than
+    paying for a corpus embed.
+    """
+    if not _NUMPY or not rows:
+        return None
+    npy_path, meta_path = _paths()
+    if not (npy_path.exists() and meta_path.exists()):
+        return None
+    try:
+        vecs = np.load(npy_path)
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    index = {m["id"]: (i, m["hash"]) for i, m in enumerate(meta)}
+
+    picked_rows: list[int] = []
+    picked_cache: list[int] = []
+    for out_idx, row in enumerate(rows):
+        hit = index.get(_identity(row))
+        if hit is None:
+            continue
+        cache_idx, h = hit
+        if h != _text_hash(row["text"]) or cache_idx >= len(vecs):
+            continue
+        picked_rows.append(out_idx)
+        picked_cache.append(cache_idx)
+    if not picked_rows:
+        return None
+
+    out = vecs[picked_cache].astype(np.float32, copy=True)
+    norms = np.linalg.norm(out, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return out / norms, picked_rows
+
+
 def get_claim_embeddings(rows: list[dict]):
     """Return an (len(rows), dim) L2-normalized array aligned to `rows`.
 

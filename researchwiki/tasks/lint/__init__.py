@@ -17,7 +17,8 @@ focused and individually testable:
   staleness       — stale_synthesis, stale_by_content, audit_count, proposals
   audit_p2        — Priority-2 entries with audit anchor hits
   db_checks       — ungraded_papers, zero_claim_papers,
-                    stems_missing_claim_overlap, db_drift
+                    stems_missing_claim_overlap, duplicate_claim_sets,
+                    db_drift
   supplementary   — supp YAML ↔ disk consistency
 
 The orchestrator below walks pages once, calls each check, then renders
@@ -47,6 +48,7 @@ from .claim_anchors import find_dangling_claim_anchors
 from .concept_contract import find_concept_contract_violations
 from .db_checks import (
     db_drift_check_and_fix,
+    find_duplicate_claim_sets,
     find_ungraded_papers,
     find_stems_missing_claim_overlap,
     find_zero_claim_papers,
@@ -104,6 +106,7 @@ def main(argv: list[str]) -> int:
                              "missing_hook, hook_too_long, "
                              "ungraded_papers, zero_claim_papers, "
                              "stems_missing_claim_overlap, "
+                             "duplicate_claim_sets, "
                              "dangling_claim_anchors, "
                              "concept_contract_violations, db_drift, "
                              "cross_paper_contradictions, fix_applied.")
@@ -157,6 +160,7 @@ def main(argv: list[str]) -> int:
     ungraded_papers = find_ungraded_papers()
     zero_claim_papers = find_zero_claim_papers()
     stems_missing_claim_overlap = find_stems_missing_claim_overlap()
+    duplicate_claim_sets = find_duplicate_claim_sets()
     supp_yaml_missing, supp_orphans = find_supplementary_issues(pages, pages_fm)
     dangling_anchors = find_dangling_claim_anchors(pages_body)
     concept_contract = find_concept_contract_violations(pages, pages_body, pages_fm)
@@ -191,6 +195,7 @@ def main(argv: list[str]) -> int:
             ungraded_papers=ungraded_papers,
             zero_claim_papers=zero_claim_papers,
             stems_missing_claim_overlap=stems_missing_claim_overlap,
+            duplicate_claim_sets=duplicate_claim_sets,
             dangling_anchors=dangling_anchors,
             concept_contract=concept_contract,
             db_drift=db_drift, db_drift_fixed=db_drift_fixed,
@@ -212,6 +217,7 @@ def main(argv: list[str]) -> int:
         ungraded_papers=ungraded_papers,
         zero_claim_papers=zero_claim_papers,
         stems_missing_claim_overlap=stems_missing_claim_overlap,
+        duplicate_claim_sets=duplicate_claim_sets,
         dangling_anchors=dangling_anchors,
         concept_contract=concept_contract,
         db_drift=db_drift, db_drift_fixed=db_drift_fixed,
@@ -289,6 +295,10 @@ def _emit_json(**kw) -> int:
         "ungraded_papers": kw["ungraded_papers"],
         "zero_claim_papers": kw["zero_claim_papers"],
         "stems_missing_claim_overlap": kw["stems_missing_claim_overlap"],
+        # null = check skipped (claim-embedding cache cold or <50% of claims
+        # cached); [] = ran and found nothing. Same convention as
+        # invalid_frontmatter above.
+        "duplicate_claim_sets": kw["duplicate_claim_sets"],
         "db_drift": kw["db_drift"],
         "cross_paper_contradictions": kw.get("cross_paper", []),
         "fix_applied": {
@@ -658,6 +668,39 @@ def _emit_prose(**kw) -> int:
               "examined, or when its claims changed since it was (regrade / "
               "re-ingest), which invalidates the earlier comparison. Drain with "
               "`researchwiki claim-overlap --backlog`._")
+        print()
+
+    dup_claims = kw["duplicate_claim_sets"]
+    if dup_claims is None:
+        print("## Near-duplicate claim sets (skipped)")
+        print("_The claim-embedding cache (`.semantic-cache/claims.npy`) is cold or covers "
+              "less than half the corpus's claims. This check reads it directly rather than "
+              "loading the bi-encoder, so `lint` stays instant; warm it with any "
+              "`researchwiki claim-overlap` run and the check starts reporting._")
+        print()
+    elif dup_claims:
+        print(f"## Near-duplicate claim sets ({len(dup_claims)}, advisory)")
+        print("Page pairs where each page's claims mostly point at the other's as their "
+              "nearest neighbour (reciprocal top-1 concentration ≥ 0.25). The failure this "
+              "catches is a *commentary* on a paper — a research highlight, News & Views, "
+              "editorial — ingested as `type: paper`, whose extracted claims then credit the "
+              "original authors' contributions to the commentary. Both fidelity gates pass on "
+              "such a page (the claims really are in its PDF), so this structural signal is "
+              "the only one available.")
+        print()
+        print("Advisory, not a defect: legitimate near-duplication is common — a paper and "
+              "its own preprint, two trials of one therapy, two reviews of one disease, two "
+              "papers from one group. Compare the pair's venues and page types; the shorter "
+              "page is the usual suspect, and the fix is `type:`, not the prose.")
+        for d in dup_claims[:20]:
+            a, b = d["pages"]
+            print(f"- **{d['score']:.2f}** — {a['stem']} ↔ {b['stem']}")
+            print(f"    - {a['stem']}: {a['n_top1_in_other']}/{a['n_claims']} claims "
+                  f"(share {a['top1_share']:.2f}) nearest-match into the other page")
+            print(f"    - {b['stem']}: {b['n_top1_in_other']}/{b['n_claims']} claims "
+                  f"(share {b['top1_share']:.2f}) nearest-match into the other page")
+        if len(dup_claims) > 20:
+            print(f"- ... ({len(dup_claims) - 20} more)")
         print()
 
     db_drift = kw["db_drift"]
