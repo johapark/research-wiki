@@ -15,6 +15,39 @@ from ...paths import ingest_dir
 from .walk import extract_links, page_key
 
 
+def _source_change_date(md: Path, fm: dict):
+    """Date a referenced page's *substance* last changed.
+
+    Prefers YAML `ingested_at` over filesystem mtime. A paper page's mtime moves
+    for any edit at all, and the overwhelmingly common edit is a Related Papers
+    bullet — `lint --fix` back-links, claim-overlap cross-links, concept-hub
+    attachment, gloss rewrites. None of those change what the paper says, so
+    none of them should age a synthesis page that cites it.
+
+    Measured 2026-08-05 after a maintenance run that rewrote back-link bullets
+    across ~250 paper pages: of 277 papers reported as `newer_references`, 231
+    had mtimes bumped that day and only 4 had actually been (re)ingested. The
+    remaining 227 were pure false positives, and permanent ones — mtimes never
+    move back, so every affected synthesis page would stay flagged until its
+    `generated_at` was bumped past the maintenance date, which would falsely
+    claim a review that never happened.
+
+    `ingested_at` moves on (re)ingest, which is the substantive event this check
+    documents caring about ("re-examined when sources change"). The trade is
+    recall: a hand-edited paper page that doesn't touch `ingested_at` no longer
+    ages its citing pages. That is the right trade at these ratios, and pages
+    without the field fall back to mtime so nothing is silently exempted.
+    """
+    from datetime import datetime
+    raw = fm.get("ingested_at")
+    if raw:
+        try:
+            return datetime.fromisoformat(str(raw).strip().strip("\"'")).date()
+        except (ValueError, TypeError):
+            pass
+    return datetime.fromtimestamp(md.stat().st_mtime).date()
+
+
 def find_stale_synthesis(
     pages: list[Path],
     pages_fm: dict[Path, dict],
@@ -33,7 +66,7 @@ def find_stale_synthesis(
     from datetime import datetime
     stale: list[tuple[Path, list[str]]] = []
     all_mtime_dates = {
-        page_key(p): datetime.fromtimestamp(p.stat().st_mtime).date()
+        page_key(p): _source_change_date(p, pages_fm.get(p, {}))
         for p in pages
     }
     for md in pages:
