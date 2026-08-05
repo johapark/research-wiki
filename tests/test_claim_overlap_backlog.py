@@ -212,6 +212,114 @@ def test_nudge_survives_a_missing_db(monkeypatch, stamp):
     assert co.backlog_warning() is None
 
 
+# ---------- which verdicts earn a bullet ----------
+#
+# `measures_same` is a real relation but the weakest one the judge accepts, and
+# in practice it fires on shared methodology ("both quantify indel frequency by
+# deep sequencing, on different CRISPR systems"). That is not the source citing,
+# building on, or contrasting the other paper, so it fails CLAUDE.md's cross-link
+# corollary and gets a typed edge without a Related Papers bullet. Over a
+# 56-stem drain it was 6 of 9 confirmed links, so the boundary carries real
+# weight and would be easy to erase by accident.
+
+def test_measures_same_does_not_earn_a_bullet():
+    assert "measures_same" not in co._CROSS_LINK_VERDICTS
+    assert "measures_same" in co._EDGE_ONLY_VERDICTS
+
+
+@pytest.mark.parametrize("verdict", ["corroborates", "refines", "builds_on", "cross_link"])
+def test_engaging_verdicts_do_earn_a_bullet(verdict):
+    assert verdict in co._CROSS_LINK_VERDICTS
+
+
+def test_the_two_sets_are_disjoint():
+    """A verdict in both would make the bullet decision order-dependent."""
+    assert not (co._CROSS_LINK_VERDICTS & co._EDGE_ONLY_VERDICTS)
+
+
+def test_every_edge_only_verdict_still_maps_to_a_relation():
+    """An edge-only verdict whose relation is None would write nothing at all —
+    silently dropping the pair instead of recording it."""
+    for v in co._EDGE_ONLY_VERDICTS:
+        assert co._relation_from_verdict(v) is not None
+
+
+def test_relation_verdicts_is_the_union():
+    """The `none`/unparseable boundary must not drift from the two sets."""
+    assert co._RELATION_VERDICTS == co._CROSS_LINK_VERDICTS | co._EDGE_ONLY_VERDICTS
+    assert "none" not in co._RELATION_VERDICTS
+
+
+def test_judge_prompt_still_offers_every_verdict_the_code_handles():
+    """If the prompt stops emitting a verdict the sets accept, the split is dead
+    code; if it emits one they don't, the pair is dropped as a coincidence."""
+    emitted = set(co._JUDGE_SCHEMA["properties"]["verdict"]["enum"]) - {"none"}
+    handled = co._RELATION_VERDICTS - {"cross_link"}   # legacy, not emitted
+    assert emitted == handled
+
+
+# ---------- end to end: what actually lands on disk ----------
+
+class _Cand:
+    def __init__(self, existing_stem):
+        self.existing_stem = existing_stem
+        self.cosine = 0.9
+        # `position` is required — `_format_prompt` cites claims as
+        # `section#position` so the judge can see where each one sits.
+        self.new_claim = {"section": "results", "position": 0, "text": "new claim"}
+        self.existing_claim = {"section": "results", "position": 1, "text": "old claim"}
+
+
+class _Page:
+    def __init__(self, path, key, stem):
+        self.path, self.key, self.stem = path, key, stem
+
+
+def _two_pages(tmp_path, monkeypatch, verdict):
+    """Wire `run()` against two real files and a judge stubbed to `verdict`."""
+    new_p = tmp_path / "new-2026-a.md"
+    old_p = tmp_path / "old-2020-b.md"
+    for p in (new_p, old_p):
+        p.write_text("---\ntitle: t\n---\n\n## Related Papers\n\n")
+
+    pages = [_Page(new_p, "compbio/new-2026-a", "new-2026-a"),
+             _Page(old_p, "compbio/old-2020-b", "old-2020-b")]
+    monkeypatch.setattr(co, "read_pages", lambda: pages)
+    monkeypatch.setattr("researchwiki.grade.claim_overlap.find_claim_overlaps",
+                        lambda *a, **k: [_Cand("old-2020-b")])
+    edges = []
+    monkeypatch.setattr(co, "_persist_typed_edge",
+                        lambda *a, **k: edges.append(a[4]))   # relation
+    monkeypatch.setattr(co, "record_run", lambda *a, **k: None)
+    res = co.run("new-2026-a", new_claims=[{"section": "results", "text": "x"}],
+                 judge_fn=lambda _p: {"verdict": verdict, "rationale": "r"})
+    return res, edges, new_p.read_text(), old_p.read_text()
+
+
+def test_measures_same_writes_an_edge_but_no_bullet(tmp_path, monkeypatch):
+    res, edges, new_body, old_body = _two_pages(tmp_path, monkeypatch, "measures_same")
+    assert edges == ["measures_same"], "the typed edge must still be recorded"
+    assert res["applied"] == []
+    assert len(res["edge_only"]) == 1
+    assert "[[" not in new_body and "[[" not in old_body, \
+        "no Related Papers bullet on either page"
+
+
+def test_builds_on_writes_reciprocal_bullets_and_an_edge(tmp_path, monkeypatch):
+    res, edges, new_body, old_body = _two_pages(tmp_path, monkeypatch, "builds_on")
+    assert edges == ["builds_on"]
+    assert len(res["applied"]) == 1 and res["edge_only"] == []
+    assert "[[compbio/old-2020-b]] — claim-grounded match" in new_body
+    assert "[[compbio/new-2026-a]] — claim-grounded match" in old_body
+
+
+def test_none_writes_neither(tmp_path, monkeypatch):
+    res, edges, new_body, old_body = _two_pages(tmp_path, monkeypatch, "none")
+    assert edges == [] and res["applied"] == [] and res["edge_only"] == []
+    assert len(res["coincidence"]) == 1
+    assert "[[" not in new_body and "[[" not in old_body
+
+
 # ---------- the ingest flag flip ----------
 
 def _ingest_args(argv):

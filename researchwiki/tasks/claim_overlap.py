@@ -2,10 +2,14 @@
 
 Finds existing wiki papers whose claims are near-paraphrases of the new paper's
 claims (cheap cosine, no LLM), then asks a small LLM judge whether each is a
-*real* relationship — the new paper builds on / extends / directly contrasts /
-measures the same thing as the existing one — versus mere vocabulary overlap.
-Confirmed matches get a reciprocal `[[wikilink]]` auto-added to both pages'
-Related Papers. Coincidences are dropped.
+*real* relationship — the new paper builds on, extends, refines, or corroborates
+the existing one — versus mere vocabulary overlap. Those get a reciprocal
+`[[wikilink]]` auto-added to both pages' Related Papers.
+
+A `measures_same` verdict is real but weaker: both claims measure the same
+quantity on different cohorts, which in practice means shared methodology
+rather than one paper engaging the other. It records a typed claim-graph edge
+and no bullet (see `_EDGE_ONLY_VERDICTS`). Coincidences are dropped entirely.
 
 Runs AFTER `db rebuild` (claim rows are inserted there, from the final page —
 never drafts), so it belongs in the post-ingest sequence, not the ingest agent.
@@ -40,9 +44,9 @@ from ..wiki import read_pages
 _NOTE = "claim-grounded match (auto-added; claim-overlap)"
 
 # Typed relation vocabulary — a superset of the earlier binary
-# {cross_link, coincidence} vocabulary. Any non-"none" verdict counts as a
-# cross-link (the reciprocal `[[wikilink]]` in Related Papers is applied),
-# but the specific verdict is what the claim-graph edge cache stores. `none`
+# {cross_link, coincidence} vocabulary. The specific verdict decides BOTH what
+# the claim-graph edge cache stores and whether a Related Papers bullet is
+# written: see `_CROSS_LINK_VERDICTS` vs `_EDGE_ONLY_VERDICTS` below. `none`
 # replaces the earlier `coincidence`; the older term is still accepted as a
 # fallback for callers that haven't migrated yet.
 _JUDGE_SYSTEM = """\
@@ -90,15 +94,37 @@ _JUDGE_SCHEMA = {
     },
 }
 
-# Which verdicts imply a paper-level cross-link. `refines` and `builds_on`
-# are directed (NEW → EXISTING); symmetric verdicts still get a reciprocal
-# [[wikilink]] on both sides because the wiki's Related Papers section is
-# undirected. Directedness only affects the edge record.
+# Verdicts that earn a `[[wikilink]]` in Related Papers. `refines` and
+# `builds_on` are directed (NEW → EXISTING); symmetric verdicts still get a
+# reciprocal bullet on both sides because Related Papers is undirected.
+# Directedness only affects the edge record.
 _CROSS_LINK_VERDICTS = frozenset({
-    "corroborates", "measures_same", "refines", "builds_on",
+    "corroborates", "refines", "builds_on",
     # Legacy alias — old prompt returned this and older callers rely on it.
     "cross_link",
 })
+
+# Verdicts that earn a typed claim-graph edge but NOT a Related Papers bullet.
+#
+# `measures_same` is defined in `_JUDGE_SYSTEM` as "both claims measure the same
+# quantity or benchmark, but on legitimately DIFFERENT cohorts / datasets /
+# conditions", and the prompt ranks it the weakest accepted relation. In practice
+# it fires on shared methodology — "both quantify indel frequency by deep
+# sequencing, on different CRISPR systems" — which is not the source explicitly
+# citing, building on, or contrasting the other paper, so it fails CLAUDE.md's
+# cross-link corollary. Measured over a 56-stem backlog drain it was 6 of 9
+# confirmed links, i.e. it dominated the output with its weakest tier.
+#
+# The edge is still worth keeping: `concepts/refresh.py` consumes
+# `measures_same` when seeding hub spokes, and "these two papers measure the
+# same thing under different conditions" is a real fact about the corpus. It
+# just doesn't earn Related Papers real estate.
+_EDGE_ONLY_VERDICTS = frozenset({"measures_same"})
+
+# Any verdict the judge returned that means something — used to separate a real
+# relation from `none`/unparseable, independent of whether it earns a bullet.
+_RELATION_VERDICTS = _CROSS_LINK_VERDICTS | _EDGE_ONLY_VERDICTS
+
 _DIRECTED_VERDICTS = frozenset({"refines", "builds_on"})
 
 
@@ -403,7 +429,7 @@ def run(
     new_body = new_page.path.read_text(encoding="utf-8") if new_page.path.exists() else ""
     judge = judge_fn or _default_judge
 
-    applied, coincidence, skipped, judge_failed = [], [], [], []
+    applied, edge_only, coincidence, skipped, judge_failed = [], [], [], [], []
     for cand in candidates:
         ex = pages.get(cand.existing_stem)
         if ex is None:
@@ -425,7 +451,7 @@ def run(
             continue
         v = verdict.get("verdict")
         rationale = verdict.get("rationale", "")
-        if v not in _CROSS_LINK_VERDICTS:
+        if v not in _RELATION_VERDICTS:
             coincidence.append({"existing": ex_key, "cosine": cand.cosine,
                                 "rationale": rationale, "verdict": v})
             continue
@@ -433,21 +459,24 @@ def run(
         relation = _relation_from_verdict(v)
         record = {"existing": ex_key, "cosine": cand.cosine,
                   "rationale": rationale, "relation": relation}
+        links = v in _CROSS_LINK_VERDICTS
         if not dry_run:
-            wrote_new = append_related_paper(new_page.path, ex_key, note=_NOTE)
-            wrote_ex = append_related_paper(ex.path, new_key, note=_NOTE)
-            record["wrote"] = {"new_page": wrote_new, "existing_page": wrote_ex}
-            if wrote_new:  # keep in-memory body current so a later candidate sees the link
-                new_body = new_page.path.read_text(encoding="utf-8")
-            # Typed edge lands regardless of whether the wikilink was already
-            # present — the edge cache is orthogonal to Related Papers.
+            # Typed edge lands for every real relation, and regardless of
+            # whether a wikilink was already present — the edge cache is
+            # orthogonal to Related Papers.
             if relation is not None:
                 _persist_typed_edge(
                     stem, cand.new_claim,
                     cand.existing_stem, cand.existing_claim,
                     relation, rationale, cand.cosine,
                 )
-        applied.append(record)
+            if links:
+                wrote_new = append_related_paper(new_page.path, ex_key, note=_NOTE)
+                wrote_ex = append_related_paper(ex.path, new_key, note=_NOTE)
+                record["wrote"] = {"new_page": wrote_new, "existing_page": wrote_ex}
+                if wrote_new:  # keep in-memory body current so a later candidate sees the link
+                    new_body = new_page.path.read_text(encoding="utf-8")
+        (applied if links else edge_only).append(record)
 
     # Mark the stem covered so `find_backlog` stops returning it. Not on a dry
     # run: nothing was applied, so claiming coverage would hide real work.
@@ -468,7 +497,7 @@ def run(
                 fingerprint=claims_fingerprint(compared),
                 n_claims=len(compared),
                 n_candidates=len(candidates),
-                n_judged=len(applied) + len(coincidence),
+                n_judged=len(applied) + len(edge_only) + len(coincidence),
                 n_confirmed=len(applied),
                 sim_threshold=sim_threshold,
             )
@@ -480,6 +509,10 @@ def run(
         "stem": stem,
         "n_candidates": len(candidates),
         "applied": applied,
+        # Real relation, typed edge written, deliberately no bullet — see
+        # _EDGE_ONLY_VERDICTS. Distinct from `coincidence`, which is the
+        # judge saying the pair is unrelated.
+        "edge_only": edge_only,
         "coincidence": coincidence,
         "skipped": skipped,
         "judge_failed": judge_failed,
@@ -551,7 +584,7 @@ def _run_backlog(args) -> int:
           + (" — DRY RUN, no links written" if args.dry_run else ""))
 
     results, failed = [], []
-    tot = {"candidates": 0, "judged": 0, "confirmed": 0}
+    tot = {"candidates": 0, "judged": 0, "confirmed": 0, "edge_only": 0}
     for i, stem in enumerate(pending, 1):
         try:
             r = run(stem, sim_threshold=args.sim, top_papers=args.top,
@@ -561,10 +594,12 @@ def _run_backlog(args) -> int:
             failed.append((stem, "no wiki page"))
             continue
         results.append(r)
-        judged = len(r["applied"]) + len(r["coincidence"])
+        edge_only = len(r.get("edge_only", []))
+        judged = len(r["applied"]) + edge_only + len(r["coincidence"])
         tot["candidates"] += r["n_candidates"]
         tot["judged"] += judged
         tot["confirmed"] += len(r["applied"])
+        tot["edge_only"] += edge_only
         if not args.json:
             mark = "✓" if r["applied"] else " "
             print(f"  {mark} [{i}/{len(pending)}] {stem[:56]:56s} "
@@ -580,7 +615,8 @@ def _run_backlog(args) -> int:
         return 0
 
     print(f"\n  {len(results)} stem(s) processed: {tot['candidates']} candidate(s), "
-          f"{tot['judged']} judged, {tot['confirmed']} confirmed link(s)")
+          f"{tot['judged']} judged, {tot['confirmed']} confirmed link(s), "
+          f"{tot['edge_only']} edge-only (typed edge, no bullet)")
     for stem, why in failed:
         print(f"  ! skipped {stem}: {why}")
     if not args.dry_run and tot["confirmed"]:
@@ -650,6 +686,9 @@ def main(argv: list[str]) -> int:
     verb = "would link" if args.dry_run else "linked"
     for a in result["applied"]:
         print(f"  ✓ {verb} [[{a['existing']}]]  (cos {a['cosine']}) — {a['rationale']}")
+    for e in result.get("edge_only", []):
+        print(f"  ~ edge only [[{e['existing']}]]  (cos {e['cosine']}, "
+              f"{e['relation']}) — typed edge recorded, no Related Papers bullet")
     for c in result["coincidence"]:
         print(f"  · skipped [[{c['existing']}]]  (cos {c['cosine']}, coincidence)")
     for s in result["skipped"]:
@@ -661,6 +700,7 @@ def main(argv: list[str]) -> int:
     n_applied = len(result["applied"])
     log(f"claim-overlap {args.stem}: {n_applied} cross-link(s) "
         f"{'(dry-run)' if args.dry_run else 'applied'}, "
+        f"{len(result.get('edge_only', []))} edge-only, "
         f"{len(result['coincidence'])} coincidence, {len(result['skipped'])} already-linked",
         tag="claim-overlap")
     return 0
