@@ -351,13 +351,25 @@ def _judge_one(
     verdict = (parsed.get("verdict") or "").strip().lower()
     if verdict not in VALID_VERDICTS:
         return None
+    patch = _coerce_patch(parsed.get("patch"))
+    if verdict != "none" and not patch:
+        # The prompt's hard rules require a non-"none" verdict to carry a
+        # usable patch ("If you cannot satisfy these constraints, return
+        # 'none' instead"), so this is the model breaking its own contract.
+        # Dropping it beats rendering a proposal whose every field reads
+        # "(missing)" — that costs a human a review cycle to discover it is
+        # empty, and `evolve`'s output is a human review queue.
+        log(f"{neighbor.key}: verdict '{verdict}' with unusable patch "
+            f"({type(parsed.get('patch')).__name__}) — dropped",
+            tag="propose_evolution")
+        return None
     return EvolutionProposal(
         source_key=source_key,
         target_key=neighbor.key,
         verdict=verdict,
         confidence=float(parsed.get("confidence") or 0.0),
         rationale=(parsed.get("rationale") or "").strip()[:300],
-        patch=parsed.get("patch") or {},
+        patch=patch,
         claim_ids=parsed.get("claim_ids") or [],
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
@@ -365,13 +377,35 @@ def _judge_one(
     )
 
 
+def _coerce_patch(raw) -> dict:
+    """Normalize a judge's `patch` field to a dict, or `{}` if unusable.
+
+    The schema below declares `patch` as an object, but it is only honored by
+    chat-relay — every other provider ignores it, so `patch` arrives as
+    whatever the model emitted. Observed 2026-08-04 ingesting a Molecular
+    Biology and Evolution paper: the model returned a LIST, which sailed
+    through the old `parsed.get("patch") or {}` (a non-empty list is truthy)
+    into a field annotated `dict`, and crashed `render_proposal_md` on
+    `.get()` — after the page had already been committed, so the ingest
+    exited 3 on a run that had actually succeeded.
+
+    A single-element list wrapping the dict is the common slip and is
+    recovered rather than discarded; anything else yields `{}` and the caller
+    decides what that means for the verdict.
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list) and len(raw) == 1 and isinstance(raw[0], dict):
+        return raw[0]
+    return {}
+
+
 # JSON Schema for the evolution proposer envelope. Honored by chat-relay;
-# ignored by other providers. `verdict` is enum-constrained — downstream code
-# rejects anything not in VALID_VERDICTS — and `patch` is loosely typed
+# ignored by other providers — which is why `_coerce_patch` exists rather than
+# this schema being load-bearing. `verdict` is enum-constrained (downstream
+# code rejects anything not in VALID_VERDICTS) and `patch` is loosely typed
 # because its shape varies per verdict (refine/enhance/contrast each pull
-# different keys; "none" gives `patch: {}`). The downstream `_judge_one`
-# logic still validates patch shape per-verdict; the schema only ensures
-# the envelope is well-formed.
+# different keys; "none" gives `patch: {}`).
 _EVOLUTION_SCHEMA = {
     "type": "object",
     "required": ["verdict", "rationale", "patch"],
