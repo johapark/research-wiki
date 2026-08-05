@@ -83,6 +83,29 @@ def find_zero_claim_papers() -> list[dict]:
     return [{"stem": r["stem"], "category": r["category"]} for r in rows]
 
 
+def find_stems_missing_claim_overlap() -> list[str]:
+    """Paper pages with claims that `claim-overlap` has not covered.
+
+    Claim-overlap is opt-in at ingest (`--claim-overlap`) because it spends an
+    LLM judge call per candidate pair to confirm a link on roughly one paper in
+    ten — batching it is cheaper than paying per ingest. The cost of batching is
+    that coverage decays silently, so it needs a check: without one, a stem that
+    was never examined is indistinguishable from one examined and correctly found
+    to have no real overlap (the common outcome).
+
+    Advisory, not a defect. A pending stem means an opportunity was not taken,
+    not that anything on disk is wrong — drain with
+    `researchwiki claim-overlap --backlog`.
+    """
+    from ...db.safe import safe_read
+
+    def _query(conn):
+        from ..claim_overlap import find_backlog
+        return find_backlog(conn)
+
+    return safe_read(_query, default=[], label="lint.find_stems_missing_claim_overlap")
+
+
 def db_drift_check_and_fix(
     apply_fix: bool,
 ) -> tuple[dict[str, list], dict[str, int]]:

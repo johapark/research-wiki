@@ -55,6 +55,8 @@ def _batch_passthrough_args(args) -> list[str]:
         out.append("--verify-claim-entailment")
     if args.no_cross_link:
         out.append("--no-cross-link")
+    if args.claim_overlap:
+        out.append("--claim-overlap")
     if args.auto_promote:
         out.append("--auto-promote")
     if args.force_sandbox:
@@ -227,18 +229,19 @@ def _cmd_ingest(args) -> int:
     print("Inspect the trace with:")
     print(f"  researchwiki agent trace {ctx.attempt_id}")
 
-    # Proactive claim-grounded cross-linking. Runs off the committed page's
-    # claims (they aren't in the DB until `db rebuild`), auto-adds reciprocal
-    # Related-Papers links for LLM-confirmed matches. Opt out with
-    # --no-cross-link; naturally no-ops under --stub / --no-semantic (no judge /
-    # no bi-encoder) and when the page was sandboxed rather than promoted.
     # Post-commit hooks — skip when the ingest refused to promote (duplicate PDF,
     # sandbox, etc.). committed_path is None in those cases and the hooks would
     # crash on the None path since they all take an os.PathLike.
     if (not args.no_cross_link and not args.stub
             and ctx.paper_stem and ctx.committed_path):
-        from . import claim_overlap
-        claim_overlap.run_after_ingest(ctx.paper_stem, ctx.committed_path)
+        # Claim-grounded cross-linking is OPT-IN (--claim-overlap). It spends an
+        # LLM judge call per candidate pair and confirms a link for roughly one
+        # paper in ten, so paying it on every ingest buys little; the stem lands
+        # in the claim_overlap_runs backlog instead and `status` surfaces the
+        # count once enough accumulate to be worth one batch.
+        if args.claim_overlap:
+            from . import claim_overlap
+            claim_overlap.run_after_ingest(ctx.paper_stem, ctx.committed_path)
         # Attach the new paper to any existing concept hub whose term it
         # mentions (spoke + reciprocal link). No-ops until concept pages exist.
         from .. import concepts
@@ -310,7 +313,13 @@ def _cmd_trace(args) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """Construct the `researchwiki agent` parser.
+
+    Split out of `main` so flag contracts are testable without running an
+    ingest — the `--claim-overlap` default in particular, since flipping it
+    silently would restore per-ingest LLM spend.
+    """
     parser = argparse.ArgumentParser(prog="researchwiki agent", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     subs = parser.add_subparsers(dest="cmd", required=True)
@@ -355,7 +364,14 @@ def main(argv: list[str]) -> int:
     p_ingest.add_argument("--force-sandbox", action="store_true",
                           help="Always write to .agent-output/, never promote to wiki/")
     p_ingest.add_argument("--no-cross-link", action="store_true",
-                          help="Skip the post-promote claim-overlap cross-linking pass.")
+                          help="Skip the post-promote concept-hub attachment and "
+                               "contradiction-alert passes.")
+    p_ingest.add_argument("--claim-overlap", action="store_true",
+                          help="Also run claim-overlap cross-linking now. Off by "
+                               "default: it costs LLM judge calls per ingest and "
+                               "confirms a link on roughly 1 paper in 10, so it is "
+                               "batched instead — skipped stems accumulate and "
+                               "`researchwiki claim-overlap --backlog` drains them.")
     p_ingest.add_argument("--doi", default=None,
                           help="Override the DOI (skip in-text DOI detection — use when "
                                "the PDF contains fragments of neighboring articles)")
@@ -407,5 +423,10 @@ def main(argv: list[str]) -> int:
     p_trace.add_argument("--show-drafts", action="store_true", help="Also print draft text")
     p_trace.set_defaults(func=_cmd_trace)
 
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
     return int(args.func(args) or 0)

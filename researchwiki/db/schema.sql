@@ -132,3 +132,38 @@ CREATE INDEX IF NOT EXISTS idx_iter_attempt  ON ingest_iterations(attempt_id);
 CREATE INDEX IF NOT EXISTS idx_iter_stem     ON ingest_iterations(paper_stem);
 CREATE INDEX IF NOT EXISTS idx_iter_role     ON ingest_iterations(role);
 CREATE INDEX IF NOT EXISTS idx_iter_created  ON ingest_iterations(created_at);
+
+-- ---------------------------------------------------------------------------
+-- claim_overlap_runs — one row per stem that `claim-overlap` has processed.
+--
+-- Exists to make coverage knowable. The bullets claim-overlap writes are the
+-- only other trace it leaves, and a stem with no bullet is ambiguous: it may
+-- never have been examined, or examined and correctly found nothing (the
+-- common case — the judge rejects most candidates by design). Without this
+-- table you cannot tell those apart, so you can never say the route is current.
+--
+-- `claims_fingerprint` is a hash of the stem's graded claim texts at run time.
+-- A re-ingest or regrade that changes the claims changes the fingerprint, so
+-- the stem falls back into the backlog instead of being considered done
+-- forever on the strength of a stale comparison.
+--
+-- Counts are stored so the backlog drain can report yield without re-running,
+-- and so a suspiciously zero-candidate corpus is diagnosable.
+CREATE TABLE IF NOT EXISTS claim_overlap_runs (
+    paper_stem         TEXT PRIMARY KEY,
+    ran_at             INTEGER NOT NULL,   -- epoch seconds
+    claims_fingerprint TEXT NOT NULL,      -- sha256 over the claim texts compared
+    n_claims           INTEGER NOT NULL,
+    n_candidates       INTEGER NOT NULL,   -- pairs above the cosine threshold
+    n_judged           INTEGER NOT NULL,   -- candidates that reached the LLM
+    n_confirmed        INTEGER NOT NULL,   -- judged as a real relationship
+    sim_threshold      REAL NOT NULL,      -- recorded: a lowered floor invalidates comparability
+    -- 'run'    : written by an actual claim-overlap execution; counts are real.
+    -- 'marked' : written by `claim-overlap --mark-covered`, which back-records
+    --            the papers the old auto-on-ingest hook already processed. Those
+    --            runs predate this table, so their candidate/judged counts were
+    --            never captured and read 0 — do not aggregate them as measurements.
+    source             TEXT NOT NULL DEFAULT 'run'
+);
+
+CREATE INDEX IF NOT EXISTS idx_co_runs_ran_at ON claim_overlap_runs(ran_at);

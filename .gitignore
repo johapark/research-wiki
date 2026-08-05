@@ -46,6 +46,10 @@ wiki/other/*
 # suppress `suggest-splits --category` reminders for the decay window).
 .category-divergence-stamp
 
+# Companion stamp for the claim-overlap backlog nudge (status uses it to
+# suppress `claim-overlap --backlog` reminders for the decay window).
+.claim-overlap-stamp
+
 # Per-user "I decided this isn't a concept" denylist for concept-hub
 # candidates that failed the concept-vs-glossary thesis test. Written by
 # `researchwiki candidates concepts --decline`; read by `collect_candidates`

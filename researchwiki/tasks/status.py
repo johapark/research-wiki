@@ -415,6 +415,16 @@ def main(argv: list[str]) -> int:
         print(msg)
         print()
 
+    # Claim-overlap backlog nudge. Same size-threshold + decay-stamp shape as
+    # the `other` warning above. Claim-overlap is opt-in at ingest, so coverage
+    # would otherwise decay with nothing to notice it — this line is the only
+    # thing standing between a batched pass and a silently forgotten one.
+    from .claim_overlap import backlog_warning
+    co_msg = backlog_warning()
+    if co_msg:
+        print(co_msg)
+        print()
+
     # Within-category divergence nudge. Structural-only (no LLM) and
     # decay-stamped like the `other` warning — fires when a populated category
     # has grown a sub-cluster distinct enough to consider splitting out. See

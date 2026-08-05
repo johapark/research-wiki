@@ -16,7 +16,8 @@ focused and individually testable:
   yaml_checks     — invalid_fm, type/category/doi/year/keywords drift
   staleness       — stale_synthesis, stale_by_content, audit_count, proposals
   audit_p2        — Priority-2 entries with audit anchor hits
-  db_checks       — ungraded_papers, zero_claim_papers, db_drift
+  db_checks       — ungraded_papers, zero_claim_papers,
+                    stems_missing_claim_overlap, db_drift
   supplementary   — supp YAML ↔ disk consistency
 
 The orchestrator below walks pages once, calls each check, then renders
@@ -47,6 +48,7 @@ from .concept_contract import find_concept_contract_violations
 from .db_checks import (
     db_drift_check_and_fix,
     find_ungraded_papers,
+    find_stems_missing_claim_overlap,
     find_zero_claim_papers,
 )
 from .link_checks import (
@@ -101,6 +103,7 @@ def main(argv: list[str]) -> int:
                              "stale_evolution_proposals, missing_keywords, "
                              "missing_hook, hook_too_long, "
                              "ungraded_papers, zero_claim_papers, "
+                             "stems_missing_claim_overlap, "
                              "dangling_claim_anchors, "
                              "concept_contract_violations, db_drift, "
                              "cross_paper_contradictions, fix_applied.")
@@ -153,6 +156,7 @@ def main(argv: list[str]) -> int:
     p2_anchor_hits = find_p2_anchor_hits(pages)
     ungraded_papers = find_ungraded_papers()
     zero_claim_papers = find_zero_claim_papers()
+    stems_missing_claim_overlap = find_stems_missing_claim_overlap()
     supp_yaml_missing, supp_orphans = find_supplementary_issues(pages, pages_fm)
     dangling_anchors = find_dangling_claim_anchors(pages_body)
     concept_contract = find_concept_contract_violations(pages, pages_body, pages_fm)
@@ -186,6 +190,7 @@ def main(argv: list[str]) -> int:
             supp_yaml_missing=supp_yaml_missing, supp_orphans=supp_orphans,
             ungraded_papers=ungraded_papers,
             zero_claim_papers=zero_claim_papers,
+            stems_missing_claim_overlap=stems_missing_claim_overlap,
             dangling_anchors=dangling_anchors,
             concept_contract=concept_contract,
             db_drift=db_drift, db_drift_fixed=db_drift_fixed,
@@ -206,6 +211,7 @@ def main(argv: list[str]) -> int:
         supp_yaml_missing=supp_yaml_missing, supp_orphans=supp_orphans,
         ungraded_papers=ungraded_papers,
         zero_claim_papers=zero_claim_papers,
+        stems_missing_claim_overlap=stems_missing_claim_overlap,
         dangling_anchors=dangling_anchors,
         concept_contract=concept_contract,
         db_drift=db_drift, db_drift_fixed=db_drift_fixed,
@@ -282,6 +288,7 @@ def _emit_json(**kw) -> int:
         ],
         "ungraded_papers": kw["ungraded_papers"],
         "zero_claim_papers": kw["zero_claim_papers"],
+        "stems_missing_claim_overlap": kw["stems_missing_claim_overlap"],
         "db_drift": kw["db_drift"],
         "cross_paper_contradictions": kw.get("cross_paper", []),
         "fix_applied": {
@@ -634,6 +641,23 @@ def _emit_prose(**kw) -> int:
               "extraction reads only `## Key Contributions` / `## Results` / "
               "`## Limitations` / `## Methodology and Architecture`. Rename the "
               "heading, then `db rebuild`._")
+        print()
+
+    pending_overlap = kw["stems_missing_claim_overlap"]
+    if pending_overlap:
+        print(f"## Paper pages not yet covered by claim-overlap ({len(pending_overlap)})")
+        for s in pending_overlap[:20]:
+            print(f"- {s}")
+        if len(pending_overlap) > 20:
+            print(f"- ... ({len(pending_overlap) - 20} more)")
+        print()
+        print("_Advisory, not a defect — nothing on disk is wrong. Claim-overlap is "
+              "opt-in at ingest (`--claim-overlap`) because it spends an LLM judge "
+              "call per candidate pair to confirm a link on roughly one paper in "
+              "ten, so it's batched. A stem appears here when it has never been "
+              "examined, or when its claims changed since it was (regrade / "
+              "re-ingest), which invalidates the earlier comparison. Drain with "
+              "`researchwiki claim-overlap --backlog`._")
         print()
 
     db_drift = kw["db_drift"]
