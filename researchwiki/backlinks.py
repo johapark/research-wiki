@@ -83,6 +83,29 @@ def invert_relationship_note(source_note: str) -> str:
     return TOPICAL_NOTE
 
 
+# A "no related papers" placeholder written by the page author when it had
+# nothing to link. Matched with the rest of the line, because authors qualify it
+# — `(none)`, `(none — no overlapping wiki papers)`, `(None yet.)`.
+NONE_PLACEHOLDER_RE = re.compile(r"(?im)^\s*\(?\s*none\b.*$")
+
+
+def _drop_none_placeholder(section_body: str) -> str:
+    """Remove a `(none…)` placeholder from a Related Papers section body.
+
+    Called when a bullet is about to be inserted, because the placeholder and a
+    bullet are contradictory and the insertion is what makes it stale. Without
+    this the placeholder simply stays and the bullet lands underneath it: 62
+    pages in the corpus carried a literal `(none)` line sitting above real
+    Related Papers bullets, every one of them written by exactly this path.
+
+    Only drops lines whose *whole* content is the placeholder, so a bullet that
+    happens to contain the word ("none of the three replicated…") is untouched.
+    """
+    kept = [ln for ln in section_body.split("\n") if not NONE_PLACEHOLDER_RE.match(ln)]
+    out = "\n".join(kept).strip()
+    return (out + "\n") if out else ""
+
+
 def append_related_paper(
     target_path: Path, source_key: str,
     note: str = TOPICAL_NOTE,
@@ -131,6 +154,7 @@ def append_related_paper(
         next_m = _NEXT_HEADING_RE.search(text, section_start + 1)
         section_end = next_m.start() if next_m else len(text)
         section_body = text[section_start:section_end].rstrip() + "\n"
+        section_body = _drop_none_placeholder(section_body)
         new_body = section_body + bullet + "\n\n"
         return text[:section_start] + "\n" + new_body + text[section_end:]
 

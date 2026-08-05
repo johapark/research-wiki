@@ -165,6 +165,7 @@ def run_ingest(
         ctx.pdf_full_text = full_text
         ctx.claims_count = claim_count
         log(f"extract → sections={list(sections.keys())} pdf_claims={claim_count}", tag="agent")
+        _warn_thin_extraction(sections, claim_count)
 
         # Phase 2.4: target-claims extraction (L3) — structured list of
         # claims the page should preserve. Surfaces a coverage target the
@@ -323,6 +324,43 @@ def _phase_reconcile(ctx: Context, conn) -> tuple[dict, int]:
         conn=conn,
     )
     return meta, iter_id
+
+
+# Section names that carry a paper's findings. An extraction that returns none
+# of them has recovered the paper's framing but not its evidence.
+_FINDING_SECTIONS = ("results", "discussion", "conclusion", "findings")
+
+
+def _warn_thin_extraction(sections: dict, claim_count: int) -> None:
+    """Log a warning when section extraction recovered no findings text.
+
+    Silent-degradation guard. `kim-2019-spcas9-activity-prediction-by-deepspcas9`
+    extracted `['introduction', 'methods', 'abstract']` with `pdf_claims=0` from a
+    9-page research article — no results, no discussion — and still produced a
+    page that passed every gate, because the author phase works from whatever
+    sections it is handed and the graders check the draft against the PDF's *full*
+    text rather than against the sections. So the page was fine and the grounding
+    corpus behind it was thinner than it looked, with nothing anywhere saying so.
+
+    Warning only, never a failure: thin extraction is a quality risk, not a
+    defect, and some genuinely have no results section (editorials, commentary,
+    perspectives). The wiki-page analogue is `lint`'s `zero_claim_papers`; this is
+    the ingest-time counterpart, and its job is to put the fact in the log where a
+    reviewer reading a surprising page can find it.
+    """
+    names = {str(k).lower() for k in (sections or {})}
+    if not names:
+        log("extract ⚠ no sections recovered at all — the page will rest on the "
+            "abstract and full-text retrieval alone", tag="agent")
+        return
+    if not any(any(f in n for f in _FINDING_SECTIONS) for n in names):
+        log(f"extract ⚠ no findings section recovered "
+            f"(got {sorted(names)}) — claims will be graded against full text "
+            f"only, so treat the Results section of the draft with extra care",
+            tag="agent")
+    if claim_count == 0:
+        log("extract ⚠ zero PDF-side claims extracted — nothing to cross-check "
+            "the draft's claims against beyond retrieval", tag="agent")
 
 
 def _phase_extract(ctx: Context, conn) -> tuple[dict, int, str]:

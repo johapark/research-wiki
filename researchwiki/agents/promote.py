@@ -499,20 +499,86 @@ _BACKLINK_NOTES = {
 _BACKLINK_NOTE_DEFAULT = _BACKLINK_NOTES["topical"]
 
 
+_STEM_SURNAME_YEAR_RE = re.compile(r"^(.+?)-(\d{4})[a-z]?-")
+
+
+def _stem_surname_year(stem: str) -> tuple[str, str] | None:
+    """Split a canonical stem into (surname-slug, year). None if it doesn't parse.
+
+    The surname slug may itself contain hyphens (`garcia-lopez`, and consortium
+    slugs like `1000-genomes-project`), so the year is the anchor rather than the
+    first `-`. Folded/lowercased comparison downstream means `garcia-lopez`
+    matches a reference list's `García-López`; a consortium slug simply won't
+    match, which degrades to the weaker note rather than to a wrong one.
+    """
+    m = _STEM_SURNAME_YEAR_RE.match(stem)
+    return (m.group(1), m.group(2)) if m else None
+
+
+def _upgrade_kind_from_references(cand, source_pdf: Path | None) -> str:
+    """The candidate's relationship kind, upgraded when the PDF proves a citation.
+
+    `propose_crosslinks` labels a pairing `topical` whenever it didn't establish
+    a direction, and `promote` would then write "topically related" onto the
+    target — understating a relationship the source PDF's own reference list can
+    prove. On `kim-2019-spcas9-…` that cost two real citations (Doench 2014 as its
+    ref. 14, and DeepCRISPR) and they shipped as merely topical.
+
+    Only ever strengthens `topical`/unknown, and only on positive proof: a
+    citation kind already asserted upstream is left alone, and a False from
+    `cites_reference` means "not proven", so it keeps the weaker phrasing.
+    """
+    kind = getattr(cand, "kind", "") or ""
+    if kind in ("cited_by_source", "cites_source"):
+        return kind
+    if source_pdf is None or not source_pdf.exists():
+        return kind
+    parsed = _stem_surname_year(cand.wikilink.rsplit("/", 1)[-1])
+    if not parsed:
+        return kind
+    surname, year = parsed
+    try:
+        from ..pdf.text import cites_reference
+        if cites_reference(source_pdf, surname, year):
+            return "cited_by_source"
+    except Exception:
+        pass
+    return kind
+
+
 def _append_backlinks(
     candidates: list,
     source_category: str,
     source_stem: str,
+    source_page: Path | None = None,
+    source_pdf: Path | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Append a back-link to each verified candidate's Related Papers section.
+    """Write BOTH directions of each verified cross-link. Idempotent.
 
     Uses the shared `backlinks.append_related_paper` helper for consistent
     on-disk convention with `lint --fix`. The bullet's note comes from the
     candidate's `kind` (see `_BACKLINK_NOTES`) — an unknown kind falls back to
-    the topical phrasing, which asserts the least.
+    the topical phrasing, which asserts the least — after
+    `_upgrade_kind_from_references` gets a chance to prove a citation.
 
-    Returns (added, skipped) — `skipped` covers both already-linked targets
-    and missing target files.
+    `source_page` is the newly-promoted page. Passing it is what makes the link
+    reciprocal, and omitting it used to guarantee lint debt: the new page's own
+    `## Related Papers` is whatever wikilinks the *author draft* happened to
+    write, so when a draft contained none (as on `kim-2019-spcas9-…`) the
+    verified candidates got bullets pointing **at** the new page while the new
+    page pointed back at nothing. `lint` then reported three `missing_backlinks`
+    that no one had introduced by hand. Reciprocity belongs here, where the
+    verified list already lives, not in a later repair pass.
+
+    The source-side note is the inverse of the target-side one, via
+    `backlinks.invert_relationship_note` — the same inversion `lint --fix` uses,
+    so the two agree by construction rather than by coincidence.
+
+    Returns (added, skipped) for the TARGET side only, preserving the existing
+    contract: `PromotionResult.backlinks_added` and the `Cross-links: N
+    back-links added` count in log.md both mean "bullets written onto *other*
+    pages", and re-counting the source side here would silently double the
+    number every historical entry is compared against.
     """
     from ..backlinks import append_related_paper
 
@@ -521,13 +587,18 @@ def _append_backlinks(
     skipped: list[str] = []
     for cand in candidates:
         target_path = wiki_dir() / f"{cand.wikilink}.md"
-        note = _BACKLINK_NOTES.get(
-            getattr(cand, "kind", ""), _BACKLINK_NOTE_DEFAULT
-        )
+        kind = _upgrade_kind_from_references(cand, source_pdf)
+        note = _BACKLINK_NOTES.get(kind, _BACKLINK_NOTE_DEFAULT)
         if append_related_paper(target_path, source_key, note=note):
             added.append(cand.wikilink)
         else:
             skipped.append(cand.wikilink)
+        # The reciprocal, on the page we just wrote.
+        if source_page is not None:
+            append_related_paper(
+                source_page, cand.wikilink,
+                note=_bl.invert_relationship_note(note),
+            )
     return added, skipped
 
 
@@ -707,6 +778,8 @@ def promote_to_wiki(
         candidates=candidates,
         source_category=category,
         source_stem=stem,
+        source_page=page_path,
+        source_pdf=res.pdf_path,
     )
     res.backlinks_added = added
     res.backlinks_skipped = skipped
