@@ -245,13 +245,36 @@ Single-term **hub note** — a mini-synthesis around one recurring concept (surf
 
 **PDFs needing replacement** are not a file. A page whose PDF wasn't text-extractable records that in its own YAML `pdf_extraction_note:` (plus `abstract_source:` for what it was built from instead); `researchwiki status` lists them under *Workflow state*.
 
+### 7. Commentary page — `wiki/{category}/{stem}.md`
+
+A piece *about* someone else's paper: Research Highlight, News & Views, Comment, editorial. It lives beside the paper it discusses (a category dir, **not** `references/` — that's for guidance and books) and carries `type: commentary` plus `primary_paper:`.
+
+```yaml
+type: commentary
+primary_paper: "[[single-cell/gold-2026-scoring-gene-importance-by-interpreting]]"
+# …or a YAML list when the piece covers several, with a citation string for any
+# primary that isn't in the wiki:
+# primary_paper:
+#   - "[[cgt/orosco-2026-dna-guided-crispr-cas12-for-cellular-rna]]"
+#   - "Wu et al., *Nature Biotechnology* (2026) — companion study; not in this wiki"
+```
+
+**Why the type exists: attribution.** Typed `paper`, a commentary's claims are extracted and credited to the commentator — the primary authors' results asserted under the wrong stem, and citable via `[[stem#slug]]` anchors from synthesis pages. Neither fidelity gate objects, because the claims genuinely *are* in the commentary's PDF; the gates check faithfulness to the cited source, not entitlement to the claim. `type: commentary` is the structural fix: `db.rebuild` extracts claims only from `type: paper`, so retyping retracts them on the next `db rebuild` and they cannot come back.
+
+**Contract.** Open with a blockquote banner above `## Summary` saying the page is a commentary, naming the primary paper, and directing the reader to cite it. Write `hook:` about *the page* — what it covers and that it carries no findings of its own — never a restatement of the primary paper's contribution. Body sections may stay as authored (they describe the primary work accurately); what changes is the attribution frame. A commentary is **not** citable evidence: cite the primary paper, and where only the commentary is in the wiki, attribute in prose to the original authors and footnote the commentary as the route ("…as summarized by[^marchal-2026]").
+
+Multi-item Research Highlights columns are the sharpest case — one *Nature Genetics* column can summarize four unrelated studies by four groups, so the single stem otherwise asserts all four groups' work.
+
+**Detection is local, not upstream.** Crossref returns `type: journal-article` and PubMed `Journal Article` for highlight and primary alike, so no metadata lookup can catch this. `agent ingest` blocks it structurally instead — see *Ingest → Commentary guard*.
+
 ### Page-type discipline
 
-- Every page declares `type:` — `paper`, `synthesis`, `guidance`, `protocol`, `whitepaper`, `book`, `idea`, `concept`.
+- Every page declares `type:` — `paper`, `synthesis`, `guidance`, `protocol`, `whitepaper`, `book`, `idea`, `concept`, `commentary`.
 - Synthesis, idea + concept pages must cite their sources and pass **both** `check-grounding` + `grade synthesis`. Synthesis/idea cite via the body (inline `[[wikilink]]`s + `## References` footnotes); concept pages use the `referenced_papers:` spoke list.
 - **Exemption**: the `## What would update this page` H2 is skipped by `check-grounding` (name-narrow, exact heading, case-insensitive). Other "next steps"-style headings aren't exempt.
 - Idea pages must follow Verdict → Background → Opportunities → Plans → Caveats.
 - Concept pages must follow Definition → How it appears across the corpus (Cross-domain connections optional).
+- Commentary pages need `primary_paper:` and a banner blockquote, produce no claims, and are never cited as evidence — cite the primary paper.
 
 ---
 
@@ -298,6 +321,8 @@ researchwiki agent ingest --resume .ingest/batch-<ts>/          # resume after a
 
 **Never write ad-hoc scripts to ingest PDFs, and never fan out one Bash task per file.** Always use `agent ingest` (or digest path for recovery); rely on its built-in batch mode for multi-PDF runs.
 
+**Commentary guard.** `agent ingest` refuses to auto-promote a commentary-shaped PDF as `type: paper`: a strong masthead label (`Research Highlight`, `News & Views`) fires alone; otherwise `page_count == 1` **and** Crossref `reference-count == 0`, or a line-anchored `Editorial`/`Comment` plus one structural signal. Page lands in `.agent-output/` typed `commentary`, fired signals named in the gate reason and its frontmatter; `--auto-promote` overrides but still writes `type: commentary`. Unlike other gate failures this one is **not** DEBUG-repairable — no rewrite of the prose changes what the PDF is. Cost is near-zero: the Crossref lookup is gated on a local pre-trigger that fires on ~3% of PDFs, so the common path adds no network call. See `researchwiki/agents/commentary.py` and Page Types §7. The digest path has no guard — check the PDF's masthead yourself.
+
 **Digest-path fallback — `researchwiki ingest`** — recovery, unextractable PDFs, special page types, custom-voice cases. Workflow + page-contract template in [`prompts/ingest-digest.md`](./prompts/ingest-digest.md).
 
 #### After ingest (both paths)
@@ -316,7 +341,7 @@ Coverage is tracked per stem with a fingerprint of the claims compared, so a reg
 
 **Step 2.6 — Concept-hub attachment.** Agent path auto-runs `concepts.attach_after_ingest` (this one *is* automatic — unlike Step 2.5 it makes no LLM call): the new paper joins any existing `wiki/concepts/` hub whose `topic_seed` term appears in a **contribution claim** (key_contributions / results / methodology sections — a body-prose-only mention isn't enough; those log as near-misses). The spoke bullet cites the specific matching claim via `[[stem#slug]]`; `referenced_papers`/`concept_span` refresh on the hub, and a reciprocal `[[concepts/<slug>]]` lands on the paper (tagged `auto-added; concept-link`). No-ops until concept pages exist. Digest path: run nothing here (attachment is agent-only); new bridge concepts instead surface via `researchwiki candidates concepts --bridges` — span-≥2 terms are labeled `concept-ready (bridge)`. Scaffold one with `researchwiki concepts "<term>"` (see [`prompts/concept-page-author.md`](./prompts/concept-page-author.md)); creation stays review-gated (it writes prose → both gates). To backfill slug citations on existing hubs after new claims land, `researchwiki concepts --upgrade-spokes` rewrites bare `[[stem]]` spokes to `[[stem#slug]]` (idempotent).
 
-**Step 3 — Set `hook:` on the new page.** The catalog gloss `index.md` renders after the citation: `[[category/stem]] — **Short name** (*Venue* year): {hook}`. Write it **result-first** — method + scale + the distinguishing finding — because its job is to separate this paper from the ~40 others in its category section; restating the paper's *question* (what sentence 1 of `## Summary` gives you) fails that job. Quote the value: hooks routinely contain `[[wikilinks]]` and `:`, both of which break unquoted. Advisory ceilings, `lint`-warned and **never auto-truncated**: **paper 400** chars (1–2 sentences), **concept / synthesis / reference 1000**, **idea 2000**.
+**Step 3 — Set `hook:` on the new page.** The catalog gloss `index.md` renders after the citation: `[[category/stem]] — **Short name** (*Venue* year): {hook}`. Write it **result-first** — method + scale + the distinguishing finding — because its job is to separate this paper from the ~40 others in its category section; restating the paper's *question* (what sentence 1 of `## Summary` gives you) fails that job. Quote the value: hooks routinely contain `[[wikilinks]]` and `:`, both of which break unquoted. Advisory ceilings, `lint`-warned and **never auto-truncated**: **paper / commentary 400** chars (1–2 sentences), **concept / synthesis / reference 1000**, **idea 2000**.
 
 **Agent ingest writes `hook:` automatically.** The author phase emits a `HANDLE:`/`HOOK:` trailer after the six sections; `phases.draft.split_gloss_trailer` parses it off the body (so the critic and graders only ever see the sections) and the *same* string lands in both YAML `hook:` and the `index.md` bullet — they can't drift. Costs no extra LLM call, and the author has the source sections in context. Malformed or missing → field omitted, page lands on `lint`'s `missing_hook`; nothing is ever salvaged from a Summary slice.
 
@@ -413,7 +438,7 @@ CLI wrappers around PubMed / bioRxiv / ORCID. Usage, YAML-recording rules, and w
 ### Agent output — prefer `--json`
 
 - `search --json` → `[{key, stem, category, page_type, title, score, rrf_score, bm25_rank, bm25_score, semantic_rank, semantic_score, snippet}]`; `--see-also` adds `see_also`.
-- `lint --json` → `{pages_scanned, invalid_frontmatter, orphans, broken_wikilinks, missing_backlinks, page_type_mismatches, category_yaml_drift, stale_synthesis, stale_by_content, stale_by_audit_count, stale_evolution_proposals, missing_keywords, missing_hook, hook_too_long, missing_doi, stem_year_drift, unquoted_wikilink_lists, supplementary_missing_on_disk, supplementary_orphaned_files, dangling_claim_anchors, concept_contract_violations, ungraded_papers, zero_claim_papers, stems_missing_claim_overlap, db_drift, cross_paper_contradictions, p2_entries_with_anchor_hits, fix_applied}`. Concept-hub candidates: `candidates concepts --json` → `[{term, slug, pages, categories, weighted, label, source, sections}]` — `label` is the triage signal (`concept-ready (bridge)` / `concept-ready (deep)` / `candidate` / `glossary-suspect`). Contract violations are advisory (Definition ≥40 words, span≥2 hubs need Cross-domain connections, Definition shouldn't paraphrase a spoke).
+- `lint --json` → `{pages_scanned, invalid_frontmatter, orphans, broken_wikilinks, missing_backlinks, page_type_mismatches, category_yaml_drift, stale_synthesis, stale_by_content, stale_by_audit_count, stale_evolution_proposals, missing_keywords, missing_hook, hook_too_long, missing_doi, stem_year_drift, unquoted_wikilink_lists, supplementary_missing_on_disk, supplementary_orphaned_files, dangling_claim_anchors, concept_contract_violations, ungraded_papers, zero_claim_papers, stems_missing_claim_overlap, duplicate_claim_sets, db_drift, cross_paper_contradictions, p2_entries_with_anchor_hits, fix_applied}`. `duplicate_claim_sets` is advisory — page pairs whose claims are each other's nearest neighbours (reciprocal top-1 share ≥ 0.25), the structural signature of a commentary ingested as `type: paper`; `null` means skipped (claim-embedding cache cold or <50% covered — warm it with any `claim-overlap` run). Legitimate near-duplication is common (two trials of one therapy, a paper and its preprint), so the pair is reported and the call is the reviewer's. Concept-hub candidates: `candidates concepts --json` → `[{term, slug, pages, categories, weighted, label, source, sections}]` — `label` is the triage signal (`concept-ready (bridge)` / `concept-ready (deep)` / `candidate` / `glossary-suspect`). Contract violations are advisory (Definition ≥40 words, span≥2 hubs need Cross-domain connections, Definition shouldn't paraphrase a spoke).
 - `audit --json` → `{papers_skipped_no_doi, papers_intentional_no_doi, total_paper_pages, papers, cross_wiki_citations, edge_summary, recommended_additions, shared_citation_anchors, anchor_groups, s2_missing}`; `categories`/`category_breadth`/`count_normalized` are per-entry fields nested inside `recommended_additions`/`shared_citation_anchors`, not top-level.
 
 ### Exit-code contract

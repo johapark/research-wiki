@@ -61,6 +61,10 @@ HOOK_MAX_CHARS = {
     "protocol": 1000,
     "whitepaper": 1000,
     "book": 1000,
+    # A commentary is a one-page piece about someone else's paper, so its
+    # gloss should say what it covers and stop — the primary paper carries
+    # the substance. Same ceiling as a paper page.
+    "commentary": 400,
     "idea": 2000,
 }
 HOOK_MAX_DEFAULT = 1000
