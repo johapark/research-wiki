@@ -61,8 +61,17 @@ _MAGNITUDE_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?([KkMmBbGg])\b")
 # by space+3 digits), and "8 heads" is left alone. Applied as a haystack/claim
 # pre-normalization rather than by loosening the tokenizer, which is shared with
 # the paper-page grader and the fixture scorer.
+# The trailing `(?!,\d)` guard is not optional. PDF extraction routinely glues a
+# superscript citation marker to the preceding word, so a table row reads
+# "Borzoi (2023)73 524,000" — and without the guard "73" is a valid 1-3 digit lead
+# and "524" a valid 3-digit group, so the two joined into "73524,000" and the real
+# figure 524,000 vanished from the evidence set, surfacing as a false
+# MISATTRIBUTED on a page whose number was verifiably in the cited PDF. A
+# following ",<digit>" proves the group was already comma-delimited, so it cannot
+# also be space-delimited; a comma used as punctuation ("300 000, and") still
+# joins, because that comma is not followed by a digit.
 _SPACED_THOUSANDS_RE = re.compile(
-    r"(?<![\d.])(\d{1,3})((?:[    ]\d{3})+)(?!\d)"
+    r"(?<![\d.])(\d{1,3})((?:[    ]\d{3})+)(?!\d)(?!,\d)"
 )
 
 

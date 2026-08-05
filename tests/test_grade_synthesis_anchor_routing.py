@@ -121,3 +121,24 @@ def test_trailing_zero_decimals_still_match():
     """Pre-existing tolerance must survive the new normalization."""
     _, unmatched = check_numerics("F1 of 0.778", "", "F1 was 0.7780")
     assert unmatched == []
+
+
+def test_superscript_citation_does_not_glue_to_a_comma_grouped_number():
+    """Regression: PDF extraction glues a citation marker to the preceding word.
+
+    A table row extracts as "Borzoi (2023)73 524,000". Without the `(?!,\\d)`
+    guard, "73" is a valid 1-3 digit lead and "524" a valid 3-digit group, so the
+    two joined into "73524,000" and the real figure 524,000 left the evidence
+    set — producing a false MISATTRIBUTED on a page whose number was verifiably
+    in the cited PDF. A following ",<digit>" proves the group was already
+    comma-delimited, so it cannot also be space-delimited.
+    """
+    s = "Borzoi (2023)73 524,000 bp"
+    assert collapse_spaced_thousands(s) == s
+    _, unmatched = check_numerics("receptive field of 524,000 bp", "", s)
+    assert unmatched == []
+
+
+def test_comma_as_punctuation_still_joins():
+    """The guard must key on ',<digit>', not on any comma."""
+    assert collapse_spaced_thousands("300 000, and more") == "300000, and more"
