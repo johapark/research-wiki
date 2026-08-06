@@ -83,6 +83,8 @@ Research/
 
 **Invariant**: `papers/` holds only canonically-named PDFs. Raw drops live in `inbox/`. A non-empty `inbox/` is the backlog.
 
+`wiki/`, `papers/`, `inbox/` may be **directory symlinks** into a synced folder (recommended layout when the user syncs their library — see [`prompts/migration-backfill.md`](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder)). That is deliberate: don't "fix" them, and don't be alarmed that their tracked `.gitkeep`s are `skip-worktree`-pinned. Unrelated to the per-PDF *"copy, never symlink"* rule below, which governs files moved into `inbox/`. Always run `researchwiki` from the repo root — paths resolve from `Path.cwd()`.
+
 ---
 
 ## File Naming Convention

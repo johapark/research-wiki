@@ -22,9 +22,15 @@ python3 -m venv ~/.venvs/research-wiki
 Both halves of that matter.
 
 - **A venv, not the ambient interpreter.** Bare `pip install -e .` installs into whatever Python is active — frequently a shared conda `base`. This project pulls ~2 GB (torch + transformers + sentence-transformers), and its constraints are platform-specific: on x86_64 macOS, torch caps at 2.2.2, which forces `transformers<5` and `numpy<2` (see the install-time failure table in [`migration-backfill.md`](./migration-backfill.md)). Those pins have no business in an environment other projects share.
-- **Outside the repo, not `.venv/` inside it.** A venv is ~34,000 files. If the repo sits in iCloud/Dropbox — a normal setup here, since `wiki/` and `papers/` want syncing — an in-repo venv becomes 96% of the sync load and starves the daemon, which then loses races against concurrent writes: stale `.git/index`, `<name> 2.md` conflict copies. `migration-backfill.md` § *Keep the churn out of the synced folder* has the measurements and the matching relocations for `.git` and the caches. Do those at the same time if the repo is synced.
+- **Outside the repo, not `.venv/` inside it.** A venv is ~34,000 files, so an in-repo venv becomes 96% of the sync load if the tree is synced, starving the daemon until it loses races against concurrent writes: stale `.git/index`, `<name> 2.md` conflict copies.
 
 Venvs bake absolute paths into `bin/` and `pyvenv.cfg`, so pick the location now — moving one later means recreating it.
+
+**Then ask whether they want `wiki/` and `papers/` synced** — across machines, or to read on a phone. Raise it here rather than later: the answer decides where the checkout itself goes, and moving a tree afterwards means redoing the venv and the caches.
+
+If yes, recommend the split layout — **checkout outside the synced folder, with `wiki/`, `papers/`, `inbox/` symlinked into it.** Git and the sync service then have disjoint jobs (`wiki/*` and `papers/*` are gitignored, so the repo never carried them anyway), and the synced folder is left as a clean Obsidian vault that the **mobile app can open**. Walk them through [`migration-backfill.md`](./migration-backfill.md) § *Keep the checkout out of the synced folder*: copy-paste block, the `git update-index --skip-worktree` pin the tracked `.gitkeep` files need (git doesn't traverse symlinked dirs, so the tree otherwise reads permanently dirty), the cache relocations, and the fallback for platforms without usable symlinks.
+
+Warn against the inverse — checkout *inside* the synced folder with `.git` and caches relocated out. Those pointers hold absolute paths but live in the synced tree, so they reach every other machine and resolve nowhere there. Same section documents the observed failures.
 
 That install pulls every Python dependency: `pypdfium2`, `tantivy`, `pyyaml`, `numpy`, torch + transformers + sentence-transformers, and the Anthropic SDK. Optional extras: `pip install -e '.[mcp]'` for `mcp-serve`, `.[dev]` for pytest.
 

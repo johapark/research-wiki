@@ -46,7 +46,26 @@ python3 -m venv ~/.venvs/research-wiki    # outside the repo — see below
 
 Activate the venv (or call `~/.venvs/research-wiki/bin/researchwiki`) to get the CLI — a venv is not on `PATH` otherwise. Everything most users need — pypdfium2, tantivy, the bi-encoder grader, and the Anthropic SDK — is in the default install. Extras: **`[mcp]`** (MCP server for Claude Desktop), **`[dev]`** (pytest). To skip the ~2 GB grader weights at runtime, pass `--no-semantic` to `agent ingest` (draft selection falls back to BM25; pages land in the sandbox for manual promotion) or use the digest path (no grading).
 
-**Why a venv, and why not `.venv/` in the repo.** Bare `pip install -e .` lands in whatever interpreter is active — often a shared conda `base` — and this project's ~2 GB of pins are platform-specific (on x86_64 macOS torch caps at 2.2.2, forcing `transformers<5` and `numpy<2`). And a venv is ~34,000 files: if you keep the repo in iCloud/Dropbox so `wiki/` and `papers/` sync, an in-repo venv becomes the overwhelming majority of the sync load and starves the daemon into corrupting `.git/index` and spawning `<name> 2.md` conflict copies. [`prompts/migration-backfill.md`](./prompts/migration-backfill.md) has the measurements plus the matching relocations for `.git` and the caches.
+**Why a venv, and why not `.venv/` in the repo.** Bare `pip install -e .` lands in whatever interpreter is active — often a shared conda `base` — and this project's ~2 GB of pins are platform-specific (on x86_64 macOS torch caps at 2.2.2, forcing `transformers<5` and `numpy<2`). And a venv is ~34,000 files, which matters most if you sync your library — see just below.
+
+### Syncing your library (and reading it on your phone)
+
+Two directories are worth syncing: **`papers/`** and **`wiki/`**. They are also exactly the two the repo does *not* carry — both are gitignored, since the framework is public and your corpus isn't. So git and your sync service (iCloud, Dropbox, Drive, Syncthing) have disjoint jobs, and the recommended layout just lets each do its own.
+
+**Keep the checkout outside the synced folder, and symlink the content dirs in.**
+
+```bash
+SYNC="$HOME/<your-synced-folder>/research-wiki"   # holds wiki/ and papers/
+git clone git@github.com:johapark/research-wiki.git ~/src/research-wiki
+cd ~/src/research-wiki
+for d in wiki papers inbox; do rm -rf "$d"; ln -sfn "$SYNC/$d" "$d"; done
+```
+
+Your sync daemon then sees markdown and PDFs only — no virtualenv, no `.git/` rewritten on every command, no SQLite or search index. Keeping the checkout *inside* the synced folder instead makes the venv alone ~96% of the sync load, which starves the daemon into corrupting `.git/index` and spawning `<name> 2.md` conflict copies.
+
+**The payoff: `$SYNC` becomes purely a vault, so the Obsidian mobile app can open it** — your whole wiki readable on a phone or tablet, `[[wikilinks]]` and all, with none of the checkout in the way. Keep `wiki/` and `papers/` as siblings there so `pdf_path:` links (`[[{stem}.pdf]]`) resolve and PDFs open on tap.
+
+Two details this needs: a `git update-index --skip-worktree` pin on the tracked `.gitkeep` files (git doesn't traverse symlinked directories, so the tree otherwise reads permanently dirty), and the caches relocated to `~/.cache/research-wiki`. Both are one-liners — copy-paste block, the no-symlink fallback, and the sync-specific failure modes (including why a stale sync looks exactly like uncommitted work) are in [`prompts/migration-backfill.md`](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder).
 
 ### Providers
 

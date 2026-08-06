@@ -49,9 +49,16 @@ researchwiki lint --json              # expect ungraded_papers 0
 
 Only *then* is a `hook`/`keywords` backfill worth paying for — if the synced pages predate a field, that is genuinely case 1 above.
 
-### Keep the churn out of the synced folder
+### Keep the checkout out of the synced folder
 
-If the repo lives inside iCloud/Dropbox, the sync daemon is the problem, and the fix is to stop giving it work. Measured on this corpus, by **file count** — which is what sync cost tracks, not bytes:
+Only two directories want syncing: `papers/` and `wiki/`. They are also the two the repo deliberately does **not** carry — `.gitignore` excludes `papers/*` and `wiki/*`, because the repo is public and the corpus is not. So git and the sync service have disjoint jobs, and the split that follows is not a compromise:
+
+| Content | Synced by | Why not the other |
+|---|---|---|
+| `researchwiki/`, `config/`, `tests/`, docs | git | must not carry a private corpus |
+| `papers/`, `wiki/` (+ `inbox/`) | iCloud/Dropbox/Drive | cannot be committed to a public repo |
+
+Measured on this corpus by **file count** — which is what sync cost tracks, not bytes — the checkout is almost entirely noise to the daemon:
 
 | Path | Files | Sync it? |
 |---|---|---|
@@ -60,27 +67,56 @@ If the repo lives inside iCloud/Dropbox, the sync daemon is the problem, and the
 | `.git/` | 288 | no — and rewritten on every command |
 | `papers/` + `wiki/` | 150 | **yes — this is the whole point** |
 
-So 96% of the sync load was a virtualenv. Relocate the rest outside the synced tree:
+**Recommended layout: put the checkout outside the synced folder and symlink the two content dirs in.** The daemon then sees markdown and PDFs only — no virtualenv, no SQLite, no search index, nothing rewritten mid-command:
 
 ```bash
-python3 -m venv ~/.venvs/research-wiki          # never inside the synced folder
-~/.venvs/research-wiki/bin/pip install -e '.[dev]'
+SYNC="$HOME/<your-synced-folder>/research-wiki"   # holds wiki/ and papers/
+git clone <repo-url> ~/src/research-wiki && cd ~/src/research-wiki
 
-mv .git ~/git-repos/research-wiki.git           # git natively supports this
-printf 'gitdir: %s\n' ~/git-repos/research-wiki.git > .git
-git --git-dir=~/git-repos/research-wiki.git config core.worktree "$PWD"
+for d in wiki papers inbox; do rm -rf "$d"; ln -sfn "$SYNC/$d" "$d"; done
 
-mkdir -p ~/.cache/research-wiki                 # caches out, symlinked back
-for d in .grade-cache .s2-cache .semantic-cache .tantivy-index \
-         .ingest .claim-graph .evolve-cache .agent-output; do
+# git does not traverse a symlinked directory, so the tracked .gitkeep
+# scaffolding under them must be pinned or the tree reads permanently dirty
+git update-index --skip-worktree \
+  inbox/.gitkeep papers/.gitkeep wiki/.gitkeep wiki/concepts/.gitkeep \
+  wiki/ideas/.gitkeep wiki/other/.gitkeep wiki/references/.gitkeep \
+  wiki/synthesis/.gitkeep
+printf '/wiki\n/papers\n/inbox\n' >> .git/info/exclude
+git status --short                                # must be empty
+
+mkdir -p ~/.cache/research-wiki                   # caches stay machine-local
+for d in .grade-cache .s2-cache .semantic-cache .tantivy-index .crossref-cache \
+         .ingest .claim-graph .evolve-cache .agent-output .web-cache; do
   [ -e "$d" ] && [ ! -L "$d" ] && mv "$d" ~/.cache/research-wiki/"$d"
   mkdir -p ~/.cache/research-wiki/"$d"; ln -sfn ~/.cache/research-wiki/"$d" "$d"
 done
 ```
 
-**This is per-machine setup, and it is not optional once done anywhere.** The `.git` pointer file and the cache symlinks hold *absolute* paths and they live inside the synced tree, so they reach every other machine. A machine that syncs them without having run the block above gets a repo git cannot open and caches that fail to write. Run it on each machine, at the same paths, right after `pip install -e .`.
+Both `git update-index` and `.git/info/exclude` are local to the checkout and never travel — correct, since the layout is per-machine. Undo with `git update-index --no-skip-worktree <paths>`.
 
-**Two traps specific to syncing.**
+Keep `$SYNC` as the Obsidian vault root: `wiki/` and `papers/` must stay siblings there, or `pdf_path:` wikilinks (`[[{stem}.pdf]]`) won't resolve. The payoff beyond sync hygiene is that the vault is now *only* the vault, so **Obsidian mobile can open it** — the same pages, readable on a phone, with none of the checkout in the way.
+
+Everything resolves from `Path.cwd()` (`researchwiki/paths.py`), so run `researchwiki` from the checkout root; the symlinks are what make an out-of-sync-folder tree work. `.env` is gitignored and per-machine — copy it to each checkout.
+
+**Fallback: checkout inside the synced folder.** If symlinks aren't available (a sync client that won't follow them; Windows without developer mode), keep the checkout where it is and relocate the churn instead — `.venv` as above, plus:
+
+```bash
+mv .git ~/git-repos/research-wiki.git
+printf 'gitdir: %s\n' ~/git-repos/research-wiki.git > .git
+```
+
+**Then understand what you have signed up for.** That `.git` pointer and those cache symlinks hold *absolute* paths, and they live inside the synced tree, so they reach every other machine. A second machine — different username, therefore different `$HOME` — receives paths that resolve nowhere: a repo git refuses to open, and caches that fail to write. Two observed failures, both from exactly this: a gitdir pointer naming another machine's user, and eight dangling cache symlinks that crashed `agent ingest` at batch-directory creation. If you must use this layout, write the paths **relative** (`gitdir: ../../../git-repos/research-wiki.git`) so they resolve under any `$HOME`, and re-run the relocation on every machine at matching paths.
+
+**Three traps specific to syncing.**
+
+*A stale sync looks exactly like uncommitted work.* A wall of modified and deleted files after a pull is usually the daemon lagging behind another machine's commits, not local edits — the files are simply older copies. Confirm before you preserve *or* discard them: if a file's blob matches an earlier commit, it is stale, and `git restore` is safe.
+
+```bash
+f=path/to/file; lh=$(git hash-object "$f")
+for c in $(git log -25 --format=%h); do
+  [ "$(git rev-parse "$c:$f" 2>/dev/null)" = "$lh" ] && echo "stale (matches $c)" && break
+done
+```
 
 *The repo in a synced folder can corrupt `.git/index`.* The symptom is a wall of modified files whose staged and unstaged diffs are exact inverses, plus paths listed as both deleted and untracked. Check with `git diff HEAD --stat`: if the worktree matches HEAD, only the index is stale and plain `git reset` (no `--hard`) rebuilds it without touching a file.
 
