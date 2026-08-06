@@ -204,7 +204,9 @@ def test_provenance_is_honest():
     # removed (no reader anywhere), and provenance rests on these two instead.
     assert "source_collection" not in d
     assert d["migrated_at"] == "2026-01-01T00:00:00"
-    assert "migrated" in d["tags"]
+    # The `migrated` tag went with the rest of paper-page `tags:`; `migrated_at`
+    # is the provenance marker now and cannot be mistaken for vocabulary.
+    assert not d.get("tags")
     assert "ingested_at" not in d and "author_model" not in d
 
 

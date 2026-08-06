@@ -410,8 +410,16 @@ def _build_frontmatter(
     fm_lines.append(
         f"ingested_at: {_dt_for_ingest_stamp.now().isoformat(timespec='seconds')}"
     )
+    # No `tags:`. On paper pages the field was provenance and nothing else —
+    # `ingested-via-agent` was the only tag 334 of 391 paper pages carried, and the
+    # topical remainder was 322 near-singletons that grouped nothing while
+    # `keywords:` (required, 5-10, indexed) already carried the vocabulary. The
+    # provenance it did assert is recorded better elsewhere: `ingested_at` and
+    # `author_model` are two lines above, and `ingest_iterations` holds the event.
+    # Concept / idea / synthesis pages keep their tags, which are a real vocabulary
+    # because `keywords:` is exempt for those types — see
+    # `index.pages_semantic._TAGS_CARRY_SIGNAL`.
     fm_lines.extend([
-        "tags: [ingested-via-agent]",
         "---",
         "",
     ])

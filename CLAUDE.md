@@ -276,6 +276,7 @@ Multi-item Research Highlights columns are the sharpest case — one *Nature Gen
 - Idea pages must follow Verdict → Background → Opportunities → Plans → Caveats.
 - Concept pages must follow Definition → How it appears across the corpus (Cross-domain connections optional).
 - Commentary pages need `primary_paper:` and a banner blockquote, produce no claims, and are never cited as evidence — cite the primary paper.
+- **`tags:` is for concept / idea / synthesis pages only.** Paper and commentary pages don't carry it: the field was provenance there (`ingested-via-agent` was the only tag 334 of 391 paper pages had) and its topical remainder was near-singletons, while `keywords:` — required at 5–10, `lint`-checked, indexed — already carried the vocabulary. On the other three types `keywords:` is *exempt*, so `tags:` is the only keyword-like field they have and it is embedded for them (`index.pages_semantic._TAGS_CARRY_SIGNAL`).
 
 ---
 

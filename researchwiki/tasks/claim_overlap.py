@@ -276,17 +276,31 @@ def mark_covered(*, dry_run: bool = False, conn=None) -> dict:
     examined — but that left no record, and without one the whole corpus looks
     like an untouched backlog.
 
-    Restricted to papers tagged `ingested-via-agent`, because that tag is the
-    evidence the hook ran. Digest-path papers were never covered (the hook is
-    agent-only) and stay pending, which is the honest answer rather than a
-    convenient one. A paper ingested with `--no-cross-link` is the one false
-    positive this cannot detect; re-running that stem by hand is the remedy.
+    Restricted to papers with a row in `ingest_iterations`, because an ingest
+    attempt recorded there is the evidence the hook ran. Digest-path papers were
+    never covered (the hook is agent-only) and stay pending, which is the honest
+    answer rather than a convenient one. A paper ingested with `--no-cross-link`
+    is the one false positive this cannot detect; re-running that stem by hand is
+    the remedy.
+
+    This used to key off the `ingested-via-agent` tag, which was dropped from
+    paper frontmatter on 2026-08-06 (it was the only tag 334 of 391 paper pages
+    carried, and `keywords:` does the topical job). Telemetry is the better
+    evidence where both exist — a recorded event rather than a self-declared
+    label — but it is not a superset: measured at the swap, 326 papers carried
+    the tag and 298 had telemetry, so **39 stems this once matched are no longer
+    reachable**. That only matters on a machine whose `state.db` has not run this
+    migration yet, since derived state is per-machine; the cost there is a
+    claim-overlap backlog that over-reports rather than any incorrect data, and
+    draining it is idempotent.
     """
     c = conn or _default_conn()
     rows = c.execute(
-        "SELECT stem FROM papers "
-        " WHERE page_type='paper' AND tags LIKE '%ingested-via-agent%' "
-        " ORDER BY stem"
+        "SELECT p.stem FROM papers p "
+        " WHERE p.page_type='paper' "
+        "   AND EXISTS (SELECT 1 FROM ingest_iterations i "
+        "                WHERE i.paper_stem = p.stem) "
+        " ORDER BY p.stem"
     ).fetchall()
     marked, no_claims = [], []
     for (stem,) in rows:

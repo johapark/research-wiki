@@ -36,16 +36,27 @@ def conn(tmp_path):
             n_candidates INTEGER NOT NULL, n_judged INTEGER NOT NULL,
             n_confirmed INTEGER NOT NULL, sim_threshold REAL NOT NULL,
             source TEXT NOT NULL DEFAULT 'run');
+        CREATE TABLE ingest_iterations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, paper_stem TEXT,
+            created_at INTEGER NOT NULL DEFAULT 0);
     """)
     return c
 
 
-def _paper(conn, stem, *, claims=("a claim",), page_type="paper", tags="ingested-via-agent"):
+def _paper(conn, stem, *, claims=("a claim",), page_type="paper", agent_ingested=True):
+    """Seed a paper. `agent_ingested` writes an `ingest_iterations` row, which is
+    what `mark_covered` now reads — it used to key off an `ingested-via-agent`
+    tag, dropped from paper frontmatter on 2026-08-06."""
     conn.execute(
         "INSERT INTO papers (stem, category, page_type, year, tags, page_path) "
         "VALUES (?,?,?,?,?,?)",
-        (stem, "compbio", page_type, 2024, tags, f"wiki/compbio/{stem}.md"),
+        (stem, "compbio", page_type, 2024, "", f"wiki/compbio/{stem}.md"),
     )
+    if agent_ingested:
+        conn.execute(
+            "INSERT INTO ingest_iterations (paper_stem, created_at) VALUES (?, 0)",
+            (stem,),
+        )
     for t in claims:
         conn.execute(
             "INSERT INTO claims (paper_stem, section, text, is_cross_ref) VALUES (?,?,?,0)",
@@ -137,8 +148,8 @@ def test_record_run_upserts_rather_than_duplicating(conn):
 
 def test_mark_covered_only_claims_agent_ingested_papers(conn):
     """Digest-path papers were never covered — the hook is agent-only."""
-    _paper(conn, "agent-2024-x", tags="ingested-via-agent")
-    _paper(conn, "digest-2024-y", tags="")
+    _paper(conn, "agent-2024-x", agent_ingested=True)
+    _paper(conn, "digest-2024-y", agent_ingested=False)
     res = co.mark_covered(conn=conn)
     assert res["marked"] == 1
     assert co.find_backlog(conn) == ["digest-2024-y"]

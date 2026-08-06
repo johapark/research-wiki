@@ -213,7 +213,7 @@ def render_frontmatter(
     real category from the parent dir and ignores YAML (`db/rebuild.py:129-131`),
     so writing anything else only trips `lint`'s `category_yaml_drift`.
 
-    Provenance is honest: `migrated_at` + a `migrated` tag, never `ingested_at` /
+    Provenance is honest: `migrated_at`, never `ingested_at` /
     `author_model` / `ingested-via-agent`, which would claim this page came out of
     the agent pipeline. (`source_collection: migrated` used to carry this too and
     was dropped — nothing ever read the field, and `migrated_at`'s presence already
@@ -225,10 +225,11 @@ def render_frontmatter(
     vals["pdf_path"] = f'"[[{stem}.pdf]]"'
     vals["migrated_at"] = migrated_at
 
-    tags = _as_list(vals.get("tags"))
-    if "migrated" not in tags:
-        tags.append("migrated")
-    vals["tags"] = f"[{', '.join(tags)}]"
+    # No `migrated` tag, and no `tags:` synthesised at all: migrated pages are
+    # paper-type, and paper pages no longer carry the field (see
+    # `promote._build_frontmatter`). `migrated_at` above is the provenance marker,
+    # and unlike a tag it cannot be confused for topical vocabulary. A `tags:`
+    # value mapped in from the source vault is preserved as-is by `_RENDER_ORDER`.
 
     kw = _as_list(vals.get("keywords"))
     if kw:
