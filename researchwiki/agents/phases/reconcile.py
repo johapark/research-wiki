@@ -199,6 +199,26 @@ _PREPRINT_VENUES = (
 _is_venue_furniture = metadata_sanity.is_venue_furniture
 
 
+def _s2_record_is_preprint(s2_meta: dict, doi: str | None) -> bool:
+    """True when S2's record describes a preprint but our DOI is a journal DOI.
+
+    The mismatch means S2 resolved the journal DOI to the earlier deposit's
+    metadata, so its year (and title, and author list) belong to a different
+    version of the paper than the PDF in hand.
+
+    Both halves are required. An actual preprint ingest — bioRxiv PDF, bioRxiv
+    DOI — must keep S2's year, which is correct and is exactly what the wiki
+    wants for a preprint page.
+    """
+    if not _is_preprint_venue(s2_meta.get("venue")):
+        return False
+    d = (doi or "").lower()
+    if not d:
+        return False
+    return not d.startswith(("10.1101/", "10.64898/", "10.48550/",
+                             "10.31219/", "10.20944/", "10.2139/"))
+
+
 def _is_preprint_venue(venue: str | None) -> bool:
     """True when `venue` names a preprint server rather than a journal."""
     v = (venue or "").lower()
@@ -414,9 +434,30 @@ def reconcile_metadata(
                   f"{type(e).__name__}: {e}", tag="agent")
 
     title = s2_meta.get("title") or cr_meta_from_hunt.get("title") or seed_title
+    # Year resolution. S2 is first — except when S2's own record is describing
+    # the *preprint* rather than the journal article we ingested. That happens
+    # routinely: for `10.1038/s41592-025-02626-1` (LigandMPNN, Nature Methods,
+    # April 2025) S2 returns year=2023 venue=bioRxiv, the 2023 deposit's
+    # metadata under the 2025 DOI. Taken at face value it produced the stem
+    # `dauparas-2023-…` for a 2025 paper — and the stem is the filename and every
+    # wikilink, so this is not a cosmetic field.
+    #
+    # The tell is already computed one block down for venue: S2 naming a preprint
+    # server while the resolved DOI is *not* a preprint DOI means S2 is describing
+    # the preprint. `_is_preprint_venue` rescued the venue here (the page landed
+    # `Nature Methods` via the Crossref fallback) while nothing rescued the year.
+    # Same signal, same conclusion — distrust the year too, and fall through to
+    # Crossref and then the PDF, which CLAUDE.md already names as the source of
+    # truth for the naming fields.
+    s2_year = s2_meta.get("year")
+    if s2_year and _s2_record_is_preprint(s2_meta, doi):
+        log(f"year ✗ S2 says {s2_year} with venue "
+            f"{s2_meta.get('venue')!r} for a non-preprint DOI — its record is the "
+            f"preprint's; deferring to Crossref/PDF", tag="reconcile")
+        s2_year = None
     year = (
         year_override
-        or s2_meta.get("year")
+        or s2_year
         or cr_meta_from_hunt.get("year")
         or llm_meta["year"]
         or _extract_year_from_pdf(text, doi=doi)
