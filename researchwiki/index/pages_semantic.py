@@ -21,6 +21,7 @@ we always rebuild from scratch (matches the Tantivy contract).
 from __future__ import annotations
 
 import hashlib
+import re
 import json
 import time
 from dataclasses import dataclass
@@ -30,7 +31,7 @@ import numpy as np
 
 from . import embeddings as semantic
 from ..paths import semantic_cache_dir
-from ..wiki import Page, extract_section, read_pages
+from ..wiki import Page, extract_section, read_pages, strip_non_prose
 from ..log import log
 
 PAGES_NPY = "pages.npy"
@@ -47,47 +48,136 @@ class PageHit:
     score: float             # cosine similarity in [0, 1]
 
 
+#: Sections that carry a page's substance, per page type. `page_index_text`
+#: extracted only `Summary` + `Key Contributions` — names that exist on paper
+#: pages and on **no other type** — so every synthesis, idea and concept page was
+#: embedded on its title alone. Measured 2026-08-06, median embedded length:
+#: paper 2539 chars, synthesis 51, idea 64, concept 23 (minimum 15). Their real
+#: H2s were never read.
+_INDEX_SECTIONS: dict[str, tuple[str, ...]] = {
+    "paper":      ("Summary", "Key Contributions"),
+    "commentary": ("Summary", "Key Contributions"),
+    "concept":    ("Definition", "How it appears across the corpus",
+                   "Cross-domain connections"),
+    "idea":       ("Verdict", "Background", "Opportunities"),
+    "synthesis":  ("Short answer", "Question", "Evidence from the wiki", "Summary"),
+}
+_INDEX_SECTIONS_DEFAULT = ("Summary", "Key Contributions", "Definition")
+
+#: Page types whose `tags:` carry a topical vocabulary worth embedding.
+#:
+#: The split is not cosmetic — the field is used for two different jobs. On paper
+#: pages it is provenance: `ingested-via-agent` accounts for 334 of 391 pages'
+#: tags, a token identical across three quarters of the corpus that adds no
+#: discrimination while occupying room in every vector. On concept / idea /
+#: synthesis pages it is the only keyword-like field they have, because
+#: `find_missing_keywords` exempts exactly those three directories — so that is
+#: where a real vocabulary accumulated (`dna-foundation-model`, `pangenome`,
+#: `deep-mutational-scanning`, `ldl-c`), at 2.0 / 7.9 / 3.5 tags per page against
+#: the paper pages' 1.9 that are mostly one provenance marker.
+_TAGS_CARRY_SIGNAL = frozenset({"concept", "idea", "synthesis"})
+
+#: Tags that describe the pipeline rather than the paper. Stripped even on the
+#: types above, so a stray provenance marker can't dilute a small vector.
+_FRAMEWORK_TAGS = frozenset({
+    "ingested-via-agent", "migrated", "synthesis", "concept", "idea",
+    "whitepaper", "guidance", "protocol", "book", "paper", "commentary",
+})
+
+
 def page_index_text(p: Page) -> str:
     """The text we embed for a page.
 
-    A-Mem's note encoding concatenates content + keywords + tags + context
-    before embedding. We do the analog over the wiki page's high-signal
-    fields — the full body is too noisy at the page level (template-driven
-    sections, wikilink syntax, etc.) and dilutes the cosine signal.
+    A-Mem's note encoding concatenates content + keywords + tags + context before
+    embedding. We do the analog over the wiki page's high-signal fields — the full
+    body is too noisy at the page level (template-driven sections, wikilink
+    syntax) and dilutes the cosine signal.
 
-    `tags:` is deliberately **excluded**, against A-Mem's recipe, because on this
-    corpus it carries no signal to add. Measured 2026-08-06: 342 of 443 pages have
-    exactly one tag, and `ingested-via-agent` accounts for 334 of them — a token
-    identical across three quarters of the corpus contributes nothing
-    discriminative while taking up room in every vector. Of 458 distinct tags 365
-    occur exactly once, so they cannot group anything either, and the handful that
-    do recur (`synthesis`, `concept`, `idea`, `whitepaper`) restate `type:`.
-    `keywords:` is the field that does this job properly here — required at 5-10
-    entries, present on 402/443 pages, and already included above.
+    Which fields count is **type-dependent**, and getting that wrong is how
+    synthesis / idea / concept pages came to be embedded on nothing but their
+    titles: the section names were paper-page names, and the one field that did
+    reach them, `tags:`, was removed earlier the same day on a corpus-wide
+    argument that only held for papers. See `_INDEX_SECTIONS` and
+    `_TAGS_CARRY_SIGNAL` for the measurements.
 
-    Revisit if `tags` ever gains a real controlled vocabulary; the argument is
-    about this corpus's tag distribution, not about tags in principle.
+    Section names are matched by type with a permissive fallback, so a page whose
+    H2s don't match its declared type still contributes whatever it does have
+    rather than silently reducing to a title.
+
+    **Order is load-bearing.** The bi-encoder truncates at `max_seq_length` 512
+    tokens, roughly 2000 characters, so anything past that is not embedded at all.
+    Each type's list therefore leads with its own tl;dr — `Verdict` for an idea,
+    `Short answer` for a synthesis, `Summary` for a paper — and the longer
+    supporting sections trail behind where truncation costs least. An idea page
+    assembles ~11.8k characters and only its first fifth is read; that is fine,
+    and it is fine *because* of the ordering.
     """
     parts: list[str] = []
+    page_type = str(p.fm.get("type") or "paper").strip().strip("\"'")
+
     title = p.fm.get("title", "").strip()
     if title:
         parts.append(title)
 
-    summary = extract_section(p.body, "Summary").strip()
-    if summary:
-        parts.append(summary)
+    wanted = _INDEX_SECTIONS.get(page_type, _INDEX_SECTIONS_DEFAULT)
+    seen: set[str] = set()
+    for name in (*wanted, *_INDEX_SECTIONS_DEFAULT):
+        if name in seen:
+            continue
+        seen.add(name)
+        section = extract_section(p.body, name).strip()
+        if section:
+            parts.append(section)
 
-    # Key Contributions only exists on paper pages — synthesis pages just
-    # contribute their summary instead.
-    contribs = extract_section(p.body, "Key Contributions").strip()
-    if contribs:
-        parts.append(contribs)
+    # Synthesis pages have no mandated H2 contract (unlike idea and concept, whose
+    # section order CLAUDE.md fixes), so name matching cannot be exhaustive there:
+    # `synthesis/dsb-free-editing-axis` uses "The axis" / "Positions on the axis",
+    # and `synthesis/suggested-additions` uses "Priority 1 — …". Both reduced to a
+    # bare title under name matching alone. Falling back to the body is safe
+    # because the embedder truncates anyway.
+    if len(parts) <= 1:
+        body = _drop_section(p.body, "References")
+        prose = strip_non_prose(body).strip()
+        if prose:
+            parts.append(prose)
 
     keywords = p.str_field("keywords").strip()
     if keywords:
         parts.append(keywords)
 
+    if page_type in _TAGS_CARRY_SIGNAL:
+        tags = [
+            tg for tg in _tag_list(p.fm.get("tags"))
+            if tg.lower() not in _FRAMEWORK_TAGS
+        ]
+        if tags:
+            parts.append(", ".join(tags))
+
     return "\n\n".join(parts)
+
+
+def _drop_section(body: str, name: str) -> str:
+    """`body` with one `## name` section removed, heading included.
+
+    Used to keep a References block of bare `[^id]: [[stem]]` footnotes out of the
+    whole-body fallback, where it would contribute a wall of stems rather than
+    prose.
+    """
+    m = re.search(rf"^## {re.escape(name)}\s*$", body, re.MULTILINE)
+    if not m:
+        return body
+    nxt = re.search(r"^## ", body[m.end():], re.MULTILINE)
+    end = m.end() + nxt.start() if nxt else len(body)
+    return body[:m.start()] + body[end:]
+
+
+def _tag_list(raw) -> list[str]:
+    """`tags:` as a list of strings, tolerating the inline-YAML string form."""
+    if isinstance(raw, str):
+        return [x.strip() for x in raw.strip().strip("[]").split(",") if x.strip()]
+    if isinstance(raw, (list, tuple)):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    return []
 
 
 def _content_hash(text: str) -> str:
