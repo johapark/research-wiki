@@ -74,15 +74,8 @@ SYNC="$HOME/<your-synced-folder>/research-wiki"   # holds wiki/ and papers/
 git clone <repo-url> ~/src/research-wiki && cd ~/src/research-wiki
 
 for d in wiki papers inbox; do rm -rf "$d"; ln -sfn "$SYNC/$d" "$d"; done
-
-# git does not traverse a symlinked directory, so the tracked .gitkeep
-# scaffolding under them must be pinned or the tree reads permanently dirty
-git update-index --skip-worktree \
-  inbox/.gitkeep papers/.gitkeep wiki/.gitkeep wiki/concepts/.gitkeep \
-  wiki/ideas/.gitkeep wiki/other/.gitkeep wiki/references/.gitkeep \
-  wiki/synthesis/.gitkeep
-printf '/wiki\n/papers\n/inbox\n' >> .git/info/exclude
-git status --short                                # must be empty
+researchwiki init --scaffold-only                 # page-type dirs, inside $SYNC
+git status --short                                # empty — nothing to configure
 
 mkdir -p ~/.cache/research-wiki                   # caches stay machine-local
 for d in .grade-cache .s2-cache .semantic-cache .tantivy-index .crossref-cache \
@@ -92,7 +85,7 @@ for d in .grade-cache .s2-cache .semantic-cache .tantivy-index .crossref-cache \
 done
 ```
 
-Both `git update-index` and `.git/info/exclude` are local to the checkout and never travel — correct, since the layout is per-machine. Undo with `git update-index --no-skip-worktree <paths>`.
+No git configuration is involved, and none is needed: `wiki/`, `papers/` and `inbox/` are gitignored **in full** — no `.gitkeep`, nothing committed underneath — so git has no opinion about whether they are directories or symlinks. (The ignore patterns are deliberately written without a trailing slash; `/wiki/` would match directories only and leave the symlink showing as untracked.)
 
 Keep `$SYNC` as the Obsidian vault root: `wiki/` and `papers/` must stay siblings there, or `pdf_path:` wikilinks (`[[{stem}.pdf]]`) won't resolve. The payoff beyond sync hygiene is that the vault is now *only* the vault, so **Obsidian mobile can open it** — the same pages, readable on a phone, with none of the checkout in the way.
 

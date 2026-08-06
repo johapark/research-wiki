@@ -29,7 +29,7 @@ from pathlib import Path
 
 from ..categories import PAGE_TYPE_DIRS, content_categories
 from ..fsatomic import write_text_atomic
-from ..paths import inbox_dir, wiki_dir, wiki_root
+from ..paths import ensure_scaffold, inbox_dir, wiki_dir, wiki_root
 
 # ── Provider wiring ──────────────────────────────────────────────────────────
 
@@ -406,16 +406,44 @@ def _step_confirm() -> None:
           "`researchwiki init` any time (it's idempotent).")
 
 
+def _scaffold(quiet: bool = False) -> int:
+    """Create the gitignored content dirs. Shared by the wizard and
+    `--scaffold-only`, which is the non-interactive entry point (the LLM-guided
+    setup in prompts/init.md has no TTY, so it cannot run the wizard)."""
+    try:
+        created = ensure_scaffold()
+    except FileExistsError as e:
+        print(f"researchwiki init: {e}", file=sys.stderr)
+        return 2
+    if quiet:
+        return 0
+    if created:
+        rel = sorted(str(p.relative_to(wiki_root())) for p in created)
+        print(f"Created: {', '.join(rel)}")
+    else:
+        print("Content directories already present — nothing to create.")
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if "--scaffold-only" in argv:
+        return _scaffold()
+
     if not sys.stdin.isatty():
         print("`researchwiki init` is interactive — run it in a terminal, or follow the "
-              "conversational setup in prompts/init.md.", file=sys.stderr)
+              "conversational setup in prompts/init.md. To only create the content "
+              "directories (no prompts), use `researchwiki init --scaffold-only`.",
+              file=sys.stderr)
         return 2
 
     root = wiki_root()
     _header("Research Wiki — setup")
     print("This wizard configures your LLM provider and initial categories, scaffolds the "
           "dashboard, and confirms the install. Every choice is reversible.")
+
+    rc = _scaffold(quiet=True)
+    if rc:
+        return rc
 
     _step_provider(root)
     _step_categories(root)

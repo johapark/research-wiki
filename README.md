@@ -65,7 +65,7 @@ Your sync daemon then sees markdown and PDFs only — no virtualenv, no `.git/` 
 
 **The payoff: `$SYNC` becomes purely a vault, so the Obsidian mobile app can open it** — your whole wiki readable on a phone or tablet, `[[wikilinks]]` and all, with none of the checkout in the way. Keep `wiki/` and `papers/` as siblings there so `pdf_path:` links (`[[{stem}.pdf]]`) resolve and PDFs open on tap.
 
-Two details this needs: a `git update-index --skip-worktree` pin on the tracked `.gitkeep` files (git doesn't traverse symlinked directories, so the tree otherwise reads permanently dirty), and the caches relocated to `~/.cache/research-wiki`. Both are one-liners — copy-paste block, the no-symlink fallback, and the sync-specific failure modes (including why a stale sync looks exactly like uncommitted work) are in [`prompts/migration-backfill.md`](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder).
+Run `researchwiki init --scaffold-only` afterwards to create the page-type dirs inside `$SYNC`, and relocate the caches to `~/.cache/research-wiki`. No git configuration is needed — these three dirs are gitignored in full, so git doesn't care whether they're directories or symlinks. The copy-paste block, the no-symlink fallback, and the sync-specific failure modes (including why a stale sync looks exactly like uncommitted work) are in [`prompts/migration-backfill.md`](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder).
 
 ### Providers
 
@@ -111,7 +111,7 @@ With no `config/models.yaml` present, the loader falls back to a hardcoded table
 
 ### Point your LLM at the directory
 
-Open the clone in **Claude Code** (primary tested harness; Cursor / Aider / Codex should work but get less testing). The LLM reads **CLAUDE.md** on first prompt — the Four Rules, naming convention, ingest workflow, recovery procedure. No server or plugin: it drives the wiki through the `researchwiki` CLI and file reads. The three content dirs (`inbox/`, `papers/`, `wiki/`) ship as `.gitkeep` shells, so a clone is immediately functional; their contents stay gitignored.
+Open the clone in **Claude Code** (primary tested harness; Cursor / Aider / Codex should work but get less testing). The LLM reads **CLAUDE.md** on first prompt — the Four Rules, naming convention, ingest workflow, recovery procedure. No server or plugin: it drives the wiki through the `researchwiki` CLI and file reads. The three content dirs (`inbox/`, `papers/`, `wiki/`) are gitignored in full and so are absent from a fresh clone — `researchwiki init` creates them, or `researchwiki init --scaffold-only` if you just want the directories without the wizard. Until then every other command exits with a pointer to it.
 
 ### Categories
 
@@ -179,7 +179,7 @@ See [CLAUDE.md Page Types](./CLAUDE.md) for the full contracts.
 
 ## What's tracked
 
-Tracked: `researchwiki/` (package + CLI), `prompts/`, `config/` **templates** (your `config/models.yaml` is gitignored), `tests/`, docs (`CLAUDE.md`, `README.md`, `WORKFLOW.md`), `pyproject.toml`, `.gitignore`, and the `inbox/` `papers/` `wiki/` **shells** (`.gitkeep` only).
+Tracked: `researchwiki/` (package + CLI), `prompts/`, `config/` **templates** (your `config/models.yaml` is gitignored), `tests/`, docs (`CLAUDE.md`, `README.md`, `WORKFLOW.md`), `pyproject.toml`, `.gitignore`. Nothing under `inbox/`, `papers/`, `wiki/` — not even a placeholder; `researchwiki init` creates those dirs locally.
 
 Gitignored (your library stays local): `papers/*.pdf` + `.supp/`, `wiki/{category}/*.md`, `inbox/*.pdf`, the `wiki/` bookkeeping files (`index.md`, `log.md`), and repo-root caches (`.ingest/`, `.s2-cache/`, `.crossref-cache/`, `.web-cache/`, `.tantivy-index/`, `.semantic-cache/`, `.grade-cache/`, `.agent-output/`, `.suggest-splits-stamp`).
 

@@ -1,41 +1,21 @@
-# Content directories — the dirs themselves are tracked (via .gitkeep)
-# so a fresh clone has the structure, but every PDF / wiki page / supp file
-# inside stays gitignored as per-user content.
+# Content directories — wholly untracked, structure included. They hold only
+# per-user content: PDFs, LLM-authored pages, supplementary files, and the
+# wiki/index.md + wiki/log.md bookkeeping that lives inside the Obsidian vault.
+# `researchwiki init` creates them (see categories.DEFAULT_DIRS for the
+# page-type scaffold); nothing here is committed, so there is no .gitkeep.
 #
-# `wiki/*` covers wiki/{category}/*.md (the LLM-authored paper pages),
-# wiki/synthesis/*, wiki/references/*, AND the three bookkeeping files
-# wiki/index.md / wiki/log.md / wiki/pdfs-failed-parsing.md — all per-user
-# state that lives inside the Obsidian vault.
-papers/*
-!papers/.gitkeep
-inbox/*
-!inbox/.gitkeep
-wiki/*
-!wiki/.gitkeep
+# Written WITHOUT a trailing slash on purpose. A trailing slash matches
+# directories only, and these paths are frequently symlinks into a synced
+# folder (see prompts/migration-backfill.md) — which git does not treat as a
+# directory, so `/wiki/` would leave the symlink showing as untracked.
+/papers
+/inbox
+/wiki
 # Obsidian Web Clipper drops — per-user captured content, never part of the repo.
-Clippings/
+# No trailing slash, same reason as above: it may be a symlink into the vault.
+/Clippings
 # Local-only shareable artifacts.
 share/
-# Default scaffold subdirs — committed (via .gitkeep) so every clone has the
-# universal structure: the page-type dirs (synthesis/ideas/references) plus
-# the `other` content bucket. Their contents stay gitignored as per-user
-# state. Content categories like sc-omics are intentionally NOT seeded here —
-# they're local, derived from each user's papers.
-!wiki/synthesis/
-wiki/synthesis/*
-!wiki/synthesis/.gitkeep
-!wiki/ideas/
-wiki/ideas/*
-!wiki/ideas/.gitkeep
-!wiki/concepts/
-wiki/concepts/*
-!wiki/concepts/.gitkeep
-!wiki/references/
-wiki/references/*
-!wiki/references/.gitkeep
-!wiki/other/
-wiki/other/*
-!wiki/other/.gitkeep
 
 # Per-user "I dismissed the suggest-splits warning at this time" stamp.
 # Touched by `researchwiki suggest-splits`; status uses it to suppress

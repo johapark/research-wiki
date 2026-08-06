@@ -71,6 +71,49 @@ def inbox_dir() -> Path:
     return wiki_root() / "inbox"
 
 
+def ensure_scaffold() -> list[Path]:
+    """Create the content dirs a working wiki needs; return the ones created.
+
+    `wiki/`, `papers/`, `inbox/`, and the page-type scaffold under `wiki/`
+    (`categories.DEFAULT_DIRS`). These are gitignored in full — no `.gitkeep`,
+    nothing committed — so a fresh clone has none of them and this is what puts
+    them there. Idempotent.
+
+    Deliberately NOT called on every CLI invocation: `__main__` treats a missing
+    `wiki/` as "you are in the wrong directory" and exits 2, a guard worth
+    keeping. Auto-creating would turn a typo'd `cd` into a phantom empty wiki.
+
+    A path that exists as a *dangling symlink* (a synced folder that has not
+    mounted yet) is reported rather than created — `mkdir` on one raises
+    `FileExistsError`, and replacing the link would strand the real content.
+    """
+    from .categories import DEFAULT_DIRS
+
+    root = wiki_root()
+    top = [root / "wiki", root / "papers", root / "inbox"]
+
+    # Top level first, and bail before touching the subdirs: `wiki/` is
+    # routinely a symlink, and if it dangles then `wiki/<scaffold>/.mkdir()`
+    # fails on the *parent* with a bare FileExistsError that names the link and
+    # explains nothing.
+    dangling = [p for p in top if p.is_symlink() and not p.exists()]
+    if dangling:
+        names = ", ".join(str(p.relative_to(root)) for p in dangling)
+        raise FileExistsError(
+            f"dangling symlink(s): {names} — what they point at is missing (an "
+            f"unmounted synced folder?). Fix the link or the mount; refusing to "
+            f"replace it with an empty directory."
+        )
+
+    created = []
+    for t in top + [root / "wiki" / d for d in sorted(DEFAULT_DIRS)]:
+        if t.is_dir():
+            continue
+        t.mkdir(parents=True, exist_ok=True)
+        created.append(t)
+    return created
+
+
 # The bookkeeping markdown files live INSIDE wiki/ (not at the repo root) so an
 # Obsidian vault opened on `wiki/` sees them. Wikilinks from these files into
 # wiki/<category>/<stem> resolve cleanly inside the vault.

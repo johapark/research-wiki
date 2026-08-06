@@ -1,6 +1,8 @@
 # Initialization — cold-start workflow
 
-Read this file when a fresh clone needs setup: every `wiki/{category}/` is empty, no PDFs in `papers/`, and the user signals they're new (*"set this up"*, *"initialize"*, *"how do I start"*). Walk through the steps below; surface each decision to the user — do not run silently.
+Read this file when a fresh clone needs setup: no `wiki/`, `papers/` or `inbox/` yet (they are gitignored in full, so a clone has none), and the user signals they're new (*"set this up"*, *"initialize"*, *"how do I start"*). Walk through the steps below; surface each decision to the user — do not run silently.
+
+**Create the content dirs first** — `researchwiki init --scaffold-only`. Every command except `init` exits 2 while `wiki/` is missing, so nothing below works until this runs. It is non-interactive (the wizard needs a TTY you don't have) and idempotent. Do it after Step 1's install, before anything else; if the user is setting up the synced-folder layout, symlink the dirs *first* so the scaffold lands in the synced folder.
 
 > **Scripted alternative:** `researchwiki init` is an interactive terminal wizard covering **Steps 2, 3, 4 and 7** (provider → categories → dashboard → confirm) by prompting the user directly. It's the human-run complement to this LLM-guided path — point the user to it if they'd rather drive setup themselves.
 >
@@ -28,7 +30,7 @@ Venvs bake absolute paths into `bin/` and `pyvenv.cfg`, so pick the location now
 
 **Then ask whether they want `wiki/` and `papers/` synced** — across machines, or to read on a phone. Raise it here rather than later: the answer decides where the checkout itself goes, and moving a tree afterwards means redoing the venv and the caches.
 
-If yes, recommend the split layout — **checkout outside the synced folder, with `wiki/`, `papers/`, `inbox/` symlinked into it.** Git and the sync service then have disjoint jobs (`wiki/*` and `papers/*` are gitignored, so the repo never carried them anyway), and the synced folder is left as a clean Obsidian vault that the **mobile app can open**. Walk them through [`migration-backfill.md`](./migration-backfill.md) § *Keep the checkout out of the synced folder*: copy-paste block, the `git update-index --skip-worktree` pin the tracked `.gitkeep` files need (git doesn't traverse symlinked dirs, so the tree otherwise reads permanently dirty), the cache relocations, and the fallback for platforms without usable symlinks.
+If yes, recommend the split layout — **checkout outside the synced folder, with `wiki/`, `papers/`, `inbox/` symlinked into it.** Git and the sync service then have disjoint jobs (`wiki/*` and `papers/*` are gitignored, so the repo never carried them anyway), and the synced folder is left as a clean Obsidian vault that the **mobile app can open**. Walk them through [`migration-backfill.md`](./migration-backfill.md) § *Keep the checkout out of the synced folder*: copy-paste block, the cache relocations, and the fallback for platforms without usable symlinks. No git configuration is needed — those dirs are gitignored in full, so git is indifferent to whether they're directories or symlinks.
 
 Warn against the inverse — checkout *inside* the synced folder with `.git` and caches relocated out. Those pointers hold absolute paths but live in the synced tree, so they reach every other machine and resolve nowhere there. Same section documents the observed failures.
 

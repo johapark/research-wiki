@@ -15,8 +15,10 @@ Only the universal *scaffold* is fixed in code:
   - `other` — the always-present content-category bucket and the classifier's
     abstention destination.
 
-`DEFAULT_DIRS` (the page-type dirs plus `other`) are seeded on every clone via
-committed `wiki/<dir>/.gitkeep` files; their contents stay gitignored.
+`DEFAULT_DIRS` (the page-type dirs plus `other`) are created by
+`paths.ensure_scaffold()`, which `researchwiki init` runs. Nothing under
+`wiki/` is committed — there are no `.gitkeep` files — so a fresh clone has
+none of them until then.
 
 Growth is deliberate, never implicit: a new content category appears only when
 its `wiki/<category>/` directory is explicitly created (by the user or an LLM
@@ -46,8 +48,8 @@ PAGE_TYPE_DIRS: frozenset[str] = frozenset(
 )
 
 # Default subdirs every wiki has regardless of domain: the page-type dirs plus
-# `other` (the always-present content-category abstention bucket). Seeded on
-# every clone via committed `wiki/<dir>/.gitkeep`.
+# `other` (the always-present content-category abstention bucket). Created by
+# `paths.ensure_scaffold()`; nothing under wiki/ is committed.
 DEFAULT_DIRS: frozenset[str] = PAGE_TYPE_DIRS | frozenset({"other"})
 
 

@@ -83,7 +83,7 @@ Research/
 
 **Invariant**: `papers/` holds only canonically-named PDFs. Raw drops live in `inbox/`. A non-empty `inbox/` is the backlog.
 
-`wiki/`, `papers/`, `inbox/` may be **directory symlinks** into a synced folder (recommended layout when the user syncs their library — see [`prompts/migration-backfill.md`](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder)). That is deliberate: don't "fix" them, and don't be alarmed that their tracked `.gitkeep`s are `skip-worktree`-pinned. Unrelated to the per-PDF *"copy, never symlink"* rule below, which governs files moved into `inbox/`. Always run `researchwiki` from the repo root — paths resolve from `Path.cwd()`.
+`wiki/`, `papers/`, `inbox/` are gitignored in full (no `.gitkeep`) and **may be directory symlinks** into a synced folder — the recommended layout when the user syncs their library ([`prompts/migration-backfill.md`](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder)). Deliberate; don't "fix" them. Unrelated to the per-PDF *"copy, never symlink"* rule below, which governs files moved into `inbox/`. Missing entirely on a fresh clone — `researchwiki init --scaffold-only` creates them. Always run `researchwiki` from the repo root; paths resolve from `Path.cwd()`.
 
 ---
 
@@ -134,7 +134,7 @@ Stem shared by both tiers: `{first-author-lastname}-{year}-{first-5-title-words}
 
 Categories are **local and derived from your papers, never predefined.** Valid iff `wiki/<category>/` exists.
 
-- **Scaffold (committed)**: `synthesis`, `ideas`, `concepts`, `references`, `other` — via `.gitkeep`. First four are **page-type dirs**, not content categories; `other` is the classifier's abstention bucket.
+- **Scaffold**: `synthesis`, `ideas`, `concepts`, `references`, `other` — created by `researchwiki init` (`categories.DEFAULT_DIRS`), not committed. First four are **page-type dirs**, not content categories; `other` is the classifier's abstention bucket.
 - **Growth is explicit**: a new category exists only once `wiki/<category>/` is created. `--category X` rejected if dir doesn't exist; classifier abstains to `other`. Typos can't spawn categories.
 - **Cold start**: `researchwiki bootstrap-categories` reads `inbox/` and proposes+creates dirs. See Operations → Initialization.
 - **At ingest**: classifier picks existing category or abstains. `wiki/other/` ≥10 papers → `status` flags it, `suggest-splits` proposes splits (new category / reassign / stay).
