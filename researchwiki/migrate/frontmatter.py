@@ -48,7 +48,7 @@ FM_ALIASES: dict[str, tuple[str, ...]] = {
 #: so a migrated page reads like an ingested one in Obsidian's property view.
 _RENDER_ORDER: tuple[str, ...] = (
     "title", "short_name", "hook", "authors", "senior_authors", "year", "doi",
-    "venue", "type", "category", "pdf_path", "source_collection", "keywords",
+    "venue", "type", "category", "pdf_path", "keywords",
     "migrated_at", "tags",
 )
 
@@ -213,15 +213,16 @@ def render_frontmatter(
     real category from the parent dir and ignores YAML (`db/rebuild.py:129-131`),
     so writing anything else only trips `lint`'s `category_yaml_drift`.
 
-    Provenance is honest: `source_collection: migrated` + `migrated_at`, never
-    `ingested_at` / `author_model` / `ingested-via-agent`, which would claim this
-    page came out of the agent pipeline.
+    Provenance is honest: `migrated_at` + a `migrated` tag, never `ingested_at` /
+    `author_model` / `ingested-via-agent`, which would claim this page came out of
+    the agent pipeline. (`source_collection: migrated` used to carry this too and
+    was dropped — nothing ever read the field, and `migrated_at`'s presence already
+    says the page was migrated.)
     """
     vals = dict(plan.mapped)
     vals["type"] = page_type
     vals["category"] = f"[{category}]"
     vals["pdf_path"] = f'"[[{stem}.pdf]]"'
-    vals["source_collection"] = "migrated"
     vals["migrated_at"] = migrated_at
 
     tags = _as_list(vals.get("tags"))

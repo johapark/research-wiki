@@ -373,7 +373,6 @@ def _build_frontmatter(
         # stem; the basename lives in this wikilink, so no separate
         # `pdf_filename` field is needed.
         f'pdf_path: "[[{stem}.pdf]]"',
-        "source_collection: external",
     ])
     if category_strength == "weak":
         fm_lines.append("category_suggestion_strength: weak  # first-of-kind — review")

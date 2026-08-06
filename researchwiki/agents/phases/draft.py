@@ -447,7 +447,6 @@ def _wrap_with_frontmatter(
         lines.append("category_suggestion_strength: weak  # first-of-kind — review")
     lines += [
         f'pdf_path: "[[{stem}.pdf]]"',
-        "source_collection: external",
         "tags: []",
         "---",
         "",

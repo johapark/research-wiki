@@ -200,7 +200,9 @@ def test_provenance_is_honest():
     d = yaml.safe_load(render_frontmatter(p, stem="s", category="compbio",
                                          page_type="paper",
                                          migrated_at="2026-01-01T00:00:00"))
-    assert d["source_collection"] == "migrated"
+    # `source_collection: migrated` used to be asserted here; the field was
+    # removed (no reader anywhere), and provenance rests on these two instead.
+    assert "source_collection" not in d
     assert d["migrated_at"] == "2026-01-01T00:00:00"
     assert "migrated" in d["tags"]
     assert "ingested_at" not in d and "author_model" not in d

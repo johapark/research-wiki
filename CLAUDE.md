@@ -182,7 +182,6 @@ status: draft                         # optional: draft | final | active | super
 document_id: ""                       # optional: docket #, guidance #, NCT #, ISBN
 authors: ""                           # required for `book`
 pdf_path: "[[fda-2026-....pdf]]"       # Obsidian wikilink → click-to-open (papers/ sits beside wiki/ in the vault); quote it
-source_collection: external
 source_url: ""                        # optional: canonical URL for blog posts / online whitepapers
 author_model: "claude-opus-4-7"       # optional: LLM that authored the page (manual whitepaper path — mirrors the field agent ingest writes on paper pages)
 keywords: []                          # required: 5–10 short phrases describing the doc's content, parallel to the keywords field on paper pages. Fewer than 5 is a `lint` finding (`missing_keywords`) and the writer won't emit a shorter list at all

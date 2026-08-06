@@ -98,8 +98,7 @@ authors: {yaml_authors}
 year: {year if year else 'TODO'}
 doi: {doi or 'TODO'}
 {category_line}
-pdf_path: "[[{pdf_dest.name}]]"
-source_collection: external{supp_yaml}
+pdf_path: "[[{pdf_dest.name}]]"{supp_yaml}
 author_model: "TODO"  # which LLM authored this page (e.g. claude-sonnet-4-6, claude-opus-4-7); fill on save
 tags: []
 ---"""

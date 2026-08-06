@@ -54,6 +54,19 @@ def page_index_text(p: Page) -> str:
     before embedding. We do the analog over the wiki page's high-signal
     fields — the full body is too noisy at the page level (template-driven
     sections, wikilink syntax, etc.) and dilutes the cosine signal.
+
+    `tags:` is deliberately **excluded**, against A-Mem's recipe, because on this
+    corpus it carries no signal to add. Measured 2026-08-06: 342 of 443 pages have
+    exactly one tag, and `ingested-via-agent` accounts for 334 of them — a token
+    identical across three quarters of the corpus contributes nothing
+    discriminative while taking up room in every vector. Of 458 distinct tags 365
+    occur exactly once, so they cannot group anything either, and the handful that
+    do recur (`synthesis`, `concept`, `idea`, `whitepaper`) restate `type:`.
+    `keywords:` is the field that does this job properly here — required at 5-10
+    entries, present on 402/443 pages, and already included above.
+
+    Revisit if `tags` ever gains a real controlled vocabulary; the argument is
+    about this corpus's tag distribution, not about tags in principle.
     """
     parts: list[str] = []
     title = p.fm.get("title", "").strip()
@@ -73,10 +86,6 @@ def page_index_text(p: Page) -> str:
     keywords = p.str_field("keywords").strip()
     if keywords:
         parts.append(keywords)
-
-    tags = p.str_field("tags").strip()
-    if tags:
-        parts.append(tags)
 
     return "\n\n".join(parts)
 
