@@ -4,7 +4,7 @@
 # (RW_LLM_BASE_URL in .env still overrides base_url if set.)
 #
 # Select this config with RW_MODELS_CONFIG=models.chatgpt.yaml.
-# gpt-5.6-luna drives the quality-sensitive roles (author/critic/judge);
+# gpt-5.6-terra drives the quality-sensitive roles (author/critic/judge);
 # the deterministic short-output roles (classifier, extractor) run on the
 # cheaper gpt-5.4-mini. proposer still on gpt-5.6-luna — downgrade it too
 # once mini output quality is confirmed on short_name/keywords.
@@ -15,21 +15,21 @@ roles:
   # Drafting — produces the page prose. Quality matters most here.
   author:
     provider: openai-compatible
-    model: gpt-5.6-luna
+    model: gpt-5.6-terra
     temperature: 0.5
     max_tokens: 6000
 
   # Critic — turns grader flags into revision notes.
   critic:
     provider: openai-compatible
-    model: gpt-5.6-luna
+    model: gpt-5.6-terra
     temperature: 0.3
     max_tokens: 2500
 
   # Judge — structural decisions (cross-link selection, memory evolution).
   judge:
     provider: openai-compatible
-    model: gpt-5.6-luna
+    model: gpt-5.6-terra
     temperature: 0.2
     max_tokens: 1500
 
