@@ -111,5 +111,5 @@ phases:
   synthesis_judge:  {role: judge}
   eval_judge:       {role: judge}
   reconcile:        {role: extractor}
-  target_claims:    {role: judge, max_tokens: 8000}
+  target_claims:    {role: extractor, max_tokens: 8000}
   claim_support:    {role: judge}

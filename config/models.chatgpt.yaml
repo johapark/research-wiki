@@ -5,17 +5,13 @@
 #
 # Select this config with RW_MODELS_CONFIG=models.chatgpt.yaml.
 # gpt-5.6-terra drives the quality-sensitive roles (author/critic/judge);
-# the deterministic short-output roles (classifier, extractor) run on
-# gpt-5.4-mini; proposer on gpt-5.6-luna.
+# every other role runs on gpt-5.6-luna.
 #
-# NOTE: mini is NOT the cheap option here, despite the name. Per
-# config/pricing.yaml it is $0.75/$4.50 per Mtok against luna's $0.20/$1.20 —
-# 3.75x dearer on both, because it belongs to the older 5.4 generation and the
-# 5.6 line cut prices. Routing classifier/extractor to mini is a cost increase
-# over luna, not a saving. It costs little today only because those phases
-# barely consume tokens (measured: 0 across a 4-paper batch, since reconcile
-# resolves from S2/Crossref without an LLM call). If they ever do, move them
-# to luna.
+# gpt-5.4-mini is deliberately absent. It used to hold classifier/extractor as
+# "the cheap one", which it is not: per config/pricing.yaml mini is $0.75/$4.50
+# per Mtok against luna's $0.20/$1.20 — 3.75x dearer on both, because it is a
+# 5.4-generation model and the 5.6 line cut prices. There was no quality
+# argument for it either, so it is gone rather than merely demoted.
 #
 # Measured cost, this corpus (upper bounds — prompt-cache hits not subtracted):
 #   author/critic/judge on luna   ~$0.009/paper  (n=13)
@@ -51,7 +47,7 @@ roles:
   # Classifier — single JSON verdict, deterministic.
   classifier:
     provider: openai-compatible
-    model: gpt-5.4-mini
+    model: gpt-5.6-luna
     temperature: 0.1
     max_tokens: 200
 
@@ -62,10 +58,12 @@ roles:
     temperature: 0.3
     max_tokens: 200
 
-  # Extractor — title/authors/DOI/abstract from PDF first page.
+  # Extractor — title/authors/DOI/abstract from PDF first page, and the
+  # target-claims list. luna, not mini: cheaper per token (see note at top)
+  # and the phase wants specificity, not judgement.
   extractor:
     provider: openai-compatible
-    model: gpt-5.4-mini
+    model: gpt-5.6-luna
     temperature: 0.0
     max_tokens: 800
 
@@ -82,5 +80,11 @@ phases:
   synthesis_judge:  {role: judge}
   eval_judge:       {role: judge}
   reconcile:        {role: extractor}
-  target_claims:    {role: judge, max_tokens: 8000}
+  # Structured extraction, not synthesis — the author phase consumes this as a
+  # coverage checklist. Was {role: judge}, which sent a transcription-shaped
+  # task to the top tier: 32K input tokens across a 4-paper batch, 41% of the
+  # terra bill. The role is what costs money; max_tokens is only a ceiling
+  # (you are billed for tokens emitted, ~1.3K observed), so it stays generous
+  # — a truncated claims list silently strips the author's coverage checklist.
+  target_claims:    {role: extractor, max_tokens: 8000}
   claim_support:    {role: judge}

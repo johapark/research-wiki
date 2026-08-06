@@ -105,9 +105,14 @@ _FALLBACK_ROLES: dict[str, ModelConfig] = {
     "author":     ModelConfig("openai-compatible", "gpt-5.6-luna", 0.5, 6000),
     "critic":     ModelConfig("openai-compatible", "gpt-5.6-luna", 0.3, 2500),
     "judge":      ModelConfig("openai-compatible", "gpt-5.6-luna", 0.2, 1500),
-    "classifier": ModelConfig("openai-compatible", "gpt-5.4-mini", 0.1, 200),
+    # Every role is gpt-5.6-luna. gpt-5.4-mini used to hold classifier and
+    # extractor on the assumption it was the cheap one; it is not. mini is a
+    # 5.4-generation model and the 5.6 line cut prices, so it costs 3.75x luna
+    # per token ($0.75/$4.50 against $0.20/$1.20 — config/pricing.yaml) with
+    # no benefit on either role's work.
+    "classifier": ModelConfig("openai-compatible", "gpt-5.6-luna", 0.1, 200),
     "proposer":   ModelConfig("openai-compatible", "gpt-5.6-luna", 0.3, 200),
-    "extractor":  ModelConfig("openai-compatible", "gpt-5.4-mini", 0.0, 800),
+    "extractor":  ModelConfig("openai-compatible", "gpt-5.6-luna", 0.0, 800),
 }
 
 # Endpoint for the openai-compatible fallback roles above. Only consulted on

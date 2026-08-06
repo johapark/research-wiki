@@ -681,16 +681,15 @@ bump `as_of:` in the same edit.
 Absolute cost is **config-dependent** — it rides on whichever
 `config/models.*.yaml` file `RW_MODELS_CONFIG` selects and that provider's
 token pricing. The current active default is `models.chatgpt.yaml`:
-`gpt-5.6-luna` drives the quality-sensitive roles (author / critic / judge /
-proposer), and `gpt-5.4-mini` handles the deterministic short-output roles
-(classifier / extractor). Despite the name mini is *not* the cheaper of the
-two — it is a 5.4-generation model and the 5.6 line cut prices, so it costs
-3.75x luna per token; it stays cheap here only because those phases barely
-emit tokens. The committed fallback when no override is set is
-`config/models.yaml` (Upstage Solar: `solar-pro3` / `solar-mini`).
+`gpt-5.6-luna` drives every role. `gpt-5.4-mini` used to hold the
+deterministic short-output roles (classifier / extractor) as the cheap
+option, which it is not — mini is a 5.4-generation model and the 5.6 line cut
+prices, so it costs 3.75x luna per token with no offsetting quality
+argument. When no `config/models.yaml` is present the loader falls back to a
+hardcoded table in `agents/model_config.py` that mirrors this template.
 
 At the rates in `config/pricing.yaml` (per 1M tokens: `gpt-5.6-luna` $0.20 in
-/ $1.20 out, `gpt-5.4-mini` $0.75 in / $4.50 out), a single-draft ingest runs
+/ $1.20 out), a single-draft ingest runs
 roughly ~26K input + ~3.5K output tokens across all roles, with **author**
 and **target_claims** together accounting for nearly all of it and everything
 else a long tail — so a typical paper lands around **~$0.01** (measured mean
@@ -716,7 +715,7 @@ speed — that hasn't changed across model swaps.
 
 - **`--use-stub`** — full offline / deterministic mode. No API calls. Use
   for harness tests and CI.
-- **`--no-llm-reconcile`** — skip the LLM metadata extractor (`gpt-5.4-mini`
+- **`--no-llm-reconcile`** — skip the LLM metadata extractor (`gpt-5.6-luna`
   under the current default), fall back to the regex+S2 path. Use for
   offline/stub mode or to shave the (tiny) reconcile cost. The regex path is
   still maintained but accumulated

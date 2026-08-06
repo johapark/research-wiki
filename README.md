@@ -80,7 +80,7 @@ OPENAI_API_KEY="sk-..."                # OpenAI cloud (default, Bearer)
 
 | Provider | Setup | Cost |
 | --- | --- | --- |
-| **OpenAI** (default) | Set `OPENAI_API_KEY`. The default config (and the zero-config fallback) already routes to `gpt-5.6-luna` + `gpt-5.4-mini` — nothing to copy. | ~$0.01/paper |
+| **OpenAI** (default) | Set `OPENAI_API_KEY`. The default config (and the zero-config fallback) already routes every role to `gpt-5.6-luna` — nothing to copy. | ~$0.01/paper |
 | **Anthropic** | `cp config/models.anthropic.yaml config/models.yaml`, set `ANTHROPIC_API_KEY`. Routes to Sonnet 4.6 + Haiku 4.5. | ~$0.10/paper |
 | **Other OpenAI-compatible** (Gemini, Groq, OpenRouter, …) | `cp config/models.gemini.yaml config/models.yaml` (Gemini — ready-made) or `config/models.openai-compatible.yaml` (generic template), set `OPENAI_API_KEY` + `RW_LLM_BASE_URL`. | provider-dependent |
 | **Local LLM** (LM Studio / vLLM / llama.cpp / ollama) | Any OpenAI-compatible server. `provider: lmstudio` on a role; base URL defaults to `http://localhost:1234/v1` (override with `RW_LLM_BASE_URL`). [Details](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama). | ~free after download |
@@ -92,7 +92,7 @@ Which model runs each role is read from `config/models.yaml` — **gitignored** 
 
 | Template | Routes to |
 |---|---|
-| `config/models.chatgpt.yaml` | **Default (recommended)** — GPT-5-class **gpt-5.6-luna** for the quality-sensitive roles (author/critic/judge/proposer), **gpt-5.4-mini** for the deterministic classifier/extractor; ~$0.01/paper measured over 13 ingests. Zero-config fallback when no `config/models.yaml` is present. Set `OPENAI_API_KEY` to an OpenAI key and go. |
+| `config/models.chatgpt.yaml` | **Default (recommended)** — GPT-5-class **gpt-5.6-luna** across every role; ~$0.01/paper measured over 13 ingests. Zero-config fallback when no `config/models.yaml` is present. Set `OPENAI_API_KEY` to an OpenAI key and go. |
 | `config/models.anthropic.yaml` | Sonnet 4.6 + Haiku 4.5. Highest fidelity; ~$0.10/paper. |
 | `config/models.gemini.yaml` | **Recommended free API** — Google Gemini via its OpenAI-compatible endpoint. **Gemini 3.5 Flash** for author/critic/judge, **Gemini 3.1 Flash-Lite** for classifier/proposer/extractor. Best-grading free option in our dogfooding (see below); set `OPENAI_API_KEY` to a Gemini key and go. |
 | `config/models.lmstudio.yaml` | **Recommended local** — pure-local, every role on one LM Studio model. Runs **Qwen3.6-35B-A3B** in our setup (see [Local LLMs](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama)): no API key, nothing leaves the machine, ~free after the one-time download. |
