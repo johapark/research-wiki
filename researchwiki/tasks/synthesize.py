@@ -244,7 +244,9 @@ def _template(
         "## Tensions / open questions\n"
         "<!-- ≤150 words. Where the wiki papers disagree or leave gaps. -->\n\n"
         "## What would update this page\n"
-        "<!-- ≤3 bullets. Kinds of future paper whose ingestion would change the answer. -->\n"
+        "<!-- ≤3 bullets. Kinds of future paper whose ingestion would change the answer. -->\n\n"
+        "## References\n"
+        "<!-- [^id]: [[category/stem]], one per source paper. Required once the body\n             uses [^id] markers — this is where they are defined. -->\n"
     )
 
     yaml_block = "---\n" + "\n".join(yaml) + "\n---\n\n"

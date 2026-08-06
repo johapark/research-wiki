@@ -165,6 +165,13 @@ tags: [crispr, off-target]
 ---
 ```
 
+**H2 spine — `Question` → `Short answer` → … → `Tensions / open questions` → `What would update this page` → `References`.** Unlike idea pages, this is a **spine with permitted extension, not a closed list**: idea sections close because grounding policy differs per section (Background/Caveats strict, Opportunities/Plans allow `*(model prior)*`), so a sixth section would have undefined policy. Synthesis grounding is uniform, so extra H2s are free — and better. `researchwiki synthesize` scaffolds the spine.
+
+- **Required**: `Question`, `Short answer`, `What would update this page` — and `References` whenever the page uses `[^id]` footnotes, since that's where they're defined.
+- **Recommended**: `Tensions / open questions` (that exact spelling — three variants had drifted). Skip it on a page with no genuine disagreement rather than padding an empty section.
+- **The middle is yours.** `Evidence from the wiki` is the scaffold's placeholder, not a required slot: 10 of 23 pages replace it with thematic H2s (`Positions on the axis`, `Architectural lineage`, `When to use which`), which is what the scaffold's own comment asks for. Comparison and axis shapes are first-class.
+- **Why the names are exact**: `check-grounding` exempts `## What would update this page` by exact string, so a variant silently switches the exemption off and the gate then demands citations for content designed not to have them. `index.pages_semantic._INDEX_SECTIONS` also matches by name, and `Short answer` must come first because the embedder truncates at 512 tokens.
+
 **No `referenced_papers:` field.** Synthesis (and idea) pages cite via the body — inline `[[wikilink]]`s and `## References` footnotes (`[^id]: [[category/stem]]`), which are the single source of truth every gate/tool reads. (Concept pages *do* keep `referenced_papers:` — there it's the functional spoke registry.)
 
 ### 3. Reference document — `wiki/references/{stem}.md`
