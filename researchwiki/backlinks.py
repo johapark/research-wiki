@@ -84,9 +84,30 @@ def invert_relationship_note(source_note: str) -> str:
 
 
 # A "no related papers" placeholder written by the page author when it had
-# nothing to link. Matched with the rest of the line, because authors qualify it
-# — `(none)`, `(none — no overlapping wiki papers)`, `(None yet.)`.
-NONE_PLACEHOLDER_RE = re.compile(r"(?im)^\s*\(?\s*none\b.*$")
+# nothing to link: `(none)`, `(none — no overlapping wiki papers)`, `(None yet.)`.
+#
+# Must be **parenthesised**, or the bare word alone on its line. The first
+# version of this pattern was `^\s*\(?\s*none\b.*$` — optional paren, then
+# anything — which also matched an ordinary sentence that happens to open with
+# the word, so `_drop_none_placeholder` deleted
+# "None of the three replicates agreed, so this link is tentative." outright.
+# That path runs on every `append_related_paper` call (every ingest, every
+# `lint --fix`, every claim-overlap link), which makes a false positive here
+# silent prose loss in the framework's hottest write path.
+#
+# Requiring the parentheses is what separates a placeholder from a sentence:
+# every placeholder observed across the 62 pages cleaned on 2026-08-06 carried
+# them, and no prose sentence does.
+NONE_PLACEHOLDER_RE = re.compile(
+    r"""(?ix)
+    ^\s*
+    (?:
+        \( \s* none\b [^)]* \)     # (none) / (none — no overlapping wiki papers)
+      | none [\s.]*                 # or the bare word alone on the line
+    )
+    \s*$
+    """
+)
 
 
 def _drop_none_placeholder(section_body: str) -> str:
@@ -98,8 +119,10 @@ def _drop_none_placeholder(section_body: str) -> str:
     pages in the corpus carried a literal `(none)` line sitting above real
     Related Papers bullets, every one of them written by exactly this path.
 
-    Only drops lines whose *whole* content is the placeholder, so a bullet that
-    happens to contain the word ("none of the three replicated…") is untouched.
+    Drops only a parenthesised placeholder or a bare `none` line — see
+    `NONE_PLACEHOLDER_RE` for why that tightening matters. Prose that merely
+    *begins* with the word ("None of the three replicates agreed…") is kept, as
+    is any bullet containing it.
     """
     kept = [ln for ln in section_body.split("\n") if not NONE_PLACEHOLDER_RE.match(ln)]
     out = "\n".join(kept).strip()

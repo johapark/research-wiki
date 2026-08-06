@@ -224,3 +224,26 @@ class TestThinIndexReason:
             if r:
                 thin.append((f"{md.parent.name}/{md.stem}", r))
         assert thin == [], f"thin pages: {thin[:5]}"
+
+
+class TestFallbackGate:
+    """The fallback must key on "did a section match", not on `len(parts)`.
+
+    Counting parts made the title load-bearing: a page with no `title:` and one
+    matched section has len(parts) == 1, so the fallback also fired and the
+    section's prose was embedded twice.
+    """
+
+    def test_a_titleless_page_does_not_duplicate_its_section(self):
+        p = Page(path=Path("wiki/compbio/x.md"), stem="x", category="compbio",
+                 fm={"type": "paper"}, body="## Summary\n\nUNIQUE prose.\n")
+        assert page_index_text(p).count("UNIQUE") == 1
+
+    def test_a_titleless_bespoke_page_still_gets_its_body_once(self):
+        p = Page(path=Path("wiki/synthesis/x.md"), stem="x", category="synthesis",
+                 fm={"type": "synthesis"}, body="## The axis\n\nBESPOKE prose.\n")
+        assert page_index_text(p).count("BESPOKE") == 1
+
+    def test_a_titled_page_with_a_match_does_not_fall_back(self):
+        p = _page("paper", "## Summary\n\nS.\n\n## Limitations\n\nLIMITS\n")
+        assert "LIMITS" not in page_index_text(p)

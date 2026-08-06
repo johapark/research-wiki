@@ -121,6 +121,7 @@ def page_index_text(p: Page) -> str:
 
     wanted = _INDEX_SECTIONS.get(page_type, _INDEX_SECTIONS_DEFAULT)
     seen: set[str] = set()
+    matched_a_section = False
     for name in (*wanted, *_INDEX_SECTIONS_DEFAULT):
         if name in seen:
             continue
@@ -128,6 +129,7 @@ def page_index_text(p: Page) -> str:
         section = extract_section(p.body, name).strip()
         if section:
             parts.append(section)
+            matched_a_section = True
 
     # Synthesis pages have no mandated H2 contract (unlike idea and concept, whose
     # section order CLAUDE.md fixes), so name matching cannot be exhaustive there:
@@ -135,7 +137,11 @@ def page_index_text(p: Page) -> str:
     # and `synthesis/suggested-additions` uses "Priority 1 — …". Both reduced to a
     # bare title under name matching alone. Falling back to the body is safe
     # because the embedder truncates anyway.
-    if len(parts) <= 1:
+    # Gate on "did any section match", NOT on `len(parts)`. Counting parts made
+    # the title load-bearing: a page with no `title:` and one matched section has
+    # len(parts) == 1, so the fallback also fired and the section's text was
+    # embedded twice.
+    if not matched_a_section:
         body = _drop_section(p.body, "References")
         prose = strip_non_prose(body).strip()
         if prose:

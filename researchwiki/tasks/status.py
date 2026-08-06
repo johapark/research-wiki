@@ -42,6 +42,50 @@ from ..wiki import read_pages
 WIKILINK_RE = re.compile(r"\[\[([^\]\|#]+?)(?:#[^\]\|]*)?(?:\|[^\]]+)?\]\]")
 
 
+#: Directories that hold page types rather than content categories.
+PAGE_TYPE_DIRS_ = ("synthesis", "references", "ideas", "concepts")
+
+#: Types that behave like papers for counting and for the cross-link graph.
+#: `commentary` belongs here: it lives in a content category, carries
+#: `[[wikilink]]`s in both directions, and is a legitimate link target — it just
+#: isn't citable *evidence* (CLAUDE.md Page Types §7). Omitting it dropped 9
+#: pages from the dashboard and every edge touching them from the graph.
+#:
+#: Module-level rather than a local inside the counting function so a test can
+#: assert its membership. The previous version was buried in the function body,
+#: which is part of why the miscount it caused went unnoticed twice.
+PAPER_LIKE_TYPES = ("paper", "commentary")
+
+def is_paper_like(page) -> bool:
+    """Does this page count as a paper for the dashboard and the cross-link graph?
+
+    Three conditions, each of which was a bug when absent:
+
+      - `fm.get("type", "paper")` — a **missing** `type:` means paper, matching
+        `db.rebuild`. Reading it as `None` (the original `fm.get("type") ==
+        "paper"`) dropped the 23 pages predating the `type:` requirement, so the
+        dashboard reported 359 papers against the database's 382.
+      - `type in PAPER_LIKE_TYPES` — `commentary` counts. It lives in a content
+        category and is a legitimate `[[wikilink]]` target; excluding it deleted
+        9 pages and every edge touching them.
+      - not in a page-type dir, and not root — otherwise a synthesis page or the
+        Dataview dashboard leaks in as a paper. Root is excluded by *directory*
+        rather than by type, because relying on the type field to do it is what
+        let a type-less page through in the first place.
+
+    Extracted to module scope so it can be tested directly. The predicate was
+    inline in the counting function, and a source-grep was the only way to assert
+    anything about it — which tests spelling rather than behaviour.
+    """
+    page_type = str(page.fm.get("type", "paper") or "paper").strip().strip("\"'")
+    if page_type not in PAPER_LIKE_TYPES:
+        return False
+    if page.category in PAGE_TYPE_DIRS_:
+        return False
+    return page.category != wiki_dir().name
+
+
+
 def _extract_wikilinks(text: str) -> list[str]:
     return [m.group(1).strip() for m in WIKILINK_RE.finditer(text)]
 
@@ -266,12 +310,7 @@ def main(argv: list[str]) -> int:
     # Filter on `type: paper` instead of just excluding page-type dirs, so
     # housekeeping pages (e.g. the Dataview dashboard at `wiki/views.md`,
     # category "wiki") can't leak in as a "paper".
-    PAGE_TYPE_DIRS = ("synthesis", "references", "ideas", "concepts")
-    # Types that behave like papers for counting and for the cross-link graph.
-    # `commentary` belongs here: it lives in a content category, carries
-    # `[[wikilink]]`s in both directions, and is a legitimate link target — it
-    # just isn't citable *evidence* (CLAUDE.md Page Types §7).
-    PAPER_LIKE_TYPES = ("paper", "commentary")
+    PAGE_TYPE_DIRS = PAGE_TYPE_DIRS_
     # Held rather than consumed inline: the extraction-failure scan below reads
     # frontmatter these Page objects already carry, so it costs no second walk.
     wiki_pages = read_pages()
@@ -286,9 +325,7 @@ def main(argv: list[str]) -> int:
     papers = [
         {"stem": p.stem, "category": p.category}
         for p in wiki_pages
-        if str(p.fm.get("type", "paper") or "paper") in PAPER_LIKE_TYPES
-        and p.category not in PAGE_TYPE_DIRS
-        and p.category != wdir.name
+        if is_paper_like(p)
     ]
 
     # --- edges from [[wikilink]] occurrences in wiki pages

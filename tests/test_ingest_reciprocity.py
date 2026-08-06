@@ -155,3 +155,38 @@ class TestKindUpgrade:
     def test_an_asserted_citation_kind_is_never_downgraded(self):
         c = FakeCandidate("cgt/x-2014-y", kind="cites_source")
         assert promote._upgrade_kind_from_references(c, Path("/nonexistent.pdf")) == "cites_source"
+
+
+class TestPlaceholderNeverEatsProse:
+    """`_drop_none_placeholder` runs on every `append_related_paper` call — every
+    ingest, every `lint --fix`, every claim-overlap link. A false positive there
+    is silent prose loss in the framework's hottest write path.
+
+    The first pattern was `^\\s*\\(?\\s*none\\b.*$`: optional paren, then anything.
+    It deleted "None of the three replicates agreed, so this link is tentative."
+    The original test used a bullet starting with `-`, so it never saw this.
+    """
+
+    @pytest.mark.parametrize("line", [
+        "(none)",
+        "(none — no overlapping wiki papers)",
+        "(None yet.)",
+        "none",
+        "None.",
+    ])
+    def test_placeholders_are_dropped(self, line):
+        assert bl._drop_none_placeholder(line + "\n") == ""
+
+    @pytest.mark.parametrize("line", [
+        "None of the three replicates agreed, so this link is tentative.",
+        "None the less, the effect held.",
+        "Nonetheless the result stands.",
+        "- [[a/b]] — none of the three replicated",
+        "None of these papers measure the same quantity",
+    ])
+    def test_prose_survives(self, line):
+        assert bl._drop_none_placeholder(line + "\n").strip() == line
+
+    def test_a_placeholder_mixed_with_prose_drops_only_the_placeholder(self):
+        body = "(none)\nNone of the three replicates agreed.\n"
+        assert bl._drop_none_placeholder(body).strip() == "None of the three replicates agreed."

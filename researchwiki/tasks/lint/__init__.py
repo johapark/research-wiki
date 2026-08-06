@@ -18,6 +18,7 @@ focused and individually testable:
                     venue_suspect
   staleness       — stale_synthesis, stale_by_content, audit_count, proposals
   audit_p2        — Priority-2 entries with audit anchor hits
+  index_checks    — thin_index_text (what the embedder will see)
   db_checks       — ungraded_papers, zero_claim_papers,
                     stems_missing_claim_overlap, duplicate_claim_sets,
                     db_drift
@@ -53,9 +54,9 @@ from .db_checks import (
     find_duplicate_claim_sets,
     find_ungraded_papers,
     find_stems_missing_claim_overlap,
-    find_thin_index_text,
     find_zero_claim_papers,
 )
+from .index_checks import find_thin_index_text
 from .link_checks import (
     apply_backlink_fixes,
     find_none_placeholders,
@@ -156,7 +157,7 @@ def main(argv: list[str]) -> int:
     hook_too_long = find_hook_too_long(pages, pages_fm)
     unquoted_wikilinks = find_unquoted_wikilink_lists(pages)
     venue_suspect = find_venue_suspect(pages, pages_fm)
-    thin_index_text = find_thin_index_text(pages, pages_fm)
+    thin_index_text = find_thin_index_text(pages, pages_fm, pages_body)
 
     # --- staleness
     stale = find_stale_synthesis(pages, pages_fm, known)
