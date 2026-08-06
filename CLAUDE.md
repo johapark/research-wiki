@@ -186,7 +186,7 @@ source_collection: external
 source_url: ""                        # optional: canonical URL for blog posts / online whitepapers
 author_model: "claude-opus-4-7"       # optional: LLM that authored the page (manual whitepaper path — mirrors the field agent ingest writes on paper pages)
 keywords: []                          # required: 5–10 short phrases describing the doc's content, parallel to the keywords field on paper pages. Fewer than 5 is a `lint` finding (`missing_keywords`) and the writer won't emit a shorter list at all
-ingested_at: "2026-04-15T14:30:00"    # ISO 8601 local. Manual path: stamp with `date +%Y-%m-%dT%H:%M:%S`
+ingested_at: 2026-04-15T14:30:00      # ISO 8601 local, UNQUOTED (a real YAML timestamp — Dataview's date column needs it). Manual path: stamp with `date +%Y-%m-%dT%H:%M:%S`
 tags: []
 ---
 ```

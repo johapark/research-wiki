@@ -57,9 +57,12 @@ REQUIRED = ("title", "authors", "year")
 #: Values a lookup can supply (never a prompt).
 LOOKUP_FILLABLE = ("doi", "venue")
 
-#: Timestamps are quoted so YAML keeps them as strings rather than materializing
-#: a `datetime` — matching the `ingested_at: "..."` form in CLAUDE.md's page
-#: templates, and keeping `raw_frontmatter` JSON-serializable without a coercion.
+#: `migrated_at` is quoted so YAML keeps it a string rather than materializing a
+#: `datetime`. Local to the migrate path, and NOT the house style: `ingested_at`
+#: and `generated_at` are written unquoted (`agents/promote.py`) as real YAML
+#: timestamps, which is what the Dataview date column in `wiki/views.md` needs
+#: to format them. Either form survives the DB — `db/rebuild.py` serializes
+#: `raw_frontmatter` with `default=str`.
 _QUOTED_SCALAR = frozenset({"migrated_at"})
 
 #: Free-text scalars, always double-quoted. An unquoted `': '` inside a value is
