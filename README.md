@@ -67,6 +67,10 @@ Your sync daemon then sees markdown and PDFs only — no virtualenv, no `.git/` 
 
 Run `researchwiki init --scaffold-only` afterwards to create the page-type dirs inside `$SYNC`, and relocate the caches to `~/.cache/research-wiki`. No git configuration is needed — these three dirs are gitignored in full, so git doesn't care whether they're directories or symlinks. The copy-paste block, the no-symlink fallback, and the sync-specific failure modes (including why a stale sync looks exactly like uncommitted work) are in [`prompts/migration-backfill.md`](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder).
 
+**One thing does not travel with the checkout: the state DB.** It lives under `~/.local/share/researchwiki/repos/<name>-<hash>/`, keyed by the checkout's absolute path — so moving the checkout opens a fresh, empty database. `db rebuild` repopulates claims from your markdown and everything *looks* fine, while claim grades and ingest telemetry quietly aren't there. Set **`RESEARCHWIKI_DB_PATH`** in `.env` to pin the DB to one file and opt out of path-keying; if you are already stranded, the old DB is still on disk and recoverable. Details in [`WORKFLOW.md` → Pinning the state DB](./WORKFLOW.md#pinning-the-state-db-researchwiki_db_path).
+
+**On a second computer**, let the sync service carry `wiki/` and `papers/` and re-derive the rest locally — `researchwiki db rebuild && researchwiki reindex && researchwiki grade regression --missing-only` (no API calls). Everything that counts as knowledge converges that way, with no database copying. Cost/quality telemetry is the deliberate exception: it stays on whichever machine ran the ingest, since it records what that machine actually did. Never put the state DB itself on the sync service — concurrent SQLite writes through a sync daemon corrupt it.
+
 ### Providers
 
 Set credentials/routing via a gitignored **`.env`** at the project root (loaded automatically every invocation — no `source` needed) or inline shell exports (which take precedence). Put your **API key** in `.env`; keep **`RW_LLM_BASE_URL`** as a session export, since it changes when you swap backends.

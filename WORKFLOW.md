@@ -643,9 +643,17 @@ The wiki has clear canonicalness:
 
 - **Markdown is canonical.** `wiki/*.md` is the source of truth.
   Everything else can be regenerated from it.
-- **The state DB** (sqlite, at `~/.local/share/researchwiki/state.db`) is
-  a derived index over `wiki/` + `papers/` + caches. Run `researchwiki db
-  rebuild` to reconcile drift.
+- **The state DB** (sqlite, at
+  `~/.local/share/researchwiki/repos/<name>-<hash>/state.db`) is a derived
+  index over `wiki/` + `papers/` + caches. Run `researchwiki db rebuild` to
+  reconcile drift. It lives outside the repo on purpose, so a sync daemon
+  never sees its WAL files. `<hash>` comes from the checkout's absolute path,
+  which keeps separate wikis on one machine from sharing a `claims` table —
+  but also means **moving or renaming the checkout points the tooling at a
+  fresh, empty DB**. `RESEARCHWIKI_DB_PATH` pins it if that is a risk
+  ([below](#pinning-the-state-db-researchwiki_db_path)). One table,
+  `ingest_iterations`, is the only thing here not reconstructable from
+  markdown; it is a per-machine record of what this machine ran.
 - **`.tantivy-index/` and `.semantic-cache/`** are search indexes built
   from `wiki/` by `researchwiki reindex`. Both gitignored.
 - **`.grade-cache/{stem}/`** is per-paper PDF chunk index + embeddings.
@@ -826,6 +834,83 @@ marker when the env var is in effect), so "which config am I using?" is
 always answerable. Unlike `RW_LLM_PROVIDER` (which forces one provider
 across every phase and defeats per-role mixing), `RW_MODELS_CONFIG` selects
 a whole file that keeps its own per-role mixing.
+
+### Pinning the state DB (`RESEARCHWIKI_DB_PATH`)
+
+`state.db` is not stored in the repo — it sits under
+`~/.local/share/researchwiki/repos/<name>-<hash>/`, where `<hash>` is derived
+from the checkout's absolute path. That keeps two wikis on one machine from
+sharing a `papers`/`claims` table. The cost is that the DB is bound to *where
+the checkout is*: move it, rename a parent directory, or clone the same wiki
+to a second location, and the tooling silently opens a new, empty database.
+
+The failure is quiet rather than loud, which is what makes it worth knowing.
+`researchwiki db rebuild` cheerfully repopulates `papers` and `claims` from
+your markdown, so `status` and `search` look healthy — while two things that
+are *not* derivable from markdown stay missing: **claim grades** (until you
+re-grade, every claim is uncitable, so no synthesis page can ground against
+it) and **`ingest_iterations`** (the cost/quality telemetry behind
+`researchwiki insights`).
+
+Set `RESEARCHWIKI_DB_PATH` to an explicit file to opt out of path-keying:
+
+```bash
+# in .env, or exported in your shell
+RESEARCHWIKI_DB_PATH=~/.local/share/researchwiki/my-wiki.db
+```
+
+It overrides the per-repo path entirely, so the DB follows the *wiki* rather
+than the directory the code happens to live in. Worth setting before you
+reorganize a checkout; it takes precedence over everything else.
+
+If you are already stranded, nothing is lost — the old database is still on
+disk under its previous key. Compare and copy the richer one over the new:
+
+```bash
+ls -la ~/.local/share/researchwiki/repos/
+sqlite3 <old>/state.db "SELECT COUNT(*) FROM ingest_iterations;"   # richer wins
+cp <new>/state.db <new>/state.db.bak
+sqlite3 <old>/state.db ".backup '<new>/state.db'"
+researchwiki db rebuild        # grades survive: claims upsert by slug
+```
+
+Failing that, `researchwiki grade regression --missing-only` re-derives the
+grades locally in a few minutes with no API calls. Telemetry is not
+re-derivable — see the note on multiple machines below.
+
+### Working from more than one machine
+
+A common setup is one wiki, two computers, with `wiki/` and `papers/` on a
+sync service. What syncs, and what each machine derives for itself:
+
+| | Where it lives | How the second machine gets it |
+|---|---|---|
+| Pages, PDFs | `wiki/`, `papers/` | Sync service — this is the source of truth |
+| Claims, grades, indexes | state DB, `.tantivy-index/`, `.semantic-cache/` | Re-derived locally, identically |
+| LLM-judged caches | `.claim-graph/`, `.evolve-cache/` | Re-judged if needed; the *outcome* already synced as wikilinks |
+| Cost/quality telemetry | `ingest_iterations` | **Stays on the machine that ran the ingest — by design** |
+
+After the sync service delivers new pages, bring the second machine to parity:
+
+```bash
+researchwiki db rebuild && researchwiki reindex
+researchwiki grade regression --missing-only    # no API calls
+```
+
+Grading needs only the PDFs (which sync) and the local bi-encoder, so it is
+free and deterministic — both machines compute the same scores. Everything
+that constitutes knowledge therefore converges without copying any database.
+
+**Telemetry is deliberately not shared.** `ingest_iterations` records what a
+given machine actually ran — which model, how many tokens, which drafts were
+discarded. That is a per-machine operational log, not part of the wiki, and
+`insights` is most meaningful read that way. Expect each machine to report
+only its own ingests, and read `status`'s cost rollup as local spend.
+
+**Do not put the state DB on the sync service.** Two machines writing one
+SQLite file through a sync daemon corrupts it — WAL sidecars are exactly the
+files these daemons handle worst. Keeping the DB outside the synced tree is
+why it lives under `~/.local/share/` in the first place.
 
 ### Chat-relay (subscription users — no API key)
 

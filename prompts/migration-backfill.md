@@ -100,6 +100,27 @@ printf 'gitdir: %s\n' ~/git-repos/research-wiki.git > .git
 
 **Then understand what you have signed up for.** That `.git` pointer and those cache symlinks hold *absolute* paths, and they live inside the synced tree, so they reach every other machine. A second machine — different username, therefore different `$HOME` — receives paths that resolve nowhere: a repo git refuses to open, and caches that fail to write. Two observed failures, both from exactly this: a gitdir pointer naming another machine's user, and eight dangling cache symlinks that crashed `agent ingest` at batch-directory creation. If you must use this layout, write the paths **relative** (`gitdir: ../../../git-repos/research-wiki.git`) so they resolve under any `$HOME`, and re-run the relocation on every machine at matching paths.
 
+**The state DB does not follow the checkout.** It lives at
+`~/.local/share/researchwiki/repos/<name>-<hash>/state.db`, keyed on the
+checkout's absolute path — so relocating the checkout (exactly what this
+section tells you to do) silently opens a fresh, empty database. Move it
+deliberately, or set `RESEARCHWIKI_DB_PATH` first to pin it:
+
+```bash
+ls -la ~/.local/share/researchwiki/repos/                          # old and new keys
+sqlite3 <old>/state.db "SELECT COUNT(*) FROM ingest_iterations;"   # richer one wins
+cp <new>/state.db <new>/state.db.bak
+sqlite3 <old>/state.db ".backup '<new>/state.db'"
+researchwiki db rebuild                    # grades survive; claims upsert by slug
+researchwiki lint --json | grep ungraded   # should match its pre-move value
+```
+
+Skipping this is quiet rather than loud: `db rebuild` repopulates claims from
+markdown, so `status` and `search` look correct while claim grades (every claim
+uncitable until re-graded) and `ingest_iterations` are missing. If the old DB is
+truly gone, `researchwiki grade regression --missing-only` re-derives grades
+locally with no API calls; telemetry is per-machine and not re-derivable.
+
 **Three traps specific to syncing.**
 
 *A stale sync looks exactly like uncommitted work.* A wall of modified and deleted files after a pull is usually the daemon lagging behind another machine's commits, not local edits — the files are simply older copies. Confirm before you preserve *or* discard them: if a file's blob matches an earlier commit, it is stale, and `git restore` is safe.
