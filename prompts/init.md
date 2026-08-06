@@ -76,7 +76,7 @@ Create `wiki/views.md` — a [Dataview](https://blacksmithgu.github.io/obsidian-
 
 Write the three `dataview` blocks filtering on `type` (`paper` / `synthesis` / `idea`) and sorting on `default(ingested_at, file.ctime)` / `default(generated_at, file.mtime)` DESC — the `default(...)` fallback keeps pages ingested before those stamps existed in the ranking. Filter on `type` rather than a folder-based `FROM` so the queries work whether the Obsidian vault is opened at `wiki/` or the repo root. Tell the user the tables render only inside Obsidian with the Dataview plugin enabled; on GitHub they appear as code blocks.
 
-**Table schema** — each block is a `TABLE WITHOUT ID` with `FROM ""` (whole vault). Use exactly these columns and sort keys:
+**Table schema** — each block is a `TABLE WITHOUT ID` with `FROM ""` (whole vault). Use exactly these columns and sort keys. Note the date column wraps `default(...)` *inside* `dateformat(...)`, not the other way round: `default(stamp, dateformat(file.ctime, …))` formats only the fallback, so pages carrying the YAML stamp render as Dataview date objects in its own display format while pages without it render as `yyyy-MM-dd` strings — one column, two formats. Pick the value first, format once.
 
 *Recent papers (LIMIT 15, `WHERE type = "paper"`):*
 ```dataview
@@ -84,16 +84,16 @@ TABLE WITHOUT ID
   file.link as Page,
   short_name as "Short name",
   category[0] as Cat,
-  default(ingested_at, dateformat(file.ctime, "yyyy-MM-dd")) as "Added"
+  dateformat(default(ingested_at, file.ctime), "yyyy-MM-dd") as "Added"
 FROM ""
 WHERE type = "paper"
 SORT default(ingested_at, file.ctime) DESC
 LIMIT 15
 ```
 
-*Recent synthesis (LIMIT 10, `WHERE type = "synthesis"`):* columns `file.link as Page`, `length(referenced_papers) as Members`, `topic_seed as "Topic seed"`, `default(generated_at, dateformat(file.mtime, "yyyy-MM-dd")) as Generated`; `SORT default(generated_at, file.mtime) DESC`.
+*Recent synthesis (LIMIT 10, `WHERE type = "synthesis"`):* columns `file.link as Page`, `length(referenced_papers) as Members`, `topic_seed as "Topic seed"`, `dateformat(default(generated_at, file.mtime), "yyyy-MM-dd") as Generated`; `SORT default(generated_at, file.mtime) DESC`.
 
-*Recent ideas (LIMIT 5, `WHERE type = "idea"`):* columns `file.link as Page`, `verdict as Verdict`, `status as Status`, `default(generated_at, dateformat(file.mtime, "yyyy-MM-dd")) as Generated`; `SORT default(generated_at, file.mtime) DESC`.
+*Recent ideas (LIMIT 5, `WHERE type = "idea"`):* columns `file.link as Page`, `verdict as Verdict`, `status as Status`, `dateformat(default(generated_at, file.mtime), "yyyy-MM-dd") as Generated`; `SORT default(generated_at, file.mtime) DESC`.
 
 **Frontmatter — no `category:` field.** `views.md` sits at the wiki root (`wiki/views.md`), whose parent dir is `wiki`, not a content category or page-type dir. Give it only `type: dashboard` and `tags:` (mirror the other root bookkeeping files — `index.md`, `log.md` — which carry no `category:`). Adding `category: [...]` here trips `lint`'s category-drift check, which reads the parent dir as the canonical category and sees `wiki` ≠ whatever you wrote. Same rule for any other page you author directly at the wiki root.
 
