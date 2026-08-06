@@ -1,6 +1,8 @@
 """Staleness checks: pages that drifted out of sync with the surrounding corpus.
 
-  - stale_synthesis: a synthesis page's mtime is older than referenced papers'
+  - stale_synthesis: a synthesis page's `generated_at` predates the ingest date
+    of a paper it references (mtime is deliberately NOT used — see
+    `_source_change_date`)
   - stale_by_content: page's `topic_seed` top-hits include unreferenced papers
   - stale_by_audit_count: a cached `wiki_papers_at_audit:` value drifted
   - stale_evolution_proposals: proposal directories ≥ 7 days old
@@ -15,7 +17,7 @@ from ...paths import ingest_dir
 from .walk import extract_links, page_key
 
 
-def _source_change_date(md: Path, fm: dict):
+def _source_change_date(md: Path, fm: dict, db_dates: dict | None = None):
     """Date a referenced page's *substance* last changed.
 
     Prefers YAML `ingested_at` over filesystem mtime. A paper page's mtime moves
@@ -35,8 +37,31 @@ def _source_change_date(md: Path, fm: dict):
     `ingested_at` moves on (re)ingest, which is the substantive event this check
     documents caring about ("re-examined when sources change"). The trade is
     recall: a hand-edited paper page that doesn't touch `ingested_at` no longer
-    ages its citing pages. That is the right trade at these ratios, and pages
-    without the field fall back to mtime so nothing is silently exempted.
+    ages its citing pages. That is the right trade at these ratios.
+
+    Three tiers, and **no mtime tier**. Falling back to mtime for pages without
+    the field was the original design and it kept the exact bug the YAML
+    preference was introduced to fix, just narrowed to fewer pages: on
+    2026-08-06 a one-line YAML key removal rewrote 402 files and took
+    `stale_synthesis` from 11 to 24, the third such self-inflicted spike in two
+    days. A mechanical rewrite is not a content change, and mtime cannot tell the
+    difference.
+
+      1. YAML `ingested_at` — 373 of 443 pages.
+      2. `ingest_iterations.created_at` (via `db_dates`) — a *recorded ingest
+         event* rather than a filesystem artifact, covering 6 more.
+      3. Otherwise **None**, meaning "unknown, so don't judge". Callers already
+         skip `None`.
+
+    Tier 3 exempts 23 legacy paper pages (`eddy-2011`, `mariani-2013`,
+    `steinegger-2017`, …). That costs almost nothing real: they were ingested
+    long before any current synthesis was generated, so they cannot be newer
+    than one, and the only way they *appeared* newer was the artifact this
+    removes. "Not checked" is the honest state for a page whose ingest date
+    nothing recorded — better than a date that reports every maintenance pass as
+    a finding, because those false positives are permanent (mtimes never move
+    back) and clearing one means bumping `generated_at`, which falsely claims a
+    review that never happened.
     """
     from datetime import datetime
     raw = fm.get("ingested_at")
@@ -45,7 +70,44 @@ def _source_change_date(md: Path, fm: dict):
             return datetime.fromisoformat(str(raw).strip().strip("\"'")).date()
         except (ValueError, TypeError):
             pass
-    return datetime.fromtimestamp(md.stat().st_mtime).date()
+    if db_dates:
+        return db_dates.get(md.stem)
+    return None
+
+
+def _db_ingest_dates() -> dict:
+    """`{stem: date}` of each paper's earliest recorded ingest attempt.
+
+    Tier 2 of `_source_change_date`. One batched query rather than one per page,
+    and `safe_read` so a missing or locked DB degrades to `{}` — which pushes
+    those pages to tier 3 ("unknown, don't judge") instead of failing a lint run
+    that is otherwise pure-filesystem.
+
+    `MIN(created_at)` is deliberate: a re-ingest adds rows, and the *first*
+    attempt is when the paper's substance entered the wiki. Using MAX would make
+    every retry look like a fresh source change.
+    """
+    from datetime import datetime
+    from ...db.safe import safe_read
+
+    def _query(conn):
+        return conn.execute(
+            """
+            SELECT paper_stem, MIN(created_at) AS first_seen
+              FROM ingest_iterations
+             WHERE paper_stem IS NOT NULL AND paper_stem != ''
+             GROUP BY paper_stem
+            """
+        ).fetchall()
+
+    rows = safe_read(_query, default=[], label="lint.staleness_db_dates")
+    out: dict = {}
+    for r in rows:
+        try:
+            out[r["paper_stem"]] = datetime.fromtimestamp(r["first_seen"]).date()
+        except (TypeError, ValueError, OSError):
+            continue
+    return out
 
 
 def find_stale_synthesis(
@@ -53,10 +115,14 @@ def find_stale_synthesis(
     pages_fm: dict[Path, dict],
     known: set[str],
 ) -> list[tuple[Path, list[str]]]:
-    """Pages whose referenced papers' mtimes are newer than the page's
-    `generated_at` field. Covers both synthesis/ and ideas/ — both depend on
-    referenced_papers and both should be re-examined when sources change.
-    Reported under the `stale_synthesis` JSON key for backward compatibility.
+    """Pages a referenced paper has outrun: the paper's ingest date is newer than
+    the page's `generated_at`. Covers synthesis/, ideas/ and concepts/ — all three
+    depend on referenced papers and all three should be re-examined when sources
+    change. Reported under the `stale_synthesis` JSON key for backward
+    compatibility.
+
+    "Ingest date" is `_source_change_date`, which never consults mtime; a paper
+    whose date is unknown is skipped rather than guessed at.
 
     Comparison is at date resolution: `generated_at` is a YYYY-MM-DD field, so
     a paper modified on the same calendar day does NOT trigger staleness —
@@ -65,8 +131,9 @@ def find_stale_synthesis(
     """
     from datetime import datetime
     stale: list[tuple[Path, list[str]]] = []
-    all_mtime_dates = {
-        page_key(p): _source_change_date(p, pages_fm.get(p, {}))
+    db_dates = _db_ingest_dates()
+    source_dates = {
+        page_key(p): _source_change_date(p, pages_fm.get(p, {}), db_dates)
         for p in pages
     }
     for md in pages:
@@ -87,7 +154,7 @@ def find_stale_synthesis(
         links = extract_links(text, known)
         newer = [
             lk for lk in links
-            if (d := all_mtime_dates.get(lk)) is not None and d > gen_date
+            if (d := source_dates.get(lk)) is not None and d > gen_date
         ]
         if newer:
             stale.append((md, newer))
