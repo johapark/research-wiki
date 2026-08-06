@@ -5,9 +5,24 @@
 #
 # Select this config with RW_MODELS_CONFIG=models.chatgpt.yaml.
 # gpt-5.6-terra drives the quality-sensitive roles (author/critic/judge);
-# the deterministic short-output roles (classifier, extractor) run on the
-# cheaper gpt-5.4-mini. proposer still on gpt-5.6-luna — downgrade it too
-# once mini output quality is confirmed on short_name/keywords.
+# the deterministic short-output roles (classifier, extractor) run on
+# gpt-5.4-mini; proposer on gpt-5.6-luna.
+#
+# NOTE: mini is NOT the cheap option here, despite the name. Per
+# config/pricing.yaml it is $0.75/$4.50 per Mtok against luna's $0.20/$1.20 —
+# 3.75x dearer on both, because it belongs to the older 5.4 generation and the
+# 5.6 line cut prices. Routing classifier/extractor to mini is a cost increase
+# over luna, not a saving. It costs little today only because those phases
+# barely consume tokens (measured: 0 across a 4-paper batch, since reconcile
+# resolves from S2/Crossref without an LLM call). If they ever do, move them
+# to luna.
+#
+# Measured cost, this corpus (upper bounds — prompt-cache hits not subtracted):
+#   author/critic/judge on luna   ~$0.009/paper  (n=13)
+#   author/critic/judge on terra  ~$0.071/paper  (n=4)
+# Terra is 10x luna's rate on both input and output; normalized for paper size
+# the same ingests run ~9x dearer. Spend concentrates in two phases: `author`
+# and `target_claims` (46K and 32K input tokens respectively across 4 papers).
 
 base_url: https://api.openai.com/v1
 

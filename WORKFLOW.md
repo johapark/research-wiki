@@ -682,27 +682,33 @@ Absolute cost is **config-dependent** — it rides on whichever
 `config/models.*.yaml` file `RW_MODELS_CONFIG` selects and that provider's
 token pricing. The current active default is `models.chatgpt.yaml`:
 `gpt-5.6-luna` drives the quality-sensitive roles (author / critic / judge /
-proposer), and the cheaper `gpt-5.4-mini` handles the deterministic
-short-output roles (classifier / extractor). The committed fallback when no
-override is set is `config/models.yaml` (Upstage Solar: `solar-pro3` /
-`solar-mini`).
+proposer), and `gpt-5.4-mini` handles the deterministic short-output roles
+(classifier / extractor). Despite the name mini is *not* the cheaper of the
+two — it is a 5.4-generation model and the 5.6 line cut prices, so it costs
+3.75x luna per token; it stays cheap here only because those phases barely
+emit tokens. The committed fallback when no override is set is
+`config/models.yaml` (Upstage Solar: `solar-pro3` / `solar-mini`).
 
-At OpenAI standard rates (per 1M tokens: `gpt-5.6-luna` $1.00 in / $6.00
-out, `gpt-5.4-mini` $0.75 in / $4.50 out), a single-draft ingest runs
-roughly ~20K input + ~6K output tokens across all roles (from `researchwiki
-insights`), with the **author** phase dominating and everything else a long
-tail — so a typical paper lands around **~$0.05–$0.08**, and a 2-draft
-author tournament (`-n 2`) closer to **~$0.08–$0.12**. The two grader runs
+At the rates in `config/pricing.yaml` (per 1M tokens: `gpt-5.6-luna` $0.20 in
+/ $1.20 out, `gpt-5.4-mini` $0.75 in / $4.50 out), a single-draft ingest runs
+roughly ~26K input + ~3.5K output tokens across all roles, with **author**
+and **target_claims** together accounting for nearly all of it and everything
+else a long tail — so a typical paper lands around **~$0.01** (measured mean
+over 13 ingests on this corpus), and a 2-draft author tournament (`-n 2`)
+roughly double. Swapping the quality roles to `gpt-5.6-terra` ($2.00 / $12.00)
+moves that to **~$0.07/paper** — 10x the rate, ~9x the bill once normalized
+for paper size. The two grader runs
 are semantic-only (no LLM) and free; memory-evolution proposals cost in
 proportion to how many synthesis neighbors clear the cosine prefilter.
 
 Treat these as order-of-magnitude — token counts are config-independent
-(same prompts), but dollars move with the model assignment. Note the
-framework's built-in cost estimator only prices models already in its
-internal rate table; the current default models aren't in it, so
-`researchwiki insights` and `status` report **`$0.00`** for them today —
-read that as "unpriced," and multiply the per-role token counts from
-`insights` by your provider's rates for a real figure. The agent is
+(same prompts), but dollars move with the model assignment. The cost
+estimator prices only models present in `config/pricing.yaml`; the current
+GPT-5.6 defaults *are* listed, so `insights` and `status` report real figures
+for them. A model missing from that table resolves to `$0.00`, which is
+correct for a local backend but reads as "unpriced" for a cloud one —
+`status` names any cloud model it could not price, so a stale table is
+visible rather than a silently understated bill. The agent is
 calibrated to spend on *fidelity* (claim-grading, critic, evolve), not on
 speed — that hasn't changed across model swaps.
 

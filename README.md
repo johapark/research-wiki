@@ -80,7 +80,7 @@ OPENAI_API_KEY="sk-..."                # OpenAI cloud (default, Bearer)
 
 | Provider | Setup | Cost |
 | --- | --- | --- |
-| **OpenAI** (default) | Set `OPENAI_API_KEY`. The default config (and the zero-config fallback) already routes to `gpt-5.6-luna` + `gpt-5.4-mini` — nothing to copy. | ~$0.05/paper |
+| **OpenAI** (default) | Set `OPENAI_API_KEY`. The default config (and the zero-config fallback) already routes to `gpt-5.6-luna` + `gpt-5.4-mini` — nothing to copy. | ~$0.01/paper |
 | **Anthropic** | `cp config/models.anthropic.yaml config/models.yaml`, set `ANTHROPIC_API_KEY`. Routes to Sonnet 4.6 + Haiku 4.5. | ~$0.10/paper |
 | **Other OpenAI-compatible** (Gemini, Groq, OpenRouter, …) | `cp config/models.gemini.yaml config/models.yaml` (Gemini — ready-made) or `config/models.openai-compatible.yaml` (generic template), set `OPENAI_API_KEY` + `RW_LLM_BASE_URL`. | provider-dependent |
 | **Local LLM** (LM Studio / vLLM / llama.cpp / ollama) | Any OpenAI-compatible server. `provider: lmstudio` on a role; base URL defaults to `http://localhost:1234/v1` (override with `RW_LLM_BASE_URL`). [Details](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama). | ~free after download |
@@ -92,7 +92,7 @@ Which model runs each role is read from `config/models.yaml` — **gitignored** 
 
 | Template | Routes to |
 |---|---|
-| `config/models.chatgpt.yaml` | **Default (recommended)** — GPT-5-class **gpt-5.6-luna** for the quality-sensitive roles (author/critic/judge/proposer), cheaper **gpt-5.4-mini** for the deterministic classifier/extractor; ~$0.05/paper. Zero-config fallback when no `config/models.yaml` is present. Set `OPENAI_API_KEY` to an OpenAI key and go. |
+| `config/models.chatgpt.yaml` | **Default (recommended)** — GPT-5-class **gpt-5.6-luna** for the quality-sensitive roles (author/critic/judge/proposer), **gpt-5.4-mini** for the deterministic classifier/extractor; ~$0.01/paper measured over 13 ingests. Zero-config fallback when no `config/models.yaml` is present. Set `OPENAI_API_KEY` to an OpenAI key and go. |
 | `config/models.anthropic.yaml` | Sonnet 4.6 + Haiku 4.5. Highest fidelity; ~$0.10/paper. |
 | `config/models.gemini.yaml` | **Recommended free API** — Google Gemini via its OpenAI-compatible endpoint. **Gemini 3.5 Flash** for author/critic/judge, **Gemini 3.1 Flash-Lite** for classifier/proposer/extractor. Best-grading free option in our dogfooding (see below); set `OPENAI_API_KEY` to a Gemini key and go. |
 | `config/models.lmstudio.yaml` | **Recommended local** — pure-local, every role on one LM Studio model. Runs **Qwen3.6-35B-A3B** in our setup (see [Local LLMs](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama)): no API key, nothing leaves the machine, ~free after the one-time download. |
@@ -103,7 +103,7 @@ Which model runs each role is read from `config/models.yaml` — **gitignored** 
 cp config/models.chatgpt.yaml config/models.yaml     # the default; or the others
 ```
 
-**Which one?** The **default is `config/models.chatgpt.yaml`** — OpenAI's GPT-5-class models across the pipeline, with the cheaper mini on the mechanical roles to hold cost near ~$0.05/paper; in benchmarking it captured every critical headline claim with verbatim comparator figures. For a **zero-cost cloud** start, use `config/models.gemini.yaml` — in our ingest history Gemini 3.5 Flash produced the highest-grading drafts of any free provider (mean claim-fidelity ≈ 0.80, edging Qwen's ≈ 0.78 and Solar's ≈ 0.75). Two caveats to weigh: the free tier is rate-limited (~5 requests/min — the config already serializes drafting to stay under it) and **Google may train on free-tier prompts/responses**, so for unpublished or confidential PDFs stay on OpenAI/Anthropic or the local path. For a **fully private, no-key** setup, use `config/models.lmstudio.yaml` with Qwen3.6-35B ([details](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama)) — it trades a little fidelity for keeping every paper on your own hardware.
+**Which one?** The **default is `config/models.chatgpt.yaml`** — OpenAI's GPT-5-class models across the pipeline, holding cost near ~$0.01/paper (measured mean over 13 ingests: 25.8K input / 3.5K output tokens); in benchmarking it captured every critical headline claim with verbatim comparator figures. For a **zero-cost cloud** start, use `config/models.gemini.yaml` — in our ingest history Gemini 3.5 Flash produced the highest-grading drafts of any free provider (mean claim-fidelity ≈ 0.80, edging Qwen's ≈ 0.78 and Solar's ≈ 0.75). Two caveats to weigh: the free tier is rate-limited (~5 requests/min — the config already serializes drafting to stay under it) and **Google may train on free-tier prompts/responses**, so for unpublished or confidential PDFs stay on OpenAI/Anthropic or the local path. For a **fully private, no-key** setup, use `config/models.lmstudio.yaml` with Qwen3.6-35B ([details](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama)) — it trades a little fidelity for keeping every paper on your own hardware.
 
 With no `config/models.yaml` present, the loader falls back to a hardcoded table mirroring `models.chatgpt.yaml` — so the OpenAI default works with no copy at all (just set `OPENAI_API_KEY`). Copy a template only when you want to *change* something; delete the file to reset.
 
@@ -140,7 +140,7 @@ Always keep **`other`** — the abstention bucket the classifier falls back to; 
 
 Drop a PDF in `inbox/` and say *"Ingest the paper I just dropped in `inbox/`."* The LLM runs `researchwiki agent ingest`. ~3–5 min later: metadata reconciled (the extractor cross-checks Semantic Scholar), a draft written and graded against the PDF, promoted to `wiki/{category}/{stem}.md` with back-links added, and any synthesis-evolution proposals surfaced for review. Then ask *"What did we just learn?"* for a summary.
 
-**Backlog?** Say *"ingest everything in inbox/"* — the LLM loops over each file (~$0.05/paper on the default OpenAI config). **If something breaks mid-ingest**, tell the LLM; it follows the recovery procedure in CLAUDE.md (don't hand-patch YAML). Then the workflow is conversational: batch ingest, cross-paper Q&A, `neighbors` discovery, synthesis detection, idea pages, page fixes.
+**Backlog?** Say *"ingest everything in inbox/"* — the LLM loops over each file (~$0.01/paper on the default OpenAI config). **If something breaks mid-ingest**, tell the LLM; it follows the recovery procedure in CLAUDE.md (don't hand-patch YAML). Then the workflow is conversational: batch ingest, cross-paper Q&A, `neighbors` discovery, synthesis detection, idea pages, page fixes.
 
 Most users won't run `researchwiki` commands directly — the LLM picks among them based on what you ask. For the full command table and a copy-paste-able walkthrough, see [`WORKFLOW.md` → CLI reference](./WORKFLOW.md#cli-reference).
 
