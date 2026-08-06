@@ -53,6 +53,7 @@ from .db_checks import (
     find_duplicate_claim_sets,
     find_ungraded_papers,
     find_stems_missing_claim_overlap,
+    find_thin_index_text,
     find_zero_claim_papers,
 )
 from .link_checks import (
@@ -108,7 +109,7 @@ def main(argv: list[str]) -> int:
                              "stale_by_audit_count, p2_entries_with_anchor_hits, "
                              "stale_evolution_proposals, missing_keywords, "
                              "missing_hook, hook_too_long, "
-                             "venue_suspect, none_placeholders, "
+                             "venue_suspect, none_placeholders, thin_index_text, "
                              "ungraded_papers, zero_claim_papers, "
                              "stems_missing_claim_overlap, "
                              "duplicate_claim_sets, "
@@ -155,6 +156,7 @@ def main(argv: list[str]) -> int:
     hook_too_long = find_hook_too_long(pages, pages_fm)
     unquoted_wikilinks = find_unquoted_wikilink_lists(pages)
     venue_suspect = find_venue_suspect(pages, pages_fm)
+    thin_index_text = find_thin_index_text(pages, pages_fm)
 
     # --- staleness
     stale = find_stale_synthesis(pages, pages_fm, known)
@@ -199,6 +201,7 @@ def main(argv: list[str]) -> int:
             missing_hook=missing_hook, hook_too_long=hook_too_long,
             stem_year_drift=stem_year_drift, unquoted_wikilinks=unquoted_wikilinks,
             venue_suspect=venue_suspect, none_placeholders=none_placeholders,
+            thin_index_text=thin_index_text,
             supp_yaml_missing=supp_yaml_missing, supp_orphans=supp_orphans,
             ungraded_papers=ungraded_papers,
             zero_claim_papers=zero_claim_papers,
@@ -222,6 +225,7 @@ def main(argv: list[str]) -> int:
         missing_hook=missing_hook, hook_too_long=hook_too_long,
         stem_year_drift=stem_year_drift, unquoted_wikilinks=unquoted_wikilinks,
         venue_suspect=venue_suspect, none_placeholders=none_placeholders,
+        thin_index_text=thin_index_text,
         supp_yaml_missing=supp_yaml_missing, supp_orphans=supp_orphans,
         ungraded_papers=ungraded_papers,
         zero_claim_papers=zero_claim_papers,
@@ -304,6 +308,7 @@ def _emit_json(**kw) -> int:
         "ungraded_papers": kw["ungraded_papers"],
         "venue_suspect": kw["venue_suspect"],
         "none_placeholders": kw["none_placeholders"],
+        "thin_index_text": kw["thin_index_text"],
         "zero_claim_papers": kw["zero_claim_papers"],
         "stems_missing_claim_overlap": kw["stems_missing_claim_overlap"],
         # null = check skipped (claim-embedding cache cold or <50% of claims
@@ -652,6 +657,15 @@ def _emit_prose(**kw) -> int:
         print("   Fix via `backfill doi` → provider venue, or edit the field directly.")
         for e in venue_suspect[:20]:
             print(f"- {e['page']} — venue={e['venue']!r}")
+        print()
+
+    thin_index_text = kw["thin_index_text"]
+    if thin_index_text:
+        print(f"## Pages too thin for semantic retrieval ({len(thin_index_text)})")
+        print("   Invisible to see-also, ingest cross-linking, evolve's KNN and")
+        print("   candidates — check the page's H2 names against its page type.")
+        for e in thin_index_text[:20]:
+            print(f"- {e['page']} ({e['page_type']}) — {e['reason']}")
         print()
 
     none_placeholders = kw["none_placeholders"]

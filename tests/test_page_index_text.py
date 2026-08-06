@@ -154,3 +154,73 @@ class TestTagsOnlyWhereTheyCarrySignal:
 
     def test_missing_tags_field_is_harmless(self):
         assert "substance" in page_index_text(_page("concept", "## Definition\n\nsubstance\n"))
+
+
+class TestThinIndexReason:
+    """The guard for the silent failure: a page that embeds only its title.
+
+    Nothing caught that on 2026-08-06 — `lint` had no view of the embedding, the
+    unit tests used synthetic pages, the check reached for (`stale_by_content`)
+    runs on BM25, and the retrieval benchmark's fixtures are paper-anchored with
+    no runner. This needs no ground truth to fire.
+    """
+
+    def test_a_title_only_page_is_flagged(self):
+        from researchwiki.index.pages_semantic import thin_index_reason
+        # `## Overview` matches no type's section list and the body fallback only
+        # fires for pages with no named match... which is this page, so give it a
+        # body that strips to nothing.
+        p = _page("concept", "## Overview\n\n<!-- only a comment -->\n")
+        r = thin_index_reason(p)
+        assert r and ("title-only" in r or "chars" in r)
+
+    def test_the_reason_names_the_sections_it_looked_for(self):
+        from researchwiki.index.pages_semantic import thin_index_reason
+        p = Page(path=Path("wiki/concepts/x.md"), stem="x", category="concepts",
+                 fm={"title": "A Title", "type": "concept"}, body="")
+        r = thin_index_reason(p)
+        assert r and "type='concept'" in r and "Definition" in r
+
+    def test_an_empty_page_says_empty(self):
+        from researchwiki.index.pages_semantic import thin_index_reason
+        p = Page(path=Path("wiki/compbio/x.md"), stem="x", category="compbio",
+                 fm={}, body="")
+        assert thin_index_reason(p) == "empty — nothing indexable"
+
+    def test_a_short_but_real_page_is_flagged_by_the_floor(self):
+        from researchwiki.index.pages_semantic import thin_index_reason
+        p = _page("paper", "## Summary\n\nToo short.\n")
+        r = thin_index_reason(p)
+        assert r and "floor" in r
+
+    def test_a_substantial_page_is_not_flagged(self):
+        from researchwiki.index.pages_semantic import thin_index_reason, INDEX_TEXT_FLOOR
+        p = _page("paper", "## Summary\n\n" + ("real substantive prose. " * 40))
+        assert thin_index_reason(p) is None
+        assert INDEX_TEXT_FLOOR == 200
+
+    def test_it_never_disagrees_with_what_is_embedded(self):
+        """It calls page_index_text rather than re-deriving the parts."""
+        from researchwiki.index.pages_semantic import thin_index_reason, page_index_text
+        p = _page("idea", "## Verdict\n\n" + ("v " * 300))
+        assert thin_index_reason(p, page_index_text(p)) is thin_index_reason(p)
+
+    def test_every_real_corpus_page_passes(self):
+        """The corpus-level assertion the unit tests could not make before."""
+        import pathlib
+        from researchwiki.wiki import read_page
+        from researchwiki.index.pages_semantic import thin_index_reason
+        root = pathlib.Path("wiki")
+        if not root.exists():
+            pytest.skip("no corpus in this checkout")
+        thin = []
+        for md in root.rglob("*.md"):
+            if md.parent == root:
+                continue
+            pg = read_page(md)
+            if pg is None:
+                continue
+            r = thin_index_reason(pg)
+            if r:
+                thin.append((f"{md.parent.name}/{md.stem}", r))
+        assert thin == [], f"thin pages: {thin[:5]}"

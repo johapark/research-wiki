@@ -37,15 +37,27 @@ def build_link_graph(
         prose = pages_prose[md]
         tgts = extract_links(prose, known) - {key}
         out_links[key] = tgts
-        for t in tgts:
-            in_links.setdefault(t, set()).add(key)
+        # In-links from root meta pages are NOT recorded. `index.md` carries a
+        # bullet for every page in the wiki, so counting those as in-links made
+        # `find_orphans` measure catalogue membership rather than citation
+        # connectivity — once the catalogue is complete the check can never fire.
+        # It read 0 while `status`, which builds its graph from papers only,
+        # reported 18. The page that took `lint` from 1 to 0 on 2026-08-06
+        # (`genomics/oberlin-2025-…`) gained exactly one inbound link: the
+        # `index.md` bullet added to it. That is bookkeeping, not a relationship.
+        #
+        # Out-links are still recorded for every page, because
+        # `find_missing_backlinks` applies its own root-meta exclusion and the
+        # broken-link scan below wants the coverage.
+        if "/" in key:
+            for t in tgts:
+                in_links.setdefault(t, set()).add(key)
         # Root meta pages (`index`, `log`, `views`, … — a slashless key) are
         # catalogues/logs, not authored content: `log.md` in particular
         # accumulates historical entries with template fragments like
         # `[[stem]]` / `[[category/…]]` that are documentation, not real
-        # links. Their out-links still feed the graph above (the index links
-        # every paper), but their "broken" links are noise — exclude them,
-        # consistent with the root-meta exclusion in `find_orphans`.
+        # links. Their "broken" links are noise — exclude them, consistent with
+        # the root-meta exclusion in `find_orphans`.
         bad = broken_links(prose, known)
         if bad and "/" in key:
             broken.append((key, bad))
@@ -58,6 +70,10 @@ def find_orphans(
     in_links: dict[str, set[str]],
 ) -> list[str]:
     """Paper pages with zero in-links and zero out-links.
+
+    `in_links` excludes root meta pages as sources (see `build_link_graph`), so
+    an `index.md` bullet does not de-orphan a page — otherwise this measures
+    whether a page is catalogued, not whether anything cites it.
 
     Synthesis pages excluded — they're catalog-shaped and legitimately
     can have no inbound links until someone references them. Root meta

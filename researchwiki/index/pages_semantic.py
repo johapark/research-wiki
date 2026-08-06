@@ -171,6 +171,49 @@ def _drop_section(body: str, name: str) -> str:
     return body[:m.start()] + body[end:]
 
 
+#: Below this many characters, a page's embedded text is too thin to retrieve on.
+#:
+#: Chosen from the measured gap rather than by feel. After sections were made
+#: type-aware (2026-08-06) the shortest legitimate page embeds 726 chars
+#: (whitepaper; paper 1399, commentary 827, synthesis 772, concept 3832, idea
+#: 5500). While the type split was broken, the affected pages embedded 15-64
+#: chars. So anything between ~70 and ~700 separates the two states, and 200
+#: sits there with ~3.6x headroom under the real minimum — loose enough not to
+#: nag about a genuinely terse page, tight enough that a collapse cannot hide.
+INDEX_TEXT_FLOOR = 200
+
+
+def thin_index_reason(p: Page, text: str | None = None) -> str | None:
+    """Why this page's embedded text is too thin to retrieve on, else None.
+
+    The guard for a failure that is otherwise **silent**: on 2026-08-06 a
+    section-name mismatch reduced every synthesis, idea and concept page to its
+    title, and nothing noticed. `lint` had no view of the embedding, the unit
+    tests used synthetic pages, the check reached for (`stale_by_content`) runs on
+    BM25 and so could not reflect it, and the retrieval benchmark's fixtures are
+    paper-anchored by schema with no runner. A page that embeds only its title is
+    wrong on its face, needs no ground truth to detect, and is exactly what was
+    missed.
+
+    Deliberately calls `page_index_text` rather than re-deriving the parts, so it
+    can never disagree with what is actually embedded. Pass `text` when the caller
+    already has it (`build_index` does) to skip the second assembly.
+    """
+    text = page_index_text(p) if text is None else text
+    body = text.strip()
+    if not body:
+        return "empty — nothing indexable"
+    title = str(p.fm.get("title") or "").strip()
+    if title and body == title:
+        page_type = str(p.fm.get("type") or "paper").strip().strip("\"'")
+        wanted = _INDEX_SECTIONS.get(page_type, _INDEX_SECTIONS_DEFAULT)
+        return (f"title-only — no section matched for type={page_type!r} "
+                f"(looked for {', '.join(wanted)})")
+    if len(body) < INDEX_TEXT_FLOOR:
+        return f"only {len(body)} chars (floor {INDEX_TEXT_FLOOR})"
+    return None
+
+
 def _tag_list(raw) -> list[str]:
     """`tags:` as a list of strings, tolerating the inline-YAML string form."""
     if isinstance(raw, str):
@@ -199,8 +242,12 @@ def build_index(pages: list[Page] | None = None) -> dict | None:
 
     rows: list[dict] = []
     texts: list[str] = []
+    thin: list[dict] = []
     for p in pages:
         text = page_index_text(p)
+        reason = thin_index_reason(p, text)
+        if reason:
+            thin.append({"key": p.key, "page_type": p.page_type, "reason": reason})
         if not text.strip():
             # Skip pages with nothing indexable. Sparse stubs would otherwise
             # cluster around (0, ...) and pollute KNN.
@@ -222,7 +269,7 @@ def build_index(pages: list[Page] | None = None) -> dict | None:
         # Wipe any stale state so we don't leave a half-built index that
         # mismatches the wiki.
         _write_empty(out_dir)
-        return {"n_pages": 0, "model": semantic.DEFAULT_MODEL, "dim": 0}
+        return {"n_pages": 0, "model": semantic.DEFAULT_MODEL, "dim": 0, "thin": thin}
 
     embeddings = semantic.embed_texts(texts)
     if embeddings is None or embeddings.shape[0] != len(texts):
@@ -237,7 +284,8 @@ def build_index(pages: list[Page] | None = None) -> dict | None:
         "rows": rows,
     }
     (out_dir / PAGES_META).write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    return {"n_pages": len(rows), "model": meta["model"], "dim": meta["dim"]}
+    return {"n_pages": len(rows), "model": meta["model"], "dim": meta["dim"],
+            "thin": thin}
 
 
 def _write_empty(out_dir: Path) -> None:

@@ -341,3 +341,45 @@ def db_drift_check_and_fix(
     if deleted:
         fixed["deleted"] = deleted
     return drift, fixed
+
+
+def find_thin_index_text(pages: list, pages_fm: dict) -> list[dict]:
+    """Pages whose semantic-index text is too thin to retrieve on.
+
+    Mirrors the warning `reindex` prints, and shares its one implementation
+    (`index.pages_semantic.thin_index_reason`) so the two cannot disagree. It is
+    duplicated *here* only because `reindex`'s output scrolls away, while
+    `lint --json` is what gets scanned when checking corpus health — and the
+    failure this guards is silent by nature.
+
+    Advisory. A thin page is not malformed; it is unreachable by semantic
+    retrieval, which is a different and quieter problem.
+
+    Imported lazily: `pages_semantic` pulls in numpy, and `lint` is otherwise a
+    ~1s pure-filesystem command (same reasoning as the other deferred imports in
+    this module).
+    """
+    try:
+        from ...index.pages_semantic import thin_index_reason
+        from ...wiki import read_page
+    except Exception:
+        return []
+    out: list[dict] = []
+    for md in pages:
+        if md.parent.name == md.parent.parent.name:   # defensive: root-level
+            continue
+        try:
+            p = read_page(md)
+            if p is None:
+                continue
+            reason = thin_index_reason(p)
+        except Exception:
+            continue
+        if reason:
+            out.append({
+                "page": f"{md.parent.name}/{md.stem}",
+                "page_type": str((pages_fm.get(md) or {}).get("type") or "paper"),
+                "reason": reason,
+            })
+    out.sort(key=lambda d: d["page"])
+    return out

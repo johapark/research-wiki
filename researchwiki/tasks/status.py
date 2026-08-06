@@ -267,13 +267,28 @@ def main(argv: list[str]) -> int:
     # housekeeping pages (e.g. the Dataview dashboard at `wiki/views.md`,
     # category "wiki") can't leak in as a "paper".
     PAGE_TYPE_DIRS = ("synthesis", "references", "ideas", "concepts")
+    # Types that behave like papers for counting and for the cross-link graph.
+    # `commentary` belongs here: it lives in a content category, carries
+    # `[[wikilink]]`s in both directions, and is a legitimate link target — it
+    # just isn't citable *evidence* (CLAUDE.md Page Types §7).
+    PAPER_LIKE_TYPES = ("paper", "commentary")
     # Held rather than consumed inline: the extraction-failure scan below reads
     # frontmatter these Page objects already carry, so it costs no second walk.
     wiki_pages = read_pages()
+    # `fm.get("type", "paper")` — NOT `fm.get("type")`. A missing `type:` field
+    # means paper, which is what `db rebuild` records (`db/rebuild.py`:
+    # `str(fm.get("type", "paper"))`). Reading it as None instead dropped the 23
+    # pages that predate the `type:` requirement, so this dashboard reported 359
+    # papers against the DB's 382 — and, worse, those pages fell out of
+    # `known_pages` below, silently deleting every cross-link touching them from
+    # the graph. Root housekeeping pages are excluded by category rather than by
+    # type, so a type-less one still can't leak in as a paper.
     papers = [
         {"stem": p.stem, "category": p.category}
         for p in wiki_pages
-        if p.fm.get("type") == "paper" and p.category not in PAGE_TYPE_DIRS
+        if str(p.fm.get("type", "paper") or "paper") in PAPER_LIKE_TYPES
+        and p.category not in PAGE_TYPE_DIRS
+        and p.category != wdir.name
     ]
 
     # --- edges from [[wikilink]] occurrences in wiki pages

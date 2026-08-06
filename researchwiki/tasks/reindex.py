@@ -77,5 +77,21 @@ def main(argv: list[str]) -> int:
                 f"(dim={result['dim']}) in {sem_dt:.2f}s → .semantic-cache/"
             )
             print(semantic_summary)
+            # Thin-vector warning. Reported here rather than only in `lint`
+            # because this is where the text is actually assembled, so the
+            # warning cannot disagree with what got embedded. A page that embeds
+            # only its title is invisible to see-also, ingest cross-linking,
+            # `evolve`'s KNN and `candidates synthesis` — and stays invisible
+            # silently, which is how 41 pages went unnoticed on 2026-08-06.
+            thin = result.get("thin") or []
+            if thin:
+                print()
+                print(f"⚠ {len(thin)} page(s) embed too little text to retrieve on:")
+                for e in thin[:15]:
+                    print(f"  - {e['key']}  ({e['page_type']}) — {e['reason']}")
+                if len(thin) > 15:
+                    print(f"  - ... ({len(thin) - 15} more)")
+                print("  Check the page's H2 names against `index.pages_semantic."
+                      "_INDEX_SECTIONS` for its type.")
 
     return 0
