@@ -33,8 +33,22 @@ def all_pages() -> list[Path]:
 
 def page_key(md: Path) -> str:
     """`wiki/category/stem.md` → `category/stem`. Used as the canonical
-    identifier across the link graph."""
-    return md.relative_to(wiki_dir()).with_suffix("").as_posix()
+    identifier across the link graph.
+
+    Falls back to comparing fully-resolved paths because callers disagree on
+    whether they resolve first: `check-coverage` passes `Path(arg).resolve()`,
+    while `all_pages()` yields paths built from an unresolved `wiki_dir()`.
+    Those agree until `wiki/` is a **symlink** into a synced folder (the layout
+    in prompts/migration-backfill.md) — then the resolved page sits outside the
+    unresolved root and a plain `relative_to` raises ValueError, surfacing as an
+    internal-error traceback rather than a usable message.
+    """
+    root = wiki_dir()
+    try:
+        rel = md.relative_to(root)
+    except ValueError:
+        rel = md.resolve().relative_to(root.resolve())
+    return rel.with_suffix("").as_posix()
 
 
 def extract_links(text: str, known: set[str]) -> set[str]:
