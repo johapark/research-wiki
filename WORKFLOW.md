@@ -551,7 +551,11 @@ researchwiki/
 │   │                       #     from the package — depends on agents.phases)
 │   └── style.py            #   Style report
 ├── agents/                 # The ingest agent
-│   ├── runner.py           #   13-phase state-machine driver
+│   ├── runner.py           #   State-machine driver (11 `_phase_*` wrappers over
+│   │                       #     the phases/ modules; roles persisted to
+│   │                       #     ingest_iterations are `db/iterations.VALID_ROLES`)
+│   ├── commentary.py       #   Commentary-shaped-PDF guard (refuses to promote a
+│   │                       #     Research Highlight / News & Views as type: paper)
 │   ├── context.py          #   Shared phase Context (each phase reads/writes it)
 │   ├── fitness.py          #   Tournament + improvement-rule lenses;
 │   │                       #     `combined_quality` = 0.5·semantic + 0.5·salience,
@@ -583,7 +587,9 @@ researchwiki/
 │   ├── ingest.py           #   Digest-only path (manual page authoring)
 │   ├── agent.py            #   Full agent path (auto-authoring)
 │   ├── grade.py            #   Per-paper fidelity + salience report
-│   ├── grade_synthesis.py  #   Synthesis/idea fidelity (misattribution check)
+│   ├── _grade_synthesis.py #   Synthesis/idea fidelity (misattribution check)
+│   ├── lint/               #   One module per check family (link, yaml, staleness,
+│   │                       #     claim_anchors, concept_contract, db_checks, …)
 │   ├── check_grounding.py  #   Structural citation check
 │   ├── check_coverage.py   #   Recall surface — unreferenced top-N hits
 │   │                       #     for a synthesis/idea page's topic_seed
@@ -593,6 +599,8 @@ researchwiki/
 ├── concepts/               # Concept-hub surfacing + scaffold + reciprocal linking
 ├── claim_graph/            # Content-addressed claim identity + edge cache
 ├── synthesis_candidates/   # Detect paper clusters lacking a synthesis page
+├── migrate/                # Import one-paper-per-PDF pages from an older/simpler wiki
+│                           #   (preflight → inspect → apply → verify; zero tokens)
 └── pdf/                    # pypdfium2-backed PDF text/structure extraction
 ```
 
@@ -1070,7 +1078,18 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `retraction-check`, `preprint-check`, `orcid-lookup` | Structured PubMed / bioRxiv / ORCID queries. |
 | `claims "<query>" [--k N]` | Grounded-citation search over the pre-graded claims table (atomic bullets + `[[stem#slug]]` citation anchors + support scores). |
 | `pdf-search <stem> "<query>" [--k N]` | BM25 inside one paper's PDF chunks — pull an exact number/passage the page didn't quote. |
-| `check-grounding` | Lint a markdown file: flag claim-bearing units lacking a `[[wikilink]]` or `claim_id`. |
+| `check-grounding <page> [--strict]` | Structural gate: flag claim-bearing units lacking a `[[wikilink]]`. `--strict` also fails `*(model prior)*`-marked units. Exits 1 when it finds something. |
+| `check-coverage <page>` | Advisory recall gate: wiki papers ranking high on the page's `topic_seed` that the page never cites. Run after `check-grounding` + `grade synthesis` on any synthesis/idea/concept page. |
+| `grade <paper\|synthesis\|regression>` | Fidelity scoring against source PDFs: `paper <stem>` (fidelity + salience), `synthesis <page>` (cross-paper misattribution), `regression [--missing-only]` (re-grade all + drift diff). |
+| `concepts <term> --thesis "…"` | Scaffold a concept hub from a recurring term; refuses without a thesis. `--upgrade-spokes` backfills `[[stem#slug]]` citations on existing hubs; `concepts refresh <slug>` drafts a hub's *Cross-domain connections* from typed claim edges (review-gated, never auto-applied). |
+| `claim-graph [--tensions\|--contradicting\|--neighbors]` | Query the LLM-judged claim-edge graph — including the typed edges `claim-overlap` records without writing a Related-Papers bullet. `claim-graph promote [--apply]` transitions candidate edges. |
+| `bootstrap-categories` | Propose a category taxonomy from `inbox/` papers; `--apply` creates the dirs. |
+| `suggest-splits [--category <cat>\|--all]` | Cluster `wiki/other/` or a populated category and propose taxonomy changes. Review-gated; nothing auto-creates a category. |
+| `db <rebuild\|verify>` | Rebuild the structured mirror from markdown after any manual page edit; `verify` reports drift without writing. (`db papers` / `db query` below.) |
+| `init [--scaffold-only]` | First-time setup wizard, or just create the directory scaffold. |
+| `mcp-serve` | Read-only MCP server (search / claims / check-grounding) for Claude Desktop and IDE clients. |
+| `eval-classifier` | Leave-one-out evaluation of the Tantivy-backed category classifier. |
+| `benchmark-fixture <stem> [--repeat N] [--llm]` | Score page authoring against a hand-curated `benchmark-fixtures/` fixture. `--repeat` keeps drafts in memory; for a single authored page use `agent ingest … --force-sandbox`, never a bare `agent ingest` (it would promote a fixture paper into your corpus). |
 | `claim-overlap <stem> [--sim N] [--top N] [--dry-run] [--json]` | Proactively cross-link a newly-ingested paper: finds existing papers with near-paraphrase claims, LLM-judges each as a real relationship vs coincidence, and auto-adds reciprocal Related-Papers `[[wikilinks]]` for confirmed matches. Run after `db rebuild`. |
 | `db papers [--year/--category/--page-type/--no-doi/--venue/--author/--status] [--count] [--json]` | Structured lookups over the frontmatter mirror — counts/filters ("cgt papers from 2024", "papers missing a DOI") without re-reading markdown. `db query "SELECT…"` for ad-hoc read-only SQL. |
 | `insights [--days N] [--json]` | Analytics over the ingest telemetry log: draft quality + cost by model, section difficulty, token spend by role, draft decisions. Read-only, no LLM. |
