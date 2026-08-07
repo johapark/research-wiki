@@ -14,6 +14,8 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-07
+
 ### Added
 
 - `migrate` — bulk-import one-paper-per-PDF markdown from an older release or a simpler
@@ -91,5 +93,6 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/johapark/research-wiki/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/johapark/research-wiki/releases/tag/v0.1.0
