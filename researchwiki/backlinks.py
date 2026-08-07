@@ -98,8 +98,13 @@ def invert_relationship_note(source_note: str) -> str:
 # Requiring the parentheses is what separates a placeholder from a sentence:
 # every placeholder observed across the 62 pages cleaned on 2026-08-06 carried
 # them, and no prose sentence does.
+#
+# `m` is load-bearing even though both current callers `.match()` a single
+# already-split line: this is a module constant that crosses a package boundary,
+# and `^…$` anchors invite a `.search(page_text)` over a whole page. Without
+# MULTILINE that call would silently match only at offset 0.
 NONE_PLACEHOLDER_RE = re.compile(
-    r"""(?ix)
+    r"""(?imx)
     ^\s*
     (?:
         \( \s* none\b [^)]* \)     # (none) / (none — no overlapping wiki papers)

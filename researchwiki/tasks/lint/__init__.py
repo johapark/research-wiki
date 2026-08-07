@@ -133,10 +133,16 @@ def main(argv: list[str]) -> int:
     pages_fm: dict = {}
     pages_body: dict = {}
     pages_prose: dict = {}
+    # Files with no frontmatter fence at all. `read_page` returns None for them
+    # and `read_pages` — what `build_index` walks — drops them, so they have no
+    # index entry and index-side checks must not report on them.
+    pages_unfenced: set = set()
     for md in pages:
         p = read_page(md)
         fm = p.fm if p else {}
         body = p.body if p else md.read_text(encoding="utf-8")
+        if p is None:
+            pages_unfenced.add(md)
         pages_fm[md] = fm
         pages_body[md] = body
         pages_prose[md] = strip_non_prose(body)
@@ -157,7 +163,9 @@ def main(argv: list[str]) -> int:
     hook_too_long = find_hook_too_long(pages, pages_fm)
     unquoted_wikilinks = find_unquoted_wikilink_lists(pages)
     venue_suspect = find_venue_suspect(pages, pages_fm)
-    thin_index_text = find_thin_index_text(pages, pages_fm, pages_body)
+    thin_index_text = find_thin_index_text(
+        [p for p in pages if p not in pages_unfenced], pages_fm, pages_body
+    )
 
     # --- staleness
     stale = find_stale_synthesis(pages, pages_fm, known)

@@ -95,7 +95,7 @@ class TestStatusCountsEveryPage:
         return Page(path=Path("wiki") / category / "x.md", stem="x-2024-a-paper",
                     category=category, fm=fm, body="")
 
-    def test_a_missing_type_counts_as_paper(self, tmp_wiki):
+    def test_a_missing_type_counts_as_paper(self):
         """`db rebuild` uses `fm.get("type", "paper")`. Reading a missing field as
         None dropped the 23 pages predating the `type:` requirement — 359 papers
         reported against the database's 382."""
@@ -105,12 +105,12 @@ class TestStatusCountsEveryPage:
         assert is_paper_like(self._page("compbio", type=None))
         assert is_paper_like(self._page("compbio", type='"paper"'))    # quoted
 
-    def test_commentary_counts(self, tmp_wiki):
+    def test_commentary_counts(self):
         """9 pages, plus every cross-link edge touching them."""
         from researchwiki.tasks.status import is_paper_like
         assert is_paper_like(self._page("cgt", type="commentary"))
 
-    def test_page_type_dirs_and_root_do_not_count(self, tmp_wiki):
+    def test_page_type_dirs_and_root_do_not_count(self):
         from researchwiki.tasks.status import is_paper_like
         for cat in ("synthesis", "references", "ideas", "concepts"):
             assert not is_paper_like(self._page(cat, type="paper"))
@@ -119,7 +119,7 @@ class TestStatusCountsEveryPage:
         assert not is_paper_like(self._page("wiki"))
         assert not is_paper_like(self._page("wiki", type="meta"))
 
-    def test_non_paper_types_in_a_content_dir_do_not_count(self, tmp_wiki):
+    def test_non_paper_types_in_a_content_dir_do_not_count(self):
         from researchwiki.tasks.status import is_paper_like
         for t in ("synthesis", "concept", "idea", "whitepaper", "guidance",
                   "dashboard", "meta", "protocol", "book"):

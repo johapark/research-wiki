@@ -36,9 +36,16 @@ def find_thin_index_text(
     `page_key`) are skipped: they are catalogues, never retrieval targets. The
     first version of this check tried to express that as
     `md.parent.name == md.parent.parent.name`, which compares a directory name to
-    its *grandparent's* and is simply false for `wiki/index.md` (`'wiki' != ''`),
-    so root pages were scanned rather than skipped — and would have been reported
-    under a `wiki/index`-shaped key that exists in no namespace.
+    its *grandparent's* — for `wiki/index.md` that is the checkout directory
+    (`'wiki' != 'research-wiki'`), so root pages were scanned rather than skipped
+    and would have been reported under a `wiki/index`-shaped key that exists in
+    no namespace. Note it happened to work for anyone whose checkout was itself
+    named `wiki`, which is why the bug read as correct.
+
+    `pages` must already exclude files `read_page` can't parse (no `---` fence).
+    `build_index` walks `read_pages`, which drops them, so they have no index
+    entry to be thin — reporting one would break this check's whole premise of
+    agreeing with `reindex`. `lint` filters them out before calling.
 
     Takes `lint`'s already-cached frontmatter and body rather than re-reading
     every page: `thin_index_reason` needs a `Page`, and constructing one from the
