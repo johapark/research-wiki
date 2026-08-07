@@ -463,6 +463,10 @@ CLI wrappers around PubMed / bioRxiv / ORCID. Usage, YAML-recording rules, and w
 
 **Page-gate exception.** For the three page gates — `check-grounding`, `grade synthesis`, `check-coverage` — **1 means "the gate found something"** (the review-triggering outcome), so bad input (missing page) is **2**, not 1. All three agree; don't "align" one to the table above (`tests/test_exit_codes.py::test_page_gates_agree_on_missing_path` pins it).
 
+### Releasing the framework
+
+Bumping the version, promoting `CHANGELOG.md`'s `[Unreleased]` section, and tagging → [`CONTRIBUTING.md` § Releasing](./CONTRIBUTING.md#releasing). Two things worth knowing before touching anything: the version lives **only** in `researchwiki/__init__.py` (`pyproject.toml` resolves it from there — adding a literal back fails `tests/test_version.py`), and removing a `--json` key is a breaking change because agents parse those contracts.
+
 ---
 
 ## Search — full-text + See-Also

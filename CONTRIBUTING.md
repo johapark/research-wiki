@@ -93,6 +93,9 @@ aren't redistributable.
   grounding rules. Edit `CLAUDE.md`; never replace the symlink with a file.
 - **`WORKFLOW.md`** — end-to-end pipeline walkthrough and module map. Update the
   module map when you add or move a module.
+- **`CHANGELOG.md`** — add user-visible changes under `## [Unreleased]` as you go,
+  not in a scramble at release time. Internal refactors that change nothing for a
+  user don't need an entry.
 
 ## Commits and PRs
 
@@ -106,6 +109,55 @@ docs(workflow): correct citation guidance
 
 Explain **why** in the body, not just what — the history is the main design
 record here. Keep PRs focused; run `python -m pytest -q` before pushing.
+
+## Releasing
+
+**The version lives in exactly one place**: `__version__` in
+`researchwiki/__init__.py`. `pyproject.toml` declares it `dynamic` and resolves it
+from there, so a built artifact and `researchwiki --version` can't disagree.
+Re-adding a `version = "…"` literal to `pyproject.toml` fails
+`tests/test_version.py`.
+
+### What counts as breaking
+
+The public surface here isn't a Python API — everything under `researchwiki/` is
+internal, and renaming a function is a PATCH. What consumers actually depend on:
+
+| Surface | Breaking change |
+|---|---|
+| CLI | Removing or renaming a command or flag |
+| Exit codes | Changing what a code means (see the table in CLAUDE.md) |
+| `--json` contracts | **Removing a key** — agents parse `lint --json`, `search --json`, `audit --json`. Adding one is MINOR |
+| Page frontmatter | Removing or repurposing a field the CLAUDE.md contract specifies |
+| Phase-role strings | `db/iterations.VALID_ROLES` and the `phase=`/`role=` keys — never rename these at all; `ingest_iterations` is the one table `db rebuild` can't regenerate |
+
+While on `0.x`, a breaking change takes the **MINOR** slot (0.2.0 → 0.3.0) and says
+so at the top of its changelog entry.
+
+### Cutting a release
+
+1. **Pick the number** from the commits since the last tag —
+   `git log v<prev>..HEAD --format='%s'`. Any breaking change per the table above →
+   MINOR (while 0.x); any `feat` → MINOR; otherwise PATCH.
+2. **Promote the changelog.** Rename `## [Unreleased]` to
+   `## [x.y.z] - YYYY-MM-DD`, open a fresh empty `## [Unreleased]` above it, and add
+   the compare link at the bottom. Entries are curated prose, not generated subject
+   lines — the *why* lives in commit bodies and a generator discards it.
+3. **Bump** `__version__` in `researchwiki/__init__.py`.
+4. **`python -m pytest -q`.** `tests/test_version.py` fails unless steps 2 and 3
+   agree, which is the point: the bump and its notes ship together.
+5. **Commit** as `chore(release): vX.Y.Z`, then tag it:
+   `git tag -a vX.Y.Z -m "researchwiki vX.Y.Z"` — annotated, matching `v0.1.0`.
+6. **Push the commit, then the tag.** `git push origin main && git push origin vX.Y.Z`.
+
+Pushing the tag fires `.github/workflows/release.yml`, which runs the full test
+matrix, re-checks that the tag equals `__version__`, extracts that version's
+changelog section as the release notes, builds an sdist + wheel, and creates the
+GitHub Release. Any of those failing means no release is published — so a bad tag
+costs you a `git tag -d` and a re-push, not a bad artifact.
+
+**Not published to PyPI.** Releases are installable from a tag or a clone; there is
+no package-index presence to keep in sync.
 
 ## Licensing
 

@@ -4,7 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "researchwiki"
-version = "0.1.0"
+# Version is NOT a literal here. It lives in `researchwiki/__init__.py` and is
+# resolved from there at build time — see [tool.setuptools.dynamic] below and
+# CONTRIBUTING.md § Releasing. Re-adding a static `version =` line reintroduces
+# the drift `tests/test_version.py` exists to prevent.
+dynamic = ["version"]
 description = "A self-refining markdown wiki for research papers — LLM-authored, claim-graded against source PDFs."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -67,6 +71,15 @@ Issues = "https://github.com/johapark/research-wiki/issues"
 
 [project.scripts]
 researchwiki = "researchwiki.__main__:main"
+
+[tool.setuptools.dynamic]
+# Single source of truth for the version: the literal in `researchwiki/__init__.py`.
+# setuptools reads a simple string assignment by static AST scan, so resolving it
+# does not import the package at build time. The alternative — a literal here and
+# `importlib.metadata` in `__init__.py` — would make `researchwiki --version`
+# report whatever was current at the last `pip install`, which in practice lags
+# by weeks.
+version = {attr = "researchwiki.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["researchwiki*"]

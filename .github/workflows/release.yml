@@ -1,0 +1,69 @@
+name: release
+
+# Pushing a `v*` tag is the whole trigger. Nothing here runs on a branch push, so
+# a release is always a deliberate act, and the tag is the single input.
+on:
+  push:
+    tags: ["v*"]
+
+# `gh release create` writes to the repo. GITHUB_TOKEN is built in — no secret to
+# configure, and no third-party action in the path.
+permissions:
+  contents: write
+
+jobs:
+  # Same 3.10/3.11/3.12 matrix as an ordinary push, by reference rather than by
+  # copy. A tag that can't pass the suite doesn't become a release.
+  test:
+    uses: ./.github/workflows/tests.yml
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The guard that keeps the tag and the code honest with each other. The
+      # suite can't do this — actions/checkout fetches no tags — so it lives
+      # here, where the tag is the event. A mismatch fails before anything is
+      # published.
+      - name: Verify the tag matches __version__
+        run: |
+          code_version="v$(python -c 'import researchwiki; print(researchwiki.__version__)')"
+          if [ "$code_version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match researchwiki.__version__ ($code_version)."
+            echo "A release commit bumps researchwiki/__init__.py and tags the same number —"
+            echo "see CONTRIBUTING.md § Releasing."
+            exit 1
+          fi
+          echo "tag and __version__ agree: $GITHUB_REF_NAME"
+
+      # Release notes come from the changelog section for this version, so the
+      # published notes and the repo's own history cannot disagree. No section
+      # means no release.
+      - name: Extract the changelog section
+        run: |
+          python .github/scripts/changelog_section.py "$GITHUB_REF_NAME" > release-notes.md
+          echo "--- notes to be published ---"
+          cat release-notes.md
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+          ls -l dist/
+
+      # Artifacts are attached for provenance; this project is not published to
+      # a package index (see CONTRIBUTING.md § Releasing).
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "researchwiki $GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            dist/*
