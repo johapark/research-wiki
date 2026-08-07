@@ -7,7 +7,7 @@ models", "without fine-tuning") that clears the heuristic but is never a
 concept. Manually `--decline`-ing them is whack-a-mole.
 
 This module classifies the *whole* candidate set in one (chunked) LLM pass
-against the concept-vs-glossary thesis test (docs/concept-vs-glossary.md)
+against the concept-vs-glossary thesis test (prompts/concept-page-author.md)
 and auto-writes the noise verdicts to the decline list (tagged
 `source="llm-triage"`, reversible via `--undecline`). It never scaffolds —
 `concept`/`uncertain` verdicts stay surfaced for the human `--thesis` gate.

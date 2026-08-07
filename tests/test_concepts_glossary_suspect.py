@@ -3,7 +3,7 @@
 The `--thesis` gate (concepts.scaffold) is the creation-time backstop; this is
 the detection-time filter that keeps ambient acronym/ubiquity terms from
 dominating the candidate list and the `status` bridge count. See
-docs/concept-vs-glossary.md. Behaviour contract: demote (label +
+prompts/concept-page-author.md. Behaviour contract: demote (label +
 sort-to-bottom + exclude from bridge tier), never drop.
 """
 

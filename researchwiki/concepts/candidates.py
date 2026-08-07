@@ -34,7 +34,7 @@ ACRONYM_RE = re.compile(r"\b([A-Z][A-Z0-9\-]+[A-Z0-9])\b")
 # TitleCase multi-word phrases. The optional leading `\d+[- ]` absorbs a
 # numeric prefix so named entities like "1000 Genomes Project" are captured
 # whole instead of truncated to the fragment "Genomes Project" (which then
-# double-counts as its own candidate — see docs/concept-vs-glossary.md denoise).
+# double-counts as its own candidate — see prompts/concept-page-author.md denoise).
 PHRASE_RE = re.compile(r"\b((?:\d+[- ])?[A-Z][a-z]+(?:[- ][A-Z][a-z]+)+)\b")
 
 STOP_ACRONYMS = {
@@ -168,7 +168,7 @@ def _is_structural(phrase: str) -> bool:
     """True if any whitespace-delimited word is a figure/table/section token."""
     return any(w in STRUCTURAL_TOKENS for w in phrase.split())
 
-# --- Glossary-suspect denoise (see docs/concept-vs-glossary.md) ------------
+# --- Glossary-suspect denoise (see prompts/concept-page-author.md) ------------
 # The `--thesis` gate (concepts.scaffold) catches glossary terms at *creation*
 # time. This catches them at *detection* time so they stop dominating the
 # candidate list and inflating the `status` bridge count (the deferred
@@ -887,7 +887,7 @@ def collect_candidates(
     Terms recorded in `.concept-declines.json` (via
     `researchwiki candidates concepts --decline`) are always excluded —
     a manual, permanent override for terms that failed the
-    concept-vs-glossary thesis test (docs/concept-vs-glossary.md) and
+    concept-vs-glossary thesis test (prompts/concept-page-author.md) and
     would otherwise keep resurfacing every call, since detection here is
     stateless.
 

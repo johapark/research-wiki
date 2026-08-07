@@ -179,7 +179,7 @@ def main(argv: list[str]) -> int:
         print(
             f"researchwiki concepts: refusing to scaffold `{args.term}` without a "
             "`concept_thesis`. Pass `--thesis \"<one sentence>\"`, or run "
-            "interactively and answer the prompt. See docs/concept-vs-glossary.md "
+            "interactively and answer the prompt. See prompts/concept-page-author.md "
             "for the discipline this enforces.",
             file=sys.stderr,
         )

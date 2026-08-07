@@ -1,5 +1,5 @@
 """Permanent suppression list for concept-hub candidates that failed the
-concept-vs-glossary thesis test (see docs/concept-vs-glossary.md).
+concept-vs-glossary thesis test (see prompts/concept-page-author.md).
 
 The thesis gate in `scaffold.run()` stops a *bad* hub from being written,
 but detection in `candidates.py` is stateless — it re-derives candidates

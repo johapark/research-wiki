@@ -21,7 +21,7 @@ auto-surfaces the bridge count, so treat that line as the trigger.
 
 Detection is stateless — it re-derives candidates from scratch every call, so
 a term that fails the concept-vs-glossary thesis test (see
-docs/concept-vs-glossary.md) resurfaces every time. `--decline TERM --reason
+prompts/concept-page-author.md) resurfaces every time. `--decline TERM --reason
 TEXT` records a permanent suppression in `.concept-declines.json`
 (`--undecline` reverses it, `--list-declined` shows the current list) so a
 rejected candidate stops appearing here and in `status`'s bridge count.
@@ -76,7 +76,7 @@ def _run_concepts(argv: list[str]) -> int:
     parser.add_argument("--decline", metavar="TERM",
                         help="Permanently suppress TERM from every future listing (this command "
                              "and `status`'s bridge count) — for a candidate that failed the "
-                             "concept-vs-glossary thesis test (docs/concept-vs-glossary.md) and "
+                             "concept-vs-glossary thesis test (prompts/concept-page-author.md) and "
                              "would otherwise keep resurfacing, since detection here is stateless. "
                              "Requires --reason.")
     parser.add_argument("--reason", metavar="TEXT",
@@ -195,7 +195,7 @@ def _run_concepts(argv: list[str]) -> int:
     print('_Triage manually. `researchwiki concepts "<term>"` scaffolds a hub_')
     print('_(bridges — span ≥ 2 — first); `researchwiki synthesize` for a cross-paper argument._')
     print('_`glossary-suspect` = bare acronym or corpus-ubiquitous term — demoted, not a bridge;_')
-    print('_scaffold one only if you can write a genuine concept-thesis for it (see docs/concept-vs-glossary.md)._')
+    print('_scaffold one only if you can write a genuine concept-thesis for it (see prompts/concept-page-author.md)._')
     print("_Pass --persist-edges to write `instantiates` edges into `.claim-graph/edges.db`._")
     print('_Fails the thesis test? `--decline "<term>" --reason "..."` suppresses it for good._')
     print('_Too many to triage by hand? `--triage` batch-classifies all candidates and auto-declines the noise (`--dry-run` to preview)._')
