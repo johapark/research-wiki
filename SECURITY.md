@@ -81,8 +81,12 @@ you configure.
 
 ### Local data
 
-- The state DB lives at `~/.local/share/researchwiki/state.db`
-  (override: `RESEARCHWIKI_DB_PATH`). It's derived and rebuildable via
+- The state DB lives at
+  `~/.local/share/researchwiki/repos/<repo>-<hash>/state.db` — scoped to the
+  checkout's absolute path, so moving the checkout opens a fresh, empty DB.
+  Pin it with `RESEARCHWIKI_DB_PATH` to opt out of path-keying (an old flat
+  `~/.local/share/researchwiki/state.db` is seeded from once, non-destructively,
+  for repos that predate the scoping). It's derived and rebuildable via
   `researchwiki db rebuild` — **except** `ingest_iterations`, which holds
   non-reconstructable cost/telemetry history.
 - `researchwiki db query` is enforced read-only (`mode=ro` plus
