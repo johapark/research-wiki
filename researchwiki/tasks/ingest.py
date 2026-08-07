@@ -450,8 +450,9 @@ def process_one(src_pdf: Path, category_hint: str | None, no_move: bool,
             try:
                 staged = stage_supplementary(stem, sp)
                 staged_supp.append(staged)
+                origin = " (moved out of inbox/)" if staged["consumed"] else ""
                 log(f"supplementary staged: papers/{stem}.supp/{staged['filename']} "
-                    f"({staged['kind']})")
+                    f"({staged['kind']}){origin}")
             except (FileNotFoundError, FileExistsError, ValueError) as e:
                 log(f"supplementary skipped ({sp}): {e}")
 
@@ -532,7 +533,9 @@ def main(argv: list[str]) -> int:
                              "Repeat for multiple files. Each file is copied into "
                              "`papers/{stem}.supp/` (filename normalized to lowercase + safe "
                              "chars) and listed under `supplementary:` in the digest's YAML "
-                             "block. Defaults: PDF→kind=methods, xlsx/csv/tsv→kind=data, "
+                             "block; a source under `inbox/` is moved rather than copied, so "
+                             "it doesn't linger as ingest backlog. "
+                             "Defaults: PDF→kind=methods, xlsx/csv/tsv→kind=data, "
                              "other→kind=other. Edit the digest YAML block before pasting "
                              "into the wiki page if you need overrides. "
                              "Cannot combine with batch input.")

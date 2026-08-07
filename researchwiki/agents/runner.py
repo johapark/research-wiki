@@ -1064,8 +1064,9 @@ def _phase_commit(ctx: Context, conn) -> Path:
                 log(f"           ⚠ {w}", tag="agent")
 
         # Stage supplementary files now that the wiki page is on disk:
-        # copy each into papers/{stem}.supp/, normalize the filename,
-        # and append an entry to the page's `supplementary:` YAML block.
+        # copy each into papers/{stem}.supp/ (an inbox/ source is moved,
+        # so it doesn't linger as backlog), normalize the filename, and
+        # append an entry to the page's `supplementary:` YAML block.
         # Failures on individual files are surfaced as warnings but
         # don't abort the run — the primary page is already committed.
         if ctx.supplementary:
@@ -1077,8 +1078,9 @@ def _phase_commit(ctx: Context, conn) -> Path:
                         result.wiki_path,
                         staged["filename"], staged["kind"],
                     )
+                    origin = " (moved out of inbox/)" if staged["consumed"] else ""
                     log(f"supp     → papers/{ctx.paper_stem}.supp/"
-                          f"{staged['filename']} ({staged['kind']})", tag="agent")
+                          f"{staged['filename']} ({staged['kind']}){origin}", tag="agent")
                 except (FileNotFoundError, FileExistsError, ValueError) as e:
                     log(f"supp     ⚠ skipped {sp}: {e}", tag="agent")
 

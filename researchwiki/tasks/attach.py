@@ -7,7 +7,8 @@ behavior via the `--supplementary` flag (S3, not yet shipped).
 
 The file is copied into `papers/{stem}.supp/{normalized-name}` and the
 target page's YAML is updated to declare it under `supplementary:`. The
-wiki page body is never touched.
+wiki page body is never touched. A source under `inbox/` is *moved*
+rather than copied — see `_consume_inbox_source`.
 
 Usage:
     researchwiki attach {category}/smith-2024-... \\
@@ -25,7 +26,7 @@ from pathlib import Path
 
 from ..fsatomic import write_text_atomic
 from ..log import append_log_md, log
-from ..paths import supp_dir, wiki_dir
+from ..paths import inbox_dir, supp_dir, wiki_dir
 
 
 VALID_KINDS = ("methods", "data", "figures", "other")
@@ -42,6 +43,43 @@ def _normalize_filename(name: str) -> str:
     base = SAFE_NAME_RE.sub("", base)
     base = re.sub(r"-{2,}", "-", base).strip("-_.")
     return base
+
+
+def _consume_inbox_source(src: Path) -> bool:
+    """Delete an already-staged `src` when it lives under `inbox/`. Returns
+    whether it was removed.
+
+    Staging copies rather than moves, which is right for the common
+    `attach ~/Downloads/Table_S4.xlsx` case — the user's own file is not ours
+    to consume. An `inbox/` source is the exception: `inbox/` *is* the ingest
+    backlog, so a leftover copy there is not inert. A supplementary `.pdf` gets
+    swept up by the next `agent ingest inbox/*.pdf` and ingested as a standalone
+    paper (different text → different stem → no collision guard fires), and a
+    non-PDF is worse than harmless in the other direction — `status` only globs
+    `*.pdf`, so it accumulates unseen forever. Neither is visible to
+    `find_supplementary_issues`, which only compares YAML against
+    `papers/*.supp/`.
+
+    `src` must already be resolved by the caller, and `inbox_dir()` is resolved
+    here, so this holds when `inbox/` is a directory symlink into a synced
+    folder (a supported layout). A *file* symlink inside `inbox/` resolves to
+    its target outside the inbox and is therefore left alone — the conservative
+    outcome, since deleting it would reach into a location the user only linked.
+
+    Never fatal: the file is already staged under `papers/{stem}.supp/`, so a
+    failed unlink costs a stale inbox entry, not data.
+    """
+    try:
+        inbox = inbox_dir().resolve()
+    except OSError:
+        return False
+    if not src.is_relative_to(inbox):
+        return False
+    try:
+        src.unlink()
+        return True
+    except OSError:
+        return False
 
 
 def _resolve_page(identifier: str) -> Path | None:
@@ -150,7 +188,9 @@ def stage_supplementary(
     responsible for inserting the resulting entry into the page's YAML
     via `insert_supplementary_entry()` once the page is on disk.
 
-    Returns `{filename, kind}` describing what landed on disk.
+    Returns `{filename, kind, consumed}` describing what landed on disk;
+    `consumed` is True when `src` was an `inbox/` entry and was removed
+    afterwards (see `_consume_inbox_source`).
     Raises FileNotFoundError if `src` doesn't exist, FileExistsError if
     the target exists and `replace` is False, ValueError on a degenerate
     normalized filename.
@@ -178,7 +218,11 @@ def stage_supplementary(
             f"Pass replace=True to overwrite."
         )
     shutil.copy2(str(src), str(target))
-    return {"filename": target_name, "kind": kind}
+    return {
+        "filename": target_name,
+        "kind": kind,
+        "consumed": _consume_inbox_source(src),
+    }
 
 
 def insert_supplementary_entry(
@@ -245,7 +289,8 @@ def main(argv: list[str]) -> int:
         return 1
 
     shutil.copy2(str(src), str(target))
-    log(f"copied {src.name} → papers/{stem}.supp/{target_name}", tag="attach")
+    verb = "moved" if _consume_inbox_source(src) else "copied"
+    log(f"{verb} {src.name} → papers/{stem}.supp/{target_name}", tag="attach")
 
     try:
         _insert_supplementary(page_path, target_name, kind)
