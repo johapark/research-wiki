@@ -8,7 +8,7 @@ starts with none and derives its own from the user's papers.
 
 Only the universal *scaffold* is fixed in code:
 
-  - `PAGE_TYPE_DIRS` — `synthesis`, `ideas`, `references`. Structural page-type
+  - `PAGE_TYPE_DIRS` — `synthesis`, `ideas`, `references`, `concepts`. Structural page-type
     directories present in every wiki. They hold their own page types and are
     NEVER content categories: the research-paper classifier must not target
     them, and `is_valid()` rejects them.
