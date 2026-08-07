@@ -485,7 +485,7 @@ Query syntax: Tantivy's (`"quoted phrases"`, `field:value`, `+required`, `-exclu
 ## PDF Management Rules
 
 - **Copy, never symlink** from external locations into `inbox/`.
-- **Move (`mv`) from `inbox/` → `papers/{stem}.pdf`** during processing. Supplementary files follow the same rule: `--supplementary` / `attach` copy from anywhere else (`~/Downloads` isn't ours to consume), but an `inbox/` source is *moved* into `papers/{stem}.supp/` — left behind, a supplementary PDF is indistinguishable from backlog and the next `agent ingest inbox/*.pdf` ingests it as its own paper.
+- **Move (`mv`) from `inbox/` → `papers/{stem}.pdf`** during processing.
 - `pdf_path` is an Obsidian wikilink to the source PDF (`"[[{stem}.pdf]]"`) — click-to-open in the vault. The real file always lives at `papers/{stem}.pdf`; `db rebuild` derives that path from the stem.
 - **One canonical PDF per page**. Stem collisions classified by DOI prefix:
   - `journal-upgrade` (preprint page, incoming journal): PDF auto-swapped; manually update YAML `doi:`/`venue:` (run `preprint-check --doi <preprint-doi>`). Body + `[[wikilinks]]` preserved. Logs `pdf_upgrade`.
