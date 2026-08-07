@@ -6,7 +6,7 @@ The harness in this directory exists to make pipeline changes testable. This doc
 
 ## Baseline (2026-07, OA corpus)
 
-Fixture set was overhauled 2026-07-03 — the previous personal-corpus fixtures (kim/lai/yang/gupta/siren/zhang, six papers behind gitignored PDFs) were retired and replaced with five CC-BY-4.0 open-access papers committed under `pdfs/`. The harness now runs end-to-end on a fresh clone; anyone can `researchwiki agent ingest benchmark-fixtures/pdfs/*.pdf` and reproduce scoring.
+Fixture set was overhauled 2026-07-03 — the previous personal-corpus fixtures (kim/lai/yang/gupta/siren/zhang, six papers behind gitignored PDFs) were retired and replaced with five CC-BY-4.0 open-access papers committed under `pdfs/`. The harness now runs end-to-end on a fresh clone, so anyone can reproduce scoring — via `researchwiki benchmark-fixture <stem> --repeat N --llm`, which keeps drafts in memory, or `agent ingest … --force-sandbox` for a single authored page. **Never a bare `agent ingest` on these PDFs**: it promotes fixture papers into `papers/`/`wiki/` and `index.md`, violating the corpus-isolation rule invoked below. See [`prompts/benchmark-run.md`](../prompts/benchmark-run.md).
 
 Baseline established 2026-07-03 via `researchwiki benchmark-fixture <stem> --repeat 5 --llm` per fixture. Author phase runs 5 times against the fixture's bundled PDF (drafts in memory, no `papers/`/`wiki/` writes — per corpus-isolation rule); each draft scored independently by the Opus 4.7 cross-family judge. Config: `config/models.yaml` shipped Anthropic tier — author = `claude-sonnet-4-6@anthropic`, reconcile = `claude-haiku-4-5-20251001@anthropic`, **eval_judge = `claude-opus-4-7@anthropic`** (deliberately cross-family to avoid same-model self-grading bias).
 
@@ -164,7 +164,7 @@ Most stubborn misses are content the author never saw. Section-cap truncation in
 **Hypothesis:** even with L1's full-text fallback, the author was failing to surface caption-bound content (named instances, kcat/KM tables, ED-fig results). Adding `figure_captions` and `extended_data` as labeled blocks in the author prompt should let the author target them when the fixture grades on caption-resident content.
 
 **Implementation:**
-- `researchwiki/sections.py`: new `extract_caption_blocks` function. Pipe-style caption regex (`(Extended Data\s+)?(Fig.|Figure|Table)\s+\d+\w?\s*\|`) catches Nature-family captions reliably; period-style captions fall through to L1's full text.
+- `researchwiki/pdf/sections.py`: new `extract_caption_blocks` function. Pipe-style caption regex (`(Extended Data\s+)?(Fig.|Figure|Table)\s+\d+\w?\s*\|`) catches Nature-family captions reliably; period-style captions fall through to L1's full text.
 - Per-caption cap 1500 chars, total cap 12K per side. Yang: 6K main caption text, 0 ED. Lai: 9K main + 8.6K ED. Folddisco: 3K main + 4.6K ED.
 - `phases/draft.py:_build_author_prompt`: surfaces both new blocks when present, with explicit instruction text pointing the author to them as primary sources for quantitative anchors.
 - `prompts/author-system-{research,review}.md`: updated to describe four-block input order (curated sections > captions > ED captions > full text).
@@ -276,13 +276,13 @@ The L1+L2 wins are validated and shipped; the L4 attempt is documented as a fail
 
 ### Cheap fixes — DONE 2026-06-13
 
-- **R2 ✅** — Number regex in `researchwiki/eval/scorer.py` now handles `×` suffix, Unicode superscript exponents (`10⁶`), and other forms the audit surfaced. Trailing `\b` removed; superscript digits added inline. Verified `'20×'` → `'20×'`, `'10⁶'` → `'10⁶'`, `'10²³'` → `'10²³'`. Folddisco anchor unchanged at 95.8% (LLM judge), so calibration-neutral.
+- **R2 ✅** — Number regex in `researchwiki/grade/scorer.py` (then `eval/scorer.py`) now handles `×` suffix, Unicode superscript exponents (`10⁶`), and other forms the audit surfaced. Trailing `\b` removed; superscript digits added inline. Verified `'20×'` → `'20×'`, `'10⁶'` → `'10⁶'`, `'10²³'` → `'10²³'`. Folddisco anchor unchanged at 95.8% (LLM judge), so calibration-neutral.
 - **R3 ✅** — `_JUDGE_SYSTEM` clarified: `partial` reserved for SILENCE about detail; direct CONTRADICTION (different number, opposite direction, different named entity) is `miss`. Adversarial re-probe verified: "<25 hours" claim against "<5 hours" page → `miss` (was `partial`). Folddisco anchor unchanged.
 
 ### Reporting gains — DONE 2026-06-13
 
-- **U1 ✅** — `--with-grader` flag added to benchmark-fixture. Runs `researchwiki/grade/coverage.py` alongside fixture scoring, reports BM25 + bi-encoder + numeric-drift + negation-mismatch in a separate pane. Two complementary signals; disagreements are diagnostic. Single-shot only (warns when used with `--repeat`).
-- **U2 ✅** — `--with-style` flag added. Reports compression (page-tokens / paper-tokens; verdict tier `compressed | normal | verbose`) and extractiveness (fraction of page sentences with verbatim ≥10-word spans from PDF; verdict tier `paraphrased | normal | extractive`). Mechanical, no LLM calls, ~50ms per page. New `researchwiki/eval/style.py` module. Calibrated thresholds against committed pages — typical wiki page is 5–25% compression and 5–25% extractiveness; flags fire only at extremes. Smoke-tested across all six fixtures: 5 of 6 agent-output pages flag for low extractiveness (the agent paraphrases everything; almost zero verbatim spans), the one in-band agent page (Yang at 17%) and the curated page (Folddisco at 6%) bracket the normal range.
+- **U1 ✅** — `--with-grader` flag added to benchmark-fixture. Runs `researchwiki/grade/fidelity/paper.py` (then `grade/coverage.py`) alongside fixture scoring, reports BM25 + bi-encoder + numeric-drift + negation-mismatch in a separate pane. Two complementary signals; disagreements are diagnostic. Single-shot only (warns when used with `--repeat`).
+- **U2 ✅** — `--with-style` flag added. Reports compression (page-tokens / paper-tokens; verdict tier `compressed | normal | verbose`) and extractiveness (fraction of page sentences with verbatim ≥10-word spans from PDF; verdict tier `paraphrased | normal | extractive`). Mechanical, no LLM calls, ~50ms per page. New `researchwiki/benchmark/style.py` (then `eval/style.py`) module. Calibrated thresholds against committed pages — typical wiki page is 5–25% compression and 5–25% extractiveness; flags fire only at extremes. Smoke-tested across all six fixtures: 5 of 6 agent-output pages flag for low extractiveness (the agent paraphrases everything; almost zero verbatim spans), the one in-band agent page (Yang at 17%) and the curated page (Folddisco at 6%) bracket the normal range.
 
 ### Methodology calibration (medium cost) — quantify the curator-judge correlation
 
