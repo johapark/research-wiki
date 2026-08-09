@@ -8,20 +8,29 @@ intentional, or deliberately out of scope.
 
 ```bash
 git clone https://github.com/johapark/research-wiki.git && cd research-wiki
-python -m venv .venv && source .venv/bin/activate
-pip install -e '.[dev]'
-python -m pytest -q          # should be green before you change anything
+python3 -m venv ~/.venvs/research-wiki                    # outside the repo — see below
+~/.venvs/research-wiki/bin/pip install -e '.[dev,mcp]'
+~/.venvs/research-wiki/bin/python -m pytest -q            # green before you change anything
 ```
 
-**If you sync `wiki/` and `papers/`** (iCloud/Dropbox — the maintainer does), keep the checkout itself *outside* the synced folder and symlink those two dirs in. Both are gitignored, so git and the sync service have disjoint jobs and neither has to carry the other's content. If your checkout does live in a synced folder, at minimum put the venv elsewhere: `python3 -m venv ~/.venvs/research-wiki`. A venv is ~34,000 files and will dominate the sync queue, at which point the daemon starts losing races against your own writes — a stale `.git/index` that reports every tracked file as modified, and `<name> 2.py` conflict copies of files you just edited. See [`prompts/migration-backfill.md`](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder) § *Keep the checkout out of the synced folder*.
+**The venv goes outside the checkout.** A venv is ~34,000 files, and this one carries ~2 GB of platform-specific pins. In-repo `.venv/` is gitignored so git doesn't care — but if the tree is ever synced it becomes ~96% of the sync load, and the daemon starts losing races against your own writes: a stale `.git/index` reporting every tracked file as modified, `<name> 2.py` conflict copies of files you just edited. Venvs also bake absolute paths into `bin/`, so relocating one later means recreating it.
 
-Optional extras: `.[mcp]` for the read-only MCP server. The semantic grader pulls
-`sentence-transformers` and downloads a ~133 MB model on first use — not needed
-for the test suite.
+**If you sync `wiki/` and `papers/`** (iCloud/Dropbox — the maintainer does), also keep the checkout itself *outside* the synced folder and symlink those two dirs in. Both are gitignored, so git and the sync service have disjoint jobs and neither has to carry the other's content. See [`prompts/migration-backfill.md`](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder) § *Keep the checkout out of the synced folder*.
+
+**The install is not small.** torch, transformers and sentence-transformers are
+*core* dependencies, not extras — the claim grader is part of the default
+product — so expect ~2 GB. Its model weights are a separate ~133 MB download on
+first use, which the test suite doesn't need.
+
+`[mcp]` is in the command above to match CI. Without it
+`tests/test_mcp_serve.py` `importorskip`s and you'd be passing a smaller suite
+than CI runs — which is exactly how a broken `mcp-serve` once shipped unnoticed.
 
 A fresh clone has no `config/models.yaml` (it's gitignored, per-user). The loader
-falls back to hardcoded defaults, so the CLI works immediately; copy one of the
-`config/models.*.yaml` templates when you want to pick a backend.
+falls back to hardcoded defaults that are **OpenAI-compatible**, so
+`OPENAI_API_KEY` alone gets you a working CLI; copy one of the
+`config/models.*.yaml` templates to pick any other backend — including Anthropic,
+which is not the zero-config path.
 
 ## Tests
 
