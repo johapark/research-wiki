@@ -1,9 +1,9 @@
 """Release invariants: one version literal, and a changelog entry that matches it.
 
 `0.1.0` used to be written twice — `pyproject.toml` and `researchwiki/__init__.py`
-— with nothing tying them together. `--version` reads only the second
-(`__main__.py:61`), so a bump that touched the packaging metadata alone would ship a
-CLI reporting the previous release. The fix was structural: `pyproject.toml` declares
+— with nothing tying them together. `--version` reads only the second (see
+`researchwiki.__main__._build_parser`), so a bump that touched the packaging metadata
+alone would ship a CLI reporting the previous release. The fix was structural: `pyproject.toml` declares
 the version `dynamic` and resolves it from the package literal, which makes drift
 impossible rather than merely detectable. `test_pyproject_has_no_second_version_literal`
 is what stops someone reinstating the copy.
@@ -87,7 +87,15 @@ def test_pyproject_has_no_second_version_literal():
 
 def test_build_backend_resolves_the_dynamic_version():
     """Guards the wiring end to end: if the attr path breaks, every built artifact
-    is misversioned, and nothing else in the suite would notice."""
+    is misversioned, and nothing else in the suite would notice.
+
+    Skipped where setuptools isn't importable: it's the *build* backend, and a
+    Python 3.12+ venv doesn't ship it at runtime. Asserting on it unconditionally
+    made the suite fail in an environment that installs only what it needs.
+    """
+    pytest.importorskip(
+        "setuptools", reason="build backend not installed in this environment"
+    )
     from setuptools.config.pyprojecttoml import read_configuration
 
     resolved = read_configuration(str(PYPROJECT))["project"].get("version")
