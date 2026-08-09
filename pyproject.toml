@@ -45,9 +45,12 @@ dependencies = [
     "torch>=2.0",
     "transformers>=4.30",
     "sentence-transformers>=3.0",
-    # Anthropic cloud-API SDK. Imported lazily in agents/llm.py; only pulled
-    # in when a role has `provider: anthropic`. Bundled by default because
-    # the shipped `config/models.yaml` defaults route to Anthropic.
+    # Anthropic cloud-API SDK. Imported lazily in agents/llm.py; only pulled in
+    # when a role has `provider: anthropic`. Bundled because it's the only
+    # provider needing an SDK at all — every OpenAI-compatible backend (OpenAI,
+    # Gemini, Groq, LM Studio, …) is reached with urllib and no dependency — so
+    # shipping it is what lets any `config/models.*.yaml` template work without a
+    # second install step.
     "anthropic>=0.40",
 ]
 
