@@ -47,12 +47,23 @@ If the user genuinely wants to skip the grader weights, `--no-semantic` on `agen
 
 ## Step 2 — Pick a provider
 
-Ask the user. Verify the env var is set in their shell after they choose (`echo $ANTHROPIC_API_KEY` / `echo $RW_LLM_PROVIDER`).
+Ask the user, then verify the key is actually visible in their shell (`echo $OPENAI_API_KEY` / `echo $ANTHROPIC_API_KEY` / `echo $RW_LLM_PROVIDER`).
 
-- **Anthropic cloud** (default, ~$0.10/paper) — `ANTHROPIC_API_KEY` must be set. Best fidelity for the `author` and `judge` phases.
-- **OpenAI-compatible cloud** (OpenAI, Google Gemini, Groq, OpenRouter, etc.) — `cp config/models.openai-compatible.yaml config/models.yaml`, then set `RW_LLM_BASE_URL` to the provider's base URL and `OPENAI_API_KEY` to its key (forwarded as Bearer). Without this copy step, the loader's hardcoded fallback routes every role to `provider: anthropic` regardless of which key is set — an OpenAI/Google-only user who skips this will hit `ANTHROPIC_API_KEY not set` mid-pipeline, not a clean upfront error. Edit the `model:` strings to match the provider's catalog.
-- **Local LLM** (free per paper after setup) — server on `localhost:1234` (or override `RW_LLM_BASE_URL`); per-role routing in `config/models.yaml`. 7–8B models work for `classifier` / `keywords` / `reconcile`; keep `author` and `judge` on a larger model.
-- **Chat-relay** (no API key, no local server) — `export RW_LLM_PROVIDER=chat-relay`. The chat agent fills each prompt in `.llm-relay/pending/`. Read `prompts/chat-relay.md` for the protocol before the first ingest.
+**The zero-config path is OpenAI-compatible.** With no `config/models.yaml` present, `agents/model_config._FALLBACK_ROLES` routes every role to an OpenAI-compatible endpoint at `https://api.openai.com/v1` — so an OpenAI user sets `OPENAI_API_KEY` and is done: no copy step, no `RW_LLM_BASE_URL`.
+
+**Every other backend needs a config file, Anthropic included.** That's the failure that actually happens: a user with an Anthropic key skips the copy, believes they're on the default path, and hits a request for `OPENAI_API_KEY` mid-pipeline.
+
+Which template pairs with which backend, and what each costs per paper, lives in README's *Providers* and *Model config* tables — send the user there instead of restating it, so a moved default only has to be corrected once. What matters at init time:
+
+| Choice | What to do |
+|---|---|
+| OpenAI | Nothing but `OPENAI_API_KEY`. |
+| Anthropic | `cp config/models.anthropic.yaml config/models.yaml`, set `ANTHROPIC_API_KEY`. |
+| Other OpenAI-compatible (Gemini, Groq, OpenRouter, …) | Copy the matching `config/models.*.yaml` — Gemini has a ready-made one — and set `OPENAI_API_KEY` to *that* provider's key. The endpoint rides in the config's own `base_url:`; `RW_LLM_BASE_URL` is only an ad-hoc override. |
+| Local (LM Studio / vLLM / llama.cpp / ollama) | `cp config/models.lmstudio.yaml config/models.yaml`, start the server, no key needed. |
+| Chat-relay (no key, no server) | `export RW_LLM_PROVIDER=chat-relay`, then read [`chat-relay.md`](./chat-relay.md) before the first ingest. |
+
+For the local path: 7–8B models handle `classifier` / `keywords` / `reconcile` fine, but write shallow `author` drafts and weak `judge` verdicts — keep those two larger. `WORKFLOW.md` § *Local LLMs* names the all-roles-local model we dogfood.
 
 ## Step 3 — Categories (run bootstrap by default)
 
