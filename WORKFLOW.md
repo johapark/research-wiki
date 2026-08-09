@@ -551,9 +551,10 @@ researchwiki/
 │   │                       #     from the package — depends on agents.phases)
 │   └── style.py            #   Style report
 ├── agents/                 # The ingest agent
-│   ├── runner.py           #   State-machine driver (11 `_phase_*` wrappers over
-│   │                       #     the phases/ modules; roles persisted to
-│   │                       #     ingest_iterations are `db/iterations.VALID_ROLES`)
+│   ├── runner.py           #   State-machine driver — one `_phase_*` wrapper per
+│   │                       #     phase over the phases/ modules below. The roles
+│   │                       #     persisted to ingest_iterations are enumerated in
+│   │                       #     `db/iterations.VALID_ROLES` (never rename those)
 │   ├── commentary.py       #   Commentary-shaped-PDF guard (refuses to promote a
 │   │                       #     Research Highlight / News & Views as type: paper)
 │   ├── context.py          #   Shared phase Context (each phase reads/writes it)
