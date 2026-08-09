@@ -36,15 +36,20 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      # `.[dev]` is base + pytest, and base includes the ML stack — torch and
-      # friends are core dependencies, not extras, so this step installs them and
-      # dominates the job. The suite doesn't need them (see
-      # tests/test_lazy_ml_imports.py); installing them anyway is what keeps this
-      # a single honest line instead of a second copy of the dependency list.
+      # Base includes the ML stack — torch and friends are core dependencies, not
+      # extras — so this step installs them and dominates the job. The suite
+      # doesn't need them (see tests/test_lazy_ml_imports.py); installing them
+      # anyway keeps this one honest line instead of a second copy of the
+      # dependency list.
+      #
+      # `mcp` is here because tests/test_mcp_serve.py importorskips it: without
+      # the extra those tests skip and the MCP server has no CI coverage at all.
+      # Cheap, unlike the ML stack — pure-Python wheels, and it supports every
+      # version in the matrix.
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e '.[dev]'
+          pip install -e '.[dev,mcp]'
 
       - name: Run tests
         run: python -m pytest -q
