@@ -36,22 +36,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      # `.[dev]` is base + pytest. NOTE: base is not light — torch,
-      # transformers, sentence-transformers and anthropic are *core* dependencies
-      # in pyproject.toml, not extras, so every matrix leg installs the whole ML
-      # stack. This step dominates the job; the tests themselves are a fraction
-      # of it. (An earlier version of this comment claimed a `semantic` and an
-      # `anthropic` extra kept them out of CI. Those extras have never existed.)
-      #
-      # The suite needs none of them — it is hermetic, and passes with only
-      # pypdfium2 / tantivy / pyyaml / numpy / pytest installed. Moving the heavy
-      # dependencies behind a real extra would shrink this step to almost
-      # nothing, but it changes what a default `pip install researchwiki` gives a
-      # user, so it's a deliberate call rather than a CI-only edit.
-      #
-      # To re-check either claim rather than trusting this comment:
-      #   install/test split → `gh run view --log <run-id>` step timings
-      #   what the suite needs → run it in a venv holding just the five above
+      # `.[dev]` is base + pytest, and base includes the ML stack — torch and
+      # friends are core dependencies, not extras, so this step installs them and
+      # dominates the job. The suite doesn't need them (see
+      # tests/test_lazy_ml_imports.py); installing them anyway is what keeps this
+      # a single honest line instead of a second copy of the dependency list.
       - name: Install
         run: |
           python -m pip install --upgrade pip
