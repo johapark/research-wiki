@@ -14,6 +14,20 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Fixed
+
+- `pip install 'researchwiki[mcp]'` no longer installs a broken `mcp-serve`. The
+  extra was unbounded (`mcp>=1.0`) and mcp 2.0 removed `mcp.server.fastmcp`, which
+  the server is built on, so a fresh install of the extra resolved to a version the
+  server couldn't import. Capped to `<2`; the port to the 2.x server API is
+  separate work.
+
+### Changed
+
+- CI installs the `mcp` extra, so the MCP server's tests actually run. They had
+  been `importorskip`-ing on every CI run — which is how the breakage above stayed
+  invisible.
+
 ## [0.2.0] - 2026-08-07
 
 ### Added

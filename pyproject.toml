@@ -64,7 +64,12 @@ dev = [
 # doesn't need `mcp`; only `researchwiki mcp-serve` does. Install with:
 #   pip install -e '.[mcp]'
 mcp = [
-    "mcp>=1.0",
+    # Capped below 2.0: that release removed `mcp.server.fastmcp`, which
+    # `tasks/mcp_serve.py` is built on, and 2.x replaces it with a different
+    # server API rather than renaming it. The cap keeps `mcp-serve` working; the
+    # port is a separate piece of work. Until CI installed this extra the
+    # breakage was invisible — the tests importorskip'd and silently passed.
+    "mcp>=1.0,<2",
 ]
 
 [project.urls]
