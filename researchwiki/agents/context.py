@@ -87,7 +87,8 @@ class Context:
     metadata: dict | None = None        # reconcile output: {title, year, doi, venue, ...}
     sections: dict | None = None        # extract output: {introduction, methods, results, discussion, ...} (each capped at 4000 chars)
     pdf_full_text: str | None = None    # extract output: full PDF text, no cap — for keyword extraction's wider sampling window
-    claims_count: int | None = None     # extract output: number of claims parsed from PDF
+    # Also the real PDF-side claim count. A `claims_count` field sat here until
+    # 2026-08-10; it counted markdown bullets in typeset prose and was never read.
     target_claims: object | None = None # L3 output: TargetClaimsOutput; None when phase skipped or failed
     crosslink_candidates: list = field(default_factory=list)   # list[phases.CrosslinkCandidate]
     drafts: list[phases.Draft] = field(default_factory=list)

@@ -7,7 +7,7 @@ auditable.
 
 Phases (in order), by the function that implements each:
   reconcile_metadata : DOI / title / year / venue from PDF + S2
-  extract_sections   : section + claim extractor (reuses tasks.ingest helpers)
+  extract_sections   : section extractor (reuses tasks.ingest helpers)
   author             : LLM call producing a wiki-page draft
   grade_draft        : Phase 1 grader on the draft (BM25 + bi-encoder semantic)
   tournament         : pick the highest-scored draft (deterministic argmax)

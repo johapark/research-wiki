@@ -160,12 +160,11 @@ def run_ingest(
 
         # Phase 2: extract
         ctx.next_iter()
-        sections, claim_count, full_text = _phase_extract(ctx, conn)
+        sections, full_text = _phase_extract(ctx, conn)
         ctx.sections = sections
         ctx.pdf_full_text = full_text
-        ctx.claims_count = claim_count
-        log(f"extract → sections={list(sections.keys())} pdf_claims={claim_count}", tag="agent")
-        _warn_thin_extraction(sections, claim_count)
+        log(f"extract → sections={list(sections.keys())}", tag="agent")
+        _warn_thin_extraction(sections)
 
         # Phase 2.4: target-claims extraction (L3) — structured list of
         # claims the page should preserve. Surfaces a coverage target the
@@ -181,6 +180,15 @@ def run_ingest(
                   f"({n_crit} critical, {n_high} high)", tag="agent")
         elif ctx.target_claims is not None and ctx.target_claims.error:
             log(f"target-claims → skipped ({ctx.target_claims.error[:60]})", tag="agent")
+        # Thin-grounding warning, moved here 2026-08-10 from _warn_thin_extraction.
+        # This is the phase that genuinely extracts PDF-side claims, so an empty
+        # result here means what the old bullet-counting `pdf_claims=0` only
+        # appeared to mean: the draft's claims have no independently-extracted
+        # claim set to be checked against, leaving retrieval as the sole guard.
+        if ctx.target_claims is None or ctx.target_claims.is_empty():
+            log("target-claims ⚠ zero PDF-side claims extracted — nothing to "
+                "cross-check the draft's claims against beyond retrieval",
+                tag="agent")
 
         # Phase 2.5: crosslink candidates (verified surface for Related Papers)
         ctx.next_iter()
@@ -331,7 +339,7 @@ def _phase_reconcile(ctx: Context, conn) -> tuple[dict, int]:
 _FINDING_SECTIONS = ("results", "discussion", "conclusion", "findings")
 
 
-def _warn_thin_extraction(sections: dict, claim_count: int) -> None:
+def _warn_thin_extraction(sections: dict) -> None:
     """Log a warning when section extraction recovered no findings text.
 
     Silent-degradation guard. `kim-2019-spcas9-activity-prediction-by-deepspcas9`
@@ -347,6 +355,11 @@ def _warn_thin_extraction(sections: dict, claim_count: int) -> None:
     perspectives). The wiki-page analogue is `lint`'s `zero_claim_papers`; this is
     the ingest-time counterpart, and its job is to put the fact in the log where a
     reviewer reading a surprising page can find it.
+
+    The zero-claims half of this warning used to live here too, keyed off the
+    bullet-counting `claim_count` that `extract_sections` no longer returns (see
+    that function for why the number was meaningless). It now fires from the
+    target-claims phase, which is the one that actually extracts claims.
     """
     names = {str(k).lower() for k in (sections or {})}
     if not names:
@@ -358,15 +371,12 @@ def _warn_thin_extraction(sections: dict, claim_count: int) -> None:
             f"(got {sorted(names)}) — claims will be graded against full text "
             f"only, so treat the Results section of the draft with extra care",
             tag="agent")
-    if claim_count == 0:
-        log("extract ⚠ zero PDF-side claims extracted — nothing to cross-check "
-            "the draft's claims against beyond retrieval", tag="agent")
 
 
-def _phase_extract(ctx: Context, conn) -> tuple[dict, int, str]:
+def _phase_extract(ctx: Context, conn) -> tuple[dict, str]:
     """Wrapper for the extract phase. Persists one row."""
     t0 = time.time()
-    sections, n_claims, full_text = phases.extract_sections(ctx.pdf_path)
+    sections, full_text = phases.extract_sections(ctx.pdf_path)
     elapsed_ms = int((time.time() - t0) * 1000)
     write_iteration(
         attempt_id=ctx.attempt_id,
@@ -377,11 +387,11 @@ def _phase_extract(ctx: Context, conn) -> tuple[dict, int, str]:
         decision="observed",
         decision_reason=(
             f"extracted in {elapsed_ms}ms; sections={list(sections.keys())}; "
-            f"claims_pdf_anchored={n_claims}; full_text_chars={len(full_text)}"
+            f"full_text_chars={len(full_text)}"
         ),
         conn=conn,
     )
-    return sections, n_claims, full_text
+    return sections, full_text
 
 
 def _phase_target_claims(ctx: Context, conn):

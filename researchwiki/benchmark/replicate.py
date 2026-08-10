@@ -149,7 +149,7 @@ def replicate_score(
     metadata = phases.reconcile_metadata(pdf_path, use_llm=not use_stub)
 
     # 2. Extract sections + full text (once).
-    sections, _, full_text = phases.extract_sections(pdf_path)
+    sections, full_text = phases.extract_sections(pdf_path)
 
     # 3. Crosslink candidates: citation-graph (S2/Crossref) + topical (semantic).
     citation_cands = phases.crosslink_candidates(pdf_path, metadata)

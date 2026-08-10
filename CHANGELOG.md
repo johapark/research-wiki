@@ -36,6 +36,19 @@ the reasoning behind any line below.
 
 ### Changed
 
+- The ingest log's `pdf_claims=N` counter is gone, along with the
+  `extract ⚠ zero PDF-side claims extracted` warning it drove. It counted lines
+  starting with `-`/`*` in the PDF's Methods/Results — markdown bullets, in typeset
+  prose, which essentially never appear: it read 0 for 6 of 8 papers in one session,
+  and the sole nonzero reading was two samtools/pbmm2 command-line flags
+  (`--secondary=no -s 25000 -K 15G`) mistaken for claims. Nothing consumed it
+  (`ctx.claims_count` was assigned and never read), so its only effect was a warning
+  that fired on nearly every ingest and implied the drift check had been weakened
+  when that check reads the full PDF text and was never affected. The warning now
+  fires from the `target_claims` phase, which actually extracts PDF-side claims
+  (18–35 on those same papers). `extract_sections()` returns
+  `(sections, full_text)`; `ctx.claims_count` is removed.
+
 - CI installs the `mcp` extra, so the MCP server's tests actually run. They had
   been `importorskip`-ing on every CI run — which is how the breakage above stayed
   invisible.
