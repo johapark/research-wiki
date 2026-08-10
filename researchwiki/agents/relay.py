@@ -47,6 +47,44 @@ _RELAY_MAX_RETRIES = 2            # retries on schema failure; 1 original + 2 re
 _fresh_counter = itertools.count(1)
 
 
+# Which paper this process is working on, stamped into every prompt payload as
+# `stem` / `pdf` so a responder can tell whose prompt it is holding.
+#
+# It exists for fan-out. Nothing serializes relay calls — each writes its own
+# `{op_id}.prompt.json` and polls its own response path — so several ingests can
+# have prompts pending at once, and a responder answering them concurrently (one
+# subagent per ingest) previously had to guess ownership by reading the prompt
+# body, since the payload named the phase but never the paper. See
+# `prompts/chat-relay.md`: the sanctioned shape is one foreground single-PDF
+# invocation per responder, because batch mode redirects each worker's stderr —
+# where the pending-prompt notice is printed — into a per-worker log file.
+#
+# Process-scoped rather than threaded through `llm.call()`: every ingest is its
+# own process (`_ingest_batch._worker` spawns `python -m researchwiki …`, and the
+# single-PDF path is one invocation), so a process only ever handles one paper,
+# and the author phase's ThreadPoolExecutor drafts all belong to that same paper.
+# A module global is therefore both correct and free of the ripple that adding a
+# `stem=` kwarg to every phase's `call()` site would cause.
+_current_stem: str | None = None
+_current_pdf: str | None = None
+
+
+def set_relay_identity(*, stem: str | None = None, pdf: str | None = None) -> None:
+    """Record which paper this process is ingesting, for relay prompt payloads.
+
+    Called by the runner: `pdf` as soon as the path is known, `stem` once
+    reconcile has derived it. Both are advisory metadata — they are deliberately
+    NOT inputs to `_stable_op_id`, because op_id is the cache key and folding the
+    stem into it would invalidate every response already on disk. A no-op under
+    every provider except chat-relay, which is the only one that writes payloads.
+    """
+    global _current_stem, _current_pdf
+    if stem is not None:
+        _current_stem = stem
+    if pdf is not None:
+        _current_pdf = pdf
+
+
 # ───────────────────────── path helpers ─────────────────────────
 
 def _relay_dir() -> Path:
@@ -306,6 +344,13 @@ def call_chat_relay(
                 "schema_version": _RELAY_SCHEMA_VERSION,
                 "op_id": op_id,
                 "phase": phase,
+                # Whose prompt this is. Additive and nullable, so schema_version
+                # stays 1: a responder written before these existed ignores the
+                # extra keys, and the response shape is unchanged. `stem` is null
+                # for the reconcile phase, which is the phase that derives it —
+                # `pdf` is the identifier to use there.
+                "stem": _current_stem,
+                "pdf": _current_pdf,
                 "model_hint": model,
                 "system": system,
                 "prompt": prompt,

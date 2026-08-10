@@ -60,6 +60,8 @@ pending prompt" / "watch for prompts" / similar:
   "schema_version": 1,
   "op_id": "abc1d2e3f4",
   "phase": "author" | "classifier" | "judge" | "critic" | ...,
+  "stem": "smith-2024-a-title-in-five-words" | null,  // null on `reconcile`
+  "pdf":  "raw-drop.pdf",              // always set; use it when stem is null
   "model_hint": "claude-sonnet-4-6",   // advisory; you can use any model
   "system": "<system prompt or null>",
   "prompt": "<the actual user prompt — usually a long block>",
@@ -75,6 +77,12 @@ Field notes:
 
 - **`phase`** — what kind of work this is. See the phase glossary below
   for the expected output shape per phase.
+- **`stem` / `pdf`** — which paper this prompt belongs to, so that when
+  several ingests run at once you can tell whose prompt you are holding
+  without reading the prompt body. `stem` is null on the `reconcile`
+  prompt, because reconcile is the phase that derives it — `pdf` is set
+  from the start and is the identifier to use there. Neither feeds the
+  op_id hash.
 - **`model_hint`** — *advisory only*. Whatever model the chat platform is
   using is fine; the `via` field in your response carries traceability.
 - **`schema`** — when non-null, your response **must** validate. You'll
@@ -188,16 +196,70 @@ short_name. The CLI fires them one at a time — when you fill prompt N's
 response, the CLI consumes it and writes prompt N+1. So you'll see
 exactly one pending file at a time (during a single ingest).
 
-Two `agent ingest` calls running in parallel can produce two
-simultaneous pending files. The relay grabs `.llm-relay/lock` while
-holding a single chat-relay call, so the two ingests serialize on
-chat-relay phases — but you may still see both ingests' pending files in
-flight if they're at different non-relay steps. Just respond to whichever
-is pending; the CLI infers ownership by op_id.
+## Parallel ingests — fan out, but NOT with batch mode
+
+Nothing serializes relay calls. Each `call_chat_relay` writes its own
+`{op_id}.prompt.json` and polls its own `{op_id}.response.json`; the op_id
+namespace is the only coordination and the 600 s timeout is per prompt.
+So concurrent ingests produce concurrent pending files and you may answer
+them in parallel — the throughput limit is you, not the protocol.
+
+(An earlier version of this document claimed the relay grabs
+`.llm-relay/lock`, so parallel ingests serialized on chat-relay phases.
+That lock never existed. The only `flock`s in the package guard
+`index.md` and back-link writes.)
+
+**To parallelize: one foreground single-PDF invocation per subagent.**
+
+```bash
+researchwiki agent ingest inbox/<one>.pdf      # per subagent, no -w
+```
+
+Each subagent then owns one subprocess, sees that subprocess's own
+`📨 LLM relay pending` line with both file paths, and writes straight to
+its own response path. No scanning, no ownership ambiguity.
+
+**Do not use batch mode for this.** `agent ingest inbox/*.pdf -w 4`
+parallelizes correctly — subprocess per worker, no relay gate — but
+`_ingest_batch._worker` runs each child with
+`stdout=log_fp, stderr=subprocess.STDOUT`, and the handoff line is printed
+to **stderr**. So every prompt notice lands in
+`.ingest/batch-<ts>/worker-*.log` where you will never see it. The parent
+prints only `[i/N] ok:` *after* a worker exits. From here the run looks
+like a hang and then fails every worker on the 600 s timeout. Batch mode
+under chat-relay only works if you independently poll
+`.llm-relay/pending/`, which is strictly more work than fanning out.
+
+Note this is the documented exception to `CLAUDE.md`'s "never fan out one
+Bash task per file" rule, which assumes an API-key provider. What you give
+up is batch mode's `checkpoint.json` and `--resume`; what you get back is
+a working notification channel. Two of the three reasons that rule cites
+do not actually differ here — both paths are subprocess-per-worker, so
+`state.db` write contention is a function of worker count either way — and
+the third, uncapped concurrency, is yours to control: keep the fan-out at
+about 4 to match batch mode's default. For recovery, the `inbox/`
+invariant is the fallback record: whatever is still sitting in `inbox/`
+did not land. (Batch mode's checkpoint is also per-PDF, not per-phase, so
+a crashed ingest is re-run from the top under either approach.)
+
+Every payload names its own paper, so ownership never needs guessing:
+
+| field  | when it is set |
+|---|---|
+| `pdf`  | always — source filename, set before the first prompt |
+| `stem` | after reconcile; `null` on the `reconcile` prompt itself, which is the phase that derives it |
+
+Both are advisory metadata, deliberately absent from the op_id hash so
+they cannot disturb cache reuse, and both are additive and nullable —
+which is why `schema_version` stays `1`.
 
 ## Caching — re-runs reuse prior responses
 
-`op_id` is deterministic: `sha1(phase|prompt|stem)[:12]`. If a CLI run
+`op_id` is deterministic: `sha1(phase|prompt)[:12]`, plus
+`|retry_of=<op_id>` on a schema retry so each attempt in a chain gets its
+own id. The stem is **not** an input, despite the `stem` field in the
+payload — the prompt text already differs per paper, and folding identity
+into the cache key would invalidate every response already on disk. If a CLI run
 crashes mid-ingest after you wrote a response but before it consumed,
 re-running picks up the same response file (because the same prompt
 re-derives the same op_id). You don't need to do anything — the CLI just

@@ -25,6 +25,7 @@ from ..db.iterations import write_iteration, update_paper_stem
 from ..grade import coherence
 from . import fitness, model_config, phases
 from .context import Context, ReconcileFailed, StemRenameRefused
+from .relay import set_relay_identity
 from ..fsatomic import write_text_atomic
 from ..log import log
 
@@ -99,6 +100,11 @@ def run_ingest(
 
     log(f"attempt_id={ctx.attempt_id}", tag="agent")
     log(f"pdf={pdf_path.name}", tag="agent")
+
+    # Stamp the PDF name into chat-relay prompt payloads before the first call.
+    # Reconcile is the phase that derives the stem, so `pdf` is the only paper
+    # identifier a responder has for that prompt. No-op for every other provider.
+    set_relay_identity(pdf=pdf_path.name)
     _author_cfg = model_config.for_phase("author")
     _mode = "stub" if use_stub else f"real ({_author_cfg.provider}/{_author_cfg.model})"
     log(f"mode={_mode}", tag="agent")
@@ -118,6 +124,9 @@ def run_ingest(
         if ctx.paper_stem:
             update_paper_stem(ctx.attempt_id, ctx.paper_stem, conn=conn)
             conn.commit()
+            # Every relay prompt after reconcile can now name its paper, which is
+            # what lets a fan-out responder claim prompts without parsing bodies.
+            set_relay_identity(stem=ctx.paper_stem)
         log(
             f"reconcile → stem={ctx.paper_stem} year={meta.get('year')} "
             f"type={meta.get('paper_type', 'research')} "

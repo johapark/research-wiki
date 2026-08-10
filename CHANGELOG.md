@@ -14,7 +14,30 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- Chat-relay prompt payloads carry `stem` and `pdf`, so a responder answering
+  several ingests at once can tell whose prompt it is holding without parsing the
+  prompt body. `stem` is null on the `reconcile` prompt — the phase that derives
+  it — and `pdf` is set before the first call, so every prompt is attributable.
+  Additive and nullable, so `schema_version` stays `1` and the response shape is
+  unchanged; neither field feeds the op_id hash, because op_id is the cache key
+  and folding identity into it would invalidate responses already on disk.
+
 ### Fixed
+
+- `prompts/chat-relay.md` no longer documents a lock that does not exist. It
+  claimed the relay grabs `.llm-relay/lock` so parallel ingests serialize on
+  chat-relay phases; there is no such lock (the only `flock`s guard `index.md` and
+  back-link writes), and relay calls are isolated per op_id, so concurrent ingests
+  can be answered in parallel. It also gave the op_id formula as
+  `sha1(phase|prompt|stem)`, where the code hashes `phase|prompt` plus a
+  `retry_of` discriminator. Documented the real constraint in its place: batch mode
+  parallelizes correctly but runs each worker with `stderr=subprocess.STDOUT` into
+  a log file, which is where the relay's pending-prompt notice goes — so under
+  chat-relay a batch run looks like a hang and then times out. Parallelize
+  chat-relay with one foreground single-PDF invocation per responder instead; noted
+  as the documented exception to CLAUDE.md's "never fan out one Bash task per file".
 
 - Numeric-drift no longer glues adjacent numeric table columns into one impossible
   number. `parse_claims._extract_table_rows` joins cells with spaces, so a Results
