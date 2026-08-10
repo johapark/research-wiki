@@ -41,6 +41,34 @@ NUMERIC_TOKEN_RE = re.compile(
     r"(?<![\w.])\d[\d,]*(?:\.\d+)?(?:\s?[KkMmBbGg](?![A-Za-z]))?"
 )
 
+# Letter-prefixed *decimal* measurements, admitted to the evidence value-set only.
+#
+# The `(?<![\w.])` above is load-bearing and stays: without it "K562" contributes
+# 562 and "GRCh38" contributes 38, and a fabricated claim could be satisfied by a
+# cell line or a reference-build name. But it also hides values a paper only ever
+# writes with a letter prefix. Phred/QV notation is the case that bit: Hansen 2026
+# states "QV increased from Q63.1 for the v0.7 assembly to Q68.9", and 68.9 appears
+# nowhere else in the paper unprefixed, so a correct page claiming "QV from 63.1 to
+# 68.9" was reported as numeric drift and vetoed at promote time. 63.1 escaped only
+# because that PDF happens to also say "The initial QV was 63.1" — i.e. whether the
+# veto fired was luck. Observed 2026-08-10 on hansen-2026-a-complete-diploid-human-genome
+# (38 Q-prefixed numerics in that PDF alone).
+#
+# The discriminator is the decimal point. Identifiers that must stay excluded are
+# letter+integer (K562, HG002, chr2, GRCh38, rs45512696, T2T); measurement notation
+# that should be admitted carries a fractional part (Q68.9, v1.1). Requiring
+# `\.\d` keeps the whole identifier class out without enumerating prefixes.
+#
+# Evidence-side only, and additive: this can only grow the value-set, so it can
+# only suppress false drift — it can never invalidate a match the plain tokenizer
+# already made. The claim side is deliberately left alone. A page that writes
+# "Q68.9" simply has that number unchecked (fails open, no false positive);
+# admitting prefixed forms as *claim* tokens would instead create new ways to
+# flag correct prose.
+_PREFIXED_DECIMAL_RE = re.compile(
+    r"(?<![\w.])[A-Za-z](\d[\d,]*\.\d+)(?![\w.])"
+)
+
 # Magnitude-suffix multipliers so prose "350 K" / "8.6 M" compares equal to a
 # PDF's "350,000" / "8,600,000". A number's canonical value is added to its
 # form-set *in addition to* its plain normalized form (never replacing it), so
@@ -171,6 +199,12 @@ def check_numerics(
     for t in NUMERIC_TOKEN_RE.findall(retrieved_text):
         evidence_forms |= numeric_forms(t)
     for t in NUMERIC_TOKEN_RE.findall(full_text):
+        evidence_forms |= numeric_forms(t)
+    # Values the source only ever writes letter-prefixed ("Q68.9"). See
+    # _PREFIXED_DECIMAL_RE: additive, so this only ever suppresses false drift.
+    for t in _PREFIXED_DECIMAL_RE.findall(retrieved_text):
+        evidence_forms |= numeric_forms(t)
+    for t in _PREFIXED_DECIMAL_RE.findall(full_text):
         evidence_forms |= numeric_forms(t)
     unmatched = []
     for t in tokens:

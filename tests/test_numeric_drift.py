@@ -137,3 +137,49 @@ def test_number_glued_to_letter_unit_is_extracted():
     assert um == []
     _, um = _check_numerics("128nm resolution", "imaged at 128nm depth", "")
     assert um == []
+
+
+# ---------- letter-prefixed decimal measurements (evidence side only) ----------
+
+def test_qv_prefixed_value_matches_bare_claim():
+    # Hansen 2026 writes Phred/QV scores only as "Q68.9"; a correct page claiming
+    # "QV from 63.1 to 68.9" was flagged as drift and vetoed at promote time,
+    # because the tokenizer's `(?<![\w.])` hid any number behind a letter. 63.1
+    # escaped only because that PDF also happens to say "the initial QV was 63.1",
+    # so whether the veto fired was luck. Observed 2026-08-10.
+    _, um = _check_numerics(
+        "polishing lifted QV from 63.1 to 68.9",
+        "QV increased from Q63.1 for the v0.7 assembly to Q68.9 for the v1.1 assembly",
+        "",
+    )
+    assert um == []
+
+
+def test_prefixed_decimal_admitted_from_full_text_haystack():
+    # Same rule must apply to the second (full-PDF) haystack, which is where the
+    # paper-page grader finds numbers outside the retrieved neighborhood.
+    _, um = _check_numerics("consensus QV of 68.9", "unrelated retrieved chunk", "reached Q68.9 overall")
+    assert um == []
+
+
+def test_letter_prefixed_integer_identifiers_still_excluded():
+    # The decimal point is the whole discriminator. Identifiers are letter+integer
+    # and must NOT satisfy a claim's number, or a fabricated value could be waved
+    # through by a cell line, a reference build, a sample ID, or an rsID.
+    for claim, evidence, token in [
+        ("we used 562 cells", "the K562 cell line was used", "562"),
+        ("38 medical genes", "aligned to GRCh38 throughout", "38"),
+        ("2 samples sequenced", "HG002 was sequenced", "2"),
+        ("45512696 variants", "the variant rs45512696 was found", "45512696"),
+    ]:
+        _, um = _check_numerics(claim, evidence, evidence)
+        assert um == [token], (claim, um)
+
+
+def test_prefixed_decimal_does_not_reintroduce_substring_false_negative():
+    # Admitting prefixed decimals is additive to the evidence value-set; it must
+    # not weaken the value-based guards the other tests pin.
+    _, um = _check_numerics("8 attention heads", "v1.128 released", "v1.128 released")
+    assert um == ["8"]
+    _, um = _check_numerics("accuracy 0.5", "reached Q10.53 percent", "")
+    assert um == ["0.5"]

@@ -16,6 +16,18 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Numeric-drift no longer fires on values a paper only ever writes with a letter
+  prefix. `NUMERIC_TOKEN_RE`'s `(?<![\w.])` lookbehind — which correctly stops
+  `K562` from contributing `562` — also hid Phred/QV notation, so Hansen 2026's
+  "QV increased from Q63.1 ... to Q68.9" put neither value in the evidence set and a
+  page correctly claiming "QV from 63.1 to 68.9" was flagged as drift and refused
+  auto-promotion. `63.1` escaped only because that PDF also says "the initial QV was
+  63.1" unprefixed, so whether the veto fired came down to luck. Evidence-side
+  matching now also admits `<letter><decimal>` forms; the decimal point is the
+  discriminator, so letter+integer identifiers (`K562`, `HG002`, `GRCh38`,
+  `rs45512696`) stay excluded. Additive to the value-set, so it can only suppress
+  false drift, never mask a rounding — `grade paper` on the affected page goes from
+  1 drift claim to 0 with every other value still checked.
 - `pip install 'researchwiki[mcp]'` no longer installs a broken `mcp-serve`. The
   extra was unbounded (`mcp>=1.0`) and mcp 2.0 removed `mcp.server.fastmcp`, which
   the server is built on, so a fresh install of the extra resolved to a version the
