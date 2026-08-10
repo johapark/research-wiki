@@ -98,8 +98,33 @@ _MAGNITUDE_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?([KkMmBbGg])\b")
 # following ",<digit>" proves the group was already comma-delimited, so it cannot
 # also be space-delimited; a comma used as punctuation ("300 000, and") still
 # joins, because that comma is not followed by a digit.
+#
+# The `,` in the *lookbehind* is that same argument mirrored to the leading side,
+# and it matters most for tables. `parse_claims._extract_table_rows` joins cells
+# with spaces, so a Results table of numeric columns arrives as prose like
+# "Total single variants significant (P < 2.95e-10) 74,514 559" — two columns,
+# 74,514 and 559. Unguarded, "514" is a valid 1-3 digit lead and " 559" a valid
+# 3-digit group, so they glued into "74,514559": a number nobody wrote, which
+# nothing can ever match, so a correct claim drifted by construction. wright-2026
+# carried three of these and zimin-2026 one spanning four columns
+# ("1,173 864 619 486" → "1,173864619486"). A lead group immediately preceded by a
+# comma is the tail of an already-comma-delimited number and cannot also begin a
+# space-delimited one. Observed 2026-08-10 auditing persisted drift flags.
+# Punctuation stays safe: in "In 2020, 300 000 people" the character before "300"
+# is the space, not the comma, so that case still joins.
+#
+# Known residue, not fixed here: a table row of three or more numeric columns still
+# corrupts. zimin-2026's "1,173 864 619 486" now stops gluing at the comma, but the
+# scanner just starts again at "864" and yields "864619486". That one is genuinely
+# ambiguous — "864 619 486" is exactly what a space-delimited 864,619,486 looks like
+# — so no local rule separates it from three cells. The real fix is to not collapse
+# claim text that came from `_extract_table_rows` at all (space-separation carries
+# no thousands semantics in a synthetic cell join), which means threading claim
+# provenance into check_numerics and through the synthesis grader too. Measured
+# effect of the guard alone across all 11,907 claims: 7 claims cleared, 0 newly
+# flagged, this one still flagged (differently), 11,899 untouched.
 _SPACED_THOUSANDS_RE = re.compile(
-    r"(?<![\d.])(\d{1,3})((?:[    ]\d{3})+)(?!\d)(?!,\d)"
+    r"(?<![\d.,])(\d{1,3})((?:[    ]\d{3})+)(?!\d)(?!,\d)"
 )
 
 

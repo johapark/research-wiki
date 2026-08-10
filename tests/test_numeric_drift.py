@@ -183,3 +183,36 @@ def test_prefixed_decimal_does_not_reintroduce_substring_false_negative():
     assert um == ["8"]
     _, um = _check_numerics("accuracy 0.5", "reached Q10.53 percent", "")
     assert um == ["0.5"]
+
+
+# ---------- table-row column glue (leading-comma guard) ----------
+
+def test_table_row_columns_not_glued_across_a_comma():
+    # `parse_claims._extract_table_rows` joins cells with spaces, so a two-column
+    # numeric row arrives as "74,514 559". Unguarded, "514" was a valid 1-3 digit
+    # lead and " 559" a valid 3-digit group, gluing them into "74,514559" -- a
+    # number nobody wrote, which nothing can match, so the claim drifted by
+    # construction. wright-2026 carried three of these. Observed 2026-08-10.
+    _, um = _check_numerics(
+        "Total single variants significant 74,514 559",
+        "we report 74,514 significant single variants, 559 of them novel",
+        "",
+    )
+    assert um == []
+    # and the glued form is what the old regex produced, so pin that it is gone
+    from researchwiki.grade.primitives import collapse_spaced_thousands
+    assert "74,514559" not in collapse_spaced_thousands("significant 74,514 559")
+
+
+def test_spaced_thousands_still_join_after_punctuation():
+    # The guard keys on a comma *immediately* before the lead group. A comma used as
+    # punctuation leaves a space in between, so genuine spaced thousands still join.
+    _, um = _check_numerics("In 2020, 300,000 people were screened", "In 2020, 300 000 people", "")
+    assert um == []
+
+
+def test_spaced_thousands_still_join_unprefixed():
+    # The original motivating case must keep working: a page's "1,158,017" against a
+    # PDF that typesets "1 158 017".
+    _, um = _check_numerics("exome-sequencing of 1,158,017 people", "analysed 1 158 017 individuals", "")
+    assert um == []

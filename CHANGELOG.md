@@ -16,6 +16,20 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Numeric-drift no longer glues adjacent numeric table columns into one impossible
+  number. `parse_claims._extract_table_rows` joins cells with spaces, so a Results
+  row arrives as prose like `74,514 559`; `collapse_spaced_thousands` then read
+  `514` as a fresh thousands lead and produced `74,514559`, a value nobody wrote and
+  nothing can match, so the claim drifted by construction. `_SPACED_THOUSANDS_RE`'s
+  lookbehind now also excludes a comma — the mirror of the trailing `(?!,\d)` guard
+  added for superscript markers, on the same reasoning: a lead group immediately
+  preceded by a comma is the tail of an already-comma-delimited number and cannot
+  also begin a space-delimited one. Punctuation is unaffected (`In 2020, 300 000`
+  still joins, since the character before `300` is the space). Measured across all
+  11,907 claims: 7 claims cleared, 0 newly flagged, 11,899 untouched. Rows of three
+  or more numeric columns still corrupt (`1,173 864 619 486` → `864619486`); that
+  case is genuinely ambiguous against a real space-delimited 864,619,486 and needs
+  claim provenance threaded into the grader, which is separate work.
 - Numeric-drift no longer fires on values a paper only ever writes with a letter
   prefix. `NUMERIC_TOKEN_RE`'s `(?<![\w.])` lookbehind — which correctly stops
   `K562` from contributing `562` — also hid Phred/QV notation, so Hansen 2026's
