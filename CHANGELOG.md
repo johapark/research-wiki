@@ -14,6 +14,32 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Fixed
+
+- Stem derivation folds Unicode dashes to ASCII `-`, so a paper whose title is set
+  with U+2010 no longer derives a different stem than the same paper spelled with a
+  plain hyphen. Publisher-set titles use the Unicode forms freely, and the
+  `[^a-z0-9-]` pass *deletes* an unfolded dash instead of preserving the word
+  boundary — welding `ATAC‐seq` into `atacseq` while the PDF's own spelling gives
+  `atac-seq`. The fold already existed in `slugify_phrase` and was missing from
+  `normalize_title_word`, which is the shape of the bug: a normalization every
+  caller had to remember separately. It now lives in `strip_diacritics`, which both
+  paths share, so slugs and stems cannot drift apart again. Measured against a real
+  532-item reference-manager library: 15 of 516 stems were affected. U+2212 MINUS
+  SIGN is deliberately excluded — it is category `Sm`, and titles use it as a
+  mathematical operator (`CD4−`), not as punctuation.
+- Suspended compounds no longer leave a dangling separator in a stem. A title like
+  *"epigenome- and transcriptome-wide"* produced `…-in-epigenome-`, and
+  *"long- and short-read"* produced `…-long--and-short-read` — trailing and doubled
+  hyphens no other stem carries, and which break `STEM_PREFIX_RE`. Interior hyphens
+  are untouched, so CLAUDE.md's rule that a hyphenated term counts as one word
+  (`Cas-OFFinder`) still holds. 3 of 516 stems in the same library.
+
+  Neither fix renames anything: existing pages keep the stems they were created
+  with. One page on this corpus (`…-of-singlecell`) would derive differently if
+  re-ingested, which is a deliberate call to leave alone rather than a silent
+  rename — see the stem-stability rule in CLAUDE.md § *Disambiguation & updates*.
+
 ## [0.2.1] - 2026-08-10
 
 ### Added

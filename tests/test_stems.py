@@ -6,6 +6,10 @@ refactor nudges them. The examples here mirror the ones in CLAUDE.md so the
 table and the code can't drift apart unnoticed.
 """
 
+import re
+
+import pytest
+
 from researchwiki.stems import (
     derive_stem,
     derive_title_part,
@@ -129,6 +133,95 @@ def test_title_hyphenated_term_is_one_word():
 
 def test_title_empty_is_untitled():
     assert derive_title_part("") == "untitled"
+
+
+# ---------- Unicode dashes (regression, 2026-08-11) ----------
+#
+# Publisher-set titles use U+2010 and friends freely. `slugify_phrase` folded
+# them from the start; `normalize_title_word` did not, so the same paper
+# derived two different stems depending on whether its metadata came from the
+# PDF (ASCII hyphen) or from a reference-manager export (U+2010). Measured on a
+# real 532-item library: 15 stems differed. The fold now lives in
+# `strip_diacritics`, which both paths share.
+
+@pytest.mark.parametrize("dash,name", [
+    ("‐", "HYPHEN"),
+    ("‑", "NON-BREAKING HYPHEN"),   # NFKD-decomposes to U+2010 first
+    ("‒", "FIGURE DASH"),
+    ("–", "EN DASH"),
+    ("—", "EM DASH"),
+])
+def test_title_unicode_dashes_fold_to_ascii_hyphen(dash, name):
+    assert derive_title_part(f"ATAC{dash}seq a method for assaying") == \
+        "atac-seq-a-method-for-assaying", f"{name} was not folded"
+
+
+def test_unicode_dash_and_ascii_hyphen_give_the_same_stem():
+    """The whole point: one paper, two metadata sources, one stem."""
+    from_pdf = derive_stem(["Jason D. Buenrostro"], 2015,
+                           "ATAC-seq: A Method for Assaying Chromatin")
+    from_export = derive_stem(["Buenrostro, Jason D."], 2015,
+                              "ATAC‐seq: A Method for Assaying Chromatin")
+    assert from_pdf == from_export == \
+        "buenrostro-2015-atac-seq-a-method-for-assaying"
+
+
+def test_hyphenated_surname_with_unicode_dash_is_kept():
+    assert first_author_surname(["García‐López"]) == "garcia-lopez"
+
+
+def test_minus_sign_is_not_a_dash():
+    """U+2212 is category Sm — a mathematical operator, not punctuation. Titles
+    use it as one (`CD4− cells`), so it is deleted like other symbols rather
+    than folded into a word boundary."""
+    assert derive_title_part("CD4− cells respond to antigen") == \
+        "cd4-cells-respond-to-antigen"
+
+
+def test_nbsp_separates_words():
+    assert derive_title_part("a draft human pangenome reference") == \
+        "a-draft-human-pangenome-reference"
+
+
+# ---------- dangling hyphens (regression, 2026-08-11) ----------
+#
+# Suspended compounds ("epigenome- and transcriptome-wide") left a trailing `-`
+# on the word, which the join carried into the stem. 3 of 516 real records.
+
+def test_suspended_compound_does_not_leave_a_trailing_hyphen():
+    assert derive_title_part(
+        "Controlling bias and inflation in epigenome- and transcriptome-wide"
+    ) == "controlling-bias-and-inflation-in-epigenome"
+
+
+def test_suspended_compound_does_not_double_the_separator():
+    assert derive_title_part(
+        "Rapid, accurate long- and short-read mapping to pangenome graphs"
+    ) == "rapid-accurate-long-and-short-read"
+
+
+def test_interior_hyphen_still_survives():
+    """The repair must not flatten legitimate hyphenated terms — that rule
+    (`Cas-OFFinder` is one word) is what the edge-strip could easily break."""
+    assert derive_title_part("Cas-OFFinder a fast and versatile") == \
+        "cas-offinder-a-fast-and-versatile"
+
+
+@pytest.mark.parametrize("title", [
+    "epigenome- and transcriptome-wide association studies",
+    "long- and short-read mapping",
+    "ATAC‐seq: a method",
+    "— leading dash",
+    "trailing dash –",
+    "Evo 2",
+    "",
+])
+def test_stem_never_has_an_edge_or_doubled_separator(title):
+    """The invariant both fixes exist to hold, stated once."""
+    stem = derive_stem(["Ann Author"], 2024, title)
+    assert "--" not in stem
+    assert not stem.endswith("-") and not stem.startswith("-")
+    assert re.fullmatch(r"[a-z0-9][-a-z0-9]*", stem), stem
 
 
 # ---------- derive_stem ----------

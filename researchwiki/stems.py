@@ -42,14 +42,35 @@ _TRANSLITERATE = str.maketrans({
 def strip_diacritics(s: str) -> str:
     """Fold a string to its ASCII-letter skeleton.
 
-    Two mechanisms, because one is not enough: NFKD handles anything that
-    decomposes into a base letter plus combining marks, and `_TRANSLITERATE`
-    handles the Latin letters that do not decompose. Transliteration runs first
-    so a mapped letter carrying an additional accent still reaches NFKD.
+    Three mechanisms, because no one of them is enough:
+
+      1. `_TRANSLITERATE` handles the Latin letters NFKD cannot decompose.
+      2. NFKD handles anything that decomposes into a base letter plus
+         combining marks. Transliteration runs first so a mapped letter
+         carrying an additional accent still reaches NFKD.
+      3. Every Unicode dash (category `Pd` — en/em dash, figure and
+         non-breaking hyphens) folds to ASCII `-`. This runs *after* NFKD
+         because U+2011 NON-BREAKING HYPHEN decomposes to U+2010 HYPHEN, so
+         folding first would miss the decomposition product.
+
+    Step 3 lived only in `slugify_phrase` until 2026-08-11, which is exactly
+    how the bug it prevents got into stem derivation: every caller of this
+    function then needed to remember a normalization the function itself
+    didn't do, and `normalize_title_word` didn't. Publisher-set titles use
+    U+2010 freely, and the `[^a-z0-9-]` passes downstream *delete* an
+    unfolded dash rather than preserving the word boundary — welding
+    `ATAC‐seq` into `atacseq` while the same paper's ASCII-hyphen spelling
+    gives `atac-seq`. Two stems, one paper, depending on which source the
+    metadata came from. Measured on a real 532-item library: 15 stems.
+
+    NBSP needs no special case — it is category `Zs` and NFKD-normalizes to a
+    plain space. U+2212 MINUS SIGN is deliberately *not* folded: it is
+    category `Sm`, a mathematical operator, and titles use it as one.
     """
     s = (s or "").translate(_TRANSLITERATE)
     nfkd = unicodedata.normalize("NFKD", s)
-    return "".join(c for c in nfkd if not unicodedata.combining(c))
+    folded = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return "".join("-" if unicodedata.category(c) == "Pd" else c for c in folded)
 
 
 def slugify_phrase(s: str) -> str:
@@ -57,16 +78,12 @@ def slugify_phrase(s: str) -> str:
     concept terms). Shared so a scaffolded page's filename and the edge target
     that points at it can't drift apart.
 
-    Applies the same two normalizations stem derivation does, in the same
-    order, before reducing to `[a-z0-9-]`:
-
-      1. NFKD-fold and drop combining marks, so an accented letter becomes its
-         ASCII base rather than vanishing (CLAUDE.md's naming rule: `García` →
-         `garcia`). Deleting it instead yielded `garca`.
-      2. Map every Unicode dash (category Pd — en/em dash, non-breaking and
-         figure hyphens) to ASCII `-`. These are common in publisher-set
-         titles, and deleting them welded words together: `k‑mers` → `kmers`,
-         `CRISPR–Cas9` → `crisprcas9`.
+    Both normalizations live in `strip_diacritics`: the NFKD fold that turns an
+    accented letter into its ASCII base rather than deleting it (CLAUDE.md's
+    `García` → `garcia`; deleting yielded `garca`), and the Unicode-dash fold
+    that keeps word boundaries (`k‑mers` → `k-mers`, not `kmers`). This function
+    used to apply the dash fold itself, on top of `strip_diacritics`; it is now
+    inherited, so stems and slugs cannot drift apart again.
 
     Remaining punctuation is deleted rather than replaced with a separator,
     which is what keeps possessives and decimals intact (`Claude's` →
@@ -74,7 +91,6 @@ def slugify_phrase(s: str) -> str:
     concept + synthesis pages on disk: no existing slug changes.
     """
     s = strip_diacritics(s or "")
-    s = "".join("-" if unicodedata.category(c) == "Pd" else c for c in s)
     s = s.lower().strip()
     s = re.sub(r"[^a-z0-9\s\-]", "", s)
     s = re.sub(r"\s+", "-", s)
@@ -155,13 +171,27 @@ def first_author_surname(authors: list[str]) -> str:
         i -= 1
     surname = "-".join(parts[i:]).lower()
     surname = re.sub(r"[^a-z0-9-]", "", surname)
+    # Same invariant the title part holds: a stem component never carries an
+    # edge or doubled separator. Rare here (a byline ending in a stray dash),
+    # but the alternative is a stem whose author segment breaks STEM_PREFIX_RE.
+    surname = re.sub(r"-{2,}", "-", surname).strip("-")
     return surname or "unknown"
 
 
 def normalize_title_word(w: str) -> str:
+    """One title word → its stem-safe form, or `""` if nothing survives.
+
+    Interior hyphens are kept, because CLAUDE.md counts a hyphenated term as
+    one word (`Cas-OFFinder` → `cas-offinder`). Edge hyphens are not: a
+    suspended compound like *"epigenome- and transcriptome-wide"* leaves a
+    dangling `-` that the join then carries into the stem, producing
+    `…-in-epigenome-` and `…-long--and-short-read` — trailing and doubled
+    separators that no other stem has. Collapse runs too, so a word cannot
+    contribute `--` from its own interior either.
+    """
     w = strip_diacritics(w).lower()
     w = re.sub(r"[^a-z0-9-]", "", w)
-    return w
+    return re.sub(r"-{2,}", "-", w).strip("-")
 
 
 def derive_title_part(title: str) -> str:

@@ -111,7 +111,7 @@ Stem shared by both tiers: `{first-author-lastname}-{year}-{first-5-title-words}
 - First 5 words; **all** words count (including stop words).
 - Trailing stop word? Extend until stem ends on a content word. Stop words: `a an the of for with and or in on at to from by as across over all that this these those`.
 - Colons skipped — keep counting into the subtitle.
-- Hyphenated terms = one word (`Cas-OFFinder` is 1 word).
+- Hyphenated terms = one word (`Cas-OFFinder` is 1 word). Unicode dashes count as hyphens (`ATAC‐seq` → `atac-seq`); a suspended compound's dangling hyphen doesn't survive (`epigenome- and` → `epigenome`).
 - Numbers kept as-is (`Evo 2` → `evo-2`).
 - Strip all other punctuation; lowercase; spaces → hyphens; diacritics → ASCII.
 
