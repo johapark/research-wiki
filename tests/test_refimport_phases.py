@@ -182,14 +182,48 @@ def test_inspect_with_an_unreadable_pdf_root_exits_one(wiki, capsys):
     assert code == 1 and "no such directory" in err
 
 
-def test_inspect_rejects_a_category_with_no_directory(wiki, capsys):
-    """Categories are explicit — a typo must not spawn one."""
-    code, _, err = run(["inspect", str(RIS), "--category", "typo"], capsys)
-    assert code == 1 and "has no wiki/typo/" in err
+def test_inspect_has_no_category_flag(wiki):
+    """It had one, and it was a no-op: validated, written to the manifest, read
+    by nothing. `agent ingest` — which `apply` dispatches — has no `--category`
+    at all, so the promise ("target wiki/<category>/ for the whole run") could
+    never be kept, and every paper went to the auto-suggest classifier anyway.
+
+    Removed rather than implemented: category per paper is the better answer for
+    an imported library, since a reference manager's collections rarely map onto
+    wiki categories and one global value would flatten a mixed corpus.
+    """
+    with pytest.raises(SystemExit):
+        import_task.main(["inspect", str(RIS), "--category", "cgt"])
 
 
-def test_inspect_accepts_an_existing_category(wiki, capsys):
-    assert run(["inspect", str(RIS), "--category", "cgt"], capsys)[0] == 0
+def test_apply_dry_run_works_without_a_usable_embedding_model(wiki, monkeypatch,
+                                                              capsys):
+    """`--dry-run` is documented as "copy nothing, spend nothing". Gating the
+    preview on a 133 MB bi-encoder denied argv inspection to exactly the user
+    whose environment is broken."""
+    import json as _json
+
+    from researchwiki.tasks import _ingest_batch
+    monkeypatch.setattr(_ingest_batch, "new_batch", lambda *a, **k: 0)
+    monkeypatch.setattr(import_task, "_embedding_status",
+                        lambda: (False, "RuntimeError: _ARRAY_API not found"))
+
+    src = wiki / "src" / "p.pdf"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"%PDF-1.4\n")
+    run_dir = wiki / ".ingest" / "import-20260101T000000"
+    run_dir.mkdir(parents=True)
+    (run_dir / "manifest.json").write_text(_json.dumps({
+        "version": 1, "items": [{
+            "verdict": "ready", "doi": "10.1234/a", "derived_stem": "a-2024-x",
+            "primary_pdf": str(src), "ingest_args": ["--doi", "10.1234/a"],
+        }],
+    }))
+
+    code, out, _ = run(["apply", "--run", str(run_dir), "--dry-run"], capsys)
+    assert code == 0
+    assert "agent ingest --doi 10.1234/a" in out
+    assert "WARNING embedding model unusable" in out
 
 
 def test_inspect_limit_caps_the_records_assessed(wiki, capsys):

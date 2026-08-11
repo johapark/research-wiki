@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..stems import derive_stem
-from .pair import TITLE_MARGIN, Pairing, PdfFacts
+from .pair import TITLE_ACCEPT, TITLE_MARGIN, Pairing, PdfFacts
 from .parse import ExportItem
 
 READY, REVIEW, SKIP = "ready", "review", "skip"
@@ -219,7 +219,7 @@ def assess_all(items: list[ExportItem], pairings: list[Pairing],
                 if facts.page_count == 1 and not item.has_usable_doi:
                     a._flag(REVIEW, "maybe-commentary")
             if pairing.rung == "title":
-                if pairing.confidence < 0.75:
+                if pairing.confidence < TITLE_ACCEPT:
                     a._flag(REVIEW, "weak-pairing")
                 elif pairing.margin < TITLE_MARGIN:
                     # Confident-looking but not distinctive: another record

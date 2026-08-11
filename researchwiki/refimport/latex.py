@@ -44,8 +44,15 @@ _LETTER_CMDS = {
     r"\th": "þ", r"\TH": "Þ", r"\i": "ı", r"\j": "j",
 }
 
-#: Text commands that mean punctuation.
+#: Text commands that mean punctuation, plus the two-letter TeX font-switch
+#: commands, which are here purely so they resolve *before* `_ACCENT_CMD`.
+#: `\bf` begins with `b` and `\rm` with `r`, both accent letters, so accents-first
+#: turned `{\bf bold}` into `fbold` and `{\rm x}` into `mx` — the same welding
+#: that `\textendash` and `\aa` hit, in the family the ordering rule was written
+#: for. They render as nothing.
 _TEXT_CMDS = {
+    r"\bf": "", r"\rm": "", r"\it": "", r"\sf": "", r"\tt": "",
+    r"\sc": "", r"\em": "", r"\sl": "",
     r"\textendash": "-", r"\textemdash": "-", r"\texthyphen": "-",
     r"\textquoteright": "'", r"\textquoteleft": "'",
     r"\textquotedblright": '"', r"\textquotedblleft": '"',

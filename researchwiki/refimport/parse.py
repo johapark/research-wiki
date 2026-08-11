@@ -381,6 +381,25 @@ def _bibtex_fields_to_item(kind: str, key: str, body: str, index: int) -> Export
 
 # ---------- CSL-JSON ----------
 
+def _csl_year(issued) -> int | None:
+    """Year from a CSL `issued` field, whatever shape it arrives in.
+
+    The spec says a mapping with `date-parts`, and exporters also emit a bare
+    string (`"2015"`) and the `{"raw": "2015"}` form. Assuming the mapping
+    raised `AttributeError` on the string form, which escaped `parse_export`
+    (it only catches `JSONDecodeError`) as exit 3 — an internal bug — against a
+    module whose stated rule is that one bad record never takes down the file.
+    """
+    if isinstance(issued, dict):
+        parts = issued.get("date-parts") or []
+        if parts and parts[0]:
+            return _clean_year(parts[0][0])
+        return _clean_year(issued.get("raw") or issued.get("literal"))
+    if isinstance(issued, (str, int)):
+        return _clean_year(issued)
+    return None
+
+
 def parse_csl_json(text: str) -> list[ExportItem]:
     """CSL-JSON → items. Carries no attachment paths in any exporter we've seen,
     so pairing for this format always falls through to the content-based rungs."""
@@ -400,8 +419,7 @@ def parse_csl_json(text: str) -> list[ExportItem]:
                 name = a["literal"]
             if name:
                 authors.append(name.strip())
-        issued = (rec.get("issued") or {}).get("date-parts") or []
-        year = _clean_year(issued[0][0]) if issued and issued[0] else None
+        year = _csl_year(rec.get("issued"))
         item = ExportItem(
             key=str(rec.get("id") or f"csl-{i + 1}"),
             title=(rec.get("title") or None),

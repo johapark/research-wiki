@@ -33,6 +33,14 @@ names. Don't "fix" the filename; the CLI name would silently become
 record that clears every gate except having a file, with its DOI — which on a
 cloud-hosted library is the most useful thing this command produces.
 
+**No `--category`.** There was one; it validated its argument, wrote it to the
+manifest, and was then read by nothing — `agent ingest`, which `apply`
+dispatches, has no such flag. (The *digest* path `researchwiki ingest` does,
+which is what made the promise look plausible.) Category is chosen per paper by
+promote's neighbour-vote classifier, which is the better answer for an imported
+library anyway: a reference manager's collections rarely map onto wiki
+categories, and one global value would flatten a mixed corpus into a single bin.
+
 Exit codes: 0 success (including "nothing is importable" — a triage result is
 the deliverable), 1 bad input, 2 environment.
 """
@@ -46,7 +54,6 @@ import sys
 from pathlib import Path
 
 from ..errors import EnvironmentFailure
-from ..paths import wiki_dir
 
 
 def _stamp() -> str:
@@ -165,12 +172,6 @@ def _run_inspect(args: argparse.Namespace) -> int:
     if args.limit:
         items = items[: args.limit]
 
-    if args.category and not (wiki_dir() / args.category).is_dir():
-        print(f"researchwiki import inspect: category '{args.category}' has "
-              f"no wiki/{args.category}/ directory — create it first (categories "
-              f"are explicit; see CLAUDE.md → Categories).", file=sys.stderr)
-        return 1
-
     pdf_root = Path(args.pdf_root) if args.pdf_root else None
     if pdf_root is not None and not pdf_root.is_dir():
         # Exit 1, not 2: a mistyped argument, not a broken environment.
@@ -212,7 +213,7 @@ def _run_inspect(args: argparse.Namespace) -> int:
 
     run = new_run_dir(_stamp(), base=Path(args.run_dir) if args.run_dir else None)
     run.write_manifest(records, export_path=export, export_format=fmt,
-                       pdf_root=pdf_root, category=args.category,
+                       pdf_root=pdf_root, category=None,
                        created_at=_iso(), summary=summary,
                        unclaimed_pdfs=[str(f.path) for f in unclaimed])
     run.report_path.write_text(
@@ -363,19 +364,6 @@ def _run_apply(args: argparse.Namespace) -> int:
         print(f"researchwiki import apply: {e}", file=sys.stderr)
         return 1
 
-    # Unlike the earlier phases this one spends money and writes pages, so the
-    # embedding model stops being advisory here: `agent ingest` grades every
-    # claim against it, and without it the whole wave grades BM25-only and
-    # silently needs re-grading later. This is the phase the dependency binds.
-    ok, detail = _embedding_status()
-    if not ok:
-        raise EnvironmentFailure(
-            f"the local embedding model is unusable ({detail}). `agent ingest` "
-            f"grades against it, and without it every claim in this wave would "
-            f"grade BM25-only and need re-grading later. See the install notes "
-            f"in prompts/migration-backfill.md."
-        )
-
     plan = plan_wave(data["items"], limit=args.limit)
     if plan.already_present:
         print(f"{len(plan.already_present)} record(s) landed since inspect — skipping:")
@@ -393,13 +381,34 @@ def _run_apply(args: argparse.Namespace) -> int:
     print(f"\n# import apply — {len(staged)} paper(s)"
           f"{' (dry run — nothing copied)' if args.dry_run else ''}\n")
     for path, argv in staged:
+        # Not truncated. The whole point of `--dry-run` is reading the argv, and
+        # a 160-char cut lands mid-`--title` on realistic titles — hiding
+        # `--year` and every `--supplementary`, which `build_ingest_args`
+        # appends last.
         print(f"  {path.name}")
-        print(f"      agent ingest {' '.join(argv)}"[:160])
+        print(f"      agent ingest {' '.join(argv)}")
 
     if args.dry_run:
+        ok, detail = _embedding_status()
+        if not ok:
+            print(f"\n  WARNING embedding model unusable — {detail}\n"
+                  f"          A real run would refuse; fix it before applying.")
         print(f"\nThen: `researchwiki import apply --run {args.run}"
               f"{f' --limit {args.limit}' if args.limit else ''}`")
         return 0
+
+    # Checked here rather than at the top of the phase: `--dry-run` is
+    # documented as "copy nothing, spend nothing", and gating a preview on a
+    # 133 MB bi-encoder denied the argv inspection to exactly the user whose
+    # environment is broken. Fatal only for a real run, which is what grades.
+    ok, detail = _embedding_status()
+    if not ok:
+        raise EnvironmentFailure(
+            f"the local embedding model is unusable ({detail}). `agent ingest` "
+            f"grades against it, and without it every claim in this wave would "
+            f"grade BM25-only and need re-grading later. See the install notes "
+            f"in prompts/migration-backfill.md."
+        )
 
     code = dispatch(staged, workers=args.workers)
 
@@ -567,9 +576,6 @@ def build_parser() -> argparse.ArgumentParser:
     ins.add_argument("pdf_root", nargs="?", default=None,
                      help="Directory holding the PDFs. Optional — without it every "
                           "record is triaged as far as its metadata allows.")
-    ins.add_argument("--category", default=None,
-                     help="Target wiki/<category>/ for the whole run (must exist). "
-                          "Omit to let the classifier vote per paper.")
     ins.add_argument("--limit", type=int, default=0, help="Assess at most N records.")
     ins.add_argument("--run-dir", default=None, help="Where to write the run directory.")
     ins.add_argument("--json", dest="as_json", action="store_true")

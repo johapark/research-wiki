@@ -85,6 +85,10 @@ _SUPP_RE = re.compile(r"(?i)(supp|_si\b|\bsi[-_ ]|supporting|appendix|extended[-
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
+def _looks_supplementary(path: Path) -> bool:
+    return bool(_SUPP_RE.search(path.stem))
+
+
 @dataclass
 class PdfFacts:
     """Everything one pass over a PDF yields. Shared by pairing and triage."""
@@ -248,17 +252,35 @@ def pair_items(items: list[ExportItem], facts: list[PdfFacts], *,
         if p.primary is not None or not item.has_usable_doi:
             continue
         for f in by_doi.get(item.doi.lower(), []):
-            if f.path not in taken:
+            if f.path not in taken and not _looks_supplementary(f.path):
                 taken.add(f.path)
                 p.primary, p.rung, p.confidence = f.path, "doi", 0.9
                 break
 
     # Rung 3 — title similarity, best-match-first across all remaining pairs so
     # a strong match is never lost to a weaker one that was merely earlier.
-    remaining = [f for f in facts if f.path not in taken and f.title_tokens]
+    # Supplementary files are excluded from *primary* candidacy on the content
+    # rungs. They carry the paper's title and often its DOI, so they score as
+    # well as the paper itself — and `sorted(rglob)` can hand them the file
+    # first ("Title - Supplementary.pdf" sorts before "Title.pdf", space < dot).
+    # The paper then lands in `unclaimed` and cannot be recovered, because
+    # `_attach_supplementary` matches on the *primary's* name. The page would be
+    # authored from the appendix. Rung 1 is exempt: a declared path is the
+    # export naming that exact file on purpose.
+    remaining = [f for f in facts if f.path not in taken and f.title_tokens
+                 and not _looks_supplementary(f.path)]
     scored: list[tuple[float, ExportItem, PdfFacts]] = []
-    # Top two scores per PDF, so an accepted match can be told from a near-tie.
-    top2: dict[Path, list[float]] = {}
+    # Scores per PDF, carrying *which record* produced each. A bare score list
+    # let a record that was not the top scorer for a PDF read its own score back
+    # as the rival, reporting margin 0.
+    #
+    # Worth being precise: that never changed a verdict. The old list included
+    # the winner's own score, so margin came out as exactly 0 — still under
+    # `TITLE_MARGIN`, still flagged. What was wrong was the number published in
+    # the manifest and `--json`, which a human reads to judge whether the flag
+    # is fair; "rival 0.889" when the real contender scored 1.0 understates the
+    # contest.
+    per_pdf: dict[Path, list[tuple[float, int]]] = {}
     for item in items:
         if pairings[id(item)].primary is not None or not item.title:
             continue
@@ -267,21 +289,24 @@ def pair_items(items: list[ExportItem], facts: list[PdfFacts], *,
             score = _coverage(it, f.title_tokens)
             if score <= 0:
                 continue
-            best = top2.setdefault(f.path, [])
-            best.append(score)
-            best.sort(reverse=True)
-            del best[2:]
+            per_pdf.setdefault(f.path, []).append((score, id(item)))
             if score >= TITLE_FLOOR:
                 scored.append((score, item, f))
+
     for score, item, f in sorted(scored, key=lambda t: -t[0]):
         p = pairings[id(item)]
+        # Every PDF this record could plausibly have taken, winner or not — the
+        # report promises "each names its candidate PDFs", and a record that
+        # loses every candidate to a higher scorer would otherwise carry an
+        # empty list and be reported as `no-pdf`, sending the user off to
+        # download a file already sitting in their library.
+        p.candidates.append((f.path, round(score, 3)))
         if p.primary is not None or f.path in taken:
             continue
-        p.candidates.append((f.path, round(score, 3)))
         taken.add(f.path)
-        ranked = top2.get(f.path) or [score]
+        rivals = [s for s, owner in per_pdf.get(f.path, []) if owner != id(item)]
         p.primary, p.rung, p.confidence = f.path, "title", round(score, 3)
-        p.rival = round(ranked[1], 3) if len(ranked) > 1 else 0.0
+        p.rival = round(max(rivals), 3) if rivals else 0.0
 
     _attach_supplementary(pairings.values(), facts, taken)
     return list(pairings.values()), [f for f in facts if f.path not in taken]

@@ -14,6 +14,7 @@ from researchwiki.refimport.pair import (
     TITLE_ACCEPT,
     Pairing,
     PdfFacts,
+    _tokens,
     build_pdf_index,
     pair_items,
 )
@@ -299,3 +300,101 @@ def test_an_uncontested_match_has_no_rival(pdf_root):
     pairings, _ = run([mk_item(doi=None)], pdf_root)
     assert pairings[0].rival == 0.0
     assert pairings[0].margin == pairings[0].confidence
+
+
+# ---------- a supplementary file must never win the primary slot ----------
+
+def test_a_supplementary_pdf_does_not_take_the_primary_slot(pdf_root):
+    """The worst failure this module can produce: the page gets authored from
+    the appendix.
+
+    Supplementary files carry the paper's title and often its DOI, so they score
+    as well as the paper — and `sorted(rglob)` hands them the file *first*,
+    because "Title - Supplementary.pdf" sorts before "Title.pdf" (space < dot).
+    The paper then landed in `unclaimed` and could not be recovered, since
+    `_attach_supplementary` matches on the primary's name.
+    """
+    write_pdf(pdf_root / "Smith 2020 - Title - Supplementary.pdf",
+              ["Deep learning for protein folding"])
+    write_pdf(pdf_root / "Smith 2020 - Title.pdf",
+              ["Deep learning for protein folding"])
+    item = mk_item(title="Deep learning for protein folding", doi=None)
+    pairings, unclaimed = run([item], pdf_root)
+    assert pairings[0].primary.name == "Smith 2020 - Title.pdf"
+    assert [p.name for p in pairings[0].supplementary] == \
+        ["Smith 2020 - Title - Supplementary.pdf"]
+    assert unclaimed == []
+
+
+def test_a_supplementary_pdf_does_not_win_on_the_doi_rung_either(pdf_root):
+    """Supplementary material commonly reprints the paper's DOI."""
+    write_pdf(pdf_root / "paper-supplementary.pdf",
+              ["Supplementary Information", "doi:10.1234/jtg.2023.0001"])
+    write_pdf(pdf_root / "paper.pdf",
+              ["A draft synthetic pangenome reference", "doi:10.1234/jtg.2023.0001"])
+    pairings, _ = run([mk_item()], pdf_root)
+    assert pairings[0].primary.name == "paper.pdf"
+
+
+def test_a_declared_supplementary_path_is_still_honoured(pdf_root):
+    """Rung 1 is exempt: the export naming that exact file is deliberate."""
+    write_pdf(pdf_root / "files" / "only-supplementary.pdf", ["Anything"])
+    item = mk_item(declared_files=["files/only-supplementary.pdf"])
+    assert run([item], pdf_root)[0][0].rung == "declared"
+
+
+# ---------- rival identity ----------
+
+def test_rival_is_another_records_score_never_the_winners_own():
+    """`per_pdf` carries which record produced each score.
+
+    With a bare score list, a record that won a PDF it was *not* the top scorer
+    for read its own score back as the rival. Built with hand-made `PdfFacts`
+    rather than generated PDFs, because the case needs three records contending
+    for one file and exact scores.
+
+    **This is a data fix, not a verdict fix**, and the distinction is worth
+    keeping straight: the old list included the winner's own score, so when the
+    winner was not top the margin came out as exactly 0 — still below
+    `TITLE_MARGIN`, still flagged `ambiguous-pairing`. What was wrong was the
+    number published in the manifest and `--json`, which a human reads to decide
+    whether the flag is fair.
+    """
+    def facts(name, text):
+        f = PdfFacts(path=Path(f"/p/{name}"), page_count=5)
+        f.text = text
+        f.title_tokens = _tokens(text)
+        return f
+
+    def item(k, title):
+        return ExportItem(key=k, item_type="article", title=title,
+                          authors=["A B"], year=2024, doi=None)
+
+    F = [facts("a.pdf", "alpha beta gamma delta epsilon zeta"),
+         facts("b.pdf", "alpha beta gamma delta epsilon eta"),
+         facts("x.pdf", "alpha beta gamma delta epsilon zeta eta theta")]
+    items = [item("A", "alpha beta gamma delta epsilon zeta"),
+             item("B", "alpha beta gamma delta epsilon eta"),
+             item("C", "alpha beta gamma delta epsilon zeta eta theta iota")]
+
+    pairings, _ = pair_items(items, F, pdf_root=Path("/p"), export_dir=Path("/p"))
+    c = {p.item.key: p for p in pairings}["C"]
+    assert c.primary.name == "x.pdf"
+    assert c.rival != c.confidence, "read its own score back as the rival"
+    assert c.rival == 1.0, "rival must be the best score from another record"
+
+
+# ---------- candidates ----------
+
+def test_a_record_that_loses_every_candidate_still_records_them(pdf_root):
+    """The report promises "each names its candidate PDFs". A losing record
+    used to carry an empty list *and* the reason `no-pdf`, which put it on the
+    fetch list — telling the user to download a file already in their library."""
+    write_pdf(pdf_root / "x.pdf", ["Deep learning for protein folding studies"])
+    winner = mk_item(key="w", title="Deep learning for protein folding studies", doi=None)
+    loser = mk_item(key="l", title="Deep learning for protein folding", doi=None)
+    pairings, _ = run([winner, loser], pdf_root)
+    by_key = {p.item.key: p for p in pairings}
+    assert by_key["l"].primary is None
+    assert by_key["l"].candidates, "a losing record recorded no candidates"
+    assert by_key["l"].candidates[0][0].name == "x.pdf"

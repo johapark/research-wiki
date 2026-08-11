@@ -74,9 +74,19 @@ class RunDir:
 def new_run_dir(stamp: str, *, base: Path | None = None) -> RunDir:
     """Create `.ingest/import-{stamp}/`. Fails if it exists, so two runs can
     never share a directory."""
-    root = (base or ingest_dir()) / f"import-{stamp}"
-    root.mkdir(parents=True, exist_ok=False)
-    return RunDir(root)
+    base_dir = base or ingest_dir()
+    root = base_dir / f"import-{stamp}"
+    # `_stamp()` is second-precision, so two scripted runs inside one second
+    # collided and raised an uncaught FileExistsError. Suffix instead: still
+    # never reuses a directory, which is the property that matters.
+    suffix = 1
+    while True:
+        try:
+            root.mkdir(parents=True, exist_ok=False)
+            return RunDir(root)
+        except FileExistsError:
+            root = base_dir / f"import-{stamp}-{suffix}"
+            suffix += 1
 
 
 def open_run_dir(path: Path) -> RunDir:

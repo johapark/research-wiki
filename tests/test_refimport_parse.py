@@ -9,6 +9,7 @@ repo is public and a personal corpus is not, so excerpting real records into
 `tests/` would commit part of one.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -325,3 +326,39 @@ def test_item_without_metadata_still_yields_an_item():
     item = _by_title(parse_ris(RIS.read_text(encoding="utf-8-sig")), "Packt.Testing")
     assert isinstance(item, ExportItem)
     assert item.doi is None and item.year is None and item.authors == []
+
+
+# ---------- CSL `issued` shapes (regression) ----------
+
+@pytest.mark.parametrize("issued,expected", [
+    ({"date-parts": [[2015, 3, 1]]}, 2015),
+    ({"date-parts": [[2015]]}, 2015),
+    ({"raw": "2015"}, 2015),
+    ({"literal": "c2015"}, 2015),
+    ("2015", 2015),
+    (2015, 2015),
+    ({}, None),
+    ({"date-parts": []}, None),
+    (None, None),
+    ([], None),
+])
+def test_csl_issued_shapes(issued, expected):
+    """The spec says a mapping with `date-parts`; exporters also emit a bare
+    string and the `{"raw": ...}` form. Assuming the mapping raised
+    AttributeError, which escaped `parse_export` as exit 3 — against a module
+    whose rule is that one bad record never takes down the file."""
+    rec = {"id": "x", "type": "article-journal", "title": "T"}
+    if issued is not None:
+        rec["issued"] = issued
+    items = parse_csl_json(json.dumps([rec]))
+    assert items[0].year == expected
+
+
+def test_a_malformed_csl_record_does_not_take_down_the_file():
+    items = parse_csl_json(json.dumps([
+        {"id": "bad", "type": "article-journal", "title": "Bad", "issued": "nonsense"},
+        {"id": "good", "type": "article-journal", "title": "Good",
+         "issued": {"date-parts": [[2020]]}},
+    ]))
+    assert [i.title for i in items] == ["Bad", "Good"]
+    assert items[1].year == 2020
