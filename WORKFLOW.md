@@ -25,9 +25,11 @@ lexicographic tail. New ingests then trigger evolution proposals against
 neighboring synthesis pages — when paper P arrives, the framework asks an
 LLM whether existing synthesis pages should be edited in
 light of P, and writes structured proposals to
-`.ingest/{stem}-evolution-proposals/` for human review. The result is a
-markdown wiki on disk that compounds: every new paper makes related synthesis
-pages slightly more correct.
+`.ingest/{stem}-evolution-proposals/`. Those are reviewed by an LLM — which
+verifies each patch against the source paper before recommending it — and applied
+only on human approval; a human can of course review them directly instead. The
+result is a markdown wiki on disk that compounds: every new paper makes related
+synthesis pages slightly more correct.
 
 ---
 
