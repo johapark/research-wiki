@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..paths import inbox_dir
-from ..wiki import find_stem_collision, read_wiki_dois
+from ..wiki import read_wiki_dois, read_wiki_stems
 
 
 @dataclass
@@ -52,7 +52,10 @@ def plan_wave(records: list[dict], limit: int = 0) -> Plan:
     The first two are reported, never silently skipped: a record vanishing
     between phases is something the user should see, not something to absorb.
     """
+    # Both read once, not per record: `find_stem_collision` re-walks `wiki/`
+    # on every call, which turns this loop into O(records x pages).
     known_dois = {k.lower(): v for k, v in read_wiki_dois().items()}
+    known_stems = read_wiki_stems()
     plan = Plan()
 
     for rec in records:
@@ -64,7 +67,7 @@ def plan_wave(records: list[dict], limit: int = 0) -> Plan:
         if doi and doi in known_dois:
             plan.already_present.append({**rec, "landed_as": known_dois[doi]})
             continue
-        if stem and find_stem_collision(stem) is not None:
+        if stem and stem in known_stems:
             plan.already_present.append({**rec, "landed_as": stem})
             continue
 
@@ -96,13 +99,20 @@ def stage(records: list[dict], *, dry_run: bool = False) -> list[tuple[Path, lis
     """
     inbox = inbox_dir()
     out: list[tuple[Path, list[str]]] = []
+    # Names claimed earlier in *this* wave. Testing `dest.exists()` alone is
+    # not enough: under `--dry-run` nothing is written, so every same-named
+    # source resolved to the same destination and the preview disagreed with
+    # what `apply` would actually do — in the one mode whose entire job is to
+    # predict that accurately.
+    claimed: set[Path] = set()
     for rec in records:
         src = Path(rec["primary_pdf"])
         dest = inbox / src.name
         n = 1
-        while dest.exists():
+        while dest.exists() or dest in claimed:
             dest = inbox / f"{src.stem}--{n}{src.suffix}"
             n += 1
+        claimed.add(dest)
         if not dry_run:
             inbox.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest)

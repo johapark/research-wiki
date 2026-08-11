@@ -346,3 +346,61 @@ def test_verify_names_the_graph_wiring_followups(wiki, capsys):
     out = capsys.readouterr().out
     assert "claim-overlap --backlog" in out
     assert "candidates concepts --bridges" in out
+
+
+# ---------- dry-run must predict what apply does ----------
+
+def test_dry_run_predicts_the_same_destinations_as_a_real_run(wiki):
+    """A dry-run that disagrees with the run it previews is worse than none.
+
+    Uniquification used to test only `dest.exists()`, and under `--dry-run`
+    nothing is written — so two sources named `Nature-2026.pdf` both reported
+    the same destination while the real run correctly wrote the second to
+    `Nature-2026--1.pdf`. Exporters name files without identity, so this is a
+    plausible case, not a contrived one.
+    """
+    a = rec(wiki, key="a", name="Nature-2026.pdf")
+    b = rec(wiki, key="b", doi="10.1234/b", stem="s-2024-b")
+    b["primary_pdf"] = str(mk_pdf(wiki, "Nature-2026.pdf"))
+
+    previewed = [p for p, _ in stage([a, b], dry_run=True)]
+    actual = [p for p, _ in stage([a, b])]
+    assert previewed == actual
+    assert len(set(previewed)) == 2
+
+
+def test_three_way_collision_still_yields_three_destinations(wiki):
+    recs = []
+    for i in range(3):
+        r = rec(wiki, key=str(i), doi=f"10.1234/{i}", stem=f"s-2024-{i}")
+        r["primary_pdf"] = str(mk_pdf(wiki, "Nature-2026.pdf"))
+        recs.append(r)
+    assert len({p for p, _ in stage(recs, dry_run=True)}) == 3
+
+
+# ---------- the stem lookup is batched ----------
+
+def test_plan_wave_walks_the_wiki_once_regardless_of_record_count(wiki, monkeypatch):
+    """`find_stem_collision` re-walks `wiki/` per call, so calling it per record
+    is O(records x pages). Measured at 0.5 ms/call over 117 pages — fine today,
+    and worse with every paper added. One walk, N lookups."""
+    import researchwiki.refimport.apply as apply_mod
+
+    calls = []
+    real = apply_mod.read_wiki_stems
+    monkeypatch.setattr(apply_mod, "read_wiki_stems",
+                        lambda: calls.append(1) or real())
+
+    records = [rec(wiki, key=str(i), doi=f"10.1234/{i}", stem=f"s-2024-{i}",
+                   name=f"{i}.pdf") for i in range(25)]
+    plan_wave(records)
+    assert calls == [1], f"walked the wiki {len(calls)} times for 25 records"
+
+
+def test_batched_lookup_still_sees_a_page_written_between_waves(wiki):
+    """Not cached across calls: `apply` re-checks between waves and must see
+    what the previous wave wrote."""
+    r = rec(wiki)
+    assert plan_wave([r]).staged                      # first wave: importable
+    add_page(wiki, r["derived_stem"], doi=r["doi"])
+    assert plan_wave([r]).staged == []                # second: already present

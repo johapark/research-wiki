@@ -152,7 +152,7 @@ def _run_inspect(args: argparse.Namespace) -> int:
         reference_doc_candidates,
         summarize,
     )
-    from ..wiki import find_stem_collision, read_wiki_dois
+    from ..wiki import read_wiki_dois, read_wiki_stems
 
     export = Path(args.export)
     loaded = _load_export(export)
@@ -201,7 +201,8 @@ def _run_inspect(args: argparse.Namespace) -> int:
     assessments = assess_all(
         items, pairings, facts_by_path,
         known_dois=read_wiki_dois(),
-        stem_exists=lambda s: find_stem_collision(s) is not None,
+        # One walk, not one per record — see `read_wiki_stems`.
+        stem_exists=read_wiki_stems().__contains__,
         superseded=superseded,
     )
     summary = summarize(assessments)
@@ -444,7 +445,7 @@ def _run_verify(args: argparse.Namespace) -> int:
     import json as _json
 
     from ..refimport.manifest import open_run_dir
-    from ..wiki import find_stem_collision, read_wiki_dois
+    from ..wiki import read_wiki_dois, read_wiki_stems
 
     try:
         run = open_run_dir(Path(args.run))
@@ -454,6 +455,7 @@ def _run_verify(args: argparse.Namespace) -> int:
         return 1
 
     known_dois = {k.lower(): v for k, v in read_wiki_dois().items()}
+    known_stems = read_wiki_stems()
     sandbox = Path(".agent-output")
     sandboxed_stems = {p.stem for p in sandbox.glob("*.md")} if sandbox.is_dir() else set()
 
@@ -465,7 +467,7 @@ def _run_verify(args: argparse.Namespace) -> int:
         stem = rec.get("derived_stem")
         if doi and doi in known_dois:
             landed.append({**rec, "landed_as": known_dois[doi]})
-        elif stem and find_stem_collision(stem) is not None:
+        elif stem and stem in known_stems:
             landed.append({**rec, "landed_as": stem})
         elif stem and stem in sandboxed_stems:
             in_sandbox.append(rec)

@@ -446,3 +446,15 @@ def test_reference_doc_candidates_is_in_the_json_payload(wiki, capsys):
     _, out, _ = run(["inspect", str(CSL), "--json"], capsys)
     refs = json.loads(out)["reference_doc_candidates"]
     assert {r["item_type"] for r in refs} == {"book", "webpage"}
+
+
+def test_inspect_walks_the_wiki_once_for_stem_collisions(wiki, capsys, monkeypatch):
+    """Same batching as `apply`: one walk, N lookups, not one walk per record."""
+    import researchwiki.wiki as wiki_mod
+
+    calls = []
+    real = wiki_mod.read_wiki_stems
+    monkeypatch.setattr(wiki_mod, "read_wiki_stems",
+                        lambda: calls.append(1) or real())
+    run(["inspect", str(RIS)], capsys)
+    assert calls == [1]

@@ -173,6 +173,30 @@ def read_wiki_dois() -> dict[str, str]:
     return out
 
 
+def read_wiki_stems() -> dict[str, Path]:
+    """`{stem: path}` for every page in the wiki. One directory walk.
+
+    The batched sibling of `find_stem_collision`, for callers testing many
+    stems at once. That function re-walks `wiki/` on every call, which is right
+    for the single-shot uses (ingest, promote, synthesize) but turns a loop over
+    N records into O(N x pages): measured at 0.5 ms per call over 117 pages, so
+    ~0.3 s for a 500-record import today and worse as the corpus grows, against
+    one walk here.
+
+    Includes *every* `.md` — synthesis, ideas, concepts, bookkeeping — because a
+    stem must be unique across the whole wiki, not just among paper pages. That
+    is the one way this differs from `read_wiki_dois`, which excludes synthesis
+    deliberately.
+
+    Not cached: callers that write pages and re-check (`import apply` between
+    waves) need to see their own writes.
+    """
+    root = wiki_dir()
+    if not root.exists():
+        return {}
+    return {md.stem: md for md in root.rglob("*.md")}
+
+
 def read_wiki_papers() -> list[dict[str, str]]:
     """Return list of {stem, category, doi, title, year} dicts for each paper page."""
     papers: list[dict[str, str]] = []
