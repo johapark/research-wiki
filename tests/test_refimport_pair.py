@@ -14,6 +14,8 @@ from researchwiki.refimport.pair import (
     TITLE_ACCEPT,
     Pairing,
     PdfFacts,
+    _SUPP_ANY_RE,
+    _looks_supplementary,
     _tokens,
     build_pdf_index,
     pair_items,
@@ -400,6 +402,62 @@ def test_an_uncontested_match_has_no_rival(pdf_root):
     pairings, _ = run([mk_item(doi=None)], pdf_root)
     assert pairings[0].rival == 0.0
     assert pairings[0].margin == pairings[0].confidence
+
+
+# ---------- what counts as a supplementary marker ----------
+#
+# Two patterns, because the two decisions have opposite risk. Excluding a file
+# from *primary* candidacy is unrecoverable — on the title rung it drops out of
+# `remaining` and lands in `unclaimed`. Attaching a sibling is cheap, and is
+# additionally gated by a 12-char stem-prefix match. So `appendix` and a bare
+# `supporting` are safe to attach on and unsafe to exclude a primary on, and the
+# asymmetry is pinned here rather than inherited.
+
+
+@pytest.mark.parametrize("stem", [
+    "paper-supplementary", "paper-supplement", "paper_supplemental",
+    "paper-suppl", "paper_supp", "paper supp", "paper-supp-1",
+    "Supplementary Data 1",
+    # Four markers the pattern has always claimed and nothing ever tested.
+    "paper_si", "paper-si-1", "Supporting Information", "extended-data-fig-1",
+    "Extended Data Table 2",
+])
+def test_strong_markers_are_excluded_from_primary_candidacy(stem):
+    assert _looks_supplementary(Path(f"{stem}.pdf")), stem
+
+
+@pytest.mark.parametrize("stem", [
+    # Ordinary subject matter that a bare `supp` substring disqualified. A paper
+    # whose filename says `suppressor` could never be paired as a paper.
+    "tumour-suppressor-screen", "p53-suppression-assay", "cas9-suppresses-repair",
+    "vitamin-d-supplementation-trial", "reagent-supply-chain",
+    # Bare `supporting` and `appendix` are title words. They still *attach*.
+    "supporting-evidence-for-a-model", "the-appendix-microbiome",
+    # `si` as the start of a word, not an SI marker.
+    "simulation-of-folding", "single-cell-atlas",
+])
+def test_ordinary_titles_can_still_be_primaries(stem):
+    assert not _looks_supplementary(Path(f"{stem}.pdf")), stem
+
+
+@pytest.mark.parametrize("stem", ["paper-appendix", "paper-appendices",
+                                  "paper-supporting", "paper-si"])
+def test_weak_markers_attach_but_do_not_exclude(stem):
+    """The strict/loose split: attachable, but never grounds to lose a paper."""
+    p = Path(f"{stem}.pdf")
+    assert _SUPP_ANY_RE.search(p.stem), stem
+    assert not _looks_supplementary(p), stem
+
+
+def test_a_suppressor_paper_wins_its_primary_slot(pdf_root):
+    """End-to-end: pre-fix this paper lost to `unclaimed` on the title rung and
+    its record was reported as having no PDF."""
+    write_pdf(pdf_root / "tumour-suppressor-screen.pdf",
+              ["A genome wide tumour suppressor screen"])
+    item = mk_item(title="A genome wide tumour suppressor screen", doi=None)
+    pairings, unclaimed = run([item], pdf_root)
+    assert pairings[0].primary is not None, "disqualified by its own title"
+    assert unclaimed == []
 
 
 # ---------- a supplementary file must never win the primary slot ----------

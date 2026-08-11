@@ -80,14 +80,68 @@ TITLE_MARGIN = 0.05
 #: are better recovered by their DOI, which is why the DOI rung runs first.
 _TITLE_WINDOW = 700
 
-#: Filenames that announce themselves as supplementary material.
-_SUPP_RE = re.compile(r"(?i)(supp|_si\b|\bsi[-_ ]|supporting|appendix|extended[-_ ]data)")
+#: Left anchor for a supplementary marker: not preceded by a letter.
+#:
+#: `\b` is wrong here, and subtly: `_` is a word character, so `\bsupp` does not
+#: match `paper_supp.pdf` — one of the commonest shapes an exporter writes. It is
+#: why the pattern below ever needed a separate `_si` alternative. "Not preceded
+#: by a letter" is the actual intent, and it rejects `resupply` while accepting
+#: `paper_supp`, `paper-supp` and `paper supp`.
+_L = r"(?<![a-z])"
+_R = r"(?![a-z])"
+
+#: Filenames whose name is *unambiguously* a supplementary marker.
+#:
+#: This is the strict one, and it drives `_looks_supplementary`, which excludes a
+#: file from **primary** candidacy. A false positive here is the most expensive
+#: error this module makes: on the title rung the file is dropped from
+#: `remaining` and lands in `unclaimed`, where nothing recovers it, and the
+#: record it belonged to is reported as having no PDF.
+#:
+#: So the `supp` branch enumerates its suffixes rather than matching the bare
+#: prefix. As a substring, `supp` disqualified any paper whose filename contained
+#: `suppress`, `suppressor`, `suppression`, `supply` or `supplementation` — all
+#: ordinary subject matter, and `suppressor` in particular is common enough in
+#: this corpus to matter. `supplement` followed by a letter is a topic
+#: (`supplementation`); followed by a boundary or a digit it is a marker.
+_SUPP_STRONG = rf"""
+      {_L} supp (?: l (?: ement (?: al | ary )? )? )? {_R}
+    | {_L} si [-_ ] \d
+    | _si \b
+    | {_L} supporting [-_ ]* (?: information | info | data | material )
+    | {_L} extended [-_ ]? data {_R}
+"""
+_SUPP_STRONG_RE = re.compile(rf"(?ix){_SUPP_STRONG}")
+
+#: Strict superset, used only to *attach* a supplementary sibling.
+#:
+#: Additionally gated by the 12-character stem-prefix test in
+#: `_attach_supplementary`, so a false positive costs at most an extra
+#: attachment on a same-directory file that already shares the primary's leading
+#: name — recoverable, and nothing like losing a paper to `unclaimed`. That
+#: slack is what lets `appendix` and a bare `supporting` live here: both are
+#: legitimate attachment names *and* ordinary title words, so they are safe to
+#: attach on and unsafe to exclude a primary on.
+_SUPP_ANY_RE = re.compile(
+    rf"""(?ix)
+      {_SUPP_STRONG}
+    | {_L} appendi (?: x | ces ) {_R}
+    | {_L} supporting {_R}
+    | {_L} si {_R}
+    """
+)
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
 def _looks_supplementary(path: Path) -> bool:
-    return bool(_SUPP_RE.search(path.stem))
+    """Whether this file is too clearly supplementary to be anyone's *primary*.
+
+    Deliberately the strict pattern. Excluding a real paper here loses it to
+    `unclaimed` with no way back; missing a marker merely means an appendix
+    competes on content, which the title and DOI rungs handle on their merits.
+    """
+    return bool(_SUPP_STRONG_RE.search(path.stem))
 
 
 @dataclass
@@ -355,7 +409,7 @@ def _attach_supplementary(pairings, facts: list[PdfFacts], taken: set[Path]) -> 
         if p.primary is None:
             continue
         for f in by_dir.get(p.primary.parent, []):
-            if f.path in taken or not _SUPP_RE.search(f.path.stem):
+            if f.path in taken or not _SUPP_ANY_RE.search(f.path.stem):
                 continue
             if f.path.stem.lower().startswith(p.primary.stem.lower()[:12]):
                 taken.add(f.path)
