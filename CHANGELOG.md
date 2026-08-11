@@ -16,6 +16,14 @@ the reasoning behind any line below.
 
 ### Added
 
+- `RW_RELAY_TIMEOUT` (seconds) overrides the chat-relay poll deadline, previously a
+  hard-coded 600 s. The deadline starts when the prompt is written rather than when
+  the responder notices it, so it does not survive concurrency: with several
+  ingests in flight each holds its own 600 s clock, and a responder answering them
+  serially can lose workers it has not reached. Settable per run instead of raising
+  the floor for everyone, which would also make a genuinely abandoned run hang ten
+  times longer. Resolved per call, not as a default argument, so the value is not
+  frozen at import; an unusable value falls back to 600 rather than failing.
 - `agent ingest` warns when batch mode is combined with the `chat-relay` provider,
   the one provider/mode pairing that fails silently: each worker's stderr is
   redirected into `.ingest/batch-<ts>/worker-*.log`, and that is where the relay
@@ -37,6 +45,14 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- `researchwiki init --scaffold-only` now creates `wiki/index.md`. It created every
+  content directory but not the catalog, and `promote._append_index_entry` returns
+  False when that file is absent — so on a fresh clone the *first* paper ingested
+  never got its catalog line while every later one did. Existence is the whole
+  requirement: a missing `## <category>` section is created by the splice, not
+  refused. Idempotent, and it never rewrites an existing catalog. The
+  accompanying warning no longer offers "category section absent" as a possible
+  cause, since that case is handled — it now names the missing path and the fix.
 - Reconcile no longer adopts a PDF's `/Title` when that field holds production
   furniture rather than a title. Oxford stamps it with an internal job code and the
   page range — minimap2's is `OP-CBIO180195 3094..3100`, 24 characters beginning with
@@ -84,7 +100,6 @@ the reasoning behind any line below.
   chat-relay a batch run looks like a hang and then times out. Parallelize
   chat-relay with one foreground single-PDF invocation per responder instead; noted
   as the documented exception to CLAUDE.md's "never fan out one Bash task per file".
-
 - Numeric-drift no longer glues adjacent numeric table columns into one impossible
   number. `parse_claims._extract_table_rows` joins cells with spaces, so a Results
   row arrives as prose like `74,514 559`; `collapse_spaced_thousands` then read
@@ -131,7 +146,6 @@ the reasoning behind any line below.
   fires from the `target_claims` phase, which actually extracts PDF-side claims
   (18–35 on those same papers). `extract_sections()` returns
   `(sections, full_text)`; `ctx.claims_count` is removed.
-
 - CI installs the `mcp` extra, so the MCP server's tests actually run. They had
   been `importorskip`-ing on every CI run — which is how the breakage above stayed
   invisible.

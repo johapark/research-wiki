@@ -111,6 +111,28 @@ def ensure_scaffold() -> list[Path]:
             continue
         t.mkdir(parents=True, exist_ok=True)
         created.append(t)
+
+    # `wiki/index.md` must exist before the first ingest, not after it.
+    # `promote._append_index_entry` returns False when the catalog file is absent
+    # and the ingest logs "index.md not updated" — so on a fresh clone the very
+    # first paper silently never gets its catalog line, and every later one does.
+    # A missing `## <category>` section is handled (the splice appends one), so
+    # existence is the whole requirement; an empty-but-present file is enough.
+    # `log.md` needs no equivalent: `log.append_log_md` writes its own header
+    # when the file is missing.
+    idx = root / "wiki" / "index.md"
+    if not idx.exists() and (root / "wiki").is_dir():
+        idx.write_text(
+            "# index.md\n\n"
+            "Catalog of every page in this wiki, grouped by category. Each bullet's "
+            "gloss is the page's own `hook:` field, so this file is regenerable "
+            "rather than hand-maintained — `researchwiki backfill hook` fills the "
+            "field on pages that predate it.\n\n"
+            "Ingest appends one bullet per paper under `## <category>`, creating "
+            "the section when it is missing.\n",
+            encoding="utf-8",
+        )
+        created.append(idx)
     return created
 
 

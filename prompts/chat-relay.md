@@ -201,6 +201,19 @@ exactly one pending file at a time (during a single ingest).
 Nothing serializes relay calls. Each `call_chat_relay` writes its own
 `{op_id}.prompt.json` and polls its own `{op_id}.response.json`; the op_id
 namespace is the only coordination and the 600 s timeout is per prompt.
+
+That deadline starts when the prompt is **written**, not when you notice it, so
+it is really a budget for how long until someone looks. It does not survive
+concurrency: with several ingests in flight each holds its own 600 s clock, and a
+responder working through them one at a time can lose workers it has not reached
+yet. Raise it for the run rather than hurrying — `RW_RELAY_TIMEOUT` is in
+seconds, applies per prompt, and an unusable value falls back to 600 rather
+than failing:
+
+```bash
+RW_RELAY_TIMEOUT=2400 RW_LLM_PROVIDER=chat-relay \
+  researchwiki agent ingest inbox/<one>.pdf
+```
 So concurrent ingests produce concurrent pending files and you may answer
 them in parallel — the throughput limit is you, not the protocol.
 

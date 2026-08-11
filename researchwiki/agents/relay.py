@@ -39,6 +39,30 @@ from ..paths import wiki_root
 
 _RELAY_SCHEMA_VERSION = 1
 _RELAY_DEFAULT_TIMEOUT = 600.0   # seconds; generous for slow / inattentive agents
+
+
+def _default_timeout() -> float:
+    """Per-prompt poll deadline, overridable via `RW_RELAY_TIMEOUT` (seconds).
+
+    600 s suits one responder answering one ingest: the deadline starts when the
+    prompt is *written*, not when anyone notices it, so it is really a budget for
+    "how long until a human looks at this". That budget does not survive
+    concurrency — with several ingests in flight each holds its own 600 s clock,
+    so a responder working through them serially can lose workers it has not
+    reached yet. Rather than raise the constant for everyone (which would also
+    make a genuinely abandoned run hang ten times longer), make it settable.
+
+    Invalid or non-positive values fall back to the default rather than raising:
+    a typo'd env var should not turn every relay call into an immediate failure.
+    """
+    raw = (os.environ.get("RW_RELAY_TIMEOUT") or "").strip()
+    if not raw:
+        return _RELAY_DEFAULT_TIMEOUT
+    try:
+        val = float(raw)
+    except ValueError:
+        return _RELAY_DEFAULT_TIMEOUT
+    return val if val > 0 else _RELAY_DEFAULT_TIMEOUT
 _RELAY_POLL_INTERVAL = 0.5        # seconds between existence checks
 _RELAY_MAX_RETRIES = 2            # retries on schema failure; 1 original + 2 retries = 3 attempts
 
@@ -289,7 +313,7 @@ def call_chat_relay(
     max_tokens: int = 2000,
     system: str | None = None,
     phase: str | None = None,
-    timeout: float = _RELAY_DEFAULT_TIMEOUT,
+    timeout: float | None = None,
     fresh: bool = False,
     schema: dict | None = None,
 ) -> LLMResponse:
@@ -327,6 +351,11 @@ def call_chat_relay(
     that still parse JSON out of free text.
     """
     from .llm import LLMResponse           # lazy: see top-of-file note on cycle
+
+    # Resolved per call, not as a default argument: a default is evaluated once at
+    # import, which would freeze whatever RW_RELAY_TIMEOUT held at that moment.
+    if timeout is None:
+        timeout = _default_timeout()
 
     op_id = _stable_op_id(phase, prompt, fresh=fresh)
     chain: list[str] = [op_id]

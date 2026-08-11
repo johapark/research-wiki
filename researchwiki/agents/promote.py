@@ -804,7 +804,17 @@ def promote_to_wiki(
     ):
         res.index_updated = True
     else:
-        res.warnings.append("index.md not updated (file missing or category section absent)")
+        # Only reachable when the catalog file itself is absent: `_splice` creates
+        # a missing `## <category>` section rather than giving up, so naming that
+        # as a possible cause (as this warning used to) sent readers looking for
+        # the wrong thing. `ensure_scaffold` now creates the file, so this should
+        # only fire if someone deleted it.
+        from ..paths import index_path as _idx_path
+        res.warnings.append(
+            f"index.md not updated — no catalog at {_idx_path()}; "
+            f"create it (or run `researchwiki init --scaffold-only`) and add this "
+            f"page's bullet by hand"
+        )
 
     # log.md (always — needs no preexisting content).
     res.log_appended = _append_log_entry(
