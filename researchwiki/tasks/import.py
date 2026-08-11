@@ -54,6 +54,7 @@ import sys
 from pathlib import Path
 
 from ..errors import EnvironmentFailure
+from ..paths import canonical
 
 
 def _stamp() -> str:
@@ -161,7 +162,11 @@ def _run_inspect(args: argparse.Namespace) -> int:
     )
     from ..wiki import read_wiki_dois, read_wiki_stems
 
-    export = Path(args.export)
+    # Canonical from here down, so the `pdf_root`, `primary_pdf` and
+    # `unclaimed_pdfs` spellings the manifest records all agree with each other
+    # and with what `pair` indexed. Also gives `export.parent` a real directory
+    # for a bare relative argument, where `Path("lib.ris").parent` is `.`.
+    export = canonical(args.export)
     loaded = _load_export(export)
     if loaded is None:
         return 1
@@ -174,10 +179,13 @@ def _run_inspect(args: argparse.Namespace) -> int:
 
     pdf_root = Path(args.pdf_root) if args.pdf_root else None
     if pdf_root is not None and not pdf_root.is_dir():
-        # Exit 1, not 2: a mistyped argument, not a broken environment.
+        # Exit 1, not 2: a mistyped argument, not a broken environment. Reported
+        # with the spelling the user typed, which is what they can recognize.
         print(f"researchwiki import inspect: no such directory: {pdf_root}",
               file=sys.stderr)
         return 1
+    if pdf_root is not None:
+        pdf_root = canonical(pdf_root)
 
     # Dedupe *before* pairing. A record superseded by its own published version
     # is not going to be imported, so letting it compete for PDFs costs twice:

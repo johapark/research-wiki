@@ -30,6 +30,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..paths import canonical
 from ..pdf.text import detect_doi, extract_pdf, pdf_shape
 from ..stems import strip_diacritics
 from .parse import ExportItem
@@ -170,29 +171,6 @@ def _coverage(title: frozenset[str], text: frozenset[str]) -> float:
     return len(title & text) / len(title)
 
 
-def _canonical(path: Path) -> Path:
-    """One spelling per file.
-
-    Everything in this module is keyed on a `Path` — `taken`, `by_name`,
-    `by_dir`, `unclaimed` — and `triage` looks each pairing's primary up in a
-    dict keyed on `PdfFacts.path`. `Path` equality is string equality, not file
-    identity, so two spellings of one file escape all of them at once: the file
-    is handed to a record *and* reported unclaimed, a second record re-pairs it,
-    its supplementary siblings are not found, and triage calls it unreadable.
-
-    `resolve()` rather than `absolute()` because the spellings that actually
-    collide differ by more than a leading slash: a relative root
-    (`import inspect lib.ris pdfs`) and a symlinked library, where the export
-    names the location the sync client wrote and the user names the link.
-    Falls back to `absolute()` on a symlink loop, which at least fixes the
-    relative case.
-    """
-    try:
-        return path.resolve()
-    except OSError:
-        return path.absolute()
-
-
 def build_pdf_index(pdf_root: Path) -> list[PdfFacts]:
     """One extraction pass over every PDF under `pdf_root`.
 
@@ -204,7 +182,7 @@ def build_pdf_index(pdf_root: Path) -> list[PdfFacts]:
     other structure keys on — does not depend on how the caller spelled it.
     """
     facts = []
-    for path in sorted(_canonical(pdf_root).rglob("*.pdf")):
+    for path in sorted(canonical(pdf_root).rglob("*.pdf")):
         if not path.is_file():
             continue
         f = PdfFacts(path=path)
@@ -235,9 +213,13 @@ def _resolve_declared(raw: str, pdf_root: Path, export_dir: Path,
     joined, by basename — and returning whichever spelling the winning rung
     produced is what let one file sit in `taken` under a name nothing else in
     this module could match. Hits are mapped back through `by_canonical` to the
-    spelling `build_pdf_index` published; see `_canonical`. A declared file that
-    is not in the index at all still resolves, canonicalized, since `export_dir`
-    is legitimately allowed to sit outside `pdf_root`.
+    spelling `build_pdf_index` published; see `paths.canonical`.
+
+    A declared file that exists but was never *indexed* does not pair at all. It
+    has no `PdfFacts`, so it cannot be text-layer checked, page-counted, or
+    looked up in `triage`'s `facts_by_path` — where it is reported as
+    `pdf-unreadable`, which is both wrong and unactionable. Returning None makes
+    it an honest `no-pdf`, which puts its DOI on the fetch list instead.
     """
     candidate = Path(raw.strip()).expanduser()
     found: Path | None = None
@@ -250,8 +232,7 @@ def _resolve_declared(raw: str, pdf_root: Path, export_dir: Path,
                 found = p
                 break
     if found is not None:
-        canon = _canonical(found)
-        return by_canonical.get(canon, canon)
+        return by_canonical.get(canonical(found))
     hits = by_name.get(candidate.name.lower())
     return hits[0] if hits and len(hits) == 1 else None
 
@@ -264,7 +245,7 @@ def pair_items(items: list[ExportItem], facts: list[PdfFacts], *,
     item, so a confident DOI match always wins a file over a merely plausible
     title match on another record, regardless of record order.
     """
-    pdf_root, export_dir = _canonical(pdf_root), _canonical(export_dir)
+    pdf_root, export_dir = canonical(pdf_root), canonical(export_dir)
     pairings = {id(i): Pairing(item=i) for i in items}
     taken: set[Path] = set()
 
@@ -273,7 +254,7 @@ def pair_items(items: list[ExportItem], facts: list[PdfFacts], *,
         by_name.setdefault(f.path.name.lower(), []).append(f.path)
     # Whatever spelling a declared path resolves to → the spelling the index
     # published for that same file.
-    by_canonical: dict[Path, Path] = {_canonical(f.path): f.path for f in facts}
+    by_canonical: dict[Path, Path] = {canonical(f.path): f.path for f in facts}
     by_doi: dict[str, list[PdfFacts]] = {}
     for f in facts:
         if f.doi:
