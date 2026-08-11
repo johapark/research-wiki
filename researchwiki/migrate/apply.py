@@ -27,13 +27,12 @@ sources. That's the primary rollback path, and it costs nothing.
 
 from __future__ import annotations
 
-import hashlib
 import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..fsatomic import write_text_atomic
+from ..fsatomic import file_sha256, write_text_atomic
 from ..paths import papers_dir, wiki_dir
 from .manifest import RunDir
 from .sections import rewrite_headings
@@ -47,14 +46,6 @@ class ApplyResult:
     reason: str = ""
     target: str = ""
     pdf_status: str = ""
-
-
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def stage_pdf(src_pdf: Path, stem: str, *, new_doi: str | None,
@@ -75,7 +66,7 @@ def stage_pdf(src_pdf: Path, stem: str, *, new_doi: str | None,
     if already_done and target.exists():
         return target, "already-present"
     if target.exists():
-        if _sha256(target) == _sha256(src_pdf):
+        if file_sha256(target) == file_sha256(src_pdf):
             return target, "already-present"
         return target, "conflict"
 
@@ -189,7 +180,7 @@ def apply_page(
     target.parent.mkdir(parents=True, exist_ok=True)
     write_text_atomic(target, staged.read_text(encoding="utf-8"))
     res.target = str(target)
-    run.record_step(journal, src_key, "page", landed_sha256=_sha256(target),
+    run.record_step(journal, src_key, "page", landed_sha256=file_sha256(target),
                     target=str(target))
 
     # 7. commit — DB row + claim extraction. Last, and no LLM.

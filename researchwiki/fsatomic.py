@@ -65,6 +65,22 @@ def read_text(path: Path | str, default: str | None = None) -> str | None:
     return path.read_text(encoding="utf-8")
 
 
+def file_sha256(path: Path | str) -> str:
+    """Content hash of a file, read in chunks so a large PDF is not slurped.
+
+    File *identity* where a path cannot provide it. Two callers need the same
+    question answered — "is the file already sitting at the destination the same
+    file I was about to copy there?" — and a name comparison cannot answer it:
+    exporters and reference managers both produce names that carry no identity
+    (`Nature-2026.pdf`), so same-name-different-paper is a real case.
+    """
+    h = hashlib.sha256()
+    with Path(path).open("rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def read_json(path: Path | str, default=None):
     """Read JSON from `path`, returning `default` on missing/corrupt/undecodable.
 

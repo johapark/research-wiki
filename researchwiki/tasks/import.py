@@ -377,6 +377,16 @@ def _run_apply(args: argparse.Namespace) -> int:
         print(f"{len(plan.already_present)} record(s) landed since inspect — skipping:")
         for rec in plan.already_present[:10]:
             print(f"    {rec['landed_as']}")
+    if plan.already_staged:
+        # Not inert, which is why it names both exits rather than just reporting:
+        # a PDF left in `inbox/` is the ingest backlog, and the next
+        # `agent ingest inbox/*.pdf` picks it up as a paper on its own.
+        print(f"{len(plan.already_staged)} record(s) already copied into inbox/ by an "
+              f"earlier wave — not re-copied:")
+        for rec in plan.already_staged[:10]:
+            print(f"    {rec['staged_as']}")
+        print("  Each is a real backlog entry: finish it with "
+              "`researchwiki agent ingest <that path>`, or delete it.")
     if plan.missing_pdf:
         print(f"{len(plan.missing_pdf)} record(s) lost their PDF since inspect:")
         for rec in plan.missing_pdf[:10]:

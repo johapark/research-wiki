@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..stems import derive_stem
+from ..stems import derive_stem, strip_diacritics
 from .pair import TITLE_ACCEPT, TITLE_MARGIN, Pairing, PdfFacts
 from .parse import ExportItem
 
@@ -41,7 +41,20 @@ _PUNCT = re.compile(r"[^a-z0-9]+")
 
 
 def _norm_title(title: str | None) -> str:
-    return _PUNCT.sub(" ", (title or "").lower()).strip()
+    """Title reduced to a comparison key for `find_superseded`.
+
+    Folded through `strip_diacritics` before lowering, matching `pair._tokens`.
+    Without the fold, `[^a-z0-9]+` *deletes* every non-ASCII letter: `Grünewald`
+    becomes `gr newald` while the same paper spelled `Grunewald` becomes
+    `grunewald`, so the preprint and its published version land in different
+    buckets and the supersede gate never sees the pair — the one gate that finds
+    them, since such pairs carry two different DOIs.
+
+    Fold *before* lower, because `_TRANSLITERATE` maps uppercase forms. The fold
+    also turns Unicode dashes into ASCII `-`, which `[^a-z0-9]+` then maps to a
+    space, preserving the word boundary instead of welding two words together.
+    """
+    return _PUNCT.sub(" ", strip_diacritics(title or "").lower()).strip()
 
 
 @dataclass
@@ -232,8 +245,59 @@ def assess_all(items: list[ExportItem], pairings: list[Pairing],
         a.ingest_args = build_ingest_args(item, pairing)
         out.append(a)
 
+    # Order is load-bearing. Duplicate-DOI records almost always derive the same
+    # stem, so running the stem gate first would flag the survivor
+    # `stem-collision` against a record that is about to be skipped anyway —
+    # sending a clean import to review. Skipping the losers first drops them out
+    # of the `verdict == READY` filter the stem gate applies.
+    _flag_duplicate_dois(out)
     _flag_stem_collisions(out)
     return out
+
+
+def _flag_duplicate_dois(assessments: list[ItemAssessment]) -> None:
+    """Two importable records carrying the same DOI: keep one, skip the rest.
+
+    Unlike a stem collision, this is not a judgement. An identical DOI *is* the
+    same paper, so sending the whole group to review would fill the queue with
+    items that have nothing to adjudicate — the shape `find_superseded` already
+    settled the other way, choosing a survivor deliberately.
+
+    Nothing else catches it. `plan_wave` re-checks the wiki, not the manifest, so
+    two records for one DOI both dispatch in the same wave and the paper is
+    ingested twice. `_flag_stem_collisions` looks like it would cover the case
+    and does not: `derived_stem` is only set when title *and* year *and* authors
+    are present, so a DOI-bearing record missing its year has no stem and trips
+    no gate at all.
+
+    The survivor is chosen by a total order, never by input order — the same
+    reasoning `find_superseded` documents, that two exports of one library listed
+    their pairs in different orders and "first one wins" would import differently
+    from identical data. Most-complete record wins; `item.key` breaks ties.
+
+    DOIs arrive already lowercased from `parse._clean_doi`, so they are not
+    re-normalized here.
+    """
+    seen: dict[str, list[ItemAssessment]] = {}
+    for a in assessments:
+        if a.verdict == READY and a.item.has_usable_doi:
+            seen.setdefault(a.item.doi, []).append(a)
+
+    for doi, group in seen.items():
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda a: (
+            a.pairing.primary is not None,      # a record with a file beats one without
+            bool(a.derived_stem),               # …then one that can name its page
+            len(a.item.authors or []),
+            a.item.year or 0,
+            [-ord(c) for c in (a.item.key or "")],   # ascending key, as a total order
+        ), reverse=True)
+        survivor, losers = group[0], group[1:]
+        for a in losers:
+            a._flag(SKIP, "duplicate-doi")
+            if a.collision is None:
+                a.collision = {"kind": "duplicate-doi", "key": survivor.item.key}
 
 
 def _flag_stem_collisions(assessments: list[ItemAssessment]) -> None:
@@ -300,10 +364,18 @@ def missing_pdf_fetch_list(assessments: list[ItemAssessment]) -> list[dict]:
     On a cloud-hosted library this is the most useful artifact the whole command
     produces: without it, a metadata-only run reports "483 skipped" and nothing
     actionable. Emitted as plain DOIs so the list can be piped.
+
+    Deduplicated by DOI, because `_flag_duplicate_dois` cannot reach these: it is
+    gated on READY, and a record with no PDF is a skip. A metadata-only export
+    with the same paper twice would otherwise ask the user to fetch it twice.
     """
     out = []
+    seen: set[str] = set()
     for a in assessments:
         if a.reasons == ["no-pdf"] and a.item.has_usable_doi:
+            if a.item.doi in seen:
+                continue
+            seen.add(a.item.doi)
             out.append({"doi": a.item.doi, "title": a.item.title,
                         "year": a.item.year, "key": a.item.key})
     return out

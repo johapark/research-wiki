@@ -26,10 +26,17 @@ def wiki(tmp_path, monkeypatch):
     return tmp_path
 
 
-def mk_pdf(tmp_path: Path, name: str) -> Path:
+def mk_pdf(tmp_path: Path, name: str, body: bytes | None = None) -> Path:
+    """A stand-in PDF. Never parsed by this module — only copied and hashed.
+
+    Content varies with the filename so that two *different* papers are
+    distinguishable by bytes, which is how `plan_wave` recognizes a copy of one
+    of them already sitting in `inbox/`. Identical content for every fixture PDF
+    would make every record look like a leftover copy of every other.
+    """
     p = tmp_path / "src" / name
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_bytes(b"%PDF-1.4\n% not a real pdf, never parsed by this module\n")
+    p.write_bytes(body or f"%PDF-1.4\n% stand-in for {name}\n".encode())
     return p
 
 
@@ -429,6 +436,69 @@ def test_three_way_collision_still_yields_three_destinations(wiki):
         r["primary_pdf"] = str(mk_pdf(wiki, "Nature-2026.pdf"))
         recs.append(r)
     assert len({p for p, _ in stage(recs, dry_run=True)}) == 3
+
+
+# ---------- a wave that already ran must not stage twice ----------
+#
+# `stage` uniquifies on collision, so a leftover `inbox/X.pdf` from a failed wave
+# used to yield `X--1.pdf` and strand `X.pdf` as permanent phantom backlog — which
+# the next `agent ingest inbox/*.pdf` would ingest as a separate paper.
+# Identity is tested by content: `stage`'s own `--N` scheme means the leftover may
+# not even share the source's name, and exporter names carry no identity anyway.
+
+
+def test_a_byte_identical_copy_in_inbox_is_not_staged_again(wiki):
+    r = rec(wiki)
+    leftover = wiki / "inbox" / "paper.pdf"
+    leftover.write_bytes(Path(r["primary_pdf"]).read_bytes())
+
+    plan = plan_wave([r])
+    assert plan.staged == []
+    assert len(plan.already_staged) == 1
+    assert plan.already_staged[0]["staged_as"] == str(leftover)
+
+
+def test_the_leftover_is_found_under_the_uniquified_name(wiki):
+    """A previous wave may have written it as `X--1.pdf`, so a name comparison
+    would miss exactly the case this guards."""
+    r = rec(wiki)
+    leftover = wiki / "inbox" / "paper--1.pdf"
+    leftover.write_bytes(Path(r["primary_pdf"]).read_bytes())
+
+    plan = plan_wave([r])
+    assert plan.staged == []
+    assert plan.already_staged[0]["staged_as"] == str(leftover)
+
+
+def test_a_different_pdf_of_the_same_name_still_stages(wiki):
+    """The negative case. Two different papers legitimately share an
+    exporter-generated name, so name-matching here would silently drop one."""
+    r = rec(wiki)
+    (wiki / "inbox" / "paper.pdf").write_bytes(b"%PDF-1.4\n% a different paper\n")
+
+    plan = plan_wave([r])
+    assert [x["key"] for x in plan.staged] == ["k"]
+    assert plan.already_staged == []
+    assert [p.name for p, _ in stage(plan.staged)] == ["paper--1.pdf"]
+
+
+def test_already_staged_does_not_consume_the_limit(wiki):
+    """Matching `already_present` and `missing_pdf`: the limit counts work to do."""
+    done = rec(wiki, key="done", doi="10.1234/done", stem="s-2024-done", name="done.pdf")
+    (wiki / "inbox" / "done.pdf").write_bytes(Path(done["primary_pdf"]).read_bytes())
+    todo = rec(wiki, key="todo", doi="10.1234/todo", stem="s-2024-todo", name="todo.pdf")
+
+    plan = plan_wave([done, todo], limit=1)
+    assert [x["key"] for x in plan.staged] == ["todo"]
+
+
+def test_an_empty_inbox_hashes_nothing(wiki, monkeypatch):
+    """Size is the pre-filter, so the common case must not read any PDF."""
+    import researchwiki.refimport.apply as apply_mod
+
+    monkeypatch.setattr(apply_mod, "file_sha256",
+                        lambda p: pytest.fail(f"hashed {p} with an empty inbox"))
+    assert len(plan_wave([rec(wiki)]).staged) == 1
 
 
 # ---------- the stem lookup is batched ----------

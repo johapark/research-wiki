@@ -173,6 +173,7 @@ six times the README figure.
 |---|---|---|
 | `no-text-layer` | skip | Scanned PDF, < 200 chars/page. **The silent one** — ingest would log a warning nobody reads and the page would pass every later gate on grounding that isn't there. |
 | `superseded-by-journal` | skip | A preprint whose published version is also in the export. Invisible to DOI dedupe — same title, different DOIs. |
+| `duplicate-doi` | skip | Two records in the export carry the same DOI. One survives, chosen by completeness (never by input order); the rest are dropped, each naming its survivor in `collision`. The complement of `superseded-by-journal`: same DOI rather than same title. |
 | `already-present` | skip | DOI or stem already in the wiki. Makes top-up imports idempotent. |
 | `no-pdf` | skip | Metadata-only record. Never a failure; it lands on the fetch list. |
 | `not-a-paper` | skip | Typed as book/webpage/thesis by the exporter. Only fires where the exporter populates `type`. |

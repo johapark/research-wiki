@@ -162,6 +162,21 @@ def test_survivor_does_not_depend_on_record_order():
         assert by_key["pre"] == SKIP and by_key["pub"] == READY
 
 
+def test_titles_differing_only_in_diacritics_still_pair():
+    """`[^a-z0-9]+` *deletes* a non-ASCII letter rather than folding it, so
+    `Grünewald` reduced to `gr newald` while `Grunewald` reduced to `grunewald`
+    — different buckets, and the pair escaped the one gate that finds it. A
+    preprint and its published version are commonly typeset differently."""
+    pre = mk_item(key="pre", title="Grünewald transformer editing",
+                  doi="10.1101/2024.1.9")
+    pub = mk_item(key="pub", title="Grunewald transformer editing",
+                  doi="10.1234/j.9")
+    by_key = {a.item.key: a for a in run([pre, pub])}
+    assert by_key["pre"].verdict == SKIP
+    assert "superseded-by-journal" in by_key["pre"].reasons
+    assert by_key["pub"].verdict == READY
+
+
 def test_titles_differing_only_in_punctuation_still_pair():
     pre = mk_item(key="pre", title="Deep-learning: a review", doi="10.1101/2024.1.1")
     pub = mk_item(key="pub", title="Deep learning  a review!", doi="10.1234/j.2")
@@ -225,6 +240,68 @@ def test_in_batch_stem_collision_goes_to_review():
     two = mk_item(key="b", doi="10.1234/b")
     out = run([one, two])
     assert all(a.verdict == REVIEW and "stem-collision" in a.reasons for a in out)
+
+
+# ---------- the same DOI twice in one export ----------
+#
+# `plan_wave` re-checks the wiki, not the manifest, so without this gate both
+# records dispatch in one wave and the paper is ingested twice.
+
+
+def test_duplicate_doi_keeps_one_and_skips_the_rest():
+    a = mk_item(key="a", title="Same paper", doi="10.1234/dup")
+    b = mk_item(key="b", title="Same paper", doi="10.1234/dup")
+    verdicts = [x.verdict for x in run([a, b])]
+    assert sorted(verdicts) == [READY, SKIP]
+    loser = next(x for x in run([a, b]) if x.verdict == SKIP)
+    assert "duplicate-doi" in loser.reasons
+    assert loser.collision["kind"] == "duplicate-doi"
+
+
+def test_duplicate_doi_is_caught_without_a_year():
+    """The hole this gate exists for. `derived_stem` is only set when title *and*
+    year *and* authors are present, so a DOI-bearing record with no year has no
+    stem and `_flag_stem_collisions` never sees it."""
+    a = mk_item(key="a", title="Same paper", doi="10.1234/dup", year=None)
+    b = mk_item(key="b", title="Same paper", doi="10.1234/dup", year=None)
+    out = run([a, b])
+    assert all(x.derived_stem is None for x in out), "fixture no longer has the hole"
+    assert sorted(x.verdict for x in out) == [READY, SKIP]
+
+
+def test_duplicate_doi_survivor_does_not_depend_on_record_order():
+    """Same reasoning as the supersede gate: two exports of one library listed
+    their records in different orders."""
+    a = mk_item(key="a", title="Same paper", doi="10.1234/dup")
+    b = mk_item(key="b", title="Same paper", doi="10.1234/dup")
+    for order in ([a, b], [b, a]):
+        survivors = [x.item.key for x in run(list(order)) if x.verdict == READY]
+        assert survivors == ["a"], f"order {[i.key for i in order]} chose {survivors}"
+
+
+def test_the_duplicate_doi_survivor_is_not_also_flagged_stem_collision():
+    """Gate ordering. Both records derive the same stem, so running the stem gate
+    first would send a clean import to review over a record about to be
+    skipped."""
+    a = mk_item(key="a", title="Same paper", doi="10.1234/dup")
+    b = mk_item(key="b", title="Same paper", doi="10.1234/dup")
+    survivor = next(x for x in run([a, b]) if x.verdict == READY)
+    assert "stem-collision" not in survivor.reasons
+
+
+def test_distinct_dois_are_untouched_by_the_dedup_gate():
+    a = mk_item(key="a", title="First paper here", doi="10.1234/a")
+    b = mk_item(key="b", title="Second paper here", doi="10.1234/b")
+    assert all("duplicate-doi" not in x.reasons for x in run([a, b]))
+
+
+def test_the_fetch_list_asks_for_each_doi_once():
+    """`_flag_duplicate_dois` is READY-gated and a PDF-less record is a skip, so
+    the fetch list needs its own dedupe or it asks twice."""
+    a = mk_item(key="a", title="Same paper", doi="10.1234/dup")
+    b = mk_item(key="b", title="Same paper", doi="10.1234/dup")
+    out = assess_all([a, b], [Pairing(item=a), Pairing(item=b)], {})
+    assert [r["doi"] for r in missing_pdf_fetch_list(out)] == ["10.1234/dup"]
 
 
 # ---------- verdict severity ----------

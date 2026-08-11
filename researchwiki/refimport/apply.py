@@ -22,6 +22,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..fsatomic import file_sha256
 from ..paths import inbox_dir
 from ..wiki import read_wiki_dois, read_wiki_stems
 
@@ -32,30 +33,88 @@ class Plan:
 
     staged: list[dict] = field(default_factory=list)
     already_present: list[dict] = field(default_factory=list)
+    already_staged: list[dict] = field(default_factory=list)
     missing_pdf: list[dict] = field(default_factory=list)
 
     @property
     def total_ready(self) -> int:
-        return len(self.staged) + len(self.already_present) + len(self.missing_pdf)
+        return (len(self.staged) + len(self.already_present)
+                + len(self.already_staged) + len(self.missing_pdf))
+
+
+def read_inbox_index() -> dict[int, list[Path]]:
+    """`inbox/`'s PDFs grouped by byte size — a cheap pre-filter for identity.
+
+    Named and used like `read_wiki_dois`/`read_wiki_stems`: read once per
+    `plan_wave`, then looked up N times. Size first so the common case (an empty
+    or unrelated `inbox/`) hashes nothing at all.
+
+    `inbox_dir()` is globbed unresolved, which still works when `inbox/` is a
+    directory symlink into a synced folder — a layout CLAUDE.md supports — and
+    keeps the spelling the user recognizes for the report.
+    """
+    index: dict[int, list[Path]] = {}
+    try:
+        for p in sorted(inbox_dir().glob("*.pdf")):
+            try:
+                index.setdefault(p.stat().st_size, []).append(p)
+            except OSError:
+                continue
+    except OSError:
+        return {}
+    return index
+
+
+def _already_in_inbox(src: Path, index: dict[int, list[Path]]) -> Path | None:
+    """The copy of `src` already staged in `inbox/`, if there is one.
+
+    Compares **bytes**, not names. `stage` deliberately uniquifies same-named
+    sources into `X--1.pdf` because two different papers legitimately share an
+    exporter-generated name, so a name match is not an identity match — and the
+    leftover this looks for may itself be under the `--N` spelling. Content is
+    the one test immune to both, and to path spelling.
+    """
+    try:
+        candidates = index.get(src.stat().st_size, [])
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    try:
+        want = file_sha256(src)
+        for p in candidates:
+            if file_sha256(p) == want:
+                return p
+    except OSError:
+        return None
+    return None
 
 
 def plan_wave(records: list[dict], limit: int = 0) -> Plan:
     """Choose the next wave from the manifest's `ready` records.
 
-    Three ways a record that `inspect` called ready can drop out here, all of
+    Four ways a record that `inspect` called ready can drop out here, all of
     them checked against the live filesystem rather than the manifest:
 
       - its DOI or stem is now in the wiki (a previous wave landed it)
       - its PDF has since been moved or deleted
+      - a byte-identical copy is already sitting in `inbox/`
       - the limit is reached
 
-    The first two are reported, never silently skipped: a record vanishing
+    All but the limit are reported, never silently skipped: a record vanishing
     between phases is something the user should see, not something to absorb.
+
+    The `inbox/` check is what makes re-running a failed wave safe. `stage`
+    uniquifies on collision, so without it a leftover `inbox/X.pdf` produced
+    `X--1.pdf` and stranded `X.pdf` as permanent phantom backlog — which the next
+    `agent ingest inbox/*.pdf` would ingest as a separate paper. Reported rather
+    than silently reused, because the user may have partly processed it.
     """
-    # Both read once, not per record: `find_stem_collision` re-walks `wiki/`
+    # All read once, not per record: `find_stem_collision` re-walks `wiki/`
     # on every call, which turns this loop into O(records x pages).
     known_dois = {k.lower(): v for k, v in read_wiki_dois().items()}
     known_stems = read_wiki_stems()
+    inbox_index = read_inbox_index()
     plan = Plan()
 
     for rec in records:
@@ -74,6 +133,13 @@ def plan_wave(records: list[dict], limit: int = 0) -> Plan:
         src = rec.get("primary_pdf")
         if not src or not Path(src).is_file():
             plan.missing_pdf.append(rec)
+            continue
+
+        # After the wiki and existence checks: a record already in the wiki is
+        # more definitively done, and `src` has to exist to be hashed.
+        leftover = _already_in_inbox(Path(src), inbox_index)
+        if leftover is not None:
+            plan.already_staged.append({**rec, "staged_as": str(leftover)})
             continue
 
         if limit and len(plan.staged) >= limit:
