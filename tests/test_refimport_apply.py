@@ -252,3 +252,97 @@ def test_apply_hard_fails_when_the_embedding_model_is_unusable(wiki, monkeypatch
     with pytest.raises(EnvironmentFailure, match="embedding model"):
         import_task.main(["apply", "--run", str(run)])
     capsys.readouterr()
+
+
+# ---------- the verify phase ----------
+#
+# Reads the *manifest*, not the batch checkpoint, because the question is about
+# records ("did this paper reach the wiki") and the checkpoint only knows about
+# files. A record can complete its ingest and still not be in wiki/ — that's the
+# sandbox path, and surfacing it is the whole reason this phase exists.
+
+def test_verify_reports_a_landed_record(wiki, capsys):
+    r = rec(wiki)
+    run = write_manifest(wiki, [r])
+    add_page(wiki, r["derived_stem"], doi=r["doi"])
+    assert import_task.main(["verify", "--run", str(run), "--json"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["landed"] == ["cgt/" + r["derived_stem"]]
+    assert out["not_imported"] == []
+
+
+def test_verify_distinguishes_sandboxed_from_missing(wiki, capsys):
+    """A gate-failed page lands in .agent-output/ instead of wiki/. Counting it
+    as 'not imported' would hide work that is done and waiting for review."""
+    held = rec(wiki, key="held", stem="held-2024-a-paper", doi="10.1234/held")
+    never = rec(wiki, key="never", stem="never-2024-a-paper", doi="10.1234/never",
+                name="n.pdf")
+    run = write_manifest(wiki, [held, never])
+    sandbox = wiki / ".agent-output"
+    sandbox.mkdir()
+    (sandbox / "held-2024-a-paper.md").write_text("draft")
+
+    import_task.main(["verify", "--run", str(run), "--json"])
+    out = json.loads(capsys.readouterr().out)
+    assert out["sandboxed"] == ["held-2024-a-paper"]
+    assert out["not_imported"] == ["never-2024-a-paper"]
+
+
+def test_verify_only_counts_records_that_were_ready(wiki, capsys):
+    """`skip` and `review` records were never going to land; counting them as
+    'not imported' would make every run look half-failed."""
+    run = write_manifest(wiki, [rec(wiki, key="a"),
+                                rec(wiki, key="b", verdict="skip", name="b.pdf"),
+                                rec(wiki, key="c", verdict="review", name="c.pdf")])
+    import_task.main(["verify", "--run", str(run), "--json"])
+    assert json.loads(capsys.readouterr().out)["ready"] == 1
+
+
+def test_verify_carries_a_lint_snapshot(wiki, capsys):
+    """Shelled out rather than suggested: a bulk import is exactly when nobody
+    runs the follow-ups by hand."""
+    r = rec(wiki)
+    run = write_manifest(wiki, [r])
+    add_page(wiki, r["derived_stem"], doi=r["doi"])   # lint needs pages to lint
+    import_task.main(["verify", "--run", str(run), "--json"])
+    out = json.loads(capsys.readouterr().out)
+    assert isinstance(out["lint"], dict)
+    assert "invalid_frontmatter" in out["lint"]
+
+
+def test_verify_reports_no_snapshot_on_an_empty_wiki(wiki, capsys):
+    """`lint` prints a human message rather than JSON when there is nothing to
+    lint, so the snapshot is legitimately absent — not a failure."""
+    run = write_manifest(wiki, [rec(wiki)])
+    assert import_task.main(["verify", "--run", str(run), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["lint"] is None
+
+
+def test_verify_survives_a_lint_failure(wiki, capsys, monkeypatch):
+    """`verify` is a report. It must never be the thing that fails."""
+    from researchwiki.tasks import lint as lint_task
+    monkeypatch.setattr(lint_task, "main",
+                        lambda argv: (_ for _ in ()).throw(RuntimeError("boom")))
+    run = write_manifest(wiki, [rec(wiki)])
+    assert import_task.main(["verify", "--run", str(run), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["lint"] is None
+
+
+def test_verify_on_a_missing_run_returns_1(wiki, capsys):
+    assert import_task.main(["verify", "--run", str(wiki / "nope")]) == 1
+    capsys.readouterr()
+
+
+def test_verify_requires_an_explicit_run(wiki):
+    with pytest.raises(SystemExit):
+        import_task.main(["verify"])
+
+
+def test_verify_names_the_graph_wiring_followups(wiki, capsys):
+    """A bulk import arrives as N disconnected nodes, and nothing else in the
+    report measures that."""
+    run = write_manifest(wiki, [rec(wiki)])
+    import_task.main(["verify", "--run", str(run)])
+    out = capsys.readouterr().out
+    assert "claim-overlap --backlog" in out
+    assert "candidates concepts --bridges" in out

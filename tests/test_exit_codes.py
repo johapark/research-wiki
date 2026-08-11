@@ -297,3 +297,19 @@ def test_import_inspect_returns_0_when_nothing_is_importable(tmp_path, capsys):
 
 def test_import_documents_its_exit_codes():
     assert "Exit codes:" in (_import_task().__doc__ or "")
+
+
+def test_import_verify_returns_0_even_when_nothing_landed(tmp_path, capsys):
+    """`verify` is a report: "none of this landed" is its most useful output,
+    not a failure to produce output."""
+    (tmp_path / ".ingest" / "import-x").mkdir(parents=True)
+    (tmp_path / ".ingest" / "import-x" / "manifest.json").write_text(
+        '{"version": 1, "items": []}')
+    assert _import_task().main(
+        ["verify", "--run", str(tmp_path / ".ingest" / "import-x")]) == 0
+    capsys.readouterr()
+
+
+def test_import_verify_on_a_missing_manifest_returns_1(tmp_path, capsys):
+    assert _import_task().main(["verify", "--run", str(tmp_path / "nope")]) == 1
+    capsys.readouterr()

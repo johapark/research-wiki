@@ -10,6 +10,7 @@
     researchwiki import preflight <export>              # parse only
     researchwiki import inspect   <export> [pdf-root]   # triage
     researchwiki import apply --run <dir> --limit N     # copy + ingest a wave
+    researchwiki import verify --run <dir>              # did it land?
 
 `preflight` and `inspect` cost **zero tokens** and write nothing outside their
 run directory; `apply` is the phase that spends and that writes pages.
@@ -389,6 +390,142 @@ def _run_apply(args: argparse.Namespace) -> int:
     return code
 
 
+# ---------- verify ----------
+
+#: `lint --json` keys worth reading after a bulk import, and what each means
+#: here. Deliberately a subset: `lint` reports ~30 checks and most are about
+#: the wiki as a whole, while these are the ones an import can break.
+_LINT_KEYS = (
+    ("invalid_frontmatter", 0, "unparseable YAML — the page is invisible to "
+                               "db rebuild and every query"),
+    ("zero_claim_papers", 0, "paper pages producing no citable claims"),
+    ("missing_hook", 0, "no catalog gloss"),
+    ("missing_doi", None, "no DOI recorded"),
+    ("missing_keywords", None, "fewer than 5 keywords"),
+    ("ungraded_papers", 0, "claims not yet scored against their PDF"),
+    ("broken_wikilinks", 0, "links to pages that didn't come along"),
+    ("page_type_mismatches", 0, "type: disagrees with the directory"),
+    ("category_yaml_drift", 0, "YAML category ≠ parent dir"),
+    ("duplicate_claim_sets", None, "advisory — near-duplicate claim sets; the "
+                                   "signature of a commentary typed as a paper"),
+)
+
+
+def _run_verify(args: argparse.Namespace) -> int:
+    """Did the import land, and what does it still need?
+
+    Reads the manifest rather than the batch checkpoint, because the question
+    is about *records* ("did this paper make it into the wiki") and the
+    checkpoint only knows about files. A record can complete its ingest and
+    still not be in `wiki/` — that's the sandbox path, and it is exactly what
+    this phase exists to surface.
+    """
+    import json as _json
+
+    from ..refimport.manifest import open_run_dir
+    from ..wiki import find_stem_collision, read_wiki_dois
+
+    try:
+        run = open_run_dir(Path(args.run))
+        data = run.read_manifest()
+    except FileNotFoundError as e:
+        print(f"researchwiki import verify: {e}", file=sys.stderr)
+        return 1
+
+    known_dois = {k.lower(): v for k, v in read_wiki_dois().items()}
+    sandbox = Path(".agent-output")
+    sandboxed_stems = {p.stem for p in sandbox.glob("*.md")} if sandbox.is_dir() else set()
+
+    landed, in_sandbox, missing = [], [], []
+    for rec in data["items"]:
+        if rec.get("verdict") != "ready":
+            continue
+        doi = (rec.get("doi") or "").lower()
+        stem = rec.get("derived_stem")
+        if doi and doi in known_dois:
+            landed.append({**rec, "landed_as": known_dois[doi]})
+        elif stem and find_stem_collision(stem) is not None:
+            landed.append({**rec, "landed_as": stem})
+        elif stem and stem in sandboxed_stems:
+            in_sandbox.append(rec)
+        else:
+            missing.append(rec)
+
+    lint = _lint_snapshot()
+
+    if args.as_json:
+        print(_json.dumps({
+            "run_dir": str(run.root),
+            "ready": len(landed) + len(in_sandbox) + len(missing),
+            "landed": [r["landed_as"] for r in landed],
+            "sandboxed": [r.get("derived_stem") for r in in_sandbox],
+            "not_imported": [r.get("derived_stem") or r.get("key") for r in missing],
+            "lint": lint,
+        }, indent=2))
+        return 0
+
+    total = len(landed) + len(in_sandbox) + len(missing)
+    print(f"# import verify — {run.root.name}\n")
+    print(f"  ready in manifest    {total}")
+    print(f"  landed in wiki/      {len(landed)}")
+    print(f"  in .agent-output/    {len(in_sandbox)}")
+    print(f"  not imported yet     {len(missing)}")
+
+    if in_sandbox:
+        print("\n  Sandboxed — the gates held these back; review and promote by hand:")
+        for rec in in_sandbox[:15]:
+            print(f"    .agent-output/{rec['derived_stem']}.md")
+
+    if lint is None:
+        print("\n  lint: no snapshot — nothing to lint yet, or lint itself "
+              "failed.\n        Run `researchwiki lint --json` directly to see which.")
+    else:
+        print("\n  lint")
+        for key, want, meaning in _LINT_KEYS:
+            n = lint.get(key)
+            n = len(n) if isinstance(n, (list, dict)) else n
+            if n is None:
+                continue
+            flag = "  ← " + meaning if want is not None and n != want else ""
+            print(f"    {key:<24} {n}{flag}")
+
+    # A bulk import arrives as N disconnected nodes. Nothing above measures
+    # that, and it is the difference between a pile of pages and a wiki.
+    print("\n  Wiring the new pages into the graph (each is free or cheap):")
+    print("    researchwiki claim-overlap --backlog --dry-run   # reciprocal links")
+    print("    researchwiki audit --json                        # citation-graph gaps")
+    print("    researchwiki candidates concepts --bridges       # cross-category hubs")
+    print("    researchwiki candidates synthesis                # dense clusters")
+    return 0
+
+
+def _lint_snapshot() -> dict | None:
+    """`lint --json` as a dict, or None.
+
+    Run rather than suggested: a bulk import is exactly when nobody runs the
+    follow-ups by hand, and the keys that matter here are a small subset of the
+    ~30 `lint` reports.
+
+    None covers two cases deliberately merged, because the caller's response to
+    both is the same — go run `lint` yourself. `lint` prints a human message
+    instead of JSON when the wiki has no pages at all, and it can also fail
+    outright. Neither may take `verify` down with it: this phase is a report,
+    and a report that dies while reporting is worse than one with a gap.
+    """
+    import io
+    import json as _json
+    from contextlib import redirect_stdout
+
+    try:
+        from . import lint as lint_task
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            lint_task.main(["--json"])
+        return _json.loads(buf.getvalue())
+    except Exception:  # noqa: BLE001 — verify must never fail on its own report
+        return None
+
+
 # ---------- entry point ----------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -423,6 +560,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--dry-run", action="store_true",
                     help="Print the argv per paper; copy nothing, spend nothing.")
     ap.add_argument("--workers", "-w", type=int, default=4)
+
+    ver = sub.add_parser("verify", help="Did the import land, and what's left?")
+    ver.add_argument("--run", required=True, help="Run directory from `inspect`.")
+    ver.add_argument("--json", dest="as_json", action="store_true")
     return p
 
 
@@ -434,4 +575,6 @@ def main(argv: list[str]) -> int:
         return _run_inspect(args)
     if args.phase == "apply":
         return _run_apply(args)
+    if args.phase == "verify":
+        return _run_verify(args)
     return 1

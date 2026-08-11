@@ -146,6 +146,8 @@ Drop a PDF in `inbox/` and say *"Ingest the paper I just dropped in `inbox/`."* 
 
 **Backlog?** Say *"ingest everything in inbox/"* — the LLM loops over each file (~$0.01/paper on the default OpenAI config). **If something breaks mid-ingest**, tell the LLM; it follows the recovery procedure in CLAUDE.md (don't hand-patch YAML). Then the workflow is conversational: batch ingest, cross-paper Q&A, `neighbors` discovery, synthesis detection, idea pages, page fixes.
 
+**Already have a library in Zotero, Paperpile, Mendeley or ReadCube?** Export it (BibTeX or RIS — those carry attachment paths; CSL-JSON doesn't) and say *"import my library"*. `researchwiki import` reads the export as authoritative metadata, pairs each record to its PDF, and reports what's importable **before** anything is spent — scanned PDFs with no text layer, preprints superseded by their published version, papers already in the wiki. Then it ingests in waves you control (`--limit 30`), feeding each paper its own DOI, title, authors and year instead of rediscovering them. Works without the PDFs too: you get back a list of DOIs to go fetch. Details in [`prompts/import-reference-manager.md`](./prompts/import-reference-manager.md).
+
 Most users won't run `researchwiki` commands directly — the LLM picks among them based on what you ask. For the full command table and a copy-paste-able walkthrough, see [`WORKFLOW.md` → CLI reference](./WORKFLOW.md#cli-reference).
 
 ## Navigating the wiki

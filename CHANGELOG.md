@@ -17,11 +17,12 @@ the reasoning behind any line below.
 ### Added
 
 - `researchwiki import`, for the corpus most new users actually arrive with:
-  an existing library in Zotero, Paperpile, Mendeley or ReadCube. Two phases so far,
-  `preflight` and `inspect`, both costing zero tokens and writing nothing outside
-  their run directory. `migrate` explicitly refuses this case — it imports markdown
-  pages from an older wiki, while these users have PDFs and metadata and no prose —
-  so until now they were told what the tool was *not* for and given nowhere to go.
+  an existing library in Zotero, Paperpile, Mendeley or ReadCube. Four phases —
+  `preflight` → `inspect` → `apply` → `verify` — of which only `apply` spends tokens
+  or writes pages; the rest write nothing outside their run directory. `migrate`
+  explicitly refuses this case — it imports markdown pages from an older wiki, while
+  these users have PDFs and metadata and no prose — so until now they were told what
+  the tool was *not* for and given nowhere to go.
 
   The export is the asset. A reference manager carries curated DOI, title, authors
   and year, which is exactly what `agent ingest` otherwise rediscovers through its
@@ -68,6 +69,13 @@ the reasoning behind any line below.
   user read — but whether a paper is *already in the wiki* is a fact about now.
   Re-checking it per record is what makes `--limit 30` mean "the next 30 still
   pending" instead of "the first 30, again", so waves compose instead of repeating.
+
+  `researchwiki import verify --run <dir>` closes the loop: landed / sandboxed /
+  not-yet-imported per record, plus the `lint` keys an import can break and the
+  graph-wiring follow-ups. It reads the manifest rather than the batch checkpoint,
+  because the question is about records ("did this paper reach the wiki") and the
+  checkpoint only knows about files — a record can finish its ingest and still sit
+  in `.agent-output/`, which is finished work awaiting review, not a failure.
 
 - `_ingest_batch.new_batch` accepts `per_input_args`, mapping an absolute input path
   to flags for that PDF alone. The CLI still refuses `--doi`/`--title`/`--authors`/
