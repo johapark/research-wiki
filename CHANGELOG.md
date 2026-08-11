@@ -31,14 +31,23 @@ the reasoning behind any line below.
 - Suspended compounds no longer leave a dangling separator in a stem. A title like
   *"epigenome- and transcriptome-wide"* produced `…-in-epigenome-`, and
   *"long- and short-read"* produced `…-long--and-short-read` — trailing and doubled
-  hyphens no other stem carries, and which break `STEM_PREFIX_RE`. Interior hyphens
-  are untouched, so CLAUDE.md's rule that a hyphenated term counts as one word
-  (`Cas-OFFinder`) still holds. 3 of 516 stems in the same library.
+  hyphens no other stem carries. Interior hyphens are untouched, so CLAUDE.md's rule
+  that a hyphenated term counts as one word (`Cas-OFFinder`) still holds. 3 of 516
+  stems in the same library. The defect is cosmetic rather than breaking:
+  `STEM_PREFIX_RE` only anchors the `{surname}-{year}` prefix, so it matches a
+  doubled-hyphen stem, and the one such page in this corpus
+  (`chang-2025-rapid-accurate-long--and-short-read`) parses and grades normally with
+  41 claims.
 
   Neither fix renames anything: existing pages keep the stems they were created
-  with. One page on this corpus (`…-of-singlecell`) would derive differently if
-  re-ingested, which is a deliberate call to leave alone rather than a silent
-  rename — see the stem-stability rule in CLAUDE.md § *Disambiguation & updates*.
+  with, per the stem-stability rule in CLAUDE.md § *Disambiguation & updates*. Seven
+  pages in this corpus would derive a different title-part if re-ingested — six from
+  the dash fold (`…-buchwaldhartwig`, `…-crisprnet`, and four `…-crisprcas9` stems,
+  all from en dashes or U+2010 in the published title) and one from the hyphen repair
+  (`…-long--and-short-read`). Leaving them is the deliberate call: a stem is the
+  filename and every inbound `[[wikilink]]`, so the corpus will carry both
+  conventions until a paper is re-ingested for some other reason. Worth knowing
+  before a recovery re-ingest of any of the seven, which will land the new form.
 
 ## [0.2.1] - 2026-08-10
 
