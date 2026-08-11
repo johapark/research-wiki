@@ -7,12 +7,24 @@
 ❌ Don't use: to import markdown pages from an older wiki (that's `migrate`), or
    to fix metadata on a page that already exists (that's `prompts/recovery.md`).
 
-    researchwiki import-library preflight <export>              # parse only
-    researchwiki import-library inspect   <export> [pdf-root]   # triage
+    researchwiki import preflight <export>              # parse only
+    researchwiki import inspect   <export> [pdf-root]   # triage
 
 Both phases cost **zero tokens** and write nothing outside their run directory.
 `inspect` is where the value is: it pairs records to PDFs, runs every gate, and
 writes a manifest plus a report you read *before* deciding what to import.
+
+**This module is named for a Python keyword, deliberately.** `__main__` derives
+each CLI name from its module name by a pure transformation
+(`_discover_tasks`: underscores → dashes), and both discovery
+(`pkgutil.iter_modules`) and dispatch (`importlib.import_module`) work on
+strings, so a keyword filename is fine for them. The cost is that this is the
+one task module no `import` statement can reach — tests and any other caller
+must use `importlib.import_module("researchwiki.tasks.import")`. That was
+preferred over an alias table in `__main__`, which would have bought a
+conventional filename by making CLI names no longer derivable from module
+names. Don't "fix" the filename; the CLI name would silently become
+`import-library` again.
 
 `<pdf-root>` is optional. With no PDFs at all the report still lists every
 record that clears every gate except having a file, with its DOI — which on a
@@ -46,12 +58,12 @@ def _load_export(path: Path):
     from ..refimport.parse import parse_export
 
     if not path.is_file():
-        print(f"researchwiki import-library: no such file: {path}", file=sys.stderr)
+        print(f"researchwiki import: no such file: {path}", file=sys.stderr)
         return None
     try:
         return parse_export(path)
     except ValueError as e:
-        print(f"researchwiki import-library: {e}", file=sys.stderr)
+        print(f"researchwiki import: {e}", file=sys.stderr)
         return None
 
 
@@ -84,7 +96,7 @@ def _run_preflight(args: argparse.Namespace) -> int:
         return 1
     fmt, items = loaded
 
-    print(f"# import-library preflight — {args.export}\n")
+    print(f"# import preflight — {args.export}\n")
     print(f"  format             {fmt}")
     print(f"  records            {len(items)}")
     if not items:
@@ -120,7 +132,7 @@ def _run_preflight(args: argparse.Namespace) -> int:
               "       against it and degrades to BM25-only without it — which would\n"
               "       mean re-grading the whole import later. Fix before importing.")
 
-    print(f"\nNext: `researchwiki import-library inspect {args.export!r} <pdf-root>`")
+    print(f"\nNext: `researchwiki import inspect {args.export!r} <pdf-root>`")
     return 0
 
 
@@ -148,7 +160,7 @@ def _run_inspect(args: argparse.Namespace) -> int:
         items = items[: args.limit]
 
     if args.category and not (wiki_dir() / args.category).is_dir():
-        print(f"researchwiki import-library inspect: category '{args.category}' has "
+        print(f"researchwiki import inspect: category '{args.category}' has "
               f"no wiki/{args.category}/ directory — create it first (categories "
               f"are explicit; see CLAUDE.md → Categories).", file=sys.stderr)
         return 1
@@ -156,7 +168,7 @@ def _run_inspect(args: argparse.Namespace) -> int:
     pdf_root = Path(args.pdf_root) if args.pdf_root else None
     if pdf_root is not None and not pdf_root.is_dir():
         # Exit 1, not 2: a mistyped argument, not a broken environment.
-        print(f"researchwiki import-library inspect: no such directory: {pdf_root}",
+        print(f"researchwiki import inspect: no such directory: {pdf_root}",
               file=sys.stderr)
         return 1
 
@@ -212,7 +224,7 @@ def _by_verdict(assessments) -> dict[str, list]:
 
 def _print_report(assessments, summary, fetch, unclaimed, run) -> None:
     groups = _by_verdict(assessments)
-    print(f"\n# import-library inspect — {summary['total']} record(s)\n")
+    print(f"\n# import inspect — {summary['total']} record(s)\n")
     for verdict in ("ready", "review", "skip"):
         group = groups.get(verdict) or []
         print(f"  {verdict:<8} {len(group)}")
@@ -242,7 +254,7 @@ def _print_report(assessments, summary, fetch, unclaimed, run) -> None:
     print(f"  report:   {run.report_path}")
     n_ready = len(groups.get("ready") or [])
     if n_ready:
-        print(f"\nNext: `researchwiki import-library apply --run {run.root} "
+        print(f"\nNext: `researchwiki import apply --run {run.root} "
               f"--limit 30 --dry-run`   ({n_ready} ready)")
     else:
         print("\nNothing is ready to import yet — see the reasons above.")
@@ -304,7 +316,7 @@ def _render_report(assessments, summary, fetch, unclaimed, export, fmt, pdf_root
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="researchwiki import-library",
+        prog="researchwiki import",
         description=__doc__.split("\n\n")[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

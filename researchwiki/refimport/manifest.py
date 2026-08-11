@@ -66,7 +66,7 @@ class RunDir:
         if not isinstance(data, dict) or "items" not in data:
             raise FileNotFoundError(
                 f"no usable manifest at {self.manifest_path} — run "
-                f"`researchwiki import-library inspect <export>` first"
+                f"`researchwiki import inspect <export>` first"
             )
         return data
 

@@ -1,4 +1,4 @@
-"""End-to-end phase tests for `researchwiki import-library`.
+"""End-to-end phase tests for `researchwiki import`.
 
 **This file is the point of the exercise.** `migrate`'s unit tests are good, but
 every test it has is a unit test, so its phases — the part users actually run —
@@ -11,13 +11,15 @@ written files and `--json` keys.
 names removing one a breaking change), so they are asserted explicitly.
 """
 
+import importlib
 import json
-import os
 from pathlib import Path
 
 import pytest
 
-from researchwiki.tasks import import_library
+# `researchwiki/tasks/import.py` is named for a keyword, so no `import`
+# statement can reach it. That is deliberate — see the module docstring.
+import_task = importlib.import_module("researchwiki.tasks.import")
 
 FIXTURES = Path(__file__).parent / "refimport-fixtures"
 RIS = FIXTURES / "readcube-sample.ris"
@@ -39,7 +41,7 @@ def wiki(tmp_path, monkeypatch):
 
 
 def run(argv, capsys) -> tuple[int, str, str]:
-    code = import_library.main(argv)
+    code = import_task.main(argv)
     out = capsys.readouterr()
     return code, out.out, out.err
 
@@ -98,7 +100,7 @@ def test_preflight_does_not_fail_on_a_broken_embedding_model(wiki, capsys, monke
     this. Parsing a .ris has no dependency on a 133 MB bi-encoder, and refusing
     to read an export because a torch wheel is wrong blocks the phase a user
     runs first — before they own any PDFs. `apply` is where it binds."""
-    monkeypatch.setattr(import_library, "_embedding_status",
+    monkeypatch.setattr(import_task, "_embedding_status",
                         lambda: (False, "RuntimeError: _ARRAY_API not found"))
     code, out, _ = run(["preflight", str(RIS)], capsys)
     assert code == 0
@@ -122,7 +124,7 @@ def test_preflight_probes_an_encode_not_just_construction(monkeypatch):
     fake = types.SimpleNamespace(DEFAULT_MODEL="fake-model", embed_texts=boom)
     monkeypatch.setattr(index_pkg, "embeddings", fake)
 
-    ok, detail = import_library._embedding_status()
+    ok, detail = import_task._embedding_status()
     assert ok is False and "_ARRAY_API not found" in detail
     assert called["texts"] == ["probe"], "the probe never reached embed_texts"
 
@@ -139,7 +141,7 @@ def test_embedding_probe_reports_the_model_and_dimension_on_success(monkeypatch)
         embed_texts=lambda texts: np.zeros((len(texts), 384)),
     )
     monkeypatch.setattr(index_pkg, "embeddings", fake)
-    ok, detail = import_library._embedding_status()
+    ok, detail = import_task._embedding_status()
     assert ok is True and "fake-model" in detail and "384d" in detail
 
 
@@ -358,7 +360,7 @@ def test_csl_json_book_and_webpage_are_typed_out(wiki, capsys):
 def test_two_inspect_runs_get_separate_directories(wiki, capsys, monkeypatch):
     """No run may overwrite another's manifest."""
     stamps = iter(["20260101T000001", "20260101T000002"])
-    monkeypatch.setattr(import_library, "_stamp", lambda: next(stamps))
+    monkeypatch.setattr(import_task, "_stamp", lambda: next(stamps))
     run(["inspect", str(RIS)], capsys)
     run(["inspect", str(RIS)], capsys)
     assert len(list((wiki / ".ingest").glob("import-*"))) == 2
@@ -375,9 +377,9 @@ def test_run_dir_override_is_honoured(wiki, capsys, tmp_path):
 
 def test_no_phase_is_a_usage_error(wiki, capsys):
     with pytest.raises(SystemExit):
-        import_library.main([])
+        import_task.main([])
 
 
 def test_unknown_phase_is_a_usage_error(wiki, capsys):
     with pytest.raises(SystemExit):
-        import_library.main(["nonsense"])
+        import_task.main(["nonsense"])

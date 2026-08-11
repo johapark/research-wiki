@@ -237,46 +237,63 @@ def test_page_gates_reserve_1_for_findings():
             f"{module_name} documents code 2 as {line.strip()!r}, not bad input"
 
 
-# ---------- import-library ----------
+# ---------- import ----------
 #
-# `import-library` is the counter-example to the page gates above: it is not a
-# gate, so it follows the *table* in CLAUDE.md rather than the gate exception.
-# Its phases differ deliberately in what "nothing to do" means, and that is the
-# part worth pinning — `inspect` finding nothing importable is a **result**, not
-# an error, while `apply` (stage 4) having nothing to act on is a failure,
-# because acting is the only thing it does.
+# `import` is the counter-example to the page gates above: it is not a gate, so
+# it follows the *table* in CLAUDE.md rather than the gate exception. Its phases
+# differ deliberately in what "nothing to do" means, and that is the part worth
+# pinning — `inspect` finding nothing importable is a **result**, not an error,
+# while `apply` (stage 4) having nothing to act on is a failure, because acting
+# is the only thing it does.
+#
+# Reached through `importlib` because `researchwiki/tasks/import.py` is named
+# for a keyword; that is deliberate, and its module docstring says why.
 
-def test_import_library_preflight_bad_input_returns_1(tmp_path, capsys):
-    from researchwiki.tasks import import_library
-    assert import_library.main(["preflight", str(tmp_path / "nope.ris")]) == 1
+import importlib
+import pathlib
+
+FIXTURE_RIS = pathlib.Path(__file__).parent / "refimport-fixtures" / "readcube-sample.ris"
+
+
+def _import_task():
+    return importlib.import_module("researchwiki.tasks.import")
+
+
+def test_import_command_is_discovered_under_its_keyword_name():
+    """The reason the filename is a keyword: `_discover_tasks` derives the CLI
+    name from it, so `import.py` is what makes the command `researchwiki
+    import`. Renaming the file to something importable silently renames the
+    command."""
+    assert cli._discover_tasks().get("import") == "import"
+
+
+def test_import_command_dispatches_through_the_cli_funnel(tmp_path, capsys):
+    assert cli.main(["import", "preflight", str(tmp_path / "nope.ris")]) == 1
     capsys.readouterr()
 
 
-def test_import_library_unidentifiable_export_returns_1(tmp_path, capsys):
-    from researchwiki.tasks import import_library
+def test_import_preflight_bad_input_returns_1(tmp_path, capsys):
+    assert _import_task().main(["preflight", str(tmp_path / "nope.ris")]) == 1
+    capsys.readouterr()
+
+
+def test_import_unidentifiable_export_returns_1(tmp_path, capsys):
     p = tmp_path / "notes.txt"
     p.write_text("not an export at all")
-    assert import_library.main(["preflight", str(p)]) == 1
+    assert _import_task().main(["preflight", str(p)]) == 1
     capsys.readouterr()
 
 
-def test_import_library_inspect_returns_0_when_nothing_is_importable(tmp_path,
-                                                                     capsys):
+def test_import_inspect_returns_0_when_nothing_is_importable(tmp_path, capsys):
     """The normal metadata-only run: every record skipped for want of a PDF.
     Exit 1 here would make the expected outcome look like a failure.
 
     `_in_a_wiki_dir` has already chdir'd into `tmp_path` and made `wiki/`.
     """
-    import pathlib
-
-    from researchwiki.tasks import import_library
     (tmp_path / ".ingest").mkdir(exist_ok=True)
-    fixture = (pathlib.Path(__file__).parent / "refimport-fixtures"
-               / "readcube-sample.ris")
-    assert import_library.main(["inspect", str(fixture)]) == 0
+    assert _import_task().main(["inspect", str(FIXTURE_RIS)]) == 0
     capsys.readouterr()
 
 
-def test_import_library_documents_its_exit_codes():
-    from researchwiki.tasks import import_library
-    assert "Exit codes:" in (import_library.__doc__ or "")
+def test_import_documents_its_exit_codes():
+    assert "Exit codes:" in (_import_task().__doc__ or "")

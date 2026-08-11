@@ -1,6 +1,6 @@
 # `refimport` fixtures
 
-Bibliographic exports for the `researchwiki import-library` parser tests.
+Bibliographic exports for the `researchwiki import` parser tests.
 
 **Every record here is synthetic.** The quirks are real — each one was observed
 in a 532-item ReadCube library exported as both RIS and BibTeX — but the papers,

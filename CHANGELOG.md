@@ -16,7 +16,7 @@ the reasoning behind any line below.
 
 ### Added
 
-- `researchwiki import-library`, for the corpus most new users actually arrive with:
+- `researchwiki import`, for the corpus most new users actually arrive with:
   an existing library in Zotero, Paperpile, Mendeley or ReadCube. Two phases so far,
   `preflight` and `inspect`, both costing zero tokens and writing nothing outside
   their run directory. `migrate` explicitly refuses this case — it imports markdown
