@@ -110,6 +110,28 @@ the reasoning behind any line below.
   with. One page on this corpus (`…-of-singlecell`) would derive differently if
   re-ingested, which is a deliberate call to leave alone rather than a silent
   rename — see the stem-stability rule in CLAUDE.md § *Disambiguation & updates*.
+- `import inspect` pairs a declared PDF path to exactly one record, and reports it
+  once. `refimport.pair` keys `taken`, `by_name`, `by_dir` and `unclaimed` on
+  `Path`, and `triage` looks each pairing's primary up in a dict keyed on
+  `PdfFacts.path` — but `_resolve_declared` returned three *different spellings*
+  of one file depending on which rung matched (declared verbatim, joined and
+  resolved, or the index's own). `Path` equality is string equality, so a second
+  spelling escaped all four structures at once: the record was skipped
+  `pdf-unreadable` for a PDF that reads fine, the file was reported in
+  `unclaimed_pdfs` *and* handed to the record, a second record re-paired it via
+  the DOI rung (two `inbox/` copies, one paper ingested twice), and
+  `_attach_supplementary` found no siblings because it matches on
+  `primary.parent`. Hits now map back through the spelling `build_pdf_index`
+  published, so agreement holds by construction rather than per consumer.
+
+  This needed no exotic setup: a relative root —
+  `researchwiki import inspect lib.ris pdfs`, as the help text spells it — broke
+  every declared pairing, as did a symlinked library where the export names the
+  location the sync client wrote while the user names the link. It was invisible
+  to the suite because the fixtures build their root from pytest's `tmp_path`,
+  which is *already* absolute and resolved, so the two spellings agreed by
+  accident. The regression tests use a relative root and a symlinked root
+  specifically so that accident cannot hide it again.
 
 ## [0.2.1] - 2026-08-10
 

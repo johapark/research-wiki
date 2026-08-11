@@ -170,15 +170,41 @@ def _coverage(title: frozenset[str], text: frozenset[str]) -> float:
     return len(title & text) / len(title)
 
 
+def _canonical(path: Path) -> Path:
+    """One spelling per file.
+
+    Everything in this module is keyed on a `Path` — `taken`, `by_name`,
+    `by_dir`, `unclaimed` — and `triage` looks each pairing's primary up in a
+    dict keyed on `PdfFacts.path`. `Path` equality is string equality, not file
+    identity, so two spellings of one file escape all of them at once: the file
+    is handed to a record *and* reported unclaimed, a second record re-pairs it,
+    its supplementary siblings are not found, and triage calls it unreadable.
+
+    `resolve()` rather than `absolute()` because the spellings that actually
+    collide differ by more than a leading slash: a relative root
+    (`import inspect lib.ris pdfs`) and a symlinked library, where the export
+    names the location the sync client wrote and the user names the link.
+    Falls back to `absolute()` on a symlink loop, which at least fixes the
+    relative case.
+    """
+    try:
+        return path.resolve()
+    except OSError:
+        return path.absolute()
+
+
 def build_pdf_index(pdf_root: Path) -> list[PdfFacts]:
     """One extraction pass over every PDF under `pdf_root`.
 
     Failures are recorded, not raised: an encrypted or truncated PDF becomes a
     `PdfFacts` with `page_count=None`, which triage reports as `pdf-unreadable`.
     A whole import should not stop because one file is broken.
+
+    The root is canonicalized first, so the spelling published here — which every
+    other structure keys on — does not depend on how the caller spelled it.
     """
     facts = []
-    for path in sorted(pdf_root.rglob("*.pdf")):
+    for path in sorted(_canonical(pdf_root).rglob("*.pdf")):
         if not path.is_file():
             continue
         f = PdfFacts(path=path)
@@ -196,21 +222,36 @@ def build_pdf_index(pdf_root: Path) -> list[PdfFacts]:
 
 
 def _resolve_declared(raw: str, pdf_root: Path, export_dir: Path,
-                      by_name: dict[str, list[Path]]) -> Path | None:
-    """A declared path → a file that exists.
+                      by_name: dict[str, list[Path]],
+                      by_canonical: dict[Path, Path]) -> Path | None:
+    """A declared path → a file that exists, spelled the way the index spells it.
 
     Tried against `pdf_root`, then the export file's own directory, then by
     basename. The basename fallback is not laziness: sync clients relocate
     trees constantly, and an export written before a move names a directory
     that no longer exists while the file itself is right there.
+
+    Each of those three rungs finds the file a different way — verbatim,
+    joined, by basename — and returning whichever spelling the winning rung
+    produced is what let one file sit in `taken` under a name nothing else in
+    this module could match. Hits are mapped back through `by_canonical` to the
+    spelling `build_pdf_index` published; see `_canonical`. A declared file that
+    is not in the index at all still resolves, canonicalized, since `export_dir`
+    is legitimately allowed to sit outside `pdf_root`.
     """
     candidate = Path(raw.strip()).expanduser()
+    found: Path | None = None
     if candidate.is_absolute() and candidate.is_file():
-        return candidate
-    for base in (pdf_root, export_dir):
-        p = (base / candidate).resolve()
-        if p.is_file():
-            return p
+        found = candidate
+    else:
+        for base in (pdf_root, export_dir):
+            p = base / candidate
+            if p.is_file():
+                found = p
+                break
+    if found is not None:
+        canon = _canonical(found)
+        return by_canonical.get(canon, canon)
     hits = by_name.get(candidate.name.lower())
     return hits[0] if hits and len(hits) == 1 else None
 
@@ -223,12 +264,16 @@ def pair_items(items: list[ExportItem], facts: list[PdfFacts], *,
     item, so a confident DOI match always wins a file over a merely plausible
     title match on another record, regardless of record order.
     """
+    pdf_root, export_dir = _canonical(pdf_root), _canonical(export_dir)
     pairings = {id(i): Pairing(item=i) for i in items}
     taken: set[Path] = set()
 
     by_name: dict[str, list[Path]] = {}
     for f in facts:
         by_name.setdefault(f.path.name.lower(), []).append(f.path)
+    # Whatever spelling a declared path resolves to → the spelling the index
+    # published for that same file.
+    by_canonical: dict[Path, Path] = {_canonical(f.path): f.path for f in facts}
     by_doi: dict[str, list[PdfFacts]] = {}
     for f in facts:
         if f.doi:
@@ -238,7 +283,8 @@ def pair_items(items: list[ExportItem], facts: list[PdfFacts], *,
     for item in items:
         p = pairings[id(item)]
         for raw in item.declared_files:
-            hit = _resolve_declared(raw, pdf_root, export_dir, by_name)
+            hit = _resolve_declared(raw, pdf_root, export_dir, by_name,
+                                    by_canonical)
             if hit and hit not in taken:
                 taken.add(hit)
                 if p.primary is None:

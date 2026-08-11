@@ -160,6 +160,106 @@ def test_ambiguous_basename_does_not_pair(pdf_root):
     assert run([item], pdf_root)[0][0].primary is None
 
 
+# ---------- one spelling for every path ----------
+#
+# Every structure in this module is keyed on a `Path`: `taken`, `by_name`,
+# `by_dir`, and `unclaimed` — and `triage` looks each pairing's primary up in a
+# dict keyed on `PdfFacts.path`. The canonical spelling is whatever
+# `pdf_root.rglob("*.pdf")` produces, so any code path that returns a
+# *differently spelled* path to the same file silently escapes all of them.
+#
+# The fixtures above cannot catch that: pytest's `tmp_path` is already an
+# absolute resolved path, so `(pdf_root / candidate).resolve()` happens to equal
+# the `rglob` spelling and the two agree by accident. These tests use the
+# spellings a user actually supplies — a relative root, and a symlinked one.
+
+
+@pytest.fixture
+def rel_root(tmp_path, monkeypatch):
+    """A *relative* `pdf_root`, i.e. `researchwiki import inspect lib.ris pdfs`."""
+    (tmp_path / "pdfs").mkdir()
+    monkeypatch.chdir(tmp_path)
+    return Path("pdfs")
+
+
+def test_declared_pairing_uses_the_same_spelling_as_the_index(rel_root):
+    """The primary must be a path the index actually yielded.
+
+    When it is not, `triage`'s `facts_by_path.get(pairing.primary)` misses and
+    the record is skipped `pdf-unreadable` — for a PDF that reads fine.
+    """
+    write_pdf(rel_root / "files" / "declared-paper.pdf", ["Anything"])
+    facts = build_pdf_index(rel_root)
+    item = mk_item(declared_files=["files/declared-paper.pdf"])
+    pairings, _ = pair_items([item], facts, pdf_root=rel_root, export_dir=rel_root)
+
+    assert pairings[0].rung == "declared"
+    assert pairings[0].primary in {f.path for f in facts}
+
+
+def test_a_rung_one_pairing_consumes_its_pdf(rel_root):
+    """`unclaimed` is `facts` minus `taken`, so a mis-spelled primary is
+    reported as a leftover file *and* handed to the record — the manifest then
+    contradicts itself."""
+    write_pdf(rel_root / "files" / "declared-paper.pdf", ["Anything"])
+    facts = build_pdf_index(rel_root)
+    item = mk_item(declared_files=["files/declared-paper.pdf"])
+    _, unclaimed = pair_items([item], facts, pdf_root=rel_root, export_dir=rel_root)
+
+    assert unclaimed == []
+
+
+def test_a_declared_file_is_not_re_paired_to_a_second_record(rel_root):
+    """One PDF, two records — and `stage()` would copy it into `inbox/` twice
+    under two names, so the paper is ingested as two papers."""
+    write_pdf(rel_root / "files" / "shared.pdf",
+              ["A draft synthetic pangenome reference",
+               "doi:10.1234/jtg.2023.0001"])
+    facts = build_pdf_index(rel_root)
+    a = mk_item(key="a", declared_files=["files/shared.pdf"])
+    b = mk_item(key="b")                      # same DOI: rung 2 would claim it
+    pairings, _ = pair_items([a, b], facts, pdf_root=rel_root, export_dir=rel_root)
+
+    assert pairings[0].primary is not None
+    assert pairings[1].primary is None, "rung 2 re-paired a file rung 1 had taken"
+
+
+def test_a_rung_one_pairing_still_gets_its_supplementary(rel_root):
+    """`_attach_supplementary` looks siblings up by `primary.parent`, so a
+    mis-spelled primary silently attaches nothing."""
+    write_pdf(rel_root / "files" / "declared-paper.pdf", ["Anything"])
+    write_pdf(rel_root / "files" / "declared-paper-supplementary.pdf", ["Tables"])
+    facts = build_pdf_index(rel_root)
+    item = mk_item(declared_files=["files/declared-paper.pdf"])
+    pairings, _ = pair_items([item], facts, pdf_root=rel_root, export_dir=rel_root)
+
+    assert [p.name for p in pairings[0].supplementary] == \
+        ["declared-paper-supplementary.pdf"]
+
+
+def test_an_absolute_declared_path_agrees_with_a_symlinked_root(tmp_path):
+    """A symlinked library is a supported layout (CLAUDE.md: `papers/`, `inbox/`
+    and `wiki/` "may be directory symlinks" into a synced folder), and an export
+    written by the sync client names the file through the link. `rglob` does not
+    resolve symlinked *roots*, so the declared path and the index disagree
+    unless both are normalized the same way.
+    """
+    real = tmp_path / "synced" / "library"
+    write_pdf(real / "files" / "p.pdf", ["Anything"])
+    link = tmp_path / "pdfs"
+    link.symlink_to(real, target_is_directory=True)
+
+    # The user points at the link; the export names the location the sync client
+    # actually wrote. Both are correct, and `rglob` does not reconcile them.
+    facts = build_pdf_index(link)
+    item = mk_item(declared_files=[str(real / "files" / "p.pdf")])
+    pairings, unclaimed = pair_items([item], facts, pdf_root=link, export_dir=link)
+
+    assert pairings[0].rung == "declared"
+    assert pairings[0].primary in {f.path for f in facts}
+    assert unclaimed == []
+
+
 # ---------- rung 2: DOI ----------
 
 def test_doi_in_the_pdf_pairs(pdf_root):
