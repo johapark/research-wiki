@@ -109,11 +109,19 @@ class ExportItem:
 
     @property
     def is_preprint_doi(self) -> bool:
-        """bioRxiv/medRxiv register under `10.1101`. Used to pick the survivor
-        of a preprint/published pair, which is the single highest-value dedupe
-        in a real library: 10 such pairs in 532 records, and **zero** duplicate
-        DOIs, so nothing else finds them."""
-        return bool(self.doi and self.doi.lower().startswith("10.1101/"))
+        """True when the DOI belongs to a preprint server.
+
+        Used to pick the survivor of a preprint/published pair — the single
+        highest-value dedupe in a real library: 10 such pairs in 532 records
+        with **zero** duplicate DOIs, so nothing else finds them.
+
+        Delegates to `wiki.is_preprint_doi` rather than testing `10.1101/`
+        here. That shared list also covers medRxiv, OSF, Preprints.org and
+        arXiv, and the real library contains a `10.64898/` record a
+        bioRxiv-only check would have missed. One list, one place to extend.
+        """
+        from ..wiki import is_preprint_doi
+        return is_preprint_doi(self.doi)
 
     def as_dict(self) -> dict:
         return {

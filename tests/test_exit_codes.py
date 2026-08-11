@@ -235,3 +235,48 @@ def test_page_gates_reserve_1_for_findings():
         line = next(ln for ln in doc.splitlines() if ln.strip().startswith("2 "))
         assert "input" in line.lower(), \
             f"{module_name} documents code 2 as {line.strip()!r}, not bad input"
+
+
+# ---------- import-library ----------
+#
+# `import-library` is the counter-example to the page gates above: it is not a
+# gate, so it follows the *table* in CLAUDE.md rather than the gate exception.
+# Its phases differ deliberately in what "nothing to do" means, and that is the
+# part worth pinning — `inspect` finding nothing importable is a **result**, not
+# an error, while `apply` (stage 4) having nothing to act on is a failure,
+# because acting is the only thing it does.
+
+def test_import_library_preflight_bad_input_returns_1(tmp_path, capsys):
+    from researchwiki.tasks import import_library
+    assert import_library.main(["preflight", str(tmp_path / "nope.ris")]) == 1
+    capsys.readouterr()
+
+
+def test_import_library_unidentifiable_export_returns_1(tmp_path, capsys):
+    from researchwiki.tasks import import_library
+    p = tmp_path / "notes.txt"
+    p.write_text("not an export at all")
+    assert import_library.main(["preflight", str(p)]) == 1
+    capsys.readouterr()
+
+
+def test_import_library_inspect_returns_0_when_nothing_is_importable(tmp_path,
+                                                                     capsys):
+    """The normal metadata-only run: every record skipped for want of a PDF.
+    Exit 1 here would make the expected outcome look like a failure.
+
+    `_in_a_wiki_dir` has already chdir'd into `tmp_path` and made `wiki/`.
+    """
+    import pathlib
+
+    from researchwiki.tasks import import_library
+    (tmp_path / ".ingest").mkdir(exist_ok=True)
+    fixture = (pathlib.Path(__file__).parent / "refimport-fixtures"
+               / "readcube-sample.ris")
+    assert import_library.main(["inspect", str(fixture)]) == 0
+    capsys.readouterr()
+
+
+def test_import_library_documents_its_exit_codes():
+    from researchwiki.tasks import import_library
+    assert "Exit codes:" in (import_library.__doc__ or "")

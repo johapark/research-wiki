@@ -14,6 +14,50 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- `researchwiki import-library`, for the corpus most new users actually arrive with:
+  an existing library in Zotero, Paperpile, Mendeley or ReadCube. Two phases so far,
+  `preflight` and `inspect`, both costing zero tokens and writing nothing outside
+  their run directory. `migrate` explicitly refuses this case — it imports markdown
+  pages from an older wiki, while these users have PDFs and metadata and no prose —
+  so until now they were told what the tool was *not* for and given nowhere to go.
+
+  The export is the asset. A reference manager carries curated DOI, title, authors
+  and year, which is exactly what `agent ingest` otherwise rediscovers through its
+  most failure-prone stretch (PDF extract → DOI hunt → S2 lookup → LLM reconcile →
+  `metadata_sanity`) and the stretch that produces every `unknown-` stem and
+  wrong-but-resolving DOI. `inspect` records the exact `--doi/--title/--authors/
+  --year` argv each record contributes, so importing becomes a lookup rather than a
+  rediscovery.
+
+  Parsing is tolerant by design, because the files that break a strict parser are the
+  ones users have. Validated against a real 532-item ReadCube library exported in both
+  RIS and BibTeX, reproducing every count exactly from each: 532 records, 521 usable
+  DOIs, 529 titles, 517 author lists, 521 years. That file carries a 4-character
+  `PMID` RIS tag where the convention is 2, an always-empty `XX` tag on 385 records,
+  citekeys containing `:` (55) and non-ASCII (16) that strict BibTeX forbids outright,
+  and CRLF endings that make a literal `"\r\n"` split return one giant record.
+
+  Triage is three verdicts — `ready`/`review`/`skip` — with the detail in reason
+  strings. Two gates are worth naming. `no-text-layer` is the silent one: a scanned
+  PDF extracts to nothing, ingest logs a warning nobody reads, and the page then
+  passes every later gate on grounding that does not exist. `superseded-by-journal`
+  is invisible to DOI-level dedupe — the real library held 10 preprint/published
+  pairs and **zero** duplicate DOIs, so only title comparison finds them, and the
+  survivor is chosen deliberately because the two exports listed those pairs in
+  different orders.
+
+  `<pdf-root>` is optional, and the report always lists every record that clears
+  every gate except having a file, with its DOI. For a cloud-hosted library that
+  fetch list is the most useful thing the command produces: without it, a
+  metadata-only run reports a count and nothing actionable.
+
+  `apply` (staging into `inbox/` and dispatching to `agent ingest` with per-record
+  overrides) is not in this release. It needs a small change to `_ingest_batch`,
+  which today refuses per-PDF flags in batch mode for a reason that is correct for a
+  human command line and wrong for a programmatic caller.
+
 ### Fixed
 
 - Stem derivation folds Unicode dashes to ASCII `-`, so a paper whose title is set
