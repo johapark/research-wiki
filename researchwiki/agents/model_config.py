@@ -411,6 +411,29 @@ def for_role(name: str) -> ModelConfig:
     return cfg
 
 
+def uses_chat_relay() -> bool:
+    """True when any registered phase resolves to the `chat-relay` provider.
+
+    Two ways it can be on, and a caller that checks only the first will miss the
+    second: `RW_LLM_PROVIDER=chat-relay` forces every phase (the usual route for a
+    subscription user), but `config/models.yaml` can also route individual phases
+    to it while the rest stay on an API provider. The env check is just a fast
+    path — `for_phase` applies that override itself.
+
+    Used to warn before a batch run, where chat-relay's handoff notice would be
+    redirected into a per-worker log file nobody is watching.
+    """
+    if (os.environ.get("RW_LLM_PROVIDER") or "").strip().lower() == "chat-relay":
+        return True
+    for name in list_phases():
+        try:
+            if for_phase(name).provider == "chat-relay":
+                return True
+        except PhaseNotRegistered:
+            continue
+    return False
+
+
 def list_phases() -> list[str]:
     """Sorted list of all registered phase names. For introspection."""
     _, phases = _config()

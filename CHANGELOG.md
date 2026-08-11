@@ -16,6 +16,17 @@ the reasoning behind any line below.
 
 ### Added
 
+- `agent ingest` warns when batch mode is combined with the `chat-relay` provider,
+  the one provider/mode pairing that fails silently: each worker's stderr is
+  redirected into `.ingest/batch-<ts>/worker-*.log`, and that is where the relay
+  prints its pending-prompt notice, so the responder is never told a prompt is
+  waiting and every worker eventually fails its 600 s timeout. The warning names
+  the fix (one foreground invocation per responder) and the alternative (keep batch
+  mode, poll `.llm-relay/pending/`). It warns rather than refuses, because batch
+  mode is legitimate here for a responder that polls. Detection is
+  `model_config.uses_chat_relay()`, which checks the `RW_LLM_PROVIDER` override
+  *and* the resolved per-phase providers — a `models.yaml` can route individual
+  phases to chat-relay while the rest stay on an API provider.
 - Chat-relay prompt payloads carry `stem` and `pdf`, so a responder answering
   several ingests at once can tell whose prompt it is holding without parsing the
   prompt body. `stem` is null on the `reconcile` prompt — the phase that derives

@@ -120,6 +120,32 @@ def _cmd_ingest(args) -> int:
             print("researchwiki agent ingest: --auto-promote and --force-sandbox "
                   "are mutually exclusive", file=sys.stderr)
             return 1
+        # Chat-relay + batch mode is the one provider/mode pairing that fails
+        # silently. `_ingest_batch._worker` runs each child with
+        # `stderr=subprocess.STDOUT` into a per-worker log, and that stderr is
+        # exactly where `relay._emit_handoff_message` prints the pending-prompt
+        # notice — so the responder is never told a prompt is waiting, the run
+        # looks idle, and every worker eventually fails its 600s timeout. Warn
+        # rather than refuse: batch mode is legitimate here if the responder polls
+        # `.llm-relay/pending/` itself, and blocking it would forbid a workflow
+        # that works.
+        from ..agents import model_config as _mc
+        if _mc.uses_chat_relay():
+            print(
+                "researchwiki agent ingest: WARNING — batch mode with the "
+                "chat-relay provider.\n"
+                "  Each worker's stderr is redirected into "
+                ".ingest/batch-<ts>/worker-*.log, and that is where the relay "
+                "prints its '📨 LLM relay pending' notice — so prompt notices "
+                "will be invisible and each worker will fail on its 600s timeout "
+                "unless someone answers.\n"
+                "  fix: parallelize with one foreground invocation per responder "
+                "instead —\n"
+                "         researchwiki agent ingest inbox/<one>.pdf\n"
+                "  or keep batch mode and poll .llm-relay/pending/ yourself.\n"
+                "  See prompts/chat-relay.md.",
+                file=sys.stderr,
+            )
         from . import _ingest_batch
         return _ingest_batch.new_batch(
             args.pdfs, ["agent", "ingest"],
