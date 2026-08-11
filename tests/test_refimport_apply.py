@@ -225,6 +225,59 @@ def test_apply_dry_run_copies_nothing_and_dispatches_nothing(wiki, no_spend, cap
     capsys.readouterr()
 
 
+# ---------- the chat-relay batch warning reaches this entry point too ----------
+#
+# `dispatch` calls `_ingest_batch.new_batch` directly, so `agent ingest`'s own
+# check never saw an import run — and `import apply` is unavoidably batch-shaped.
+# Under chat-relay that combination stalls silently rather than failing: each
+# worker's stderr goes to a log file, which is where the pending-prompt notice
+# is printed. See tests/test_chat_relay_batch_guard.py for the guard itself.
+
+
+def test_apply_warns_under_chat_relay(wiki, no_spend, monkeypatch, capsys):
+    monkeypatch.setenv("RW_LLM_PROVIDER", "chat-relay")
+    run = write_manifest(wiki, [rec(wiki)])
+    assert import_task.main(["apply", "--run", str(run)]) == 0, \
+        "the guard must warn, not refuse"
+    err = capsys.readouterr().err
+    assert "chat-relay" in err
+    assert "worker-*.log" in err
+    assert "one foreground invocation per responder" in err
+
+
+def test_apply_dry_run_warns_too(wiki, no_spend, monkeypatch, capsys):
+    """The preview is where the user decides whether to spend the wave, so a
+    warning that only fires on the real run comes one decision too late."""
+    monkeypatch.setenv("RW_LLM_PROVIDER", "chat-relay")
+    run = write_manifest(wiki, [rec(wiki)])
+    assert import_task.main(["apply", "--run", str(run), "--dry-run"]) == 0
+    assert "chat-relay" in capsys.readouterr().err
+
+
+def test_apply_silent_for_an_api_provider(wiki, no_spend, monkeypatch, capsys):
+    monkeypatch.setenv("RW_LLM_PROVIDER", "anthropic")
+    run = write_manifest(wiki, [rec(wiki)])
+    assert import_task.main(["apply", "--run", str(run)]) == 0
+    assert "chat-relay" not in capsys.readouterr().err
+
+
+def test_apply_still_passes_per_input_args_under_chat_relay(wiki, no_spend,
+                                                           monkeypatch, capsys):
+    """The warning must not drag `_BATCH_INCOMPATIBLE_FLAGS` along with it.
+
+    `agent ingest` refuses batch mode combined with `--doi/--title/...` because
+    one flag cannot describe N papers. `apply` gives each paper *its own* argv
+    through `per_input_args`, which is the case that guard was never about — so
+    sharing the flag check would forbid the whole feature.
+    """
+    monkeypatch.setenv("RW_LLM_PROVIDER", "chat-relay")
+    run = write_manifest(wiki, [rec(wiki)])
+    assert import_task.main(["apply", "--run", str(run)]) == 0
+    (_, kwargs), = [(a, k) for a, k in no_spend]
+    assert kwargs["per_input_args"], "per-paper argv was dropped"
+    capsys.readouterr()
+
+
 def test_apply_limit_stages_exactly_n(wiki, no_spend, capsys):
     records = [rec(wiki, key=str(i), doi=f"10.1234/{i}", stem=f"s-2024-{i}",
                    name=f"{i}.pdf") for i in range(5)]

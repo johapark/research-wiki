@@ -388,6 +388,13 @@ def _run_apply(args: argparse.Namespace) -> int:
         print(f"  {path.name}")
         print(f"      agent ingest {' '.join(argv)}")
 
+    # Before the `--dry-run` return, not after: a preview is exactly where the
+    # user decides whether to spend the wave, and this pairing stalls silently
+    # rather than failing. `dispatch` reaches `_ingest_batch.new_batch` directly,
+    # so `agent ingest`'s own check never sees an import run.
+    from .agent import warn_if_chat_relay_batch
+    warn_if_chat_relay_batch()
+
     if args.dry_run:
         ok, detail = _embedding_status()
         if not ok:

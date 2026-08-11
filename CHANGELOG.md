@@ -132,6 +132,17 @@ the reasoning behind any line below.
   which is *already* absolute and resolved, so the two spellings agreed by
   accident. The regression tests use a relative root and a symlinked root
   specifically so that accident cannot hide it again.
+- `import apply` warns when it is about to run batch mode under the `chat-relay`
+  provider. The guard existed, but only on `agent ingest`'s own argv path:
+  `refimport.apply.dispatch` calls `_ingest_batch.new_batch` directly, so an
+  import run — which is unavoidably batch-shaped, and is the entry point most
+  likely to hand over dozens of papers at once — reached the one provider/mode
+  pairing that fails silently with no warning at all. Extracted arg-free and
+  called from both, and from `apply` *before* the `--dry-run` return, since the
+  preview is where the user decides whether to spend the wave.
+  `_BATCH_INCOMPATIBLE_FLAGS` is deliberately **not** shared: `apply` gives each
+  paper its own argv through `per_input_args`, which is the case that guard was
+  never about, and sharing it would forbid the feature outright.
 
 ## [0.2.1] - 2026-08-10
 
