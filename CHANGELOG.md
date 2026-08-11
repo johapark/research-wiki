@@ -53,10 +53,29 @@ the reasoning behind any line below.
   fetch list is the most useful thing the command produces: without it, a
   metadata-only run reports a count and nothing actionable.
 
-  `apply` (staging into `inbox/` and dispatching to `agent ingest` with per-record
-  overrides) is not in this release. It needs a small change to `_ingest_batch`,
-  which today refuses per-PDF flags in batch mode for a reason that is correct for a
-  human command line and wrong for a programmatic caller.
+  `researchwiki import apply --run <dir> --limit N` copies a wave into `inbox/` and
+  hands it to `agent ingest` with each paper's own `--doi/--title/--authors/--year`.
+  It is the only phase that spends tokens or writes pages, and the only one where
+  "nothing to do" is a failure rather than a result.
+
+  There is no journal and no staging directory, because nothing here can be left
+  half-done: the only mutation is copying a PDF, and everything after belongs to
+  `_ingest_batch`, which already keeps a crash-safe checkpoint. Recovery is
+  `agent ingest --resume <batch-dir>`, the path users already know.
+
+  One fact is deliberately **not** frozen in the manifest. Pairing, verdicts, stems
+  and argv are, so `apply` cannot conclude something different from the `inspect` a
+  user read — but whether a paper is *already in the wiki* is a fact about now.
+  Re-checking it per record is what makes `--limit 30` mean "the next 30 still
+  pending" instead of "the first 30, again", so waves compose instead of repeating.
+
+- `_ingest_batch.new_batch` accepts `per_input_args`, mapping an absolute input path
+  to flags for that PDF alone. The CLI still refuses `--doi`/`--title`/`--authors`/
+  `--year` in batch mode and should: one `--doi` has no meaning across N PDFs. But a
+  programmatic caller holding a *different* DOI for every input is the case that
+  guard was never about, and it is exactly what importing a reference-manager
+  library is. Persisted in `plan.json` as an additive key, read back with a default,
+  so batch directories written before this still resume.
 
 ### Fixed
 

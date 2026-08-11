@@ -9,8 +9,10 @@
 
     researchwiki import preflight <export>              # parse only
     researchwiki import inspect   <export> [pdf-root]   # triage
+    researchwiki import apply --run <dir> --limit N     # copy + ingest a wave
 
-Both phases cost **zero tokens** and write nothing outside their run directory.
+`preflight` and `inspect` cost **zero tokens** and write nothing outside their
+run directory; `apply` is the phase that spends and that writes pages.
 `inspect` is where the value is: it pairs records to PDFs, runs every gate, and
 writes a manifest plus a report you read *before* deciding what to import.
 
@@ -42,6 +44,7 @@ import json
 import sys
 from pathlib import Path
 
+from ..errors import EnvironmentFailure
 from ..paths import wiki_dir
 
 
@@ -324,6 +327,68 @@ def _render_report(assessments, summary, fetch, unclaimed, export, fmt, pdf_root
     return "\n".join(L) + "\n"
 
 
+# ---------- apply ----------
+
+def _run_apply(args: argparse.Namespace) -> int:
+    from ..refimport.apply import dispatch, plan_wave, stage
+    from ..refimport.manifest import open_run_dir
+
+    try:
+        run = open_run_dir(Path(args.run))
+        data = run.read_manifest()
+    except FileNotFoundError as e:
+        print(f"researchwiki import apply: {e}", file=sys.stderr)
+        return 1
+
+    # Unlike the earlier phases this one spends money and writes pages, so the
+    # embedding model stops being advisory here: `agent ingest` grades every
+    # claim against it, and without it the whole wave grades BM25-only and
+    # silently needs re-grading later. This is the phase the dependency binds.
+    ok, detail = _embedding_status()
+    if not ok:
+        raise EnvironmentFailure(
+            f"the local embedding model is unusable ({detail}). `agent ingest` "
+            f"grades against it, and without it every claim in this wave would "
+            f"grade BM25-only and need re-grading later. See the install notes "
+            f"in prompts/migration-backfill.md."
+        )
+
+    plan = plan_wave(data["items"], limit=args.limit)
+    if plan.already_present:
+        print(f"{len(plan.already_present)} record(s) landed since inspect — skipping:")
+        for rec in plan.already_present[:10]:
+            print(f"    {rec['landed_as']}")
+    if plan.missing_pdf:
+        print(f"{len(plan.missing_pdf)} record(s) lost their PDF since inspect:")
+        for rec in plan.missing_pdf[:10]:
+            print(f"    {rec.get('primary_pdf')}")
+    if not plan.staged:
+        print("Nothing left to import from this manifest.", file=sys.stderr)
+        return 1
+
+    staged = stage(plan.staged, dry_run=args.dry_run)
+    print(f"\n# import apply — {len(staged)} paper(s)"
+          f"{' (dry run — nothing copied)' if args.dry_run else ''}\n")
+    for path, argv in staged:
+        print(f"  {path.name}")
+        print(f"      agent ingest {' '.join(argv)}"[:160])
+
+    if args.dry_run:
+        print(f"\nThen: `researchwiki import apply --run {args.run}"
+              f"{f' --limit {args.limit}' if args.limit else ''}`")
+        return 0
+
+    code = dispatch(staged, workers=args.workers)
+
+    print("\nNext — free (no tokens):")
+    print("  researchwiki db rebuild && researchwiki reindex")
+    print("  researchwiki lint --json     # zero_claim_papers MUST be 0")
+    print("  researchwiki grade regression --missing-only --no-salience")
+    print("\nThen, once you're happy with these pages:")
+    print(f"  researchwiki import apply --run {args.run} --limit {args.limit or 30}")
+    return code
+
+
 # ---------- entry point ----------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -348,6 +413,16 @@ def build_parser() -> argparse.ArgumentParser:
     ins.add_argument("--limit", type=int, default=0, help="Assess at most N records.")
     ins.add_argument("--run-dir", default=None, help="Where to write the run directory.")
     ins.add_argument("--json", dest="as_json", action="store_true")
+
+    ap = sub.add_parser("apply", help="Copy a wave into inbox/ and ingest it.")
+    ap.add_argument("--run", required=True,
+                    help="Run directory from `inspect`. Required: a bare `apply` "
+                         "silently choosing among several runs is a footgun.")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="Import at most N papers this wave. Re-run for the next N.")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Print the argv per paper; copy nothing, spend nothing.")
+    ap.add_argument("--workers", "-w", type=int, default=4)
     return p
 
 
@@ -357,4 +432,6 @@ def main(argv: list[str]) -> int:
         return _run_preflight(args)
     if args.phase == "inspect":
         return _run_inspect(args)
+    if args.phase == "apply":
+        return _run_apply(args)
     return 1

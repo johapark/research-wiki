@@ -253,7 +253,8 @@ def _print_batch_epilogue(batch_dir: Path, state: dict) -> None:
 
 
 def _run_batch(batch_dir: Path, pending: list[str], workers: int,
-               subcommand: list[str], extra_args: list[str]) -> int:
+               subcommand: list[str], extra_args: list[str],
+               per_input_args: dict[str, list[str]] | None = None) -> int:
     """Drive the thread pool. Returns 0 iff every pending item completed.
 
     SIGINT: cancel unstarted futures, let in-flight subprocesses finish
@@ -286,8 +287,15 @@ def _run_batch(batch_dir: Path, pending: list[str], workers: int,
         prev_sigint = None
     installed_dfl = False
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(_worker, p, batch_dir, subcommand, extra_args): p
-                   for p in pending}
+        # Per-input flags are composed at submit time rather than passed
+        # down, so `_worker` keeps its signature and every existing caller and
+        # test is unaffected.
+        per_input_args = per_input_args or {}
+        futures = {
+            pool.submit(_worker, p, batch_dir, subcommand,
+                        [*extra_args, *per_input_args.get(p, [])]): p
+            for p in pending
+        }
         try:
             try:
                 for fut in concurrent.futures.as_completed(futures):
@@ -361,12 +369,22 @@ def _run_batch(batch_dir: Path, pending: list[str], workers: int,
 # ---------- public entry points ----------
 
 def new_batch(pdfs: list[str], subcommand: list[str],
-              extra_args: list[str], workers: int) -> int:
+              extra_args: list[str], workers: int,
+              per_input_args: dict[str, list[str]] | None = None) -> int:
     """Create a fresh batch dir, drive the ingest pool. Returns exit code.
 
     `subcommand` is the CLI verb chain each worker's subprocess runs — e.g.
     `["agent", "ingest"]` or `["ingest"]`. Recorded in plan.json so
     `resume_batch` doesn't need it re-supplied.
+
+    `per_input_args` maps an absolute input path to flags for that PDF alone —
+    `--doi`, `--title`, `--authors`, `--year`, `--supplementary`. The CLI still
+    **refuses** those flags in batch mode (`agent._BATCH_INCOMPATIBLE_FLAGS`),
+    and rightly so: one `--doi` has no meaning across N PDFs. But a programmatic
+    caller like `researchwiki import apply` holds a *different* DOI for every
+    input, which is the whole point of importing from a reference manager, and
+    that case the guard was never about. Keys are the same absolute paths
+    `_resolve_inputs` produces, so `--resume` still works from any cwd.
     """
     resolved = _resolve_inputs(pdfs)
     batch_dir = _batch_dir_for_new_run()
@@ -376,9 +394,11 @@ def new_batch(pdfs: list[str], subcommand: list[str],
         "workers": workers,
         "inputs": resolved,
         "extra_args": extra_args,
+        "per_input_args": per_input_args or {},
     }
     _atomic_write_json(batch_dir / "plan.json", plan)
-    return _run_batch(batch_dir, resolved, workers, subcommand, extra_args)
+    return _run_batch(batch_dir, resolved, workers, subcommand, extra_args,
+                      per_input_args)
 
 
 def resume_batch(batch_dir: Path, no_retry: bool,
@@ -439,5 +459,8 @@ def resume_batch(batch_dir: Path, no_retry: bool,
 
     workers = workers_override if workers_override is not None else plan.get("workers", 4)
     subcommand = plan.get("subcommand", ["agent", "ingest"])  # legacy default
+    # `.get` with a default, so a batch dir written before per-input args
+    # existed still resumes — the key is additive, not a schema bump.
     return _run_batch(batch_dir, pending, workers, subcommand,
-                      plan.get("extra_args", []))
+                      plan.get("extra_args", []),
+                      plan.get("per_input_args", {}))
