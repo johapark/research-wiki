@@ -695,6 +695,10 @@ def _clean_pdf_meta_value(raw: object, *, kind: str) -> str | None:
         return None
     if s.lower().startswith("microsoft word - "):
         return None
+    # Shape check for titles only. The author deny-list is a different problem and
+    # author strings legitimately fail a "looks like prose" test.
+    if kind == "title" and not _looks_like_title(s):
+        return None
     return s
 
 
@@ -813,6 +817,54 @@ _BANNED_TITLE_PREFIXES = (
     "accelerated", "received:", "accepted:", "published online", "cite this",
     "arxiv:", "preprint", "© ",
 )
+
+# Page-range artifact from production tooling: "3094..3100".
+_PAGE_RANGE_RE = re.compile(r"\d+\.\.\d+")
+
+# Journal masthead / running-head signatures. None of these can occur inside a
+# real title: a volume-or-issue citation, an explicit page range, or an inline DOI.
+_MASTHEAD_LINE_RE = re.compile(
+    r"(?:\bvol\.?\s*\d+|\bno\.?\s*\d+\s*,|\bpages?\s+\d+\s*[–—-]\s*\d+"
+    r"|\bdoi:\s*\S|\b10\.\d{4,9}/\S"
+    # "Advance Access publication January 24, 2014" — Oxford's running head, which
+    # trails the section name so no prefix rule reaches it.
+    r"|advance access publication"
+    # Bare volume:page citation, e.g. "Genome Res. 2009 19: 1655-1664".
+    r"|\b\d+\s*:\s*\d+\s*[–—-]\s*\d+)",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_title(s: str | None) -> bool:
+    """True when `s` plausibly *is* a title rather than production furniture.
+
+    A deny-list of prefixes cannot cover this, because the failure is a shape, not
+    a known string. Oxford University Press stamps `/Title` with its internal job
+    code and the page range — minimap2's PDF carries
+    `OP-CBIO180195 3094..3100`, which is 24 characters and starts with nothing
+    banned, so the length-and-prefix check adopted it and short-circuited the
+    first-page text scan that would have found the real title. That string then
+    became the S2 title-match query (three 404s, retried) and the fallback page
+    title. CLAUDE.md is explicit that the naming fields come from "the PDF's first
+    page text, not `reader.metadata`", so falling through to the scan is also the
+    documented behaviour. Observed 2026-08-10.
+
+    The discriminator is word shape: real titles contain at least three tokens that
+    look like words — two or more characters, alphabetic, carrying a lowercase
+    letter. Job codes, page ranges, filenames and all-caps mastheads have none or
+    almost none. An ALL-CAPS genuine title fails this and falls through to the text
+    scan, which is a fallback rather than a failure.
+    """
+    if not s:
+        return False
+    s = s.strip()
+    if _PAGE_RANGE_RE.search(s):
+        return False
+    wordy = 0
+    for tok in re.split(r"[\s,;:.()\[\]]+", s):
+        if len(tok) >= 2 and any(c.isalpha() for c in tok) and any(c.islower() for c in tok):
+            wordy += 1
+    return wordy >= 3
 _AFFILIATION_SUPERSCRIPT_RE: re.Pattern | None = None      # initialized lazily below
 
 
@@ -825,7 +877,9 @@ def _extract_title_from_pdf(pdf_meta: dict, text: str) -> str | None:
     line (lots of commas + digits), or 250 chars total.
     """
     meta_title = (pdf_meta.get("/Title") or "").strip()
-    if 20 < len(meta_title) < 250 and not meta_title.lower().startswith(_BANNED_TITLE_PREFIXES):
+    if (20 < len(meta_title) < 250
+            and not meta_title.lower().startswith(_BANNED_TITLE_PREFIXES)
+            and _looks_like_title(meta_title)):
         return meta_title
 
     head = text[:2000]
@@ -835,6 +889,15 @@ def _extract_title_from_pdf(pdf_meta: dict, text: str) -> str | None:
         if not (20 < len(line) < 250):
             continue
         if line.lower().startswith(_BANNED_TITLE_PREFIXES):
+            continue
+        # Masthead, not title. Rejecting a furniture `/Title` above means these
+        # PDFs now reach this scan, and for several of them the first qualifying
+        # line is the journal masthead rather than the title — bae-2014's is
+        # "Vol. 30 no. 10 2014, pages 1473–1475 BIOINFORMATICS APPLICATIONS NOTE
+        # doi:10.1093/bioinformatics/btu048", which sails past the prefix and
+        # authorish checks. A volume/page citation or an inline DOI is never part
+        # of a title, so skip the line and keep scanning for the real one.
+        if _MASTHEAD_LINE_RE.search(line):
             continue
         # Cheap heuristic: title lines typically have few commas and few digits;
         # author lines have many. Skip lines that look authorish.

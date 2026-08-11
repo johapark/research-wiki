@@ -37,6 +37,26 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Reconcile no longer adopts a PDF's `/Title` when that field holds production
+  furniture rather than a title. Oxford stamps it with an internal job code and the
+  page range — minimap2's is `OP-CBIO180195 3094..3100`, 24 characters beginning with
+  nothing on the banned-prefix list, so the length-and-prefix check took it and
+  short-circuited the first-page text scan. It then became the Semantic Scholar
+  title-match query (three 404s, retried) and the last-resort page title. 9 of 345
+  `/Title` values in the corpus are furniture of this shape. A deny-list cannot cover
+  it because the failure is a *shape*, so titles are now checked for one: at least
+  three tokens that look like words. Rejection falls through to the text scan, which
+  CLAUDE.md already names as the source of truth ("the PDF's first page text, not
+  `reader.metadata`"). Measured over every corpus PDF: 336 of 345 kept, and all 9
+  rejected are exactly the furniture cases — no real title is refused.
+- The first-page title scan skips journal mastheads. With furniture `/Title` values
+  now falling through to it, the first qualifying line was often the masthead instead
+  — bae-2014's reads "Vol. 30 no. 10 2014, pages 1473–1475 BIOINFORMATICS
+  APPLICATIONS NOTE doi:10.1093/bioinformatics/btu048", which passes both the prefix
+  and authorish checks. Volume/issue citations, explicit page ranges, inline DOIs,
+  "Advance Access publication" running heads and bare `19: 1655-1664` volume:page
+  citations never occur inside a title, so those lines are skipped. 7 of the 8
+  affected PDFs still on disk now yield their real title.
 - Reconcile no longer takes Semantic Scholar's year over the document's when S2 has
   merged a preprint into the journal record. The existing `_s2_record_is_preprint`
   guard needs S2 to *admit* it is describing a preprint by naming a preprint venue;
