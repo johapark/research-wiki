@@ -90,9 +90,11 @@ wrappers, never inside the phase functions.
 
 ## A worked example
 
-Here's what an ingest looks like when you run it. The output excerpts below
-are from a real run on `du-2025-a-versatile-crisprcas9-system-off-target` —
-copy-pasted, not hand-crafted, so what you see is what you'll see.
+Here's what an ingest looks like when you run it. The excerpts below are from a
+real run on `kim-2026-structural-motif-search-across-the-protein` (Folddisco) —
+values taken from that attempt's `ingest_iterations` rows, not hand-crafted. The
+run predates the `sal`/`coh` columns in the grade line, so those two axes are
+absent from the excerpt and documented separately below.
 
 ### 1. Drop a PDF
 
@@ -122,36 +124,39 @@ file: that bypasses the checkpoint, uncaps concurrency, and multiplies
 You'll see something like (excerpted, real output from a recent ingest):
 
 ```
-[agent] attempt_id=8a3b...
+[agent] attempt_id=ac715918...
 [agent] pdf=some-paper.pdf
-[agent] mode=real (openai-compatible/gpt-5.6-luna)
+[agent] mode=real (anthropic/claude-sonnet-4-6)
 [agent] n_drafts=2  use_semantic=True  max_evolve=1
-[agent] reconcile → stem=du-2025-a-versatile-crisprcas9-system-off-target year=2025 type=research
-[agent] extract   → sections=['introduction', 'methods', 'results', 'discussion'] pdf_claims=11
-[agent] target-claims → 23 extracted (5 critical, 11 high)
-[agent] crosslinks → 8 verified candidate(s)
-[agent] author #1  → stance=balanced t=0.2 7183 chars
-[agent] author #2  → stance=skeptical t=0.6 7637 chars
-[agent] grade   → draft 2890 sem=0.71 sal=0.34 coh=1.00 bm25=29.87
-[agent] grade   → draft 2891 sem=0.74 sal=0.30 coh=1.00 bm25=33.72
-[agent] tournament → winner draft 2891
-[agent] critic     → flagged 1 weak claims, 2 coverage gaps
-[agent] evolve     → revised draft, sem=0.78 sal=0.34 (combined-quality improved; kept)
-[agent] gate       → passed (combined-quality ≥ 0.55, no drift, KC≥4, n_graded≥6)
-[agent] promote    → wiki/cgt/du-2025-a-versatile-crisprcas9-system-off-target.md (3 back-links added)
-[agent] shortname  → 'CCLMoff'
-[agent] keywords   → ['CRISPR off-target prediction', 'transformer', 'RNA language model', ...]
-[agent] evolve     → 1 proposal(s) at .ingest/du-2025-...-evolution-proposals/  (knn=2 above_thr=1 judged=1 actionable=1)
+[agent] reconcile → stem=kim-2026-structural-motif-search-across-the-protein year=2026 type=research
+[agent] extract   → sections=['references', 'methods']
+[agent] crosslinks → 6 verified candidate(s)   (3 citation-graph + 3 topical)
+[agent] author #1  → stance=balanced  t=0.2
+[agent] author #2  → stance=skeptical t=0.6
+[agent] grade   → draft 101 sem=0.77 graded=12 drift=0 bm25=12.1
+[agent] grade   → draft 102 sem=0.77 graded=15 drift=0 bm25=15.4
+[agent] tournament → winner draft 102 (tied on sem; decided on the tail)
+[agent] critic     → no weak claims; pass-through
+[agent] promote    → wiki/compbio/kim-2026-structural-motif-search-across-the-protein.md (6 back-links added)
+[agent] shortname  → 'Folddisco'
+[agent] keywords   → ['structural motif search', 'Folddisco', 'pairwise geometric features', ...]
+[agent] evolve     → no actionable proposals (knn=8 above_thr=6 judged=6 actionable=0)
 ```
 
-Each grade line carries four axes: `sem` is the page-level mean of per-claim
-bi-encoder cosines (fidelity); `sal` is salience-recall against PDF-anchor
+A current grade line carries four axes: `sem` is the page-level mean of per-claim
+bi-encoder cosines (fidelity); `sal` is salience-recall against the PDF-anchor
 synthetic fixture; `coh` is the structural-conformance score (0..1, sum of
 weights of passing checks); `bm25` is the page-level mean of per-claim top-1
 BM25 retrieval scores. The tournament keys on `combined-quality = 0.5·sem +
 0.5·sal` — so a draft with low semantic but high salience can beat a
 high-semantic-low-salience peer if the combined number wins. The lexicographic
 tail (coherence → -drift → n_graded → bm25 → weakest_score) decides ties.
+
+The run above is a tie broken by that tail, which is the case worth seeing: both
+drafts scored `sem=0.77`, so the primary scalar could not separate them, and the
+winner was the draft that graded more claims (15 vs 12) at a higher BM25 (15.4 vs
+12.1). A tournament outcome that looks arbitrary on the primary axis usually isn't
+— check the tail before assuming the selection is noise.
 
 Two details of that blend matter when you're reading a tournament outcome that
 looks wrong:
@@ -180,25 +185,28 @@ progresses, so a crash mid-way leaves a partial trace you can inspect.
 
 ### 3. Inspect the new wiki page
 
-`wiki/cgt/du-2025-a-versatile-crisprcas9-system-off-target.md`:
+`wiki/compbio/kim-2026-structural-motif-search-across-the-protein.md`:
 
 ```yaml
 ---
-title: "A versatile CRISPR/Cas9 system off-target prediction tool using language model"
-authors: Yi-Hong Du, Xiao-Yan Tang, ...
-year: 2025
-doi: 10.1093/bib/...
-venue: Briefings in Bioinformatics
+title: "Structural motif search across the protein universe with Folddisco"
+authors: Hyunbin Kim, Rachel Seongeun Kim, Milot Mirdita, Jaewon Yoon, Martin Steinegger
+senior_authors: Martin Steinegger
+year: 2026
+doi: 10.1038/s41587-026-03162-9
+venue: Nature Biotechnology
 type: paper
-category: [cgt]
-pdf_path: "[[du-2025-a-versatile-crisprcas9-system-off-target.pdf]]"   # Obsidian wikilink → click-to-open; real file at papers/{stem}.pdf
-short_name: CCLMoff
-keywords: [CRISPR off-target prediction, transformer, RNA language model, ...]
-tags: [ingested-via-agent]
+category: [compbio]
+pdf_path: "[[kim-2026-structural-motif-search-across-the-protein.pdf]]"   # Obsidian wikilink → click-to-open; real file at papers/{stem}.pdf
+publication_status: published
+short_name: Folddisco
+hook: "Structural motif search across 53M AlphaFold structures in seconds using position-independent geometric indexing with novel side-chain dihedral angles; 20× faster querying and 4× smaller indices than pyScoMotif while improving sensitivity."
+keywords: [structural motif search, Folddisco, pairwise geometric features, side-chain dihedral angles, rarity-based scoring, ...]
+ingested_at: 2026-06-05T15:43:46
 ---
 
 ## Summary
-**CCLMoff** is a transformer-based deep learning framework ...
+**Folddisco** indexes pairwise geometric features of residue pairs ...
 
 ## Key Contributions
 - ...
@@ -213,46 +221,54 @@ tags: [ingested-via-agent]
 - ...
 
 ## Related Papers
-- [[cgt/lin-2020-crisprnet-a-recurrent-convolutional-network]] — direct successor; CCLMoff outperforms CRISPR-Net on shared benchmarks
-- [[cgt/chuai-2018-deepcrispr-optimized-crispr-guide-rna]] — explicitly benchmarks against and surpasses DeepCRISPR
+- [[compbio/van-kempen-2024-fast-and-accurate-protein-structure]] — Foldseek is cited as the closest related structural search tool; Folddisco extends its infrastructure but addresses the nonlinear motif-matching problem Foldseek cannot handle
+- [[compbio/abramson-2024-accurate-structure-prediction-of-biomolecular]] — AlphaFold2/3-scale predicted structure databases are the primary target corpus motivating Folddisco's scalability requirements
 - ...
 ```
 
-YAML carries the full audit (DOI, source-PDF wikilink, ingest tags). The
-body is six standard sections capped to budget. Every wikilink in
-`Related Papers` was verified — either citation-graph confirmed or
-LLM-judged topical with a one-line rationale.
+YAML carries the full audit (DOI, venue, source-PDF wikilink, the catalog gloss
+in `hook:`, and the ingest timestamp). The body is six standard sections capped
+to budget. Every wikilink in `Related Papers` was verified — either
+citation-graph confirmed or LLM-judged topical with a one-line rationale. This
+run's six candidates split 3 citation-graph (MMseqs2, Foldseek, AlphaFold 3 — all
+cited by the source) and 3 topical.
 
 ### 4. Review the evolution proposals
 
-`.ingest/du-2025-...-evolution-proposals/extend__synthesis__crispr-cas9-off-target-methods-2026.md`:
+The Folddisco run above produced **none** — `knn=8 above_thr=6 judged=6
+actionable=0`, meaning six synthesis neighbours cleared the cosine prefilter, all
+six were judged, and none warranted an edit. That is the common outcome and worth
+seeing: the judge declining six times is the prefilter doing its job, not a
+failure. The format below is therefore from a different run (`wei-2026`, an
+EVO-based promoter predictor, against the Hyena/Evo lineage page):
+
+`.ingest/wei-2026-...-evolution-proposals/refine__synthesis__dna-foundation-models-in-the-hyena-evo-lineage.md`:
 
 ```yaml
 ---
-source: cgt/du-2025-a-versatile-crisprcas9-system-off-target
-target: synthesis/crispr-cas9-off-target-methods-2026
-verdict: extend
+source: compbio/wei-2026-evosnr-prom-predicting-promoters-at-single-nucleotide
+target: synthesis/dna-foundation-models-in-the-hyena-evo-lineage
+verdict: refine
 confidence: 0.82
 ---
 
-# EXTEND — [[synthesis/crispr-cas9-off-target-methods-2026]]
+# REFINE — [[synthesis/dna-foundation-models-in-the-hyena-evo-lineage]]
 
-**Rationale:** CCLMoff is a new off-target scoring/ranking method that
-belongs in the Prediction section alongside CRISOT and CRISPRme, with a
-specific claim about outperforming prior learning-based methods using an
-RNA language model backbone and the largest benchmark dataset to date.
+**Rationale:** applies Evo 7B via LoRA to prokaryotic promoter prediction at
+single-nucleotide resolution, so it belongs in the Evidence section as a
+downstream application of the lineage's byte-level tokenization ...
 
 ## Patch
 
-- Add `[[cgt/du-2025-a-versatile-crisprcas9-system-off-target]]` into the
-  `## Approaches` / equivalent section as an inline `[[wikilink]]`, plus a
-  matching `[^id]: [[cgt/du-2025-…]]` footnote under `## References`
-  (synthesis pages cite via the body — there is no `referenced_papers:` field).
-- Section: **### Prediction — computational ranking of candidate off-targets**
+- Cite `[[compbio/wei-2026-evosnr-prom-predicting-promoters-at-single-nucleotide]]`
+  in the body (inline, plus a matching `[^id]:` footnote under `## References` if
+  the page uses footnotes — synthesis pages cite via the body, there is no
+  `referenced_papers:` field).
+- Section: **## Evidence from the wiki**
 - New bullet:
-  > **CCLMoff** [[cgt/du-2025-a-versatile-crisprcas9-system-off-target]] is a
-  > transformer-based scorer that applies a pretrained RNA language model
-  > (RNAcentral) to the off-target ranking problem ...
+  > [[compbio/wei-2026-evosnr-prom-predicting-promoters-at-single-nucleotide]] —
+  > applies Evo 7B via LoRA + lexicon-enhanced embeddings to prokaryotic promoter
+  > prediction at single-nucleotide resolution ...
 ```
 
 The proposal carries everything a reviewer needs: source paper, target
@@ -466,7 +482,7 @@ Index health:
   Semantic page idx:   built 2m ago (87 pages, dim=384)
 
 Pending evolution proposals: 1 dir(s), 1 total file(s)
-  du-2025-...                                              1 file(s), 32m old
+  wei-2026-...                                             1 file(s), 32m old
   Review and apply, then `rm -rf` the directory.
 
 Ingest cost (last 7 days):
@@ -572,7 +588,7 @@ researchwiki/
 │   ├── promote.py          #   Move PDF + write wiki page + back-links + index.md
 │   └── phases/             #   Each phase as its own module
 │       ├── reconcile.py    #     PDF → DOI/title/year/venue/authors
-│       ├── extract.py      #     PDF → sections + pdf_claims
+│       ├── extract.py      #     PDF → sections + full text
 │       ├── target_claims.py#     Identify the load-bearing claims to author against
 │       ├── crosslinks.py   #     Citation-graph + semantic crosslink candidates
 │       ├── draft.py        #     Author + tournament (combined-quality argmax)
