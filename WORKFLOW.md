@@ -422,6 +422,121 @@ Full procedure, failure-mode table and the manual fallback:
 
 ---
 
+## Importing a reference-manager library
+
+`migrate` above imports *pages*. If what you have is a library in Zotero,
+Paperpile, Mendeley or ReadCube — PDFs and metadata, no prose —
+`researchwiki import` is the sibling command, and the two are not
+interchangeable: `migrate` deliberately refuses this case, because there is no
+authored text to preserve. Pages here are authored normally, by `agent ingest`.
+
+**The export is the asset.** A reference manager already holds a curated DOI,
+title, authors and year for every record — exactly the fields `agent ingest`
+otherwise rediscovers through its most failure-prone stretch (PDF extract → DOI
+hunt → S2 lookup → LLM reconcile → `metadata_sanity`), which is where every
+`unknown-` stem and wrong-but-resolving DOI comes from. So `inspect` records the
+exact `--doi/--title/--authors/--year` argv each record contributes, and `apply`
+feeds them through batch mode: the hard part becomes a lookup.
+
+Export **BibTeX or RIS**, not CSL-JSON — the first two carry attachment paths and
+CSL-JSON carries none from any exporter seen, which costs you the `declared`
+pairing rung. Parsing is deliberately tolerant, because the files that break a
+strict parser are the ones people actually have: a real 532-item ReadCube export
+carries a 4-character `PMID` tag where the convention is 2, an always-empty `XX`
+tag on 385 records, citekeys with `:` and non-ASCII that strict BibTeX forbids,
+and CRLF endings that make a naive `"\r\n"` split return one giant record.
+
+### Pairing, and why it reports its own confidence
+
+`<pdf-root>` is optional. When you give one, every PDF under it is read **once**
+(the naive record × PDF loop is O(n²) and turns a free phase into an overnight
+one), then three rungs run as three passes over all records — so a confident DOI
+match always wins a file over a merely plausible title match:
+
+| Rung | Basis |
+|---|---|
+| `declared` | a path the export itself named |
+| `doi` | the DOI printed inside the PDF equals the record's |
+| `title` | the PDF's opening text covers the record's title |
+
+The title rung publishes a *margin*, not just a score, because a near-tie means
+the score came from vocabulary two records share rather than from identity.
+Measured against 313 DOI-confirmed pairs (the DOI gives ground truth, so title
+matching can be scored against it), requiring a 0.05 margin removed every wrong
+pairing at the cost of four correct ones — and those four land in `review` with
+their candidates listed, rather than silently attaching the wrong PDF.
+
+### Triage: three verdicts, the detail in reason strings
+
+`apply` acts on `ready` only. Four gates are worth knowing:
+
+- **`no-text-layer`** — the silent one. A scanned PDF extracts to nothing, ingest
+  logs a warning nobody reads, and the page then passes every later gate on
+  grounding that does not exist.
+- **`superseded-by-journal`** — a preprint whose published version is also in the
+  export. Invisible to DOI dedupe, since the pair carries two different DOIs; the
+  real library held 10 such pairs and zero duplicate DOIs.
+- **`duplicate-doi`** — its complement, the same DOI twice. That library had none,
+  but concatenated or merged exports produce them readily.
+- **`maybe-commentary`** — a Research Highlight would otherwise be ingested as the
+  paper it describes. See CLAUDE.md → Page Types §7.
+
+Both dedupe gates pick their survivor by a total order rather than by input
+position, because the same library exported twice listed its records in different
+orders and position would import differently from identical data.
+
+With no PDFs at all the run is still worth doing: the report lists every record
+that clears every gate *except* having a file, with its DOI, deduplicated — on a
+cloud-hosted library that fetch list is the most useful thing the command
+produces.
+
+### The phases
+
+| Phase | Writes | Cost |
+|---|---|---|
+| `import preflight <export>` | nothing | local; parse and count only |
+| `import inspect <export> [pdf-root]` | run dir only | local; pairing + gates |
+| `import apply --run <dir> [--limit N]` | `inbox/` → `wiki/` + `papers/` | **the only phase that spends** |
+| `import verify --run <dir>` | nothing | local |
+
+```bash
+researchwiki import preflight ~/lib/library.ris
+researchwiki import inspect   ~/lib/library.ris ~/lib/pdfs
+less .ingest/import-*/report.md                      # read this before applying
+researchwiki import apply --run .ingest/import-<ts> --limit 30 --dry-run
+researchwiki import apply --run .ingest/import-<ts> --limit 30
+researchwiki db rebuild && researchwiki reindex
+researchwiki import verify --run .ingest/import-<ts>
+```
+
+**Stage it with `--limit`.** `apply` re-checks per record whether a paper is
+already in the wiki, or already sitting in `inbox/` from a wave that failed — the
+one set of facts deliberately *not* frozen in the manifest, because it is a fact
+about now. That is what makes the next `--limit 30` mean "the next 30 still
+pending" rather than "the first 30, again", so waves compose instead of repeating.
+
+Everything else *is* frozen, so `apply` cannot reach a different conclusion than
+the `inspect` you read. There is no journal and no staging directory here, unlike
+`migrate`: the only mutation is copying a PDF, and everything after it belongs to
+`_ingest_batch`, which already keeps a crash-safe checkpoint. Recovery is
+`agent ingest --resume <batch-dir>` — the path you already know.
+
+Per-paper cost is ordinary `agent ingest` cost (see *Costs and trade-offs*), so
+budget by wave size. Cross-linking is deliberately not a phase: a bulk import
+arrives as N disconnected nodes, and `verify` names the follow-ups
+(`claim-overlap --backlog`, `candidates concepts --bridges`) rather than spending
+a judge call per pair inline.
+
+There is deliberately **no `--category`**. Category is chosen per paper by
+promote's neighbour-vote classifier, which is the better answer for a mixed
+library anyway — a reference manager's collections rarely map onto wiki
+categories, and one global value would flatten the corpus into a single bin.
+
+Full procedure, the reason→verdict table and failure modes:
+[`prompts/import-reference-manager.md`](./prompts/import-reference-manager.md).
+
+---
+
 ## Querying the wiki
 
 Three retrieval modes via `researchwiki search`:
@@ -620,6 +735,16 @@ researchwiki/
 ├── synthesis_candidates/   # Detect paper clusters lacking a synthesis page
 ├── migrate/                # Import one-paper-per-PDF pages from an older/simpler wiki
 │                           #   (preflight → inspect → apply → verify; zero tokens)
+├── refimport/              # Import a reference-manager library (Zotero/Paperpile/
+│                           #   Mendeley/ReadCube) from its own BibTeX/RIS/CSL-JSON
+│                           #   export. Sibling to migrate/: that one imports pages,
+│                           #   this one imports PDFs + metadata and authors nothing.
+│   ├── parse.py            #   Tolerant BibTeX/RIS/CSL-JSON reader → ExportItem
+│   ├── pair.py             #   Record → PDF, three rungs (declared/doi/title);
+│   │                       #     one extraction pass over the tree, ever
+│   ├── triage.py           #   The gates → ready/review/skip + reason strings
+│   ├── apply.py            #   Plan a wave, copy into inbox/, hand to _ingest_batch
+│   └── manifest.py         #   Run dir + manifest.json (frozen pairing/verdicts/argv)
 └── pdf/                    # pypdfium2-backed PDF text/structure extraction
 ```
 
@@ -1087,6 +1212,7 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `evolve <category/stem>` | Neighboring synthesis pages to edit in light of a paper → proposals in `.ingest/{stem}-evolution-proposals/`. |
 | `backfill <hook\|keywords\|doi>` | One-shot: populate the named field on existing pages (hook + keywords via LLM from page prose; doi via Semantic Scholar → Crossref with a sanity check). |
 | `migrate <preflight\|inspect\|apply\|verify>` | Bulk-import one-paper-per-PDF markdown from an older release or a simpler LLM wiki. Zero tokens; normalizes H2 headings and frontmatter keys before committing so claim extraction works. See `prompts/migration-backfill.md`. |
+| `import <preflight\|inspect\|apply\|verify>` | Bulk-import a reference-manager library from its BibTeX/RIS/CSL-JSON export, which supplies each paper's DOI/title/authors/year instead of rediscovering them. Only `apply` spends tokens or writes pages; `<pdf-root>` is optional, and a metadata-only run still returns a fetch list of DOIs. Stage it with `--limit N`. See `prompts/import-reference-manager.md`. |
 | `synthesize --title [...] [--papers]` | Scaffold `wiki/synthesis/{slug}.md`. Idea/reference pages are manual. |
 | `candidates <concepts\|synthesis>` | Surface opportunity signals: un-scaffolded concept hubs (concepts) or uncovered paper clusters warranting a synthesis page (synthesis). |
 | `reindex [--no-semantic]` | Rebuild Tantivy + semantic index from `wiki/`. |
