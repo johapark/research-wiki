@@ -219,9 +219,13 @@ def test_inspect_json_item_keys_are_stable(wiki, capsys):
     assert set(item) == {
         "key", "title", "doi", "year", "authors", "item_type", "verdict",
         "reasons", "derived_stem", "primary_pdf", "supplementary", "pair_rung",
-        "pair_confidence", "pair_candidates", "chars_per_page", "page_count",
-        "collision", "ingest_args",
+        "pair_confidence", "pair_rival", "pair_margin", "pair_candidates",
+        "chars_per_page", "page_count", "collision", "ingest_args",
     }
+    # Adding a key is additive and allowed; removing one is breaking
+    # (`CHANGELOG.md`). This assertion is exact so that either direction has to
+    # be a deliberate edit here rather than an unnoticed side effect — which is
+    # what it caught when `pair_rival`/`pair_margin` were introduced.
 
 
 def test_inspect_json_is_the_only_thing_on_stdout(wiki, capsys):
@@ -383,3 +387,46 @@ def test_no_phase_is_a_usage_error(wiki, capsys):
 def test_unknown_phase_is_a_usage_error(wiki, capsys):
     with pytest.raises(SystemExit):
         import_task.main(["nonsense"])
+
+
+# ---------- dedupe must happen before pairing ----------
+
+def test_a_superseded_preprint_does_not_contest_its_survivors_pdf(wiki, capsys):
+    """Ordering regression, found on a real library.
+
+    A preprint and its published version share a title verbatim, so they score
+    an exact tie against each other's PDFs. If the superseded record is still
+    in the pairing pool, the distinctiveness gate reads that tie as a genuine
+    ambiguity and sends the *survivor* — the record we do want — to review. On
+    the real 532-record library this accounted for 8 of 10 `ambiguous-pairing`
+    reviews, every one spurious.
+    """
+    from tests.test_refimport_pair import write_pdf
+
+    title = "Sequence modeling and design from molecular to genome scale"
+    pdfs = wiki / "pdfs"
+    write_pdf(pdfs / "journal.pdf", [title] + ["Body text " * 40] * 10, pages=6)
+    write_pdf(pdfs / "preprint.pdf", [title] + ["Body text " * 40] * 10, pages=6)
+
+    _, out, _ = run(["inspect", str(RIS), str(pdfs), "--json"], capsys)
+    items = {i["doi"]: i for i in json.loads(out)["items"] if i["doi"]}
+
+    published = items["10.1234/science.2024.0005"]
+    assert published["verdict"] == "ready"
+    assert "ambiguous-pairing" not in published["reasons"]
+
+    preprint = items["10.1101/2024.01.01.500001"]
+    assert preprint["verdict"] == "skip"
+    assert "superseded-by-journal" in preprint["reasons"]
+
+
+def test_a_superseded_record_is_not_reported_as_missing_a_pdf(wiki, capsys):
+    """It is not being imported, so whether it has a file is not a finding —
+    and counting it would inflate the fetch list with versions the user
+    deliberately isn't importing."""
+    _, out, _ = run(["inspect", str(RIS), "--json"], capsys)
+    payload = json.loads(out)
+    sup = [i for i in payload["items"] if "superseded-by-journal" in i["reasons"]]
+    assert sup and all("no-pdf" not in i["reasons"] for i in sup)
+    fetch_dois = {f["doi"] for f in payload["missing_pdf_fetch_list"]}
+    assert fetch_dois.isdisjoint({i["doi"] for i in sup})

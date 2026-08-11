@@ -278,3 +278,24 @@ def test_pairings_preserve_item_identity(pdf_root):
     pdf_root.mkdir(parents=True)
     items = [mk_item(key="a"), mk_item(key="b")]
     assert [p.item.key for p in run(items, pdf_root)[0]] == ["a", "b"]
+
+
+# ---------- distinctiveness ----------
+
+def test_rival_score_is_recorded_for_a_contested_pdf(pdf_root):
+    """Two records scoring against one file must leave evidence of the contest,
+    so triage can tell a confident match from a near-tie."""
+    write_pdf(pdf_root / "x.pdf", ["Machine learning for protein structure prediction"])
+    a = mk_item(key="a", title="Machine learning for protein structure prediction", doi=None)
+    b = mk_item(key="b", title="Machine learning for protein structure modelling", doi=None)
+    pairings, _ = run([a, b], pdf_root)
+    winner = [p for p in pairings if p.primary][0]
+    assert winner.rival > 0
+    assert winner.margin < 0.5
+
+
+def test_an_uncontested_match_has_no_rival(pdf_root):
+    write_pdf(pdf_root / "x.pdf", ["A draft synthetic pangenome reference"])
+    pairings, _ = run([mk_item(doi=None)], pdf_root)
+    assert pairings[0].rival == 0.0
+    assert pairings[0].margin == pairings[0].confidence

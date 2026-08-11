@@ -143,6 +143,7 @@ def _run_inspect(args: argparse.Namespace) -> int:
     from ..refimport.pair import Pairing, build_pdf_index, pair_items
     from ..refimport.triage import (
         assess_all,
+        find_superseded,
         missing_pdf_fetch_list,
         summarize,
     )
@@ -172,20 +173,31 @@ def _run_inspect(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
 
+    # Dedupe *before* pairing. A record superseded by its own published version
+    # is not going to be imported, so letting it compete for PDFs costs twice:
+    # it can win a file the survivor should have had, and — because the pair
+    # shares a title verbatim — it scores an exact tie against the survivor's
+    # own PDF, which the distinctiveness gate then reads as a genuine ambiguity.
+    # On the real library that alone accounted for most `ambiguous-pairing`
+    # reviews, every one of them spurious.
+    superseded = find_superseded(items)
+    active = [i for i in items if id(i) not in superseded]
+
     if pdf_root is not None:
         print(f"Indexing PDFs under {pdf_root} …", file=sys.stderr)
         facts = build_pdf_index(pdf_root)
-        pairings, unclaimed = pair_items(items, facts, pdf_root=pdf_root,
+        pairings, unclaimed = pair_items(active, facts, pdf_root=pdf_root,
                                          export_dir=export.parent)
     else:
         facts, unclaimed = [], []
-        pairings = [Pairing(item=i) for i in items]
+        pairings = [Pairing(item=i) for i in active]
     facts_by_path = {f.path: f for f in facts}
 
     assessments = assess_all(
         items, pairings, facts_by_path,
         known_dois=read_wiki_dois(),
         stem_exists=lambda s: find_stem_collision(s) is not None,
+        superseded=superseded,
     )
     summary = summarize(assessments)
     fetch = missing_pdf_fetch_list(assessments)

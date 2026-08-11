@@ -312,3 +312,50 @@ def test_as_dict_is_json_safe():
     import json
     a = only(run([mk_item()]))
     json.dumps(a.as_dict())
+
+
+# ---------- pairing distinctiveness ----------
+#
+# Measured against 313 DOI-confirmed pairs from a real library: without this
+# gate, 6 records were silently paired to the wrong PDF. With it, none were, at
+# a cost of 4 confident pairings demoted to review.
+
+def test_a_confident_but_undistinctive_title_match_goes_to_review():
+    """Another record scored nearly as well against this same PDF, so the score
+    came from shared vocabulary rather than from identity."""
+    p = Pairing(item=mk_item(), primary=Path("/pdfs/a.pdf"), rung="title",
+                confidence=0.90, rival=0.88)
+    a = only(assess_all([p.item], [p], {Path("/pdfs/a.pdf"): mk_facts()}))
+    assert a.verdict == REVIEW and "ambiguous-pairing" in a.reasons
+
+
+def test_a_distinctive_title_match_is_accepted():
+    p = Pairing(item=mk_item(), primary=Path("/pdfs/a.pdf"), rung="title",
+                confidence=0.90, rival=0.40)
+    a = only(assess_all([p.item], [p], {Path("/pdfs/a.pdf"): mk_facts()}))
+    assert a.verdict == READY and "ambiguous-pairing" not in a.reasons
+
+
+def test_a_sole_candidate_has_no_rival_and_is_accepted():
+    p = Pairing(item=mk_item(), primary=Path("/pdfs/a.pdf"), rung="title",
+                confidence=0.80, rival=0.0)
+    assert only(assess_all([p.item], [p],
+                           {Path("/pdfs/a.pdf"): mk_facts()})).verdict == READY
+
+
+def test_the_margin_gate_does_not_apply_to_doi_pairings():
+    """A DOI match is an identity, not a similarity — a rival score against the
+    same file is irrelevant to it."""
+    p = Pairing(item=mk_item(), primary=Path("/pdfs/a.pdf"), rung="doi",
+                confidence=0.9, rival=0.9)
+    assert only(assess_all([p.item], [p],
+                           {Path("/pdfs/a.pdf"): mk_facts()})).verdict == READY
+
+
+def test_weak_pairing_takes_precedence_over_ambiguity():
+    """Below the confidence bar is the more informative complaint; reporting
+    both would be noise."""
+    p = Pairing(item=mk_item(), primary=Path("/pdfs/a.pdf"), rung="title",
+                confidence=0.60, rival=0.59)
+    a = only(assess_all([p.item], [p], {Path("/pdfs/a.pdf"): mk_facts()}))
+    assert "weak-pairing" in a.reasons and "ambiguous-pairing" not in a.reasons

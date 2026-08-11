@@ -44,8 +44,39 @@ TITLE_ACCEPT = 0.75
 #: Below this, a title match isn't reported at all — it's noise.
 TITLE_FLOOR = 0.55
 
-#: Characters of first-page text compared against a record's title. A full page
-#: dilutes the token set with abstract and affiliations; the title lives at the top.
+#: How far the best-scoring record must beat the runner-up for a title pairing
+#: to count as unambiguous. A near-tie means the score came from vocabulary the
+#: two records share rather than from identity.
+#:
+#: Measured against 313 DOI-confirmed pairs from a real library (the DOI gives
+#: ground truth, so title matching can be scored against it):
+#:
+#:     margin   correct   wrong   precision
+#:       0.00       282       6       0.979
+#:       0.05       278       0       1.000
+#:       0.15       267       0       1.000
+#:
+#: 0.05 removes every wrong pairing for four correct ones, and those four are
+#: not lost — they land in `review` with their candidates listed, rather than
+#: silently attaching the wrong PDF to a record.
+TITLE_MARGIN = 0.05
+
+#: Characters of leading text compared against a record's title.
+#:
+#: Kept deliberately narrow, against the intuition that a wider window finds
+#: more. Widening it was measured on the same 313 ground-truth pairs and is
+#: strictly worse — body text covers a generic title by chance, and wrong
+#: records start outscoring right ones:
+#:
+#:     window   correct   wrong   precision
+#:        700       282       6       0.979
+#:       1500       288      16       0.947
+#:       3000       274      37       0.881
+#:    3 pages       201     110       0.646
+#:
+#: The failure this *doesn't* fix is a masthead-first page (`nature
+#: biotechnology VOLUME 36 …`) pushing the title past 700 chars. Those records
+#: are better recovered by their DOI, which is why the DOI rung runs first.
 _TITLE_WINDOW = 700
 
 #: Filenames that announce themselves as supplementary material.
@@ -86,7 +117,15 @@ class Pairing:
     supplementary: list[Path] = field(default_factory=list)
     rung: str | None = None
     confidence: float = 0.0
+    #: Best score any *other* record achieved against this same PDF. Only
+    #: meaningful for the title rung. Triage compares it against
+    #: `TITLE_MARGIN` — a near-tie is an ambiguous match, not a confident one.
+    rival: float = 0.0
     candidates: list[tuple[Path, float]] = field(default_factory=list)
+
+    @property
+    def margin(self) -> float:
+        return round(self.confidence - self.rival, 3)
 
 
 def _tokens(text: str) -> frozenset[str]:
@@ -218,12 +257,20 @@ def pair_items(items: list[ExportItem], facts: list[PdfFacts], *,
     # a strong match is never lost to a weaker one that was merely earlier.
     remaining = [f for f in facts if f.path not in taken and f.title_tokens]
     scored: list[tuple[float, ExportItem, PdfFacts]] = []
+    # Top two scores per PDF, so an accepted match can be told from a near-tie.
+    top2: dict[Path, list[float]] = {}
     for item in items:
         if pairings[id(item)].primary is not None or not item.title:
             continue
         it = _tokens(item.title)
         for f in remaining:
             score = _coverage(it, f.title_tokens)
+            if score <= 0:
+                continue
+            best = top2.setdefault(f.path, [])
+            best.append(score)
+            best.sort(reverse=True)
+            del best[2:]
             if score >= TITLE_FLOOR:
                 scored.append((score, item, f))
     for score, item, f in sorted(scored, key=lambda t: -t[0]):
@@ -231,9 +278,10 @@ def pair_items(items: list[ExportItem], facts: list[PdfFacts], *,
         if p.primary is not None or f.path in taken:
             continue
         p.candidates.append((f.path, round(score, 3)))
-        if score >= TITLE_FLOOR:
-            taken.add(f.path)
-            p.primary, p.rung, p.confidence = f.path, "title", round(score, 3)
+        taken.add(f.path)
+        ranked = top2.get(f.path) or [score]
+        p.primary, p.rung, p.confidence = f.path, "title", round(score, 3)
+        p.rival = round(ranked[1], 3) if len(ranked) > 1 else 0.0
 
     _attach_supplementary(pairings.values(), facts, taken)
     return list(pairings.values()), [f for f in facts if f.path not in taken]

@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..stems import derive_stem
-from .pair import Pairing, PdfFacts
+from .pair import TITLE_MARGIN, Pairing, PdfFacts
 from .parse import ExportItem
 
 READY, REVIEW, SKIP = "ready", "review", "skip"
@@ -84,6 +84,8 @@ class ItemAssessment:
             "supplementary": [str(p) for p in self.pairing.supplementary],
             "pair_rung": self.pairing.rung,
             "pair_confidence": self.pairing.confidence,
+            "pair_rival": self.pairing.rival,
+            "pair_margin": self.pairing.margin,
             "pair_candidates": [[str(p), s] for p, s in self.pairing.candidates],
             "chars_per_page": (round(self.chars_per_page, 1)
                                if self.chars_per_page is not None else None),
@@ -114,7 +116,7 @@ def build_ingest_args(item: ExportItem, pairing: Pairing) -> list[str]:
     return args
 
 
-def _find_preprint_pairs(items: list[ExportItem]) -> set[int]:
+def find_superseded(items: list[ExportItem]) -> set[int]:
     """ids() of records superseded by a published version of the same title.
 
     The highest-value gate in the whole feature, and invisible to DOI-level
@@ -148,7 +150,8 @@ def _find_preprint_pairs(items: list[ExportItem]) -> set[int]:
 def assess_all(items: list[ExportItem], pairings: list[Pairing],
                facts_by_path: dict[Path, PdfFacts], *,
                known_dois: dict[str, str] | None = None,
-               stem_exists=None) -> list[ItemAssessment]:
+               stem_exists=None,
+               superseded: set[int] | None = None) -> list[ItemAssessment]:
     """Run every gate over every record.
 
     `known_dois` maps a lowercase DOI to the wiki stem carrying it, and
@@ -157,7 +160,7 @@ def assess_all(items: list[ExportItem], pairings: list[Pairing],
     testable without a repo on disk.
     """
     known_dois = {k.lower(): v for k, v in (known_dois or {}).items()}
-    superseded = _find_preprint_pairs(items)
+    superseded = find_superseded(items) if superseded is None else superseded
     by_item = {id(p.item): p for p in pairings}
     out: list[ItemAssessment] = []
 
@@ -200,7 +203,12 @@ def assess_all(items: list[ExportItem], pairings: list[Pairing],
             a._flag(SKIP, "already-present")
 
         # --- the PDF ---
-        if pairing.primary is None:
+        # A superseded record is not being imported, so whether it has a file
+        # is not a finding. Reporting `no-pdf` for it would also inflate the
+        # fetch-list count with versions the user deliberately isn't importing.
+        if id(item) in superseded:
+            pass
+        elif pairing.primary is None:
             a._flag(SKIP, "no-pdf")
         else:
             if facts is None or facts.page_count is None:
@@ -210,8 +218,16 @@ def assess_all(items: list[ExportItem], pairings: list[Pairing],
                     a._flag(SKIP, "no-text-layer")
                 if facts.page_count == 1 and not item.has_usable_doi:
                     a._flag(REVIEW, "maybe-commentary")
-            if pairing.rung == "title" and pairing.confidence < 0.75:
-                a._flag(REVIEW, "weak-pairing")
+            if pairing.rung == "title":
+                if pairing.confidence < 0.75:
+                    a._flag(REVIEW, "weak-pairing")
+                elif pairing.margin < TITLE_MARGIN:
+                    # Confident-looking but not distinctive: another record
+                    # scored nearly as well against this same PDF, so the score
+                    # came from shared vocabulary rather than from identity.
+                    # On 313 DOI-confirmed pairs this gate is the difference
+                    # between 6 silently wrong pairings and none.
+                    a._flag(REVIEW, "ambiguous-pairing")
 
         a.ingest_args = build_ingest_args(item, pairing)
         out.append(a)
