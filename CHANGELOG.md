@@ -37,6 +37,21 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Reconcile no longer takes Semantic Scholar's year over the document's when S2 has
+  merged a preprint into the journal record. The existing `_s2_record_is_preprint`
+  guard needs S2 to *admit* it is describing a preprint by naming a preprint venue;
+  S2 also merges the other way, keeping the journal's venue and the preprint's year.
+  For minimap2's journal DOI `10.1093/bioinformatics/bty191` it returns `year=2017`
+  `venue='Bioinform.'` (its `ArXiv: 1708.01492` was posted 2017-08) while the PDF
+  prints "accepted on May 4, 2018" throughout — and since S2 outranks the LLM's
+  reading of the document by two places in the chain, a correctly-extracted 2018 was
+  discarded and the stem came out `li-2017-…`. When S2 and the document disagree,
+  Crossref now arbitrates: its record for a journal DOI is the journal's own, with no
+  preprint to merge. Fires only on disagreement, so the common path adds no request;
+  no Crossref answer leaves the prior behaviour intact. Does **not** cover the
+  distinct case of an arXiv-DOI preprint whose version year differs from S2's (arXiv
+  DOIs are not in Crossref) — CLAUDE.md's "version year on the document" rule still
+  governs there, by hand.
 - `prompts/chat-relay.md` no longer documents a lock that does not exist. It
   claimed the relay grabs `.llm-relay/lock` so parallel ingests serialize on
   chat-relay phases; there is no such lock (the only `flock`s guard `index.md` and

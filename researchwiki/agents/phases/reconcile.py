@@ -455,6 +455,30 @@ def reconcile_metadata(
             f"{s2_meta.get('venue')!r} for a non-preprint DOI — its record is the "
             f"preprint's; deferring to Crossref/PDF", tag="reconcile")
         s2_year = None
+    # The guard above needs S2 to *admit* it is describing a preprint by naming a
+    # preprint venue. S2 also merges the two versions the other way round: it keeps
+    # the journal's venue and the preprint's year, and then nothing above fires.
+    # Observed 2026-08-10 on minimap2 — for the journal DOI
+    # `10.1093/bioinformatics/bty191` S2 returns year=2017 venue='Bioinform.' with
+    # `ArXiv: 1708.01492` (posted 2017-08) among its externalIds, while the PDF
+    # prints "accepted on May 4, 2018" throughout. The reconcile prompt asks the
+    # LLM for "the paper's own year ... NOT a year from a citation", it answered
+    # 2018 correctly, and the chain below discarded it because S2 sits two places
+    # higher. Result: stem `li-2017-…` for a 2018 paper.
+    #
+    # So when S2 and the document disagree, ask Crossref to arbitrate rather than
+    # trusting either — Crossref's record for a journal DOI is the journal's own,
+    # with no preprint to merge. Only fires on genuine disagreement, so the common
+    # path adds no request, and responses are cached under `.crossref-cache/`.
+    # Fail-safe: no Crossref answer leaves S2's year standing, exactly as before.
+    if s2_year and doi and llm_meta["year"] and llm_meta["year"] != s2_year:
+        cr_year = (verify_doi_via_crossref(doi) or {}).get("year")
+        if cr_year and cr_year != s2_year:
+            log(f"year ✗ S2 says {s2_year} but the PDF says {llm_meta['year']} — "
+                f"Crossref says {cr_year} for {doi}; S2's record carries the "
+                f"preprint's year under the journal's venue, taking Crossref",
+                tag="reconcile")
+            s2_year = cr_year
     year = (
         year_override
         or s2_year
