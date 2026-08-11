@@ -268,6 +268,32 @@ def summarize(assessments: list[ItemAssessment]) -> dict:
     }
 
 
+def reference_doc_candidates(assessments: list[ItemAssessment]) -> list[dict]:
+    """Records skipped as non-papers, which are `wiki/references/` material.
+
+    Books, guidance documents, theses and reports are legitimate wiki pages —
+    they are just hand-written ones (CLAUDE.md → Page Types §3), not ingested.
+    Without this the run reports `not-a-paper: 20` and discards which twenty,
+    leaving the user a count and a dead end. Same reasoning as the missing-PDF
+    fetch list: don't throw away information the reader needs to act.
+
+    Only fires where the exporter populates `type`. Zotero does; ReadCube typed
+    531 of 532 records as journal articles, two actual books included — those
+    surface under `unresolvable` instead, which is a review item.
+    """
+    out = []
+    for a in assessments:
+        if "not-a-paper" not in a.reasons:
+            continue
+        out.append({
+            "title": a.item.title, "item_type": a.item.item_type,
+            "doi": a.item.doi, "year": a.item.year,
+            "authors": a.item.authors, "key": a.item.key,
+            "primary_pdf": str(a.pairing.primary) if a.pairing.primary else None,
+        })
+    return out
+
+
 def missing_pdf_fetch_list(assessments: list[ItemAssessment]) -> list[dict]:
     """Records that clear every gate except having a file.
 

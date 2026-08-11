@@ -43,6 +43,13 @@ researchwiki import verify --run <dir>                 # did it land?
 run directory under `.ingest/import-<stamp>/`. `apply` is the only phase that
 spends money or writes pages.
 
+**The manifest is the import's only durable record**, and `.ingest/` is
+gitignored scratch that users are told to clear. It holds which PDF paired to
+which record and why — the one artifact that can answer "was this page built
+from the right file?" months later. For anything beyond a trial run, put it
+somewhere that survives: `inspect --run-dir <path>`. Pages themselves carry no
+import-provenance field, deliberately — see the note at the end of this file.
+
 **Stage the import.** Reference libraries are aspirational — a large share is
 skimmed-once PDFs that will never be cited, and the wiki's unit of value is a
 graded, citable claim that costs real money and real review attention. Run
@@ -87,6 +94,7 @@ Read `report.md` before applying. Three things deserve attention:
 | `review` items | Adjudicate by hand — each names its candidate PDFs and scores. This is free and tells you whether pairing is trustworthy before you spend. |
 | `no-text-layer` | Scanned PDFs. OCR them or leave them out; importing one produces a page grounded on nothing. |
 | Missing PDFs | The fetch list, emitted as plain DOIs so it can be piped. |
+| Reference material | Books, guidance, theses the exporter typed as non-papers. They are real `wiki/references/` pages — hand-written, not ingested. Listed so a count doesn't become a dead end. |
 
 ## Step 4 — `apply`
 
@@ -200,3 +208,30 @@ DOI alone is a sufficient override, and reconcile resolves the rest.
   a page that can never ground a citation. They belong on the fetch list.
 - **Books and guidance documents.** Those are `wiki/references/` pages written
   by hand (CLAUDE.md → Page Types §3), not ingested.
+
+---
+
+## Why pages carry no import-provenance field
+
+A page produced by an import looks exactly like a page produced by a normal
+`agent ingest`, and that is on purpose.
+
+The tempting field is something like `imported_from: zotero`. It was considered
+and rejected for three reasons. The frontmatter contract is a
+breaking-change surface (`CHANGELOG.md`), so a field is cheap to add and
+expensive to remove. Nothing branches on it — no gate, no query, no workflow
+would read it. And the precedent is explicit: `tags:` was *removed* from paper
+pages because provenance-in-frontmatter proved to be dead weight, with
+`ingested-via-agent` the only tag on 334 of 391 pages.
+
+The question it would answer — *"the import may have mis-paired some PDFs;
+which pages are suspect?"* — is already answerable three ways, each more precise
+than a boolean flag:
+
+- `ingested_at` clusters tightly: one wave lands inside a few minutes.
+- The **manifest** records the exact PDF, pairing rung and confidence per record.
+- `ingest_iterations` in the state DB keeps `pdf_filename`, which for an import
+  is the exporter's own name (`Nature-2026.3.pdf`) rather than a normal drop.
+
+So the provenance exists; it just doesn't live in the page. Keep the manifest
+(`--run-dir`) and you keep the answer.

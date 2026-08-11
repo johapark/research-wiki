@@ -16,7 +16,9 @@ discards that paper's grading work.
 **Why `pdf` precedes `page`.** The reverse crash order leaves a wiki page with no
 PDF, which makes `grade` raise `FileNotFoundError` and stores a null `pdf_path`
 (`rebuild.py:115-121`). An orphan `papers/{stem}.pdf` is harmless — nothing scans
-it — and `--resume` completes the page.
+it — and re-running `apply --run <dir>` completes the page (the journal
+makes each step idempotent; there is no `--resume` flag on this command, unlike
+`agent ingest`).
 
 **The source corpus is never mutated.** Every rewrite happens on a copy under
 `run_dir/staged/`, and `_move_pdf` takes its `shutil.copy2` branch for external

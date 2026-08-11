@@ -207,8 +207,8 @@ def test_inspect_json_emits_the_documented_keys(wiki, capsys):
     assert code == 0
     payload = json.loads(out)
     assert set(payload) == {
-        "run_dir", "export_format", "summary",
-        "missing_pdf_fetch_list", "unclaimed_pdfs", "items",
+        "run_dir", "export_format", "summary", "missing_pdf_fetch_list",
+        "reference_doc_candidates", "unclaimed_pdfs", "items",
     }
     assert set(payload["summary"]) == {"total", "verdicts", "reasons"}
 
@@ -430,3 +430,19 @@ def test_a_superseded_record_is_not_reported_as_missing_a_pdf(wiki, capsys):
     assert sup and all("no-pdf" not in i["reasons"] for i in sup)
     fetch_dois = {f["doi"] for f in payload["missing_pdf_fetch_list"]}
     assert fetch_dois.isdisjoint({i["doi"] for i in sup})
+
+
+def test_report_lists_reference_material_rather_than_only_counting_it(wiki, capsys):
+    """CSL-JSON is the format where the typed gate actually fires, so it is the
+    one that can exercise this end to end."""
+    run(["inspect", str(CSL)], capsys)
+    report = (latest_run_dir(wiki) / "report.md").read_text()
+    assert "## Reference material, not papers" in report
+    assert "The Test Framework Manual" in report
+    assert "A blog post about testing" in report
+
+
+def test_reference_doc_candidates_is_in_the_json_payload(wiki, capsys):
+    _, out, _ = run(["inspect", str(CSL), "--json"], capsys)
+    refs = json.loads(out)["reference_doc_candidates"]
+    assert {r["item_type"] for r in refs} == {"book", "webpage"}

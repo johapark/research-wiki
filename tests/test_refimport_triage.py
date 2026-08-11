@@ -359,3 +359,32 @@ def test_weak_pairing_takes_precedence_over_ambiguity():
                 confidence=0.60, rival=0.59)
     a = only(assess_all([p.item], [p], {Path("/pdfs/a.pdf"): mk_facts()}))
     assert "weak-pairing" in a.reasons and "ambiguous-pairing" not in a.reasons
+
+
+# ---------- reference material ----------
+
+def test_typed_non_papers_are_listed_not_just_counted():
+    """A bare `not-a-paper: 20` discards which twenty and leaves the user a
+    dead end. Books and guidance are legitimate wiki/references/ pages — just
+    hand-written ones."""
+    from researchwiki.refimport.triage import reference_doc_candidates
+
+    book = mk_item(key="b", item_type="book", title="The Test Framework Manual")
+    paper = mk_item(key="p", title="A normal paper", doi="10.1234/p")
+    out = run([book, paper])
+    refs = reference_doc_candidates(out)
+    assert [r["key"] for r in refs] == ["b"]
+    assert refs[0]["item_type"] == "book"
+    assert refs[0]["title"] == "The Test Framework Manual"
+
+
+def test_an_untyped_book_does_not_reach_the_reference_list():
+    """ReadCube types books as journal articles, so they land in `unresolvable`
+    — a review item — rather than here. The list only claims what the exporter
+    actually asserted."""
+    from researchwiki.refimport.triage import reference_doc_candidates
+
+    a = only(run([mk_item(item_type="article", title="Packt.Django.5.By.Example.pdf",
+                          authors=[], year=None, doi=None)]))
+    assert "unresolvable" in a.reasons
+    assert reference_doc_candidates([a]) == []

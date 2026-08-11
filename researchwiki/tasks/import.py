@@ -149,6 +149,7 @@ def _run_inspect(args: argparse.Namespace) -> int:
         assess_all,
         find_superseded,
         missing_pdf_fetch_list,
+        reference_doc_candidates,
         summarize,
     )
     from ..wiki import find_stem_collision, read_wiki_dois
@@ -205,6 +206,7 @@ def _run_inspect(args: argparse.Namespace) -> int:
     )
     summary = summarize(assessments)
     fetch = missing_pdf_fetch_list(assessments)
+    ref_docs = reference_doc_candidates(assessments)
     records = [a.as_dict() for a in assessments]
 
     run = new_run_dir(_stamp(), base=Path(args.run_dir) if args.run_dir else None)
@@ -213,7 +215,8 @@ def _run_inspect(args: argparse.Namespace) -> int:
                        created_at=_iso(), summary=summary,
                        unclaimed_pdfs=[str(f.path) for f in unclaimed])
     run.report_path.write_text(
-        _render_report(assessments, summary, fetch, unclaimed, export, fmt, pdf_root),
+        _render_report(assessments, summary, fetch, ref_docs, unclaimed,
+                       export, fmt, pdf_root),
         encoding="utf-8")
 
     if args.as_json:
@@ -222,12 +225,13 @@ def _run_inspect(args: argparse.Namespace) -> int:
             "export_format": fmt,
             "summary": summary,
             "missing_pdf_fetch_list": fetch,
+            "reference_doc_candidates": ref_docs,
             "unclaimed_pdfs": [str(f.path) for f in unclaimed],
             "items": records,
         }, indent=2))
         return 0
 
-    _print_report(assessments, summary, fetch, unclaimed, run)
+    _print_report(assessments, summary, fetch, ref_docs, unclaimed, run)
     return 0
 
 
@@ -238,7 +242,7 @@ def _by_verdict(assessments) -> dict[str, list]:
     return out
 
 
-def _print_report(assessments, summary, fetch, unclaimed, run) -> None:
+def _print_report(assessments, summary, fetch, ref_docs, unclaimed, run) -> None:
     groups = _by_verdict(assessments)
     print(f"\n# import inspect — {summary['total']} record(s)\n")
     for verdict in ("ready", "review", "skip"):
@@ -263,6 +267,10 @@ def _print_report(assessments, summary, fetch, unclaimed, run) -> None:
     if fetch:
         print(f"\n  {len(fetch)} record(s) are importable except that no PDF was "
               f"found for them.\n  Their DOIs are listed in {run.report_path}.")
+    if ref_docs:
+        print(f"\n  {len(ref_docs)} record(s) are reference material (book / "
+              f"guidance / thesis),\n  not papers — listed in the report for a "
+              f"hand-written wiki/references/ page.")
     if unclaimed:
         print(f"\n  {len(unclaimed)} PDF(s) matched no record.")
 
@@ -276,7 +284,8 @@ def _print_report(assessments, summary, fetch, unclaimed, run) -> None:
         print("\nNothing is ready to import yet — see the reasons above.")
 
 
-def _render_report(assessments, summary, fetch, unclaimed, export, fmt, pdf_root) -> str:
+def _render_report(assessments, summary, fetch, ref_docs, unclaimed,
+                   export, fmt, pdf_root) -> str:
     """The durable version, including the full fetch list.
 
     The fetch list is the reason this file exists rather than only terminal
@@ -316,6 +325,18 @@ def _render_report(assessments, summary, fetch, unclaimed, export, fmt, pdf_root
         L += ["```", "", "<details><summary>with titles</summary>", ""]
         L += [f"- `{f['doi']}` — {f['title']}" for f in fetch]
         L += ["", "</details>"]
+
+    if ref_docs:
+        L += ["", "## Reference material, not papers", "",
+              "Typed by the exporter as a book, thesis, report or web page. These are "
+              "legitimate `wiki/references/` pages — hand-written, not ingested "
+              "(CLAUDE.md → Page Types §3). Listed here because a bare count would "
+              "leave you no way to find them.", ""]
+        for r in ref_docs:
+            L.append(f"- **{r['title'] or '(untitled)'}** — `{r['item_type']}`"
+                     + (f", DOI `{r['doi']}`" if r["doi"] else ""))
+            if r["primary_pdf"]:
+                L.append(f"  - PDF: `{r['primary_pdf']}`")
 
     if unclaimed:
         L += ["", "## PDFs matching no record", ""]
