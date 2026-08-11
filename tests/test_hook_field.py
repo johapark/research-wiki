@@ -360,9 +360,9 @@ def test_the_whole_frontmatter_block_parses_with_a_colon_venue():
     made every other field unreadable too."""
     page = _build_frontmatter(
         {"title": "T", "year": 2026, "venue": "Molecular Therapy: Nucleic Acids",
-         "doi": "10.1016/j.omtn.2022.05.036"},
-        "liu-2022-hdac", "other", BODY, short_name="X",
+         "doi": "10.1234/test.2022.0001"},
+        "ada-2022-a-paper", "other", BODY, short_name="X",
     )
     parsed = yaml.safe_load(page.split("---", 2)[1])
-    assert parsed["doi"] == "10.1016/j.omtn.2022.05.036"
+    assert parsed["doi"] == "10.1234/test.2022.0001"
     assert parsed["type"] == "paper"
