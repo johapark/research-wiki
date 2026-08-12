@@ -294,6 +294,51 @@ def test_apply_inserts_bullet_and_promotes_edge(isolated_wiki, monkeypatch):
     assert row["status"] == "promoted"
 
 
+def test_apply_commits_target_page_to_db(isolated_wiki, monkeypatch):
+    """Applying a promotion rewrites `generated_at:`, so the DB row must be
+    reconciled at write time rather than left for the next `db rebuild`.
+
+    Spied rather than asserted through `db verify`, because this fixture seeds
+    `papers` synthetically instead of walking the wiki — the call is what's
+    under test.
+    """
+    from researchwiki.claim_graph import promote as promote_mod
+
+    synth_path = isolated_wiki / "wiki" / "synthesis" / "combo.md"
+    synth_path.write_text(
+        "---\ntitle: combo\ntype: synthesis\ncategory: [ai]\n"
+        "referenced_papers:\n  - [[paper-a]]\n  - [[paper-b]]\n"
+        "generated_at: 2020-01-01\ntopic_seed: x\n---\n\n"
+        "## Approaches\n\n- overview\n"
+    )
+    _seed_state_db(
+        monkeypatch,
+        papers=[_mk_paper_row("combo", "synthesis",
+                              referenced_stems=["paper-a", "paper-b"],
+                              path_str=str(synth_path))],
+        claims=[
+            ("paper-a", "kc-aaaa1111", "A claims X = 40%."),
+            ("paper-b", "kc-bbbb2222", "B claims X = 60%."),
+        ],
+    )
+    edges = open_edges_db()
+    try:
+        _seed_edge(edges, "paper-a", "kc-aaaa1111", "paper-b", "kc-bbbb2222",
+                   "contradicts")
+    finally:
+        edges.close()
+
+    propose_promotions()
+
+    committed: list = []
+    monkeypatch.setattr(promote_mod, "commit_page", committed.append)
+
+    stats = apply_promotions()
+
+    assert stats.applied == 1
+    assert committed == [synth_path]
+
+
 def test_apply_leaves_synthesis_untouched_when_proposal_deleted(isolated_wiki, monkeypatch):
     """User rejects a proposal by deleting the file before --apply."""
     synth_path = isolated_wiki / "wiki" / "synthesis" / "combo.md"

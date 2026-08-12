@@ -41,7 +41,7 @@ from pathlib import Path
 from ...fsatomic import write_text_atomic
 from ...paths import wiki_dir
 from ...index import pages_semantic as semantic_pages
-from ...wiki import Page, extract_section, read_page
+from ...wiki import Page, commit_page, extract_section, read_page
 from .. import llm
 from ...log import log
 from . import evolve_ledger
@@ -836,4 +836,8 @@ def auto_apply_proposal(
     fm_new = _update_generated_at(fm_new, today_str)
 
     write_text_atomic(target_path, fm_new + rest_new)
+    # The patch rewrote `generated_at:` in the target's frontmatter, which the
+    # DB mirrors — reconcile now so `status` / `db query` don't read a stale row
+    # until the next `db rebuild`.
+    commit_page(target_path)
     return (True, "applied")
