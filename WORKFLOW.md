@@ -537,6 +537,78 @@ Full procedure, the reason→verdict table and failure modes:
 
 ---
 
+## Exporting the corpus as a bibliography
+
+`researchwiki export` is the inverse of the above, and the answer to "can I get my
+data out". One phase, zero tokens, no network, and byte-identical across runs — so
+a `.bib` can live in version control and diff meaningfully.
+
+```bash
+researchwiki export --format bibtex --category cgt > cgt.bib   # summary to stderr
+researchwiki export --format ris --out library.ris             # for Zotero
+researchwiki export --json                                     # the report only
+```
+
+### The citekey is the page stem, and that is the whole argument
+
+`\cite{bae-2014-cas-offinder-a-fast-and-versatile}` is long. It is also the only
+key that cannot change under you. A short key (`bae2014`) has to disambiguate
+collisions with a letter suffix — and on this corpus 47 pages collide across 19
+such keys — but that suffix is recomputed every run, so ingesting one more 2026
+Wang paper renumbers keys already sitting in a manuscript. A stem never changes,
+by the stability rule in CLAUDE.md § *Disambiguation & updates*. There is no
+`--citekey` flag, because shipping an unsafe alternative alongside the safe one
+just invites the failure.
+
+### Names are not parsed for BibTeX or RIS
+
+Both formats understand `First von Last` themselves, so the transformation is
+"replace the separator with ` and `" and nothing else. That is not laziness — it
+is what makes 58 nobiliary-particle names (`A. van der Graaf`) and 76 four-token
+names impossible to corrupt, since no boundary is ever guessed. Only CSL-JSON
+wants structured `family`/`given`, and there anything ambiguous becomes a CSL
+`literal`, which is the format's own construct for a name with no given/family
+structure.
+
+### Gaps are downgraded and reported, never invented
+
+| Corpus reality | What the export does |
+|---|---|
+| 53 papers with no `venue:` | `@misc`, not `@article` with an empty `journal`. An `@article` missing `journal` makes `bibtex` merely *warn* — surfacing weeks later in a LaTeX log rather than in the bibliography and the report. |
+| 3 furniture venues (`Journal of LaTeX Class Files`, `preprint`) | suppressed. The one place this command could print a falsehood. |
+| 10 entries with no DOI | emitted anyway; no format requires one. `no_doi_reason` becomes a `note`, because it explains a citation gap a reader of the `.bib` wants. |
+| 8 DOIs recorded as `https://doi.org/…` | normalized through the importer's own `clean_doi`, so they are neither emitted as URLs nor dropped by a stricter validator. |
+| `document_id: "Nature 654:324-326"` | passed to `note` verbatim. It *contains* a volume and page range, but the field is free text and FDA guidance numbers use it differently, so mining it is judgement. |
+| 248 of 421 titles containing `CRISPR-Cas9`, `DNA`, `Cas9` | brace-protected per word, or `plain.bst` emits `Crispr-cas9`. |
+
+Synthesis, idea and concept pages are **excluded, with no flag to include them.**
+They have no DOI, venue or year of record, so an entry for one would assert a
+publication that does not exist once pasted into a manuscript — a
+citation-integrity problem rather than a formatting one. Sharing analysis is
+[`prompts/share-page.md`](./prompts/share-page.md), which produces a document for
+a human reader instead.
+
+### It round-trips
+
+The strongest available check, and it is cheap because the importer already
+exists: 421 records, all three formats, **zero mismatches** on title, authors,
+DOI, venue or year after parsing back through `refimport`. `import preflight` on
+the emitted `.bib` reports the same counts the export did.
+
+One documented loss: the 149 `@misc` entries come back as `preprint` (96, via
+`eprint`) and `other` (53, the venue-less papers) rather than as `article`. That
+information genuinely is not in the corpus, so the asymmetry is asserted by a test
+rather than hidden.
+
+Output is UTF-8 with no LaTeX macro conversion — 86 author fields carry non-ASCII,
+and a macro table would have to be perfect or it corrupts names. A pdfLaTeX-only
+pipeline with bare `bibtex` needs `\usepackage[utf8]{inputenc}`, or biber.
+
+Full procedure and how to act on the report:
+[`prompts/export-bibliography.md`](./prompts/export-bibliography.md).
+
+---
+
 ## Querying the wiki
 
 Three retrieval modes via `researchwiki search`:
@@ -745,6 +817,11 @@ researchwiki/
 │   ├── triage.py           #   The gates → ready/review/skip + reason strings
 │   ├── apply.py            #   Plan a wave, copy into inbox/, hand to _ingest_batch
 │   └── manifest.py         #   Run dir + manifest.json (frozen pairing/verdicts/argv)
+├── refexport.py            # The inverse of refimport/: corpus → BibTeX/RIS/CSL-JSON.
+│                           #   One module, not a package — escaping, one type table,
+│                           #   one wiki walk, three renderers. Zero tokens.
+├── names.py                # Author-name parsing, shared by stems (which surname
+│                           #   goes in a stem) and refexport (family/given for CSL)
 └── pdf/                    # pypdfium2-backed PDF text/structure extraction
 ```
 
@@ -1213,6 +1290,7 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `backfill <hook\|keywords\|doi>` | One-shot: populate the named field on existing pages (hook + keywords via LLM from page prose; doi via Semantic Scholar → Crossref with a sanity check). |
 | `migrate <preflight\|inspect\|apply\|verify>` | Bulk-import one-paper-per-PDF markdown from an older release or a simpler LLM wiki. Zero tokens; normalizes H2 headings and frontmatter keys before committing so claim extraction works. See `prompts/migration-backfill.md`. |
 | `import <preflight\|inspect\|apply\|verify>` | Bulk-import a reference-manager library from its BibTeX/RIS/CSL-JSON export, which supplies each paper's DOI/title/authors/year instead of rediscovering them. Only `apply` spends tokens or writes pages; `<pdf-root>` is optional, and a metadata-only run still returns a fetch list of DOIs. Stage it with `--limit N`. See `prompts/import-reference-manager.md`. |
+| `export [--format bibtex\|ris\|csl-json]` | The inverse: emit the corpus as a bibliography for a reference manager or a manuscript. Zero tokens, no network, byte-identical across runs. Citekey is the page stem. Only page types describing someone else's publication are emitted — a synthesis page would assert a publication that does not exist. `--json` gives the report, which doubles as a page-defect to-do list. See `prompts/export-bibliography.md`. |
 | `synthesize --title [...] [--papers]` | Scaffold `wiki/synthesis/{slug}.md`. Idea/reference pages are manual. |
 | `candidates <concepts\|synthesis>` | Surface opportunity signals: un-scaffolded concept hubs (concepts) or uncovered paper clusters warranting a synthesis page (synthesis). |
 | `reindex [--no-semantic]` | Rebuild Tantivy + semantic index from `wiki/`. |
@@ -1253,6 +1331,8 @@ so an Obsidian vault opened there can browse it).
 | Batch ingest crashed mid-run | `researchwiki agent ingest --resume .ingest/batch-<ts>/` |
 | Edited a wiki page manually | `researchwiki db rebuild && researchwiki reindex` |
 | Have paper pages from an older/simpler wiki | `researchwiki migrate preflight <src>`, then `inspect` (see *Migrating an existing corpus*) |
+| Want the library in Zotero/Paperpile | `researchwiki export --format ris --out library.ris` |
+| Writing a manuscript from wiki papers | `researchwiki export --format bibtex --out refs.bib`, then `\cite{<page-stem>}` |
 | A paper page yields no citable claims | `researchwiki lint --json \| jq .zero_claim_papers` — almost always non-canonical H2 headings |
 | Want to find synthesis pages affected by a recent paper | `researchwiki evolve <category/stem>` |
 | Want to know what to ingest next | `researchwiki audit --json` |

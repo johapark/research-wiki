@@ -11,6 +11,6 @@ stdlib on some paths).
 """
 
 from .latex import delatex
-from .parse import ExportItem, parse_export, sniff_format
+from .parse import ExportItem, clean_doi, parse_export, sniff_format
 
-__all__ = ["ExportItem", "parse_export", "sniff_format", "delatex"]
+__all__ = ["ExportItem", "clean_doi", "parse_export", "sniff_format", "delatex"]

@@ -1,0 +1,203 @@
+"""Author-name logic, in one place.
+
+Three callers need to answer questions about a person's name and they used to
+answer them separately: `stems.first_author_surname` (which surname goes in a
+stem), `refexport` (which part is the family name, for CSL-JSON), and
+`metadata_sanity.normalise_author` (do two spellings denote the same person).
+The third is a *comparison* folder and stays where it is — it asks a different
+question. The first two share a parser, and this is it.
+
+Nothing here imports `stems`, deliberately: `stems` imports *this*, and the
+particle walk needs only the particle set, so the dependency stays
+one-directional. `strip_diacritics` therefore stays in `stems`, applied by its
+own wrapper before the walk. Particle comparison is ASCII-only
+(`token.lower().strip(".")`), which is safe because every particle *is* ASCII —
+a folded and an unfolded `van` are the same string.
+
+**The output convention differs by caller and that is the point.** This module
+returns names in their **original spelling and case** (`van den Berg`), because
+CSL-JSON has to show a reader the name as printed. Slugging to `van-den-berg` is
+stem derivation's business and stays in `stems`, its only consumer that wants it.
+"""
+
+from __future__ import annotations
+
+import re
+
+#: Tokens that mark a byline as a consortium rather than a person, so it is never
+#: split into given/family. `1000 Genomes Project` has no surname.
+CONSORTIUM_TOKENS = frozenset({
+    "project", "consortium", "consortia", "network", "initiative",
+    "collaboration", "collaborative", "group", "team", "alliance", "program",
+    "programme",
+})
+
+#: Nobiliary particles (tussenvoegsels) that belong to the surname rather than
+#: the given name, so CLAUDE.md's "surname as printed on p.1" keeps them:
+#: `S. De Winter` → `De Winter`, not `Winter`. Matches the corpus precedent set
+#: by `van-kempen-2024-fast-and-accurate-protein-structure`.
+SURNAME_PARTICLES = frozenset({
+    "de", "van", "von", "del", "della", "di", "da", "du", "la", "le",
+    "den", "der", "ten", "ter", "dos", "das", "bin", "ibn",
+})
+
+#: `et al.` / `et al` / `and others`, with or without a preceding comma.
+_ET_AL_RE = re.compile(r"(?i)[,;]?\s*\b(?:et\s+al\.?|and\s+others)\s*\.?\s*$")
+
+#: Above this many whitespace tokens, a single *name* is a sentence — which means
+#: the delimiter was not acting as one and the field is prose.
+#:
+#: This is the only prose signal, deliberately. Punctuation looked like a better
+#: one and is not: `Xuefei (Julie) Wang` is a real author in this corpus (a
+#: parenthesized preferred name) and shares its shape exactly with
+#: `Anthropic (enterprise team)`, so a parenthesis test either rejects a real
+#: 42-author byline or accepts an organisation — it cannot tell them apart. A
+#: period followed by a lowercase word is worse still: four real pages carry
+#: `A. van der Graaf`-shaped names where that word is a nobiliary particle.
+#:
+#: Length, by contrast, is decisive on the case that actually matters. The one
+#: genuinely harmful byline — `Laura Luebbert (Anthropic Science). Based on
+#: research by Ferdous Nasri, …` — comma-splits into a first part of ten tokens,
+#: while no real name here exceeds five.
+_MAX_NAME_TOKENS = 6
+
+
+def strip_et_al(raw: str) -> str:
+    """Drop a trailing `et al.` / `and others`.
+
+    An abbreviated byline means names are *missing from the source*, which is
+    worth reporting rather than absorbing. Without stripping it, the surname walk
+    below returns `al`, which matches no real author — four pages recorded that
+    way were reported as wrong-DOI mismatches by `backfill doi --verify` when the
+    DOIs were fine.
+    """
+    return _ET_AL_RE.sub("", (raw or "").strip()).strip().rstrip(",;")
+
+
+def is_consortium(raw: str) -> bool:
+    """Whether a byline names an organisation rather than a person."""
+    tokens = re.findall(r"[a-z0-9]+", (raw or "").lower())
+    return any(tok in CONSORTIUM_TOKENS for tok in tokens)
+
+
+def surname_span(tokens: list[str]) -> int:
+    """Index in `tokens` where the surname begins.
+
+    Walks left across nobiliary particles: `S. De Winter` → 1, `L. Van Den Berg`
+    → 1. The `i > 1` floor never consumes the first token, which is what keeps a
+    two-token byline safe — `Bin Liu` and `Di Liu` are given name + surname, not
+    particle + surname, and `bin`/`di` are in the particle set for Arabic and
+    Italian names.
+    """
+    if not tokens:
+        return 0
+    i = len(tokens) - 1
+    while i > 1 and tokens[i - 1].lower().strip(".") in SURNAME_PARTICLES:
+        i -= 1
+    return i
+
+
+#: A given-name initial: `A`, `A.`, `Y.`
+_INITIAL_RE = re.compile(r"^\w\.?$")
+
+
+def looks_inverted(raw: str) -> bool:
+    """Whether `raw` is one name written `Family, Given`.
+
+    A comma means two different things and reading it wrong is expensive in both
+    directions. In a bibliographic export it separates `Family, Given`; in this
+    wiki's own `authors:` field it separates *authors*. So
+    `van der Graaf, A.` is one person and `Akari Asai, Zeqiu Wu` is two, and no
+    amount of looking at the comma alone distinguishes them.
+
+    Two signals together do, and both are required:
+
+      1. the part *before* the comma is surname-shaped — every token but the last
+         is a nobiliary particle, so `van der Graaf` qualifies and `Akari Asai`
+         does not;
+      2. the part *after* is a given-name run — a single token, or all initials.
+
+    Measured on the real corpus: requiring only (1) changes 349 first-author
+    surnames, because a byline's leading given name is frequently a particle
+    lookalike (`Di Liu, Bin Wang`) or an initial. Requiring both changes none
+    except the case this exists for.
+    """
+    before, sep, after = raw.partition(",")
+    if not sep:
+        return False
+    head, tail = before.split(), after.split()
+    if not head or not tail:
+        return False
+    if any(t.lower().strip(".") not in SURNAME_PARTICLES for t in head[:-1]):
+        return False
+    return len(tail) == 1 or all(_INITIAL_RE.match(t) for t in tail)
+
+
+def split_author_field(value) -> list[str]:
+    """One `authors:` frontmatter value → one string per author.
+
+    Delimiter is chosen, not assumed. A YAML list is already split. A `;` is
+    unambiguous and three pages use it. Otherwise `,`, which 418 pages use.
+
+    Returns `[]` for a prose byline rather than guessing where the names are —
+    the caller reports it and emits no author field, which every entry type that
+    can carry a prose byline (`@techreport`, `@misc`) permits.
+
+    The token ceiling is applied **per name, after splitting**, not to the field.
+    A five-author list is a dozen whitespace tokens and perfectly ordinary; what
+    is not ordinary is a single *part* running to sentence length, which means the
+    delimiter wasn't acting as one.
+    """
+    if isinstance(value, list):
+        parts = [str(v) for v in value]
+    else:
+        raw = strip_et_al(str(value or ""))
+        if not raw:
+            return []
+        parts = raw.split(";") if ";" in raw else raw.split(",")
+
+    parts = [p for p in (part.strip() for part in parts) if p]
+    if any(len(p.split()) > _MAX_NAME_TOKENS for p in parts):
+        return []
+    return parts
+
+
+def as_family_given(raw: str) -> tuple[str, str] | None:
+    """`("Berg", "A. van den")`-style split, or None when it is not safe to split.
+
+    None is the **correct answer**, not a failure path: CSL-JSON's own `literal`
+    field exists for names that have no given/family structure, and emitting one
+    is faithful where inventing a split would not be. Only CSL needs this at all
+    — BibTeX and RIS parse `First von Last` themselves, so they get the name
+    unmodified and cannot be corrupted by a wrong guess here.
+
+    Declines to split when: the byline is a consortium, it is a single token
+    (`DeepSeek-AI`), it holds a comma that is not an inversion, or it has more
+    than four tokens with no particle to anchor the boundary — the
+    `Given Given Family` vs `Given Family Family` ambiguity that this corpus
+    carries no marker for.
+    """
+    raw = (raw or "").strip()
+    if not raw or is_consortium(raw):
+        return None
+
+    if "," in raw:
+        # `looks_inverted`, not a bare comma test — the same single rule
+        # `stems.first_author_surname` uses, so the two cannot disagree about
+        # whether a comma inverts a name or separates two of them. A comma that
+        # is not an inversion means this is an author *list*, i.e. not the single
+        # name this function is documented to take, so it declines rather than
+        # inventing a boundary inside it.
+        if not looks_inverted(raw):
+            return None
+        family, _, given = raw.partition(",")
+        family, given = family.strip(), given.strip()
+        return (family, given) if family else None
+
+    tokens = raw.split()
+    if len(tokens) < 2:
+        return None
+    i = surname_span(tokens)
+    if len(tokens) > 4 and i == len(tokens) - 1:
+        return None
+    return " ".join(tokens[i:]), " ".join(tokens[:i])

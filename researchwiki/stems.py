@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from . import names
+
 STOP_WORDS = {
     "a", "an", "the", "of", "for", "with", "and", "or",
     "in", "on", "at", "to", "from", "by", "as",
@@ -97,33 +99,8 @@ def slugify_phrase(s: str) -> str:
     return re.sub(r"-+", "-", s).strip("-")
 
 
-# Tokens that mark a consortium/collaboration byline rather than a personal
-# name. Per CLAUDE.md's issuer rules, these get slugged whole
-# (`1000 Genomes Project` → `1000-genomes-project`) instead of reduced to a
-# trailing token (`project`).
-_CONSORTIUM_TOKENS = frozenset({
-    "project", "consortium", "consortia", "network", "initiative",
-    "collaboration", "collaborative", "group", "alliance", "program",
-    "programme",
-})
-
-
-# Nobiliary particles (tussenvoegsels) that belong to the surname rather than
-# the given name, so CLAUDE.md's "surname as printed on p.1" keeps them:
-# `S. De Winter` → `de-winter`, not `winter`. Matches the corpus precedent set
-# by `van-kempen-2024-fast-and-accurate-protein-structure`.
-_SURNAME_PARTICLES = frozenset({
-    "de", "van", "von", "del", "della", "di", "da", "du", "la", "le",
-    "den", "der", "ten", "ter", "dos", "das", "bin", "ibn",
-})
-
-
-# `et al.` / `et al` / `and others`, with or without a preceding comma.
-_ET_AL_RE = re.compile(r"(?i)[,;]?\s*\b(?:et\s+al\.?|and\s+others)\s*\.?\s*$")
-
-
 def first_author_surname(authors: list[str]) -> str:
-    """Extract the last name from the first author string.
+    """Extract the last name from the first author string, slugged for a stem.
 
     Handles three shapes:
       - "First M. Last" / "F. M. Last" → `last`
@@ -132,44 +109,44 @@ def first_author_surname(authors: list[str]) -> str:
       - consortium bylines ("1000 Genomes Project") → the whole name slugged,
         per CLAUDE.md's consortium rule, rather than a trailing token
         (`project`).
+
+    The *parsing* lives in `names`, shared with the bibliographic exporter, which
+    needs the same boundary for CSL-JSON's `family`/`given`. What stays here is
+    the part only a stem wants: fold to ASCII first (so `Ré` → `re`), then slug
+    the surname to `[a-z0-9-]` with no edge or doubled separator.
     """
     if not authors:
         return "unknown"
-    raw = strip_diacritics(authors[0]).strip()
-    if not raw:
-        return "unknown"
-
-    # `Guohui Chuai et al.` — an abbreviated byline, not a name. Without this the
-    # trailing-token walk below returns `al`, which then matches no real author:
-    # four pages recorded this way were reported as wrong-DOI mismatches by
-    # `backfill doi --verify` when the DOIs were fine. Strip the abbreviation and
-    # the first author is still right there.
-    raw = _ET_AL_RE.sub("", raw).strip().rstrip(",;")
+    # Fold before parsing, so the walk sees ASCII and the slug below has nothing
+    # left to strip. `names.surname_span` compares against ASCII particles, which
+    # is why folding first is safe rather than merely convenient.
+    raw = names.strip_et_al(strip_diacritics(authors[0]).strip())
     if not raw:
         return "unknown"
 
     # Consortium byline: slug the whole name (keeps hyphenated surnames working
     # since those don't carry a consortium token).
-    if any(tok in _CONSORTIUM_TOKENS for tok in re.findall(r"[a-z0-9]+", raw.lower())):
-        slug = slugify_phrase(raw)
-        return slug or "unknown"
+    if names.is_consortium(raw):
+        return slugify_phrase(raw) or "unknown"
 
-    # "Last, First" — the surname is the part before the first comma.
-    if "," in raw:
-        raw = raw.split(",", 1)[0].strip()
-
-    parts = raw.split()
+    # `Family, Given` — everything before the comma is *already* the surname, so
+    # the particle walk must not run on it. Its floor exists to protect a leading
+    # given name and there isn't one here: applied to `van der Graaf, A.` it
+    # stopped at the floor and returned `der-graaf`, dropping the `van`.
+    #
+    # Gated on `names.looks_inverted` rather than on the presence of a comma,
+    # because a comma is also how this wiki's `authors:` field separates authors.
+    # Callers are supposed to split first, but treating every comma as an
+    # inversion changes 349 first-author surnames on the real corpus the moment
+    # one doesn't — a silent wrong filename, which is the expensive direction.
+    if names.looks_inverted(raw):
+        parts, start = raw.split(",", 1)[0].split(), 0
+    else:
+        parts = raw.split(",", 1)[0].split() if "," in raw else raw.split()
+        start = names.surname_span(parts)
     if not parts:
         return "unknown"
-    # Walk left across nobiliary particles: `S. De Winter` → de-winter,
-    # `L. Van Den Berg` → van-den-berg. The `i > 1` floor never consumes the
-    # first token, which is what keeps a two-token byline safe — `Bin Liu` and
-    # `Di Liu` are given name + surname, not particle + surname, and `bin`/`di`
-    # are in the particle set for Arabic and Italian names.
-    i = len(parts) - 1
-    while i > 1 and parts[i - 1].lower().strip(".") in _SURNAME_PARTICLES:
-        i -= 1
-    surname = "-".join(parts[i:]).lower()
+    surname = "-".join(parts[start:]).lower()
     surname = re.sub(r"[^a-z0-9-]", "", surname)
     # Same invariant the title part holds: a stem component never carries an
     # edge or doubled separator. Rare here (a byline ending in a stray dash),

@@ -133,11 +133,16 @@ class ExportItem:
 
 # ---------- shared field normalization ----------
 
-def _clean_doi(value: str | None) -> str | None:
+def clean_doi(value: str | None) -> str | None:
     """Strip the URL wrappers exporters put around a DOI, lowercase, validate.
 
     Returns None for anything that is not a registered-shape DOI, so a caller
     can treat "has a DOI" as "has a DOI worth passing to `--doi`".
+
+    Public because the wrappers arrive from both directions. Eight pages in this
+    corpus record `doi: https://doi.org/10.64898/…`, so a bibliographic exporter
+    that validated against `DOI_RE` on its own would drop all eight *and* emit a
+    URL where BibTeX wants a bare DOI. One normalizer, both directions.
     """
     if not value:
         return None
@@ -258,7 +263,7 @@ def _ris_record_to_item(rec: dict[str, list[str]], index: int) -> ExportItem:
         authors=[a for raw in rec.get("AU", []) or rec.get("A1", [])
                  for a in _split_authors(raw)],
         year=_clean_year(one("PY", "Y1", "DA")),
-        doi=_clean_doi(one("DO", "DI")),
+        doi=clean_doi(one("DO", "DI")),
         venue=one("T2", "JO", "JF"),
         declared_files=[v for t in _RIS_FILE_TAGS for v in rec.get(t, [])
                         if v.strip() and not v.strip().lower().startswith("http")],
@@ -370,7 +375,7 @@ def _bibtex_fields_to_item(kind: str, key: str, body: str, index: int) -> Export
         title=delatex(f.get("title")) or None,
         authors=_split_authors(f["author"]) if f.get("author") else [],
         year=_clean_year(f.get("year") or f.get("date")),
-        doi=_clean_doi(f.get("doi")),
+        doi=clean_doi(f.get("doi")),
         venue=delatex(f.get("journal") or f.get("booktitle") or "") or None,
         declared_files=_bibtex_files(f["file"]) if f.get("file") else [],
         raw=f,
@@ -425,7 +430,7 @@ def parse_csl_json(text: str) -> list[ExportItem]:
             title=(rec.get("title") or None),
             authors=authors,
             year=year,
-            doi=_clean_doi(rec.get("DOI")),
+            doi=clean_doi(rec.get("DOI")),
             venue=rec.get("container-title") or None,
             raw=rec,
         )
