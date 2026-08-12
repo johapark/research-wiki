@@ -28,7 +28,7 @@ import re
 #: split into given/family. `1000 Genomes Project` has no surname.
 CONSORTIUM_TOKENS = frozenset({
     "project", "consortium", "consortia", "network", "initiative",
-    "collaboration", "collaborative", "group", "alliance", "program",
+    "collaboration", "collaborative", "group", "team", "alliance", "program",
     "programme",
 })
 
@@ -44,16 +44,21 @@ SURNAME_PARTICLES = frozenset({
 #: `et al.` / `et al` / `and others`, with or without a preceding comma.
 _ET_AL_RE = re.compile(r"(?i)[,;]?\s*\b(?:et\s+al\.?|and\s+others)\s*\.?\s*$")
 
-#: A byline that is prose, not a name list. Three real pages carry one, e.g.
-#: `Laura Luebbert (Anthropic Science). Based on research by Ferdous Nasri, …`,
-#: which comma-splits into ten fake authors including `Based on research by
-#: Ferdous Nasri`. Parentheses, a colon and a slash never appear in a personal
-#: name in this corpus; a period followed by a lowercase word deliberately is
-#: *not* a signal, because four real pages carry `A. van der Graaf`-shaped names
-#: where that lowercase word is a nobiliary particle.
-_PROSE_RE = re.compile(r"[()/:]")
-
-#: Above this many whitespace tokens, a single "name" is a sentence.
+#: Above this many whitespace tokens, a single *name* is a sentence — which means
+#: the delimiter was not acting as one and the field is prose.
+#:
+#: This is the only prose signal, deliberately. Punctuation looked like a better
+#: one and is not: `Xuefei (Julie) Wang` is a real author in this corpus (a
+#: parenthesized preferred name) and shares its shape exactly with
+#: `Anthropic (enterprise team)`, so a parenthesis test either rejects a real
+#: 42-author byline or accepts an organisation — it cannot tell them apart. A
+#: period followed by a lowercase word is worse still: four real pages carry
+#: `A. van der Graaf`-shaped names where that word is a nobiliary particle.
+#:
+#: Length, by contrast, is decisive on the case that actually matters. The one
+#: genuinely harmful byline — `Laura Luebbert (Anthropic Science). Based on
+#: research by Ferdous Nasri, …` — comma-splits into a first part of ten tokens,
+#: while no real name here exceeds five.
 _MAX_NAME_TOKENS = 6
 
 
@@ -73,14 +78,6 @@ def is_consortium(raw: str) -> bool:
     """Whether a byline names an organisation rather than a person."""
     tokens = re.findall(r"[a-z0-9]+", (raw or "").lower())
     return any(tok in CONSORTIUM_TOKENS for tok in tokens)
-
-
-def looks_like_prose(raw: str) -> bool:
-    """Whether a byline is a sentence rather than a name (or name list)."""
-    raw = (raw or "").strip()
-    if not raw:
-        return False
-    return bool(_PROSE_RE.search(raw)) or len(raw.split()) > _MAX_NAME_TOKENS
 
 
 def surname_span(tokens: list[str]) -> int:
@@ -109,6 +106,11 @@ def split_author_field(value) -> list[str]:
     Returns `[]` for a prose byline rather than guessing where the names are —
     the caller reports it and emits no author field, which every entry type that
     can carry a prose byline (`@techreport`, `@misc`) permits.
+
+    The token ceiling is applied **per name, after splitting**, not to the field.
+    A five-author list is a dozen whitespace tokens and perfectly ordinary; what
+    is not ordinary is a single *part* running to sentence length, which means the
+    delimiter wasn't acting as one.
     """
     if isinstance(value, list):
         parts = [str(v) for v in value]
@@ -116,10 +118,12 @@ def split_author_field(value) -> list[str]:
         raw = strip_et_al(str(value or ""))
         if not raw:
             return []
-        if looks_like_prose(raw):
-            return []
         parts = raw.split(";") if ";" in raw else raw.split(",")
-    return [p for p in (part.strip() for part in parts) if p]
+
+    parts = [p for p in (part.strip() for part in parts) if p]
+    if any(len(p.split()) > _MAX_NAME_TOKENS for p in parts):
+        return []
+    return parts
 
 
 def as_family_given(raw: str) -> tuple[str, str] | None:

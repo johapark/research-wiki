@@ -17,7 +17,6 @@ import pytest
 from researchwiki.names import (
     as_family_given,
     is_consortium,
-    looks_like_prose,
     split_author_field,
     strip_et_al,
     surname_span,
@@ -89,15 +88,23 @@ def test_a_prose_byline_yields_no_authors():
     prose = ("Laura Luebbert (Anthropic Science). Based on research by "
              "Ferdous Nasri, Sarah Gurev, Patrick Varilly")
     assert split_author_field(prose) == []
-    assert looks_like_prose(prose)
 
 
-@pytest.mark.parametrize("byline", [
-    "Anthropic (enterprise team)",
-    "Brianna (Anthropic discovery team)",
-])
-def test_parenthetical_bylines_are_prose(byline):
-    assert looks_like_prose(byline)
+def test_a_parenthesized_preferred_name_is_kept():
+    """`Xuefei (Julie) Wang` is a real author here, inside a 42-name byline. A
+    parenthesis test would have thrown away all 42 — which is why length is the
+    only prose signal."""
+    field = "Eser Aygün, Xuefei (Julie) Wang, Lai Wei"
+    assert split_author_field(field) == \
+        ["Eser Aygün", "Xuefei (Julie) Wang", "Lai Wei"]
+
+
+def test_a_long_author_list_is_ordinary():
+    """The ceiling applies per name, not to the whole field. Applied to the field
+    it rejected ~300 real pages, because five authors is already a dozen
+    whitespace tokens."""
+    field = ", ".join(f"Given{i} Family{i}" for i in range(42))
+    assert len(split_author_field(field)) == 42
 
 
 @pytest.mark.parametrize("byline", [
@@ -110,7 +117,6 @@ def test_particle_names_are_not_mistaken_for_prose(byline):
     """The tempting rule — 'a period followed by a lowercase word' — false-
     positives on four real pages where that lowercase word is a nobiliary
     particle. Measured, hence this test."""
-    assert not looks_like_prose(byline)
     assert split_author_field(byline) == [byline]
 
 
@@ -133,6 +139,7 @@ def test_family_given_split(raw, expected):
     "DeepSeek-AI",                        # corporate, single token
     "1000 Genomes Project Consortium",    # consortium
     "The ENCODE Project Consortium",
+    "Anthropic (enterprise team)",        # `team` marks an organisation
     "Abner Fernandes da Silva Junior X",  # >4 tokens, no particle to anchor on
 ])
 def test_declines_to_split_when_it_cannot_be_sure(raw):
