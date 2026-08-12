@@ -1,6 +1,8 @@
-# Export a wiki page as a shareable artifact
+# Share a wiki page as a standalone document
 
-**Trigger:** user asks to "share", "export", "make sharable" a synthesis/idea page, or to send a wiki page to someone outside this repo. Output goes to `share/<slug>.md` (gitignored).
+**Trigger:** user asks to "share", "make shareable", or "send" a synthesis/idea page to someone outside this repo. Output goes to `share/<slug>.md` (gitignored).
+
+**Not this file:** `researchwiki export` emits the *corpus* as a bibliography (BibTeX/RIS/CSL-JSON) for a reference manager — see [`prompts/export-bibliography.md`](./export-bibliography.md). The word "export" belongs to that command; this one produces a document for a human reader, which is why it is "share".
 
 The wiki's `[[category/stem]]` wikilinks, framework-specific YAML fields (`type`, `category`, `referenced_papers`, `topic_seed`, `author_model`), and self-referential phrasings ("in the wiki", "this synthesis page") are private context. A shareable strips all of it and replaces wikilinks with full academic citations — the result should render correctly in any standard markdown viewer (GitHub, Obsidian, pandoc) with no internal dependencies.
 
@@ -67,6 +69,6 @@ The wiki's `[[category/stem]]` wikilinks, framework-specific YAML fields (`type`
 
 ## Notes
 
-- A shareable is a one-way export. Future edits to the source wiki page do not propagate; if the wiki page changes materially, regenerate the share file rather than hand-patching it.
+- A shareable is one-way. Future edits to the source wiki page do not propagate; if the wiki page changes materially, regenerate the share file rather than hand-patching it.
 - If the source page cites a paper that lacks a DOI (e.g., conference paper, unpublished report), use the arXiv/bioRxiv/medRxiv URL or a `(Author, Year, in preparation)` placeholder — but flag the gap to the user.
-- Avoid disclosing repo or framework identity in the shareable. The reader should see a self-contained academic survey, not a personal-knowledge-base export.
+- Avoid disclosing repo or framework identity in the shareable. The reader should see a self-contained academic survey, not a dump from a personal knowledge base.

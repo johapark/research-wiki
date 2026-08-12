@@ -81,6 +81,69 @@ the reasoning behind any line below.
   checkpoint only knows about files — a record can finish its ingest and still sit
   in `.agent-output/`, which is finished work awaiting review, not a failure.
 
+- `researchwiki export` — the corpus as BibTeX / RIS / CSL-JSON, which is the
+  inverse of `import` and the answer to "can I get my data out". Zero tokens, no
+  network, and byte-identical across runs, so a `.bib` can live in version control
+  and diff meaningfully. One phase; nothing is written without `--out`.
+
+  **The citekey is the page stem.** Long, and the only key that cannot change
+  under you: a short key has to disambiguate collisions with a letter suffix — 47
+  pages collide across 19 naive `surname+year` keys on the real corpus — and that
+  suffix is recomputed every run, so ingesting one more paper by the same author
+  in the same year renumbers keys already sitting in a manuscript. There is no
+  `--citekey` flag, because shipping an unsafe alternative beside the safe one
+  invites exactly that failure.
+
+  **Names are not parsed for BibTeX or RIS**, which both understand
+  `First von Last` themselves. That is what makes 58 nobiliary-particle names
+  (`A. van der Graaf`) and 76 four-token names impossible to corrupt: no boundary
+  is ever guessed. Only CSL-JSON wants structured `family`/`given`, and there
+  anything ambiguous becomes a CSL `literal` — the format's own construct for a
+  name with no given/family structure, so declining to split is a faithful record
+  rather than a fallback.
+
+  Gaps are downgraded and reported, never invented. 53 venue-less papers become
+  `@misc` rather than `@article` with an empty `journal`, because that shape makes
+  `bibtex` merely *warn* — surfacing weeks later in a LaTeX log instead of in the
+  bibliography and the report. Three venue values that are really typesetting
+  furniture (`Journal of LaTeX Class Files`, `preprint`) are suppressed; that is
+  the only place this command could have printed a falsehood. Eight DOIs recorded
+  as `https://doi.org/…` normalize through the importer's own `clean_doi`, so they
+  are neither emitted as URLs nor dropped by a stricter validator. `document_id`
+  values like `Nature 654:324-326` *contain* a volume and page range and are still
+  passed through to `note` whole, because the field is free text and FDA guidance
+  numbers use it differently. 248 of 421 titles carry a token a title-lowercasing
+  style would destroy, so titles are brace-protected per word.
+
+  Synthesis, idea and concept pages are excluded with no flag to include them.
+  They have no DOI, venue or year of record, so an entry for one would assert a
+  publication that does not exist once pasted into a manuscript — a
+  citation-integrity problem rather than a formatting one. Sharing analysis is
+  what `prompts/share-page.md` is for.
+
+  Round-trips: 421 records, all three formats, zero mismatches on title, authors,
+  DOI, venue or year back through `refimport`, and `import preflight` on the
+  emitted file reports the same counts. The one documented loss is that the 149
+  `@misc` entries return as `preprint` (96) and `other` (53) rather than
+  `article`; that information genuinely is not in the corpus, and a test asserts
+  the asymmetry rather than hiding it.
+
+- Author-name parsing lives in one module (`researchwiki/names.py`), shared by
+  stem derivation and the exporter. `stems.first_author_surname` held the only
+  real parser — `et al.` stripping, consortium detection, and a
+  nobiliary-particle walk whose floor is what keeps `Bin Liu` and `Di Liu` correct
+  even though `bin` and `di` are particles — and the exporter needed the same
+  boundary for CSL. Behaviour-preserving, gated on it rather than asserted: output
+  is byte-identical across all 432 distinct author strings in the corpus and the
+  documented test shapes.
+
+- `refimport.clean_doi` is public. DOI wrappers arrive from both directions, so
+  the normalizer belongs to the package rather than to `parse`'s internals.
+
+- `prompts/export-shareable.md` → `prompts/share-page.md`. It triggered on the
+  word "export", which now names a command that does something else; the output
+  has always gone to `share/`, so this aligns the name with the destination.
+
 - `_ingest_batch.new_batch` accepts `per_input_args`, mapping an absolute input path
   to flags for that PDF alone. The CLI still refuses `--doi`/`--title`/`--authors`/
   `--year` in batch mode and should: one `--doi` has no meaning across N PDFs. But a
