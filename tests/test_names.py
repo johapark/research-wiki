@@ -211,6 +211,23 @@ def test_a_whole_author_field_still_yields_the_first_surname(raw, surname):
     assert first_author_surname([raw]) == surname
 
 
+@pytest.mark.parametrize("raw", [
+    "Akari Asai, Zeqiu Wu",
+    "A. Backhaus, J. Quiroz-Chávez",
+    "Di Liu, Bin Wang",
+])
+def test_an_author_list_is_never_split_into_one_persons_name(raw):
+    """Both functions read the comma through `looks_inverted`, so neither can
+    decide it inverts a name while the other decides it separates two. Without
+    this, `as_family_given` reported a person named `Akari Asai` whose given name
+    was `Zeqiu Wu` — the same defect as the stem bug, in the other direction.
+
+    Declining is the honest answer: a comma that is not an inversion means the
+    input is not the single name this function takes, so there is no boundary
+    inside it to find."""
+    assert as_family_given(raw) is None
+
+
 def test_diacritics_are_never_folded_in_output():
     """86 corpus author fields carry non-ASCII. Folding is a stem concern; a
     bibliography has to show the reader the name as printed."""

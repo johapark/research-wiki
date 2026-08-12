@@ -172,16 +172,24 @@ def as_family_given(raw: str) -> tuple[str, str] | None:
     unmodified and cannot be corrupted by a wrong guess here.
 
     Declines to split when: the byline is a consortium, it is a single token
-    (`DeepSeek-AI`), or it has more than four tokens with no particle to anchor
-    the boundary — the `Given Given Family` vs `Given Family Family` ambiguity
-    that this corpus carries no marker for.
+    (`DeepSeek-AI`), it holds a comma that is not an inversion, or it has more
+    than four tokens with no particle to anchor the boundary — the
+    `Given Given Family` vs `Given Family Family` ambiguity that this corpus
+    carries no marker for.
     """
     raw = (raw or "").strip()
     if not raw or is_consortium(raw):
         return None
 
-    # "Last, First" — the comma already says where the boundary is.
     if "," in raw:
+        # `looks_inverted`, not a bare comma test — the same single rule
+        # `stems.first_author_surname` uses, so the two cannot disagree about
+        # whether a comma inverts a name or separates two of them. A comma that
+        # is not an inversion means this is an author *list*, i.e. not the single
+        # name this function is documented to take, so it declines rather than
+        # inventing a boundary inside it.
+        if not looks_inverted(raw):
+            return None
         family, _, given = raw.partition(",")
         family, given = family.strip(), given.strip()
         return (family, given) if family else None
