@@ -45,7 +45,7 @@ from ..fsatomic import write_text_atomic
 from ..stems import first_author_surname
 from .. import metadata_sanity
 from ..providers.crossref import verify_doi_via_crossref
-from ..wiki import read_page, read_pages
+from ..wiki import commit_page, read_page, read_pages
 
 
 # ---------- shared helpers ----------
@@ -81,6 +81,7 @@ def _insert_after_key(page_path: Path, new_line: str, after_key: str) -> None:
         if line.startswith(f"{after_key}:"):
             fm_lines.insert(idx + 1, new_line)
             write_text_atomic(page_path, f"---\n" + "\n".join(fm_lines) + f"\n---\n" + text[end + 5:])
+            commit_page(page_path)
             return
     print(f"          → no `{after_key}:` anchor; skipped {page_path.name}", file=sys.stderr)
 
@@ -92,8 +93,9 @@ def _replace_or_insert(page_path: Path, key: str, value: str, after_key: str = "
     if re.search(rf"^{key}:\s*.*$", text, re.MULTILINE):
         text = re.sub(rf"^{key}:\s*.*$", new_line, text, count=1, flags=re.MULTILINE)
         write_text_atomic(page_path, text)
+        commit_page(page_path)
         return
-    _insert_after_key(page_path, new_line, after_key)
+    _insert_after_key(page_path, new_line, after_key)  # commits on success
 
 
 # ---------- KEYWORDS ----------
@@ -138,6 +140,7 @@ def _insert_keywords_line(page_path: Path, keywords_line: str) -> None:
             break
     fm_lines.insert(insert_at, keywords_line)
     write_text_atomic(page_path, f"---\n" + "\n".join(fm_lines) + f"\n---\n" + text[end + 5:])
+    commit_page(page_path)
 
 
 def _run_keywords(args: argparse.Namespace) -> int:
@@ -305,6 +308,7 @@ def _insert_hook_lines(page_path: Path, hook: str, short_name: str) -> bool:
 
     fm_lines[anchor + 1:anchor + 1] = new_lines
     write_text_atomic(page_path, "---\n" + "\n".join(fm_lines) + "\n---\n" + text[end + 5:])
+    commit_page(page_path)
     return True
 
 

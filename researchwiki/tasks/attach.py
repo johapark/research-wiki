@@ -27,6 +27,7 @@ from pathlib import Path
 from ..fsatomic import write_text_atomic
 from ..log import append_log_md, log
 from ..paths import inbox_dir, supp_dir, wiki_dir
+from ..wiki import commit_page
 
 
 VALID_KINDS = ("methods", "data", "figures", "other")
@@ -160,6 +161,7 @@ def _insert_supplementary(
         if not prefix.endswith("\n"):
             prefix += "\n"
         write_text_atomic(page_path, prefix + insertion + suffix)
+        commit_page(page_path)
         return
 
     block_text = text[block[0]:block[1]]
@@ -170,6 +172,9 @@ def _insert_supplementary(
         )
     updated = block_text.rstrip("\n") + "\n" + new_entry
     write_text_atomic(page_path, text[:block[0]] + updated + text[block[1]:])
+    # `supplementary:` is part of the frontmatter the DB mirrors in
+    # `raw_frontmatter` — reconcile rather than wait for the next rebuild.
+    commit_page(page_path)
 
 
 def stage_supplementary(

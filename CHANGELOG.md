@@ -14,6 +14,32 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Fixed
+
+- Wiki-page writers that bypassed `wiki.commit_page` and left the state DB stale
+  until the next `db rebuild`. Seven write sites across four modules: the
+  memory-evolve applier (`agents/phases/evolution.py`), the claim-graph promotion
+  applier (`claim_graph/promote.py`), `attach`'s two `supplementary:` branches, and
+  `backfill`'s three frontmatter helpers. Each rewrote frontmatter the DB mirrors —
+  `doi` and `venue` are dedicated columns, `supplementary:` and `generated_at:` live
+  in `raw_frontmatter` — so `status`, `db query`, and `claims` could read a stale row
+  and `db verify` reported the page as `stale`. Every site now reconciles at write
+  time; `tests/test_db_write_paths_commit.py` pins the behaviour per branch, with a
+  negative control asserting an uncommitted raw write *is* still detected as stale.
+
+### Changed
+
+- `db rebuild` is no longer documented as a required post-ingest step. Per-page
+  commits keep `papers`/`claims` current, leaving rebuild as the reconciler of last
+  resort — deletion detection, `claim-graph reconcile`, and edits made outside the
+  package. `reindex` is still required after every batch, since the Tantivy and
+  semantic indexes are rebuilt wholesale rather than incrementally.
+- `db/rebuild.py`'s module docstring claimed rebuild was "mtime-aware on the second
+  pass". There is no mtime fast-path — every page is re-parsed and re-upserted
+  unconditionally, which is what makes the reproducibility property hold. Corrected
+  the docstring rather than adding the optimization: a full rebuild of a ~500-page
+  corpus runs in under a second.
+
 ## [0.3.0] - 2026-08-11
 
 ### Added

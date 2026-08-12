@@ -9,9 +9,15 @@ for paper-type pages, and upserts into the `papers` and `claims` tables.
 Deletion detection: stems present in the DB but not in the current walk are
 removed. CASCADE on the FK takes their claims out with them.
 
-Idempotent — running twice in a row is a no-op (mtime-aware on the second
-pass; we still rewrite rows so the reproducibility property holds even if
-mtime is unchanged).
+Idempotent — running twice in a row leaves identical rows. There is no
+mtime skip: every page is re-parsed and re-upserted unconditionally, which is
+what makes the reproducibility property hold. Deliberately not optimized —
+a full rebuild of a ~500-page corpus runs in well under a second, and an
+mtime fast-path would trade that property away for nothing.
+
+Prefer `upsert_page()` (below) from any caller that just wrote one page;
+`rebuild()` is the reconciler of last resort, for deletion detection and for
+edits made outside the package (hand edits, git operations).
 """
 
 from __future__ import annotations

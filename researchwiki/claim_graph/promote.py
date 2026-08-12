@@ -28,6 +28,7 @@ from pathlib import Path
 
 from ..fsatomic import write_text_atomic
 from ..paths import ingest_dir, wiki_dir
+from ..wiki import commit_page
 from .edges import Edge, open_edges_db, query, set_status
 
 
@@ -472,6 +473,8 @@ def apply_promotions(*, verbose: bool = False) -> ApplyStats:
                     updated = _insert_bullet_under_section(orig, accepted, default, bullet)
                     updated = _refresh_generated_at(updated)
                     write_text_atomic(target_path, updated)
+                    # `generated_at:` changed — keep the DB row in step.
+                    commit_page(target_path)
                 # Set edge → promoted; remove proposal file.
                 set_status(edges_conn, edge_id, "promoted")
                 edges_conn.commit()
