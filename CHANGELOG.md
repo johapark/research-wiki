@@ -137,6 +137,23 @@ the reasoning behind any line below.
   is byte-identical across all 432 distinct author strings in the corpus and the
   documented test shapes.
 
+- `refimport.clean_doi` is public. DOI wrappers arrive from both directions, so
+  the normalizer belongs to the package rather than to `parse`'s internals.
+
+- `prompts/export-shareable.md` → `prompts/share-page.md`. It triggered on the
+  word "export", which now names a command that does something else; the output
+  has always gone to `share/`, so this aligns the name with the destination.
+
+- `_ingest_batch.new_batch` accepts `per_input_args`, mapping an absolute input path
+  to flags for that PDF alone. The CLI still refuses `--doi`/`--title`/`--authors`/
+  `--year` in batch mode and should: one `--doi` has no meaning across N PDFs. But a
+  programmatic caller holding a *different* DOI for every input is the case that
+  guard was never about, and it is exactly what importing a reference-manager
+  library is. Persisted in `plan.json` as an additive key, read back with a default,
+  so batch directories written before this still resume.
+
+### Fixed
+
 - Stem derivation no longer drops a nobiliary particle from a name written
   `Family, Given`. `van der Graaf, A.` derived `der-graaf`: the part before the
   comma is *already* the surname, but the particle walk ran on it anyway, and its
@@ -157,23 +174,6 @@ the reasoning behind any line below.
   stem does. Callers are still expected to split a byline before asking for its
   first surname; this keeps the function robust when one doesn't, because the
   failure mode is a silent wrong filename.
-
-- `refimport.clean_doi` is public. DOI wrappers arrive from both directions, so
-  the normalizer belongs to the package rather than to `parse`'s internals.
-
-- `prompts/export-shareable.md` → `prompts/share-page.md`. It triggered on the
-  word "export", which now names a command that does something else; the output
-  has always gone to `share/`, so this aligns the name with the destination.
-
-- `_ingest_batch.new_batch` accepts `per_input_args`, mapping an absolute input path
-  to flags for that PDF alone. The CLI still refuses `--doi`/`--title`/`--authors`/
-  `--year` in batch mode and should: one `--doi` has no meaning across N PDFs. But a
-  programmatic caller holding a *different* DOI for every input is the case that
-  guard was never about, and it is exactly what importing a reference-manager
-  library is. Persisted in `plan.json` as an additive key, read back with a default,
-  so batch directories written before this still resume.
-
-### Fixed
 
 - Stem derivation folds Unicode dashes to ASCII `-`, so a paper whose title is set
   with U+2010 no longer derives a different stem than the same paper spelled with a
