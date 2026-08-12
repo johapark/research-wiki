@@ -21,13 +21,18 @@ You can run any command directly, but most users won't. The CLI is a contract be
 
 ## Getting started
 
-Three paths to a running wiki — pick one:
+First, **where are your papers now?** The two answers need different steps:
+
+- **Loose PDFs** — [Install](#install), pick a [provider](#providers), then [Your first ingest](#your-first-ingest-5-min-005).
+- **Already in Zotero, Paperpile, Mendeley or ReadCube** — [Install](#install), pick a [provider](#providers), then [Import an existing library](#import-an-existing-library). You'll work from your manager's *export file*; you do not need to move PDFs into `inbox/` yourself.
+
+Then three ways to drive the setup itself — pick one:
 
 - **Talk to your LLM.** Clone, drop PDFs in `inbox/`, open the directory in Claude Code (or any agent that reads `CLAUDE.md` / `AGENTS.md`), say *"initialize this for me — I have N PDFs in inbox/."* The agent walks the steps in [`prompts/init.md`](./prompts/init.md).
 - **Run the wizard.** `researchwiki init` — interactive terminal wizard (provider → categories → dashboard → confirm). Prompts you for each decision and writes `.env` / `config/models.yaml`.
 - **Do it manually.** The sub-sections below walk the same steps as a reference.
 
-Taxonomy comes from *your* papers: `researchwiki bootstrap-categories` derives categories from what's in `inbox/`, **not** the biology+ML defaults listed below.
+Taxonomy comes from *your* papers: `researchwiki bootstrap-categories` derives categories from what's in `inbox/`, **not** the biology+ML defaults listed below. Importing a library instead? Either run it on a first `--limit` wave once those papers land, or let the per-paper classifier place them — see [Categories](#categories).
 
 ### Prerequisites
 
@@ -146,7 +151,15 @@ Drop a PDF in `inbox/` and say *"Ingest the paper I just dropped in `inbox/`."* 
 
 **Backlog?** Say *"ingest everything in inbox/"* — the LLM loops over each file (~$0.01/paper on the default OpenAI config). **If something breaks mid-ingest**, tell the LLM; it follows the recovery procedure in CLAUDE.md (don't hand-patch YAML). Then the workflow is conversational: batch ingest, cross-paper Q&A, `neighbors` discovery, synthesis detection, idea pages, page fixes.
 
-**Already have a library in Zotero, Paperpile, Mendeley or ReadCube?** Export it (BibTeX or RIS — those carry attachment paths; CSL-JSON doesn't) and say *"import my library"*. `researchwiki import` reads the export as authoritative metadata, pairs each record to its PDF, and reports what's importable **before** anything is spent — scanned PDFs with no text layer, preprints superseded by their published version, papers already in the wiki. Then it ingests in waves you control (`--limit 30`), feeding each paper its own DOI, title, authors and year instead of rediscovering them. Works without the PDFs too: you get back a list of DOIs to go fetch. Details in [`prompts/import-reference-manager.md`](./prompts/import-reference-manager.md).
+### Import an existing library
+
+**Already have a library in Zotero, Paperpile, Mendeley or ReadCube?** Start here rather than with [Your first ingest](#your-first-ingest-5-min-005) — this is the path built for a corpus that already exists, and it skips the step where ingest is most likely to get metadata wrong.
+
+Export your library **as BibTeX or RIS** (those carry attachment paths; CSL-JSON doesn't, which costs you automatic PDF pairing), then say *"import my library"*. `researchwiki import` reads the export as authoritative metadata, pairs each record to its PDF, and reports what's importable **before** anything is spent — scanned PDFs with no text layer, preprints superseded by their published version, papers already in the wiki, the same DOI twice. Then it ingests in waves you control (`--limit 30`), feeding each paper its own DOI, title, authors and year instead of rediscovering them. Works without the PDFs too: you get back a deduplicated list of DOIs to go fetch.
+
+You do not need to move anything into `inbox/` — point `import` at wherever your manager keeps its files (`researchwiki import inspect library.ris ~/Zotero/storage`) and it copies each wave in for you. Details, including how to read the triage report: [`prompts/import-reference-manager.md`](./prompts/import-reference-manager.md).
+
+### Export your library
 
 **And back out again.** `researchwiki export --format bibtex > refs.bib` writes the corpus as BibTeX, RIS or CSL-JSON — for a manuscript's reference list, or to load into a reference manager. Zero tokens, no network, byte-identical across runs, so the file can live in version control. The citekey is the page's own stem, which is the only key that can't change under you when you ingest another paper by the same author. Where the corpus is thin the export says so instead of inventing: a paper with no recorded venue becomes `@misc` rather than an `@article` with a missing `journal`, and `--json` gives you the list of pages to go fix. Your own synthesis and idea pages are deliberately left out — they have no DOI or venue, and an entry for one would claim a publication that doesn't exist. Details in [`prompts/export-bibliography.md`](./prompts/export-bibliography.md).
 
