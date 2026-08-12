@@ -1,0 +1,96 @@
+TY  - JOUR
+TI  - A draft synthetic pangenome reference
+AU  - Fixture, Ada L.
+AU  - Second, Brian
+T2  - Journal of Test Genomics
+JO  - Journal of Test Genomics
+SN  - 1234-5678
+DO  - 10.1234/jtg.2023.0001
+U1  - 30000001
+U2  - PMC9000001
+AB  - A complete record with every field ReadCube normally populates.
+J2  - J. Test Genom.
+SP  - 100-110
+IS  - 2
+VL  - 41
+PY  - 2023
+UR  - https://app.readcube.com/library/aaaa/item/bbbb
+PF  - https://www.readcube.com/library/aaaa:bbbb
+XX  - 
+PMID  - 30000001
+ER  - 
+
+TY  - JOUR
+TI  - ATAC‐seq: A Method for Assaying Chromatin Accessibility Genome‐Wide
+AU  - Hyphen, Carol
+T2  - Current Protocols in Test Biology
+DO  - 10.1234/cptb.2015.0002
+PY  - 2015
+XX  - 
+PMID  - 30000002
+ER  - 
+
+TY  - JOUR
+TI  - Controlling bias and inflation in epigenome- and transcriptome-wide studies
+AU  - Dangling, Dan
+DO  - 10.1234/test.2017.0003
+PY  - 2017
+ER  - 
+
+TY  - JOUR
+TI  - Sequence modeling and design from molecular to genome scale
+AU  - Pairone, Eve
+DO  - 10.1101/2024.01.01.500001
+PY  - 2024
+ER  - 
+
+TY  - JOUR
+TI  - Sequence modeling and design from molecular to genome scale
+AU  - Pairone, Eve
+T2  - Science of Tests
+DO  - 10.1234/science.2024.0005
+PY  - 2024
+ER  - 
+
+TY  - JOUR
+TI  - Homotrimer barcodes enable accurate counting of test molecules
+DO  - 10.1234/nmeth.2024.0006
+ER  - 
+
+TY  - JOUR
+TI  - Packt.Testing.5.By.Example.pdf
+ER  - 
+
+TY  - JOUR
+TI  - Circling back to test vaccines
+DO  - 10.1038/d41586-026-00008-1
+PY  - 2026
+ER  - 
+
+TY  - JOUR
+TI  - Transcriptome-wide off-target assessment in test cells
+AU  - Grünewald-López, Jonas
+DO  - 10.1234/test.2018.0009
+PY  - 2018
+ER  - 
+
+TY  - ELEC
+TI  - Rapid DNA unwinding accelerates test editing
+UR  - chrome-extension://abcdefghijklmnop/https://www.biorxiv.org/content/10.1101/2023.01.01.500002v1.full.pdf
+ER  - 
+
+TY  - JOUR
+TI  - A very long title that some exporters wrap across
+      two physical lines mid-sentence
+AU  - Wrapped, Wendy
+DO  - 10.1234/test.2020.0011
+PY  - 2020
+ER  - 
+
+TY  - JOUR
+TI  - A paper whose attachment path is declared in the export
+AU  - Declared, Dana
+DO  - 10.1234/test.2021.0012
+PY  - 2021
+L1  - files/declared-paper.pdf
+ER  - 

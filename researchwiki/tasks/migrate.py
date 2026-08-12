@@ -19,6 +19,19 @@ decides when to spend.
 
 Full workflow, failure modes and rollback: `prompts/migration-backfill.md`.
 
+**Coverage gap, stated plainly.** `tests/test_migrate.py` exercises only the
+pure modules — `sections.py`, `frontmatter.py`, `classify.py`. Nothing in the
+suite imports `migrate/manifest.py`, `migrate/apply.py` or this file, so the run
+directory, the journal, the seven-step apply, the pre-apply tarball and `verify`
+have never been executed by a test. The phase layer has also seen little use on
+real corpora. Treat a `migrate` run as needing your own verification, and read
+`inspect`'s output rather than trusting `apply` blindly.
+
+This is recorded rather than fixed because partial coverage on a command with no
+known users would buy confidence it hasn't earned; the useful signal is that the
+gap exists. `tests/test_refimport_phases.py` is the template if you do backfill
+it — same phase-level shape, against a temporary wiki.
+
 Exit codes: 0 success, 1 bad input / nothing actionable, 2 environment
 (embedding model unavailable, unreadable source).
 """

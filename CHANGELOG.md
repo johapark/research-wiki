@@ -14,6 +14,81 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- `researchwiki import`, for the corpus most new users actually arrive with:
+  an existing library in Zotero, Paperpile, Mendeley or ReadCube. Four phases —
+  `preflight` → `inspect` → `apply` → `verify` — of which only `apply` spends tokens
+  or writes pages; the rest write nothing outside their run directory. `migrate`
+  explicitly refuses this case — it imports markdown pages from an older wiki, while
+  these users have PDFs and metadata and no prose — so until now they were told what
+  the tool was *not* for and given nowhere to go.
+
+  The export is the asset. A reference manager carries curated DOI, title, authors
+  and year, which is exactly what `agent ingest` otherwise rediscovers through its
+  most failure-prone stretch (PDF extract → DOI hunt → S2 lookup → LLM reconcile →
+  `metadata_sanity`) and the stretch that produces every `unknown-` stem and
+  wrong-but-resolving DOI. `inspect` records the exact `--doi/--title/--authors/
+  --year` argv each record contributes, so importing becomes a lookup rather than a
+  rediscovery.
+
+  Parsing is tolerant by design, because the files that break a strict parser are the
+  ones users have. Validated against a real 532-item ReadCube library exported in both
+  RIS and BibTeX, reproducing every count exactly from each: 532 records, 521 usable
+  DOIs, 529 titles, 517 author lists, 521 years. That file carries a 4-character
+  `PMID` RIS tag where the convention is 2, an always-empty `XX` tag on 385 records,
+  citekeys containing `:` (55) and non-ASCII (16) that strict BibTeX forbids outright,
+  and CRLF endings that make a literal `"\r\n"` split return one giant record.
+
+  Triage is three verdicts — `ready`/`review`/`skip` — with the detail in reason
+  strings. Two gates are worth naming. `no-text-layer` is the silent one: a scanned
+  PDF extracts to nothing, ingest logs a warning nobody reads, and the page then
+  passes every later gate on grounding that does not exist. `superseded-by-journal`
+  is invisible to DOI-level dedupe — the real library held 10 preprint/published
+  pairs and **zero** duplicate DOIs, so only title comparison finds them, and the
+  survivor is chosen deliberately because the two exports listed those pairs in
+  different orders. `duplicate-doi` is its complement, for the same paper under one
+  DOI twice: that library had none, but a concatenated or merged export produces
+  exact duplicates readily, and nothing downstream would catch them — `apply`
+  re-checks the wiki, not the manifest, so both records dispatch in one wave.
+  Both gates pick their survivor by a total order rather than by input position.
+
+  `<pdf-root>` is optional, and the report always lists every record that clears
+  every gate except having a file, with its DOI. For a cloud-hosted library that
+  fetch list is the most useful thing the command produces: without it, a
+  metadata-only run reports a count and nothing actionable.
+
+  `researchwiki import apply --run <dir> --limit N` copies a wave into `inbox/` and
+  hands it to `agent ingest` with each paper's own `--doi/--title/--authors/--year`.
+  It is the only phase that spends tokens or writes pages, and the only one where
+  "nothing to do" is a failure rather than a result.
+
+  There is no journal and no staging directory, because nothing here can be left
+  half-done: the only mutation is copying a PDF, and everything after belongs to
+  `_ingest_batch`, which already keeps a crash-safe checkpoint. Recovery is
+  `agent ingest --resume <batch-dir>`, the path users already know.
+
+  One fact is deliberately **not** frozen in the manifest. Pairing, verdicts, stems
+  and argv are, so `apply` cannot conclude something different from the `inspect` a
+  user read — but whether a paper is *already in the wiki* is a fact about now.
+  Re-checking it per record is what makes `--limit 30` mean "the next 30 still
+  pending" instead of "the first 30, again", so waves compose instead of repeating.
+
+  `researchwiki import verify --run <dir>` closes the loop: landed / sandboxed /
+  not-yet-imported per record, plus the `lint` keys an import can break and the
+  graph-wiring follow-ups. It reads the manifest rather than the batch checkpoint,
+  because the question is about records ("did this paper reach the wiki") and the
+  checkpoint only knows about files — a record can finish its ingest and still sit
+  in `.agent-output/`, which is finished work awaiting review, not a failure.
+
+- `_ingest_batch.new_batch` accepts `per_input_args`, mapping an absolute input path
+  to flags for that PDF alone. The CLI still refuses `--doi`/`--title`/`--authors`/
+  `--year` in batch mode and should: one `--doi` has no meaning across N PDFs. But a
+  programmatic caller holding a *different* DOI for every input is the case that
+  guard was never about, and it is exactly what importing a reference-manager
+  library is. Persisted in `plan.json` as an additive key, read back with a default,
+  so batch directories written before this still resume.
+
 ### Fixed
 
 - Stem derivation folds Unicode dashes to ASCII `-`, so a paper whose title is set

@@ -42,6 +42,45 @@ _BATCH_INCOMPATIBLE_FLAGS = (
 )
 
 
+def warn_if_chat_relay_batch() -> bool:
+    """Warn when batch mode is about to run under `chat-relay`. Returns whether it did.
+
+    Chat-relay + batch mode is the one provider/mode pairing that fails silently.
+    `_ingest_batch._worker` runs each child with `stderr=subprocess.STDOUT` into a
+    per-worker log, and that stderr is exactly where `relay._emit_handoff_message`
+    prints the pending-prompt notice — so the responder is never told a prompt is
+    waiting, the run looks idle, and every worker eventually fails its timeout.
+
+    Warn rather than refuse: batch mode is legitimate here if the responder polls
+    `.llm-relay/pending/` itself, and blocking it would forbid a workflow that works.
+
+    Shared with `import apply`, which reaches `_ingest_batch.new_batch` through
+    `refimport.apply.dispatch` and so never passed through the check at all.
+    Deliberately arg-free, and deliberately *not* paired with
+    `_BATCH_INCOMPATIBLE_FLAGS`: `apply` routes around that guard on purpose via
+    `per_input_args`, which is the case `new_batch`'s own docstring names as the
+    one it was never about.
+    """
+    from ..agents import model_config as _mc
+    if not _mc.uses_chat_relay():
+        return False
+    print(
+        "researchwiki: WARNING — batch mode with the chat-relay provider.\n"
+        "  Each worker's stderr is redirected into "
+        ".ingest/batch-<ts>/worker-*.log, and that is where the relay "
+        "prints its '📨 LLM relay pending' notice — so prompt notices "
+        "will be invisible and each worker will fail on its 600s timeout "
+        "unless someone answers.\n"
+        "  fix: parallelize with one foreground invocation per responder "
+        "instead —\n"
+        "         researchwiki agent ingest inbox/<one>.pdf\n"
+        "  or keep batch mode and poll .llm-relay/pending/ yourself.\n"
+        "  See prompts/chat-relay.md.",
+        file=sys.stderr,
+    )
+    return True
+
+
 def _batch_passthrough_args(args) -> list[str]:
     """Emit only flags whose value diverges from the argparse default, so the
     per-worker `python -m researchwiki agent ingest` gets the same effective
@@ -120,32 +159,7 @@ def _cmd_ingest(args) -> int:
             print("researchwiki agent ingest: --auto-promote and --force-sandbox "
                   "are mutually exclusive", file=sys.stderr)
             return 1
-        # Chat-relay + batch mode is the one provider/mode pairing that fails
-        # silently. `_ingest_batch._worker` runs each child with
-        # `stderr=subprocess.STDOUT` into a per-worker log, and that stderr is
-        # exactly where `relay._emit_handoff_message` prints the pending-prompt
-        # notice — so the responder is never told a prompt is waiting, the run
-        # looks idle, and every worker eventually fails its 600s timeout. Warn
-        # rather than refuse: batch mode is legitimate here if the responder polls
-        # `.llm-relay/pending/` itself, and blocking it would forbid a workflow
-        # that works.
-        from ..agents import model_config as _mc
-        if _mc.uses_chat_relay():
-            print(
-                "researchwiki agent ingest: WARNING — batch mode with the "
-                "chat-relay provider.\n"
-                "  Each worker's stderr is redirected into "
-                ".ingest/batch-<ts>/worker-*.log, and that is where the relay "
-                "prints its '📨 LLM relay pending' notice — so prompt notices "
-                "will be invisible and each worker will fail on its 600s timeout "
-                "unless someone answers.\n"
-                "  fix: parallelize with one foreground invocation per responder "
-                "instead —\n"
-                "         researchwiki agent ingest inbox/<one>.pdf\n"
-                "  or keep batch mode and poll .llm-relay/pending/ yourself.\n"
-                "  See prompts/chat-relay.md.",
-                file=sys.stderr,
-            )
+        warn_if_chat_relay_batch()
         from . import _ingest_batch
         return _ingest_batch.new_batch(
             args.pdfs, ["agent", "ingest"],

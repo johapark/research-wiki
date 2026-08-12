@@ -1,0 +1,37 @@
+[
+  {
+    "id": "fixture2023draft",
+    "type": "article-journal",
+    "title": "A draft synthetic pangenome reference",
+    "author": [
+      { "family": "Fixture", "given": "Ada L." },
+      { "family": "Second", "given": "Brian" }
+    ],
+    "container-title": "Journal of Test Genomics",
+    "DOI": "10.1234/jtg.2023.0001",
+    "issued": { "date-parts": [[2023, 4, 1]] }
+  },
+  {
+    "id": "hyphen2015atac",
+    "type": "article-journal",
+    "title": "ATAC‐seq: A Method for Assaying Chromatin Accessibility Genome‐Wide",
+    "author": [{ "family": "Hyphen", "given": "Carol" }],
+    "DOI": "10.1234/cptb.2015.0002",
+    "issued": { "date-parts": [[2015]] }
+  },
+  {
+    "id": "bookish2019manual",
+    "type": "book",
+    "title": "The Test Framework Manual",
+    "author": [{ "family": "Bookish", "given": "Bee" }],
+    "publisher": "Test Press",
+    "issued": { "date-parts": [[2019]] }
+  },
+  {
+    "id": "webby2022post",
+    "type": "webpage",
+    "title": "A blog post about testing",
+    "URL": "https://example.invalid/post",
+    "issued": { "date-parts": [[2022]] }
+  }
+]

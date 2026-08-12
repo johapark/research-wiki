@@ -279,10 +279,18 @@ def _detect_senior_authors(authors_str: str | None) -> str | None:
 def _yaml_dq(value: str) -> str:
     """Double-quoted YAML scalar, collapsed to one line.
 
-    Used for `hook:`, where quoting is load-bearing rather than cosmetic: hooks
-    routinely contain `[[wikilinks]]`, which PyYAML parses as a nested flow
-    sequence when unquoted (the failure `lint` reports as
-    `unquoted_wikilink_lists`), and `:` / `#`, which break a bare scalar.
+    Used wherever a value can contain YAML syntax. `hook:` was the original
+    case — hooks routinely carry `[[wikilinks]]`, which PyYAML parses as a
+    nested flow sequence when unquoted (the failure `lint` reports as
+    `unquoted_wikilink_lists`), plus `:` and `#`, which break a bare scalar.
+
+    `venue:` and `title:` need it for the same reason and were missed. A
+    colon-bearing journal name is not exotic — *Molecular Therapy: Nucleic
+    Acids* landed a page whose entire frontmatter failed to parse
+    (`mapping values are not allowed here`), which takes the page out of
+    `db rebuild`, out of the index, and out of every query, while the file
+    itself looks perfectly correct to a reader. Observed 2026-08-11 on the
+    first reference-manager import.
     """
     flat = " ".join(str(value).split())
     escaped = flat.replace("\\", "\\\\").replace('"', '\\"')
@@ -316,7 +324,11 @@ def _build_frontmatter(
     surface for the page itself. Distinct from the paper's `authors:`
     field (which is the paper's actual authors).
     """
-    title = (metadata.get("title") or "").replace('"', '\\"')
+    # No manual escaping here: `_yaml_dq` owns it below. This line used to
+    # pre-escape quotes because the title was interpolated into a raw
+    # `f'title: "{title}"'`; doing both escapes twice, and the page then reads
+    # back with literal backslashes in its title.
+    title = metadata.get("title") or ""
     authors = metadata.get("authors") or "unknown"
     year = metadata.get("year") or "unknown"
     doi = metadata.get("doi") or ""
@@ -335,7 +347,7 @@ def _build_frontmatter(
 
     fm_lines = [
         "---",
-        f'title: "{title}"',
+        f"title: {_yaml_dq(title)}",
         f"authors: {authors}",
     ]
     if senior:
@@ -352,7 +364,7 @@ def _build_frontmatter(
             # the trailing zero / precision. Keep it a string.
             fm_lines.append(f'arxiv_id: "{arxiv_id}"')
     if venue:
-        fm_lines.append(f"venue: {venue}")
+        fm_lines.append(f"venue: {_yaml_dq(venue)}")
     # `type:` is normally `paper`. The commentary guard sets
     # `metadata["page_type"] = "commentary"` when the PDF is a Research
     # Highlight / News & Views about a different paper; honoring it here means

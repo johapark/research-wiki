@@ -30,7 +30,8 @@ from ..paths import ingest_dir
 
 MANIFEST_VERSION = 1
 #: Steps `apply` performs per page, in order. The journal records each as it
-#: completes, so `--resume` is a set difference.
+#: completes, so resuming — re-running `apply --run <dir>` — is a set
+#: difference. (No `--resume` flag here; the journal is the mechanism.)
 STEPS: tuple[str, ...] = (
     "stage", "headings", "frontmatter", "relink", "pdf", "page", "commit",
 )

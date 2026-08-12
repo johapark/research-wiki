@@ -11,8 +11,10 @@ the contract that lets `--resume` work:
   - Absolute paths are the checkpoint keys — resume from any cwd.
   - plan.json records the subcommand + passthrough flags so `--resume`
     doesn't need re-supplying and semantics don't drift.
-  - Per-PDF override flags are rejected in batch mode (a --doi meant for
-    one paper would silently apply to all N).
+  - Per-PDF override flags are rejected on the *command line* in batch mode
+    (a --doi meant for one paper would silently apply to all N), while a
+    programmatic caller can supply a different set per input — which is what
+    `researchwiki import apply` needs and what that guard was never about.
 
 The worker itself is monkeypatched to a deterministic stub — the real
 `_worker` shells out to `python -m researchwiki <subcommand> <pdf>`, which
@@ -511,3 +513,76 @@ def test_cli_no_longer_lists_ingest_batch():
     # But the two hosts remain.
     assert "agent" in tasks
     assert "ingest" in tasks
+
+
+# ---------- per-input args ----------
+#
+# The CLI still refuses `--doi`/`--title`/`--authors`/`--year` in batch mode
+# (`agent._BATCH_INCOMPATIBLE_FLAGS`), and rightly so: one `--doi` has no
+# meaning across N PDFs. A programmatic caller — `researchwiki import apply` —
+# holds a *different* DOI for every input, which is the case that guard was
+# never about.
+
+def test_per_input_args_reach_only_their_own_worker(tmp_path, monkeypatch):
+    from researchwiki.tasks import _ingest_batch
+
+    a = tmp_path / "a.pdf"; a.write_bytes(b"%PDF-1.4\n")
+    b = tmp_path / "b.pdf"; b.write_bytes(b"%PDF-1.4\n")
+    seen = {}
+
+    def fake_worker(pdf_path, batch_dir, subcommand, extra_args):
+        seen[Path(pdf_path).name] = list(extra_args)
+        return {"input": pdf_path, "status": "completed", "returncode": 0}
+
+    monkeypatch.setattr(_ingest_batch, "_worker", fake_worker)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+
+    _ingest_batch.new_batch(
+        [str(a), str(b)], ["agent", "ingest"], ["-n", "1"], workers=1,
+        per_input_args={str(a.resolve()): ["--doi", "10.1234/a"]},
+    )
+    assert seen["a.pdf"] == ["-n", "1", "--doi", "10.1234/a"]
+    assert seen["b.pdf"] == ["-n", "1"]        # no leakage between inputs
+
+
+def test_per_input_args_are_persisted_for_resume(tmp_path, monkeypatch):
+    import json as _json
+
+    from researchwiki.tasks import _ingest_batch
+
+    a = tmp_path / "a.pdf"; a.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        lambda p, d, s, e: {"input": p, "status": "completed",
+                                            "returncode": 0})
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+    _ingest_batch.new_batch([str(a)], ["agent", "ingest"], [], workers=1,
+                            per_input_args={str(a.resolve()): ["--year", "2024"]})
+    batch = sorted((tmp_path / ".ingest").glob("batch-*"))[-1]
+    plan = _json.loads((batch / "plan.json").read_text())
+    assert plan["per_input_args"][str(a.resolve())] == ["--year", "2024"]
+
+
+def test_a_plan_without_per_input_args_still_resumes(tmp_path, monkeypatch):
+    """Additive key, not a schema bump: batch dirs written before this existed
+    must keep resuming."""
+    import json as _json
+
+    from researchwiki.tasks import _ingest_batch
+
+    a = tmp_path / "a.pdf"; a.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+    batch = tmp_path / ".ingest" / "batch-legacy"
+    batch.mkdir(parents=True)
+    (batch / "plan.json").write_text(_json.dumps({
+        "started_at": "2026-01-01T00:00:00", "subcommand": ["agent", "ingest"],
+        "workers": 1, "inputs": [str(a.resolve())], "extra_args": [],
+    }))
+    seen = []
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        lambda p, d, s, e: seen.append(list(e)) or
+                        {"input": p, "status": "completed", "returncode": 0})
+    _ingest_batch.resume_batch(batch, no_retry=False)
+    assert seen == [[]]

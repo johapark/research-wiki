@@ -2,9 +2,34 @@
 
 The package is invoked from the wiki root (where CLAUDE.md and wiki/ live).
 Paths are resolved lazily so callers can `cd` into the repo before running.
+
+Mostly zero-argument locations, plus `canonical()` — the one normalizer here that
+takes a path instead of producing one. It lives here because "one spelling per
+file" is the same class of fact as "where `wiki/` is", and because the callers
+that need it span packages.
 """
 
 from pathlib import Path
+
+
+def canonical(p: Path | str) -> Path:
+    """One spelling per file, so two callers that reach it compare equal.
+
+    `Path` equality is string equality, not file identity, so a structure keyed
+    on `Path` silently treats `pdfs/a.pdf`, `/abs/pdfs/a.pdf` and a path through
+    a symlink as three different files. Anything that builds a `dict` or `set` of
+    paths from more than one source needs them normalized first — see
+    `refimport.pair`, where three spellings of one PDF escaped four structures at
+    once, and `tasks.lint.walk.page_key`, whose docstring describes the same bug
+    class for wiki pages.
+
+    `resolve()` rather than `absolute()`: the spellings that collide in practice
+    differ by more than a leading slash — a relative root the user typed, and a
+    symlinked library where an export names the location the sync client wrote.
+    The tradeoff is that a recorded path names the link *target*, so it does not
+    survive the mount moving; that is the same tradeoff `page_key` accepts.
+    """
+    return Path(p).expanduser().resolve()
 
 
 def wiki_root() -> Path:

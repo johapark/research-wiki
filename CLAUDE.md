@@ -366,6 +366,10 @@ Coverage is tracked per stem with a fingerprint of the claims compared, so a reg
 
 **Step 6 — Memory-evolution proposals.** Agent path auto-runs `researchwiki evolve`; digest path doesn't (run manually). Actionable proposals land under `.ingest/{stem}-evolution-proposals/`. **You are the reviewer** — read each proposal + target synthesis, verify patches against the source paper (numbers, framing, superlatives drift), one-paragraph verdict per proposal, ask user permission (one yes/no covers all from a single ingest unless specified). On approval: apply, `rm -rf` the proposal dir, update synthesis `generated_at:` (the citation lands in the body — synthesis/idea have no `referenced_papers:`). Skip when `evolve` returned zero verdicts or paper is a reference doc.
 
+### Import — bring in a reference-manager library
+
+`researchwiki import` ingests an existing corpus from Zotero / Paperpile / Mendeley / ReadCube, using the manager's own **export** (BibTeX / RIS / CSL-JSON) as authoritative metadata. Trigger: user has a library elsewhere, or drops a `.ris`/`.bib` into `inbox/`. Phases `preflight` → `inspect` → `apply` → `verify`; the first two and the last cost zero tokens. Their export already holds curated DOI/title/authors/year, so `inspect` records the exact per-paper `--doi/--title/--authors/--year` and `apply` feeds them through batch mode — turning ingest's most failure-prone stretch into a lookup. **Stage it** (`--limit 30`); `apply` re-checks liveness per record, so the next wave takes the next N. Read [`prompts/import-reference-manager.md`](./prompts/import-reference-manager.md) before running it.
+
 ### Migrate — import paper pages from an older or simpler wiki
 
 `researchwiki migrate` brings in **one-paper-per-PDF markdown** produced by an earlier release of this framework or by a simpler "PDF in → summary page out" generator, without re-authoring prose. Phases: `preflight` (deps/disk; hard-fails if the local embedding model is missing) → `inspect` (read-only classification) → `apply` (`--dry-run` stages first) → `verify`. All zero-token; `apply` prints the paid `backfill` follow-ups rather than running them.

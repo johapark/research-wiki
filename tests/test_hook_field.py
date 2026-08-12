@@ -313,3 +313,56 @@ def test_debug_repair_inherits_the_authors_handle_and_hook(monkeypatch):
     assert repaired.text != prior.text, "sanity: the repair replaced the body"
     assert repaired.handle == prior.handle
     assert repaired.hook == prior.hook
+
+
+# ---------- venue / title quoting (regression, 2026-08-11) ----------
+#
+# `hook:` was quoted from the start; `venue:` and `title:` were not, and a
+# colon-bearing journal name is not exotic. *Molecular Therapy: Nucleic Acids*
+# landed a page whose ENTIRE frontmatter failed to parse — which takes the page
+# out of `db rebuild`, out of the index, and out of every query, while the file
+# still looks perfectly correct to a human reading it. Found on the first real
+# reference-manager import.
+
+@pytest.mark.parametrize("venue", [
+    "Molecular Therapy: Nucleic Acids",
+    "OMICS: A Journal of Integrative Biology",
+    "Cell Reports: Methods",
+    "Nature",
+    'A venue with "quotes" in it',
+    "Genome Biology #2",
+])
+def test_venue_survives_a_yaml_round_trip(venue):
+    page = _build_frontmatter(
+        {"title": "T", "year": 2026, "venue": venue},
+        "x-2026-t", "genomics", BODY, short_name="X",
+    )
+    parsed = yaml.safe_load(page.split("---", 2)[1])
+    assert parsed["venue"] == venue
+
+
+@pytest.mark.parametrize("title", [
+    "ATAC-seq: A Method for Assaying Chromatin Accessibility",
+    'A title with "quoted" words',
+    "Ratio 3:1 in a title",
+])
+def test_title_survives_a_yaml_round_trip(title):
+    page = _build_frontmatter(
+        {"title": title, "year": 2026, "venue": "Nature"},
+        "x-2026-t", "genomics", BODY, short_name="X",
+    )
+    parsed = yaml.safe_load(page.split("---", 2)[1])
+    assert parsed["title"] == title
+
+
+def test_the_whole_frontmatter_block_parses_with_a_colon_venue():
+    """The actual failure: not that `venue` was wrong, but that one bad value
+    made every other field unreadable too."""
+    page = _build_frontmatter(
+        {"title": "T", "year": 2026, "venue": "Molecular Therapy: Nucleic Acids",
+         "doi": "10.1234/test.2022.0001"},
+        "ada-2022-a-paper", "other", BODY, short_name="X",
+    )
+    parsed = yaml.safe_load(page.split("---", 2)[1])
+    assert parsed["doi"] == "10.1234/test.2022.0001"
+    assert parsed["type"] == "paper"

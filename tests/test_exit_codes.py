@@ -235,3 +235,81 @@ def test_page_gates_reserve_1_for_findings():
         line = next(ln for ln in doc.splitlines() if ln.strip().startswith("2 "))
         assert "input" in line.lower(), \
             f"{module_name} documents code 2 as {line.strip()!r}, not bad input"
+
+
+# ---------- import ----------
+#
+# `import` is the counter-example to the page gates above: it is not a gate, so
+# it follows the *table* in CLAUDE.md rather than the gate exception. Its phases
+# differ deliberately in what "nothing to do" means, and that is the part worth
+# pinning — `inspect` finding nothing importable is a **result**, not an error,
+# while `apply` (stage 4) having nothing to act on is a failure, because acting
+# is the only thing it does.
+#
+# Reached through `importlib` because `researchwiki/tasks/import.py` is named
+# for a keyword; that is deliberate, and its module docstring says why.
+
+import importlib
+import pathlib
+
+FIXTURE_RIS = pathlib.Path(__file__).parent / "refimport-fixtures" / "readcube-sample.ris"
+
+
+def _import_task():
+    return importlib.import_module("researchwiki.tasks.import")
+
+
+def test_import_command_is_discovered_under_its_keyword_name():
+    """The reason the filename is a keyword: `_discover_tasks` derives the CLI
+    name from it, so `import.py` is what makes the command `researchwiki
+    import`. Renaming the file to something importable silently renames the
+    command."""
+    assert cli._discover_tasks().get("import") == "import"
+
+
+def test_import_command_dispatches_through_the_cli_funnel(tmp_path, capsys):
+    assert cli.main(["import", "preflight", str(tmp_path / "nope.ris")]) == 1
+    capsys.readouterr()
+
+
+def test_import_preflight_bad_input_returns_1(tmp_path, capsys):
+    assert _import_task().main(["preflight", str(tmp_path / "nope.ris")]) == 1
+    capsys.readouterr()
+
+
+def test_import_unidentifiable_export_returns_1(tmp_path, capsys):
+    p = tmp_path / "notes.txt"
+    p.write_text("not an export at all")
+    assert _import_task().main(["preflight", str(p)]) == 1
+    capsys.readouterr()
+
+
+def test_import_inspect_returns_0_when_nothing_is_importable(tmp_path, capsys):
+    """The normal metadata-only run: every record skipped for want of a PDF.
+    Exit 1 here would make the expected outcome look like a failure.
+
+    `_in_a_wiki_dir` has already chdir'd into `tmp_path` and made `wiki/`.
+    """
+    (tmp_path / ".ingest").mkdir(exist_ok=True)
+    assert _import_task().main(["inspect", str(FIXTURE_RIS)]) == 0
+    capsys.readouterr()
+
+
+def test_import_documents_its_exit_codes():
+    assert "Exit codes:" in (_import_task().__doc__ or "")
+
+
+def test_import_verify_returns_0_even_when_nothing_landed(tmp_path, capsys):
+    """`verify` is a report: "none of this landed" is its most useful output,
+    not a failure to produce output."""
+    (tmp_path / ".ingest" / "import-x").mkdir(parents=True)
+    (tmp_path / ".ingest" / "import-x" / "manifest.json").write_text(
+        '{"version": 1, "items": []}')
+    assert _import_task().main(
+        ["verify", "--run", str(tmp_path / ".ingest" / "import-x")]) == 0
+    capsys.readouterr()
+
+
+def test_import_verify_on_a_missing_manifest_returns_1(tmp_path, capsys):
+    assert _import_task().main(["verify", "--run", str(tmp_path / "nope")]) == 1
+    capsys.readouterr()

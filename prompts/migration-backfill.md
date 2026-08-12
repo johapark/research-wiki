@@ -13,7 +13,8 @@ Both assumptions the tooling relies on: **one page per paper**, and **the PDF is
 
 ## What this is *not* for
 
-- **Arbitrary note vaults** (Obsidian daily notes, Zotero exports, literature-review docs). A page that isn't one-paper-shaped has no claims to extract and no PDF to grade against, so it lands as an unciteable stub. File it as a `references/` doc or a synthesis page by hand instead.
+- **A reference-manager library** (Zotero, Paperpile, Mendeley, ReadCube). Those users have PDFs and metadata and no markdown at all, which is the opposite of what this file is for. They have their own path: [`import-reference-manager.md`](./import-reference-manager.md), driven by `researchwiki import`.
+- **Arbitrary note vaults** (Obsidian daily notes, literature-review docs). A page that isn't one-paper-shaped has no claims to extract and no PDF to grade against, so it lands as an unciteable stub. File it as a `references/` doc or a synthesis page by hand instead.
 - **Pages with no PDF.** Nothing here can grade them. They can exist, but they can never ground a synthesis citation.
 - **Fixing bad prose.** If the *text* is wrong, re-ingest from the PDF — see [`recovery.md`](./recovery.md).
 
