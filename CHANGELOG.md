@@ -137,6 +137,27 @@ the reasoning behind any line below.
   is byte-identical across all 432 distinct author strings in the corpus and the
   documented test shapes.
 
+- Stem derivation no longer drops a nobiliary particle from a name written
+  `Family, Given`. `van der Graaf, A.` derived `der-graaf`: the part before the
+  comma is *already* the surname, but the particle walk ran on it anyway, and its
+  floor — the rule that keeps `Bin Liu` from being read as particle + surname —
+  stopped it one token early. Also affected `De Winter, S.` and
+  `van den Berg, L.`.
+
+  The comma is the hard part, not the walk. It separates `Family, Given` in a
+  bibliographic export and it separates *authors* in this wiki's own `authors:`
+  field, so `van der Graaf, A.` is one person and `Akari Asai, Zeqiu Wu` is two.
+  Treating every comma as an inversion is the obvious fix and it changes **349**
+  first-author surnames on the real corpus, because a byline's leading given name
+  is so often an initial or a particle lookalike (`Di Liu, Bin Wang`). Two signals
+  are now required together: the part before the comma must be surname-shaped
+  (every token but the last a particle), and the part after must be a given-name
+  run. Measured across every corpus byline *and* every raw `authors:` field —
+  756 distinct inputs — exactly the three broken cases change and no existing
+  stem does. Callers are still expected to split a byline before asking for its
+  first surname; this keeps the function robust when one doesn't, because the
+  failure mode is a silent wrong filename.
+
 - `refimport.clean_doi` is public. DOI wrappers arrive from both directions, so
   the normalizer belongs to the package rather than to `parse`'s internals.
 

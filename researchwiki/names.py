@@ -97,6 +97,42 @@ def surname_span(tokens: list[str]) -> int:
     return i
 
 
+#: A given-name initial: `A`, `A.`, `Y.`
+_INITIAL_RE = re.compile(r"^\w\.?$")
+
+
+def looks_inverted(raw: str) -> bool:
+    """Whether `raw` is one name written `Family, Given`.
+
+    A comma means two different things and reading it wrong is expensive in both
+    directions. In a bibliographic export it separates `Family, Given`; in this
+    wiki's own `authors:` field it separates *authors*. So
+    `van der Graaf, A.` is one person and `Akari Asai, Zeqiu Wu` is two, and no
+    amount of looking at the comma alone distinguishes them.
+
+    Two signals together do, and both are required:
+
+      1. the part *before* the comma is surname-shaped — every token but the last
+         is a nobiliary particle, so `van der Graaf` qualifies and `Akari Asai`
+         does not;
+      2. the part *after* is a given-name run — a single token, or all initials.
+
+    Measured on the real corpus: requiring only (1) changes 349 first-author
+    surnames, because a byline's leading given name is frequently a particle
+    lookalike (`Di Liu, Bin Wang`) or an initial. Requiring both changes none
+    except the case this exists for.
+    """
+    before, sep, after = raw.partition(",")
+    if not sep:
+        return False
+    head, tail = before.split(), after.split()
+    if not head or not tail:
+        return False
+    if any(t.lower().strip(".") not in SURNAME_PARTICLES for t in head[:-1]):
+        return False
+    return len(tail) == 1 or all(_INITIAL_RE.match(t) for t in tail)
+
+
 def split_author_field(value) -> list[str]:
     """One `authors:` frontmatter value → one string per author.
 

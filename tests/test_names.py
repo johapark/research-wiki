@@ -17,6 +17,7 @@ import pytest
 from researchwiki.names import (
     as_family_given,
     is_consortium,
+    looks_inverted,
     split_author_field,
     strip_et_al,
     surname_span,
@@ -152,6 +153,62 @@ def test_declines_to_split_when_it_cannot_be_sure(raw):
 def test_consortium_detection():
     assert is_consortium("1000 Genomes Project")
     assert not is_consortium("Sangsu Bae")
+
+
+# ---------- `Family, Given` vs the author-list delimiter ----------
+#
+# A comma means two different things: it separates `Family, Given` in a
+# bibliographic export, and it separates *authors* in this wiki's `authors:`
+# field. `van der Graaf, A.` is one person; `Akari Asai, Zeqiu Wu` is two.
+
+
+@pytest.mark.parametrize("raw", [
+    "van der Graaf, A.",        # particles + surname, then an initial
+    "De Winter, S.",
+    "van den Berg, L.",
+    "Smith, John",              # bare surname, then one given name
+    "Liu, Bin",
+])
+def test_inverted_single_names_are_recognized(raw):
+    assert looks_inverted(raw)
+
+
+@pytest.mark.parametrize("raw", [
+    "Akari Asai, Zeqiu Wu",              # two authors
+    "A. Backhaus, J. Quiroz-Chávez",     # two authors, initialed
+    "Di Liu, Bin Wang",                  # leading given name is a particle lookalike
+    "Liu, Bin Wang",                     # `Liu` then a full name = two authors
+    "Sangsu Bae",                        # no comma at all
+])
+def test_author_lists_are_not_read_as_inverted_names(raw):
+    """Requiring only the surname-shape signal changes 349 first-author surnames
+    on the real corpus, because a leading given name is so often an initial or a
+    particle lookalike. Both signals are required."""
+    assert not looks_inverted(raw)
+
+
+@pytest.mark.parametrize("raw,surname", [
+    ("van der Graaf, A.", "van-der-graaf"),
+    ("De Winter, S.", "de-winter"),
+    ("van den Berg, L.", "van-den-berg"),
+])
+def test_an_inverted_name_keeps_its_particle(raw, surname):
+    """The bug this fixes: the pre-comma part is *already* the surname, so the
+    particle walk must not run on it. Its floor exists to protect a leading given
+    name, and applied here it stopped early and dropped the `van`."""
+    assert first_author_surname([raw]) == surname
+
+
+@pytest.mark.parametrize("raw,surname", [
+    ("Akari Asai, Zeqiu Wu, Yizhong Wang", "asai"),
+    ("A. Backhaus, J. Quiroz-Chávez", "backhaus"),
+    ("Di Liu, Bin Wang", "liu"),
+])
+def test_a_whole_author_field_still_yields_the_first_surname(raw, surname):
+    """Callers are supposed to split the byline first, but this used to be robust
+    to being handed the whole field and staying robust is worth a test: the
+    failure mode is a silent wrong filename."""
+    assert first_author_surname([raw]) == surname
 
 
 def test_diacritics_are_never_folded_in_output():

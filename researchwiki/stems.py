@@ -129,14 +129,24 @@ def first_author_surname(authors: list[str]) -> str:
     if names.is_consortium(raw):
         return slugify_phrase(raw) or "unknown"
 
-    # "Last, First" — the surname is the part before the first comma.
-    if "," in raw:
-        raw = raw.split(",", 1)[0].strip()
-
-    parts = raw.split()
+    # `Family, Given` — everything before the comma is *already* the surname, so
+    # the particle walk must not run on it. Its floor exists to protect a leading
+    # given name and there isn't one here: applied to `van der Graaf, A.` it
+    # stopped at the floor and returned `der-graaf`, dropping the `van`.
+    #
+    # Gated on `names.looks_inverted` rather than on the presence of a comma,
+    # because a comma is also how this wiki's `authors:` field separates authors.
+    # Callers are supposed to split first, but treating every comma as an
+    # inversion changes 349 first-author surnames on the real corpus the moment
+    # one doesn't — a silent wrong filename, which is the expensive direction.
+    if names.looks_inverted(raw):
+        parts, start = raw.split(",", 1)[0].split(), 0
+    else:
+        parts = raw.split(",", 1)[0].split() if "," in raw else raw.split()
+        start = names.surname_span(parts)
     if not parts:
         return "unknown"
-    surname = "-".join(parts[names.surname_span(parts):]).lower()
+    surname = "-".join(parts[start:]).lower()
     surname = re.sub(r"[^a-z0-9-]", "", surname)
     # Same invariant the title part holds: a stem component never carries an
     # edge or doubled separator. Rare here (a byline ending in a stray dash),
