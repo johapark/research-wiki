@@ -24,7 +24,7 @@ from ..db.connection import get_connection
 from ..db.iterations import write_iteration, update_paper_stem
 from ..grade import coherence
 from . import fitness, model_config, phases
-from .context import Context, ReconcileFailed, StemRenameRefused
+from .context import Context, PromoteFailed, ReconcileFailed, StemRenameRefused
 from .relay import set_relay_identity
 from ..fsatomic import write_text_atomic
 from ..log import log
@@ -1048,6 +1048,45 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # to the persisted decision_reason so post-hoc audits see the signal.
         if gate.warnings:
             result.warnings.extend(gate.warnings)
+
+        # Promote is not transactional: the page + its DB row land before the
+        # PDF move, and every step after that can fail independently. When one
+        # does, `promote_to_wiki` returns `promoted=False` rather than raising.
+        # Reading that flag is what stops a half-landed paper being recorded as
+        # `committed-to-wiki` and exiting 0 — the shape a duplicate PDF in a
+        # batch produced deterministically, since `_move_pdf` refuses a stem
+        # collision that isn't a journal upgrade.
+        #
+        # Record the failure, then raise: the iteration row has to exist before
+        # the exception unwinds, because `run_ingest`'s `finally` closes `conn`.
+        if not result.promoted:
+            decision_reason = (
+                f"category={result.category}; wiki={result.wiki_path}; "
+                f"pdf={result.pdf_path}; backlinks_added={result.backlinks_added}; "
+                f"index_updated={result.index_updated}; "
+                f"log_appended={result.log_appended}"
+            )
+            if result.warnings:
+                decision_reason += f"; warnings={result.warnings}"
+            write_iteration(
+                attempt_id=ctx.attempt_id,
+                paper_stem=ctx.paper_stem,
+                pdf_filename=ctx.pdf_filename,
+                iteration=ctx.iteration,
+                role="commit",
+                parent_iteration_id=ctx.winner.iteration_id,
+                decision="promote-failed",
+                decision_reason=decision_reason,
+                conn=conn,
+            )
+            for w in result.warnings:
+                log(f"promote  ✗ {w}", tag="agent")
+            raise PromoteFailed(
+                stem=ctx.paper_stem,
+                page_path=result.wiki_path,
+                warnings=result.warnings,
+            )
+
         if result.pdf_upgrade:
             ctx.next_iter()
             write_iteration(

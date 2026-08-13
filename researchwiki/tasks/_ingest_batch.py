@@ -129,6 +129,51 @@ def _worker(pdf_path: str, batch_dir: Path, subcommand: list[str],
     return {"input": pdf_path, "status": status, "returncode": proc.returncode}
 
 
+def _split_unresumable(batch_dir: Path, pending: list[str]) -> tuple[list[str], list[str]]:
+    """Partition `pending` into (still-runnable, unresumable).
+
+    Unresumable = the input path no longer exists. Applied to everything about
+    to be queued, including retryable `failed` entries: a promote that failed
+    with exit 2 *after* the PDF move is retryable by exit code but not by path.
+    """
+    runnable: list[str] = []
+    gone: list[str] = []
+    for pdf in pending:
+        (runnable if Path(pdf).exists() else gone).append(pdf)
+    return runnable, gone
+
+
+def _report_unresumable(batch_dir: Path, unresumable: list[str], state: dict) -> None:
+    """Explain the unresumable bucket and what to check, on stderr.
+
+    Shaped like the `skipped_non_retryable` block below it — same layout,
+    different cause — so the two read as one family in a resume's output.
+    """
+    n = len(unresumable)
+    print(
+        f"ingest-batch: {n} input(s) no longer on disk — not re-runnable as-is.",
+        file=sys.stderr,
+    )
+    for pdf in unresumable:
+        rec = (state.get("unresumable") or {}).get(pdf) or {}
+        if rec.get("worker_started"):
+            why = ("worker started, never recorded a result — promote most likely "
+                   "got as far as moving the PDF into papers/ and then died")
+        else:
+            why = "no worker log — the input was moved or deleted outside this batch"
+        print(f"    · {Path(pdf).name}", file=sys.stderr)
+        print(f"      {why}", file=sys.stderr)
+        if rec.get("worker_started"):
+            print(f"      log: {_worker_log_path(batch_dir, pdf).name}", file=sys.stderr)
+    print(
+        "  These are recorded as terminal and won't be re-queued. Check each by "
+        "hand — wiki page present? index.md bullet? back-links? log.md entry? — "
+        "then finish or delete the partial page and re-ingest the PDF from "
+        "papers/. See prompts/recovery.md § Half-landed promote.",
+        file=sys.stderr,
+    )
+
+
 def _should_retry(record: dict) -> bool:
     """Decide whether a failed PDF is worth re-running on `--resume`.
 
@@ -267,12 +312,14 @@ def _run_batch(batch_dir: Path, pending: list[str], workers: int,
     # `failed` is in the denominator because `resume_batch` can now hold back
     # non-retryable failures (exit 1 / 3) instead of queueing them. Without it
     # the `[i/N]` line would silently start counting a smaller batch than the
-    # user submitted, which reads as "some inputs vanished".
-    total = len(state["completed"]) + len(state["failed"]) + len(pending)
+    # user submitted, which reads as "some inputs vanished". `unresumable` is
+    # in it for the same reason — those inputs are terminal, not absent.
+    total = (len(state["completed"]) + len(state["failed"])
+             + len(state.get("unresumable") or {}) + len(pending))
     done_before = len(state["completed"])
     if not pending:
         print(f"nothing pending ({done_before}/{total} already complete)")
-        return 0 if not state.get("failed") else 1
+        return 0 if not (state.get("failed") or state.get("unresumable")) else 1
 
     print(f"ingest-batch: {len(pending)} pending, {done_before} done, "
           f"{workers} worker{'s' if workers != 1 else ''} → {batch_dir}")
@@ -363,7 +410,7 @@ def _run_batch(batch_dir: Path, pending: list[str], workers: int,
               file=sys.stderr)
         return 1
     _print_batch_epilogue(batch_dir, state)
-    return 0 if not state["failed"] else 1
+    return 0 if not (state["failed"] or state.get("unresumable")) else 1
 
 
 # ---------- public entry points ----------
@@ -426,11 +473,12 @@ def resume_batch(batch_dir: Path, no_retry: bool,
     state = _read_checkpoint(batch_dir)
     completed = set((state.get("completed") or {}).keys())
     failed = set((state.get("failed") or {}).keys())
+    unresumable_before = set((state.get("unresumable") or {}).keys())
 
     pending: list[str] = []
     skipped_non_retryable: list[str] = []
     for pdf in plan["inputs"]:
-        if pdf in completed:
+        if pdf in completed or pdf in unresumable_before:
             continue
         if pdf in failed:
             if no_retry:
@@ -439,6 +487,36 @@ def resume_batch(batch_dir: Path, no_retry: bool,
                 skipped_non_retryable.append(pdf)
                 continue
         pending.append(pdf)
+
+    # An input whose PDF is no longer on disk cannot be re-run. The common
+    # cause is a worker that died *after* `_move_pdf` shutil.move'd the file
+    # out of inbox/ into papers/ — the checkpoint records nothing (it is only
+    # written once the subprocess returns), so the old code re-queued a path
+    # that no longer existed and the half-landed paper was never repaired.
+    #
+    # Whether the worker ever started is recoverable without new bookkeeping:
+    # `_worker` opens its log file *before* `subprocess.run`, so the log's
+    # existence already proves the subprocess was launched. That distinguishes
+    # "died mid-promote" (log present — inspect the wiki page) from "the user
+    # moved or deleted the input" (no log).
+    pending, unresumable = _split_unresumable(batch_dir, pending)
+    if unresumable:
+        state.setdefault("unresumable", {})
+        state.setdefault("failed", {})
+        for pdf in unresumable:
+            state["unresumable"][pdf] = {
+                "input": pdf,
+                "status": "unresumable",
+                "reason": "input PDF no longer on disk",
+                "worker_started": _worker_log_path(batch_dir, pdf).exists(),
+            }
+            # The buckets must stay disjoint: `_run_batch` sums them for the
+            # `[i/N]` denominator, so an input left in `failed` *and* moved to
+            # `unresumable` inflates N. A retryable-by-exit-code failure whose
+            # PDF has since vanished belongs only in the latter.
+            state["failed"].pop(pdf, None)
+        _write_checkpoint(batch_dir, state)
+        _report_unresumable(batch_dir, unresumable, state)
 
     if skipped_non_retryable:
         print(f"ingest-batch: {len(skipped_non_retryable)} failure(s) not retried "

@@ -35,6 +35,36 @@ researchwiki db rebuild && researchwiki reindex
   suppresses the guard for the whole run, including any collision you did *not*
   intend.
 
+## Half-landed promote
+
+Trigger: `agent ingest` exited **2** with *"promote did not complete — the paper is PARTIALLY landed"*, or a `--resume` reported inputs **"no longer on disk"**.
+
+Promote is five steps with no transaction — page write + DB commit → PDF move → back-links → `index.md` → `log.md` — and only the first two have run. The usual cause is a duplicate: `_move_pdf` refuses a stem collision that isn't a preprint→journal upgrade.
+
+Check the four things in order, then decide:
+
+```bash
+ls wiki/*/<stem>.md                       # 1. page written?  (expected: yes)
+ls papers/<stem>.pdf inbox/               # 2. which side is the PDF on?
+grep -n "\[\[.*/<stem>\]\]" wiki/index.md # 3. index bullet?  (expected: absent)
+grep -n "<stem>" wiki/log.md              # 4. log entry?     (expected: absent)
+```
+
+**The page is the thing to remove** — it is on disk and in `state.db`, but no back-link, bullet or log entry points at it, so nothing else in the wiki depends on it yet:
+
+```bash
+rm wiki/<cat>/<stem>.md
+researchwiki db rebuild                   # drops the claims + papers rows
+```
+
+Then resolve the cause and re-ingest from wherever the PDF actually is:
+
+- **Duplicate** (`papers/<stem>.pdf` already existed) — the honest question is which copy to keep. Same paper → delete the incoming one from `inbox/` and stop. Genuinely different paper on the same stem → see *PDF Management Rules* in `CLAUDE.md` for disambiguation.
+- **Preprint→journal upgrade that wasn't classified as one** — fix the DOI on the existing page first (`researchwiki preprint-check --doi <preprint-doi>`), then re-run.
+- **Anything else** — re-run `researchwiki agent ingest <path-to-pdf>`; note the path is `papers/<stem>.pdf` if the move had already happened.
+
+Batch note: an input the resume calls unresumable is recorded terminal in `checkpoint.json` under `unresumable` and is never re-queued, so finishing it by hand is the only path. `worker_started: true` means the subprocess ran and died mid-promote (check the four things above); `false` means the file left `inbox/` some other way.
+
 ## Override flags
 
 LLM-reconcile is on by default since R3, so most overrides are cold paths now.

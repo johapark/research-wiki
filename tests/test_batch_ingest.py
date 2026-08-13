@@ -592,3 +592,131 @@ def test_a_plan_without_per_input_args_still_resumes(tmp_path, monkeypatch):
                         {"input": p, "status": "completed", "returncode": 0})
     _ingest_batch.resume_batch(batch, no_retry=False)
     assert seen == [[]]
+
+
+# ---------- unresumable inputs (WI-1 fix c) ----------
+#
+# A worker that dies *after* `_move_pdf` shutil.move'd the PDF out of inbox/
+# records nothing in the checkpoint (that write only happens once the
+# subprocess returns). The old resume re-queued the vanished path; these pin
+# that it is now classified terminal and explained instead.
+
+def test_resume_skips_input_whose_pdf_vanished(wiki, monkeypatch, capsys):
+    """The load-bearing case: promote moved the PDF, then the worker died."""
+    pdfs = _make_pdfs(wiki, ["ok.pdf", "moved.pdf"])
+    # Only `ok.pdf` reports back; `moved.pdf` leaves no checkpoint record,
+    # exactly as a mid-promote crash would.
+    def worker(pdf_path, batch_dir, subcommand, extra_args):
+        if pdf_path == pdfs[1]:
+            raise KeyboardInterrupt
+        return {"input": pdf_path, "status": "completed", "returncode": 0}
+    monkeypatch.setattr(_ingest_batch, "_worker", worker)
+    agent_cli.main(["ingest", *pdfs])
+    batch_dir = _only_batch(wiki)
+
+    # Simulate promote having moved it into papers/.
+    Path(pdfs[1]).unlink()
+
+    touched: list[str] = []
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({}, calls=touched))
+    rc = agent_cli.main(["ingest", "--resume", str(batch_dir)])
+
+    assert rc == 1
+    assert touched == [], "a vanished input must not be re-queued"
+    state = json.loads((batch_dir / "checkpoint.json").read_text())
+    assert pdfs[1] in state["unresumable"]
+    assert state["unresumable"][pdfs[1]]["reason"] == "input PDF no longer on disk"
+    err = capsys.readouterr().err
+    assert "no longer on disk" in err
+    assert "moved.pdf" in err
+    assert "recovery.md" in err
+
+
+def test_unresumable_is_terminal_across_two_resumes(wiki, monkeypatch):
+    """Second resume must not re-report or re-queue it — the bucket is
+    terminal, like `completed`, not a retry queue."""
+    pdfs = _make_pdfs(wiki, ["gone.pdf", "keep.pdf"])
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({pdfs[0]: 2}))
+    agent_cli.main(["ingest", *pdfs])
+    batch_dir = _only_batch(wiki)
+    Path(pdfs[0]).unlink()
+
+    monkeypatch.setattr(_ingest_batch, "_worker", _stub_worker({}))
+    assert agent_cli.main(["ingest", "--resume", str(batch_dir)]) == 1
+
+    touched: list[str] = []
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({}, calls=touched))
+    assert agent_cli.main(["ingest", "--resume", str(batch_dir)]) == 1
+    assert touched == []
+
+
+def test_retryable_failure_with_vanished_pdf_is_unresumable(wiki, monkeypatch):
+    """Exit 2 is retryable *by exit code*, but not when the input is gone —
+    a promote that failed after the PDF move is exactly this shape."""
+    pdfs = _make_pdfs(wiki, ["boom.pdf", "fine.pdf"])
+    monkeypatch.setattr(_ingest_batch, "_worker", _stub_worker({pdfs[0]: 2}))
+    agent_cli.main(["ingest", *pdfs])
+    batch_dir = _only_batch(wiki)
+    Path(pdfs[0]).unlink()
+
+    touched: list[str] = []
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({}, calls=touched))
+    assert agent_cli.main(["ingest", "--resume", str(batch_dir)]) == 1
+    assert touched == []
+
+
+def test_worker_log_presence_distinguishes_crash_from_deletion(wiki, monkeypatch, capsys):
+    """`_worker` opens its log before `subprocess.run`, so the log's
+    existence already records that the subprocess launched — no extra
+    bookkeeping needed. Absent log ⇒ the user moved the file."""
+    pdfs = _make_pdfs(wiki, ["never-started.pdf", "other.pdf"])
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({pdfs[0]: 2}))
+    agent_cli.main(["ingest", *pdfs])
+    batch_dir = _only_batch(wiki)
+    # Stub worker wrote no log; remove the input as if the user moved it.
+    Path(pdfs[0]).unlink()
+
+    monkeypatch.setattr(_ingest_batch, "_worker", _stub_worker({}))
+    agent_cli.main(["ingest", "--resume", str(batch_dir)])
+
+    state = json.loads((batch_dir / "checkpoint.json").read_text())
+    assert state["unresumable"][pdfs[0]]["worker_started"] is False
+    assert "moved or deleted outside this batch" in capsys.readouterr().err
+
+
+def test_denominator_counts_unresumable(wiki, monkeypatch, capsys):
+    """`[i/N]` must keep counting the batch the user submitted; an
+    unresumable input is terminal, not absent."""
+    pdfs = _make_pdfs(wiki, ["a.pdf", "b.pdf", "c.pdf"])
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({pdfs[1]: 2, pdfs[2]: 2}))
+    agent_cli.main(["ingest", *pdfs])
+    batch_dir = _only_batch(wiki)
+    Path(pdfs[1]).unlink()
+
+    monkeypatch.setattr(_ingest_batch, "_worker", _stub_worker({}))
+    capsys.readouterr()
+    agent_cli.main(["ingest", "--resume", str(batch_dir)])
+    out = capsys.readouterr().out
+    assert "/3]" in out, f"denominator lost an input: {out!r}"
+
+
+def test_all_inputs_present_is_unaffected(wiki, monkeypatch):
+    """Guard against the check firing on a healthy resume."""
+    pdfs = _make_pdfs(wiki, ["a.pdf", "b.pdf"])
+    monkeypatch.setattr(_ingest_batch, "_worker", _stub_worker({pdfs[1]: 2}))
+    agent_cli.main(["ingest", *pdfs])
+    batch_dir = _only_batch(wiki)
+
+    touched: list[str] = []
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({}, calls=touched))
+    assert agent_cli.main(["ingest", "--resume", str(batch_dir)]) == 0
+    assert touched == [pdfs[1]]
+    state = json.loads((batch_dir / "checkpoint.json").read_text())
+    assert "unresumable" not in state or state["unresumable"] == {}

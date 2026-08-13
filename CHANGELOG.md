@@ -14,6 +14,45 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A promote that didn't complete reported success.** `promote_to_wiki` is five
+  multi-file steps with no transaction binding them — page write + DB commit → PDF
+  move → back-links → `index.md` → `log.md` — and returns `promoted=False` rather
+  than raising when a step after the page write fails. Nothing read that flag: the
+  only `.promoted` reads in the package were `gate.promoted`, a different object.
+  Execution fell through to `decision = "committed-to-wiki"`.
+
+  This was reachable without a crash. `_move_pdf` refuses a stem collision that
+  isn't a preprint→journal upgrade, i.e. **any duplicate PDF in a batch**, which
+  left a page on disk and in `state.db` with the PDF still in `inbox/`, no
+  back-links, no index bullet and no log entry — while the process exited 0 and the
+  checkpoint recorded `completed`. The warning did reach the log; the exit code was
+  what lied.
+
+  The commit phase now records a `promote-failed` iteration and raises
+  `PromoteFailed`, which the CLI maps to exit **2** (retryable — deleting the
+  duplicate makes the retry work) with an inspection checklist and no stack trace.
+
+- **`--resume` re-queued inputs whose PDF had already moved.** The batch checkpoint
+  is only written once a worker subprocess returns, so a worker that died
+  mid-promote recorded nothing, and `resume_batch` re-queued its input path by
+  name — a path `_move_pdf` had already `shutil.move`d out of `inbox/`. The re-run
+  was dead on arrival and the half-landed paper was never repaired.
+
+  Such inputs are now classified `unresumable` in `checkpoint.json`, reported with
+  what to check, and never re-queued. Whether the worker ever started is recovered
+  from the existence of its log file — `_worker` opens that before
+  `subprocess.run`, so no new bookkeeping was needed — which distinguishes "died
+  mid-promote" from "the user moved the file". The check also covers retryable
+  (exit 2) failures, whose exit code says retry but whose input is gone.
+
+### Changed
+
+- A batch containing a duplicate PDF now exits non-zero where it previously exited
+  0. Same for a resume that finds an input no longer on disk. Wrapper scripts that
+  branch on the exit status will see this.
+
 ## [0.3.1] - 2026-08-13
 
 ### Added
