@@ -143,11 +143,30 @@ internal, and renaming a function is a PATCH. What consumers actually depend on:
 While on `0.x`, a breaking change takes the **MINOR** slot (0.2.0 → 0.3.0) and says
 so at the top of its changelog entry.
 
+**The same table decides additions.** SemVer's MINOR clause is about new
+functionality introduced to *the public API*, so what earns a MINOR here is a change
+that **adds** to a surface above: a new command or flag, a new `--json` key, a new
+frontmatter field, a new page type. A change that only alters behaviour behind an
+existing surface is a PATCH however its commit was labelled — new diagnostics,
+warnings, better error messages, prompt edits, heuristic changes. Nothing a consumer
+parses gained a member, so nothing they pin can break.
+
+This replaces "any `feat` → MINOR", borrowed from Conventional Commits. That rule
+keyed the version to a label chosen per commit, before anyone knew what the release
+would contain, and it over-fired on precisely the shape it couldn't see: the `feat`
+in the 0.3.1 range added 96 lines to one internal module, two stderr warnings, and no
+public surface whatsoever, while 0.3.0 — two new commands — occupied the same slot.
+Deciding from the table keeps the choice mechanical, with one arbiter and no
+per-release argument about whether a feature was big enough, while measuring the
+thing SemVer actually names.
+
 ### Cutting a release
 
 1. **Pick the number** from the commits since the last tag —
-   `git log v<prev>..HEAD --format='%s'`. Any breaking change per the table above →
-   MINOR (while 0.x); any `feat` → MINOR; otherwise PATCH.
+   `git log v<prev>..HEAD --format='%s'`, read against the table above. Breaking
+   change → MINOR (while 0.x); anything that *adds* a listed surface → MINOR;
+   otherwise PATCH. Commit types are evidence, not the rule: check what the diff
+   added, not whether the subject said `feat`.
 2. **Promote the changelog.** Rename `## [Unreleased]` to
    `## [x.y.z] - YYYY-MM-DD`, open a fresh empty `## [Unreleased]` above it, and add
    the compare link at the bottom. Entries are curated prose, not generated subject
