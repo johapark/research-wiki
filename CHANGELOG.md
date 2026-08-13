@@ -14,6 +14,40 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Changed
+
+- `researchwiki init` now recommends OpenAI/ChatGPT as the default provider, matching
+  README and `model_config._FALLBACK_ROLES`. Its menu had offered Anthropic as entry 1
+  labelled `default, ~$0.10/paper` — so the human-driven setup path steered new users
+  onto a ~10x-dearer provider and told them it was the default, while the LLM-driven
+  path (which reads the README) set them up on OpenAI at ~$0.01/paper. Every provider
+  is still offered; the menu now mirrors README's *Providers* table in its order, and
+  has five entries rather than four, since plain OpenAI and "other OpenAI-compatible
+  cloud" have different setup steps and were previously conflated into one.
+
+  Picking OpenAI writes **no** `config/models.yaml`: the built-in fallback already
+  routes every role there, which is what makes that path zero-config. It is
+  deliberately not `models.chatgpt.yaml` — that template puts author/critic/judge on
+  gpt-5.6-terra (~$0.071/paper by its own header) against the fallback's gpt-5.6-luna
+  (~$0.009/paper), so copying it would have made the recommended choice ~7x dearer
+  than choosing nothing. A leftover `models.yaml` from a previous run is offered for
+  removal, because otherwise it silently overrides the choice just made.
+
+- Invalid input at either wizard menu re-prompts instead of resolving to entry 1. The
+  provider menu's old fallback printed `defaulting to Anthropic` and continued, so one
+  slipped keystroke picked the dearest provider on the list; the category menu compared
+  the raw string to `"1"` and treated everything else as "manual".
+
+- The wizard's readiness check is now the same provider-aware check `agent ingest`
+  preflights with, so its verdict and the first ingest's outcome cannot disagree. It
+  previously used `has_synchronous_llm()` — "is any key set anywhere" — which printed
+  a ✓ for an Anthropic key against an OpenAI-routed config, the exact mix-up the step
+  exists to catch.
+
+- The wizard restated the bootstrap PDF threshold as 5 against the real
+  `MIN_INBOX_FOR_BOOTSTRAP = 3`, so users with 3–4 PDFs were told bootstrap was
+  unavailable when it would have worked. It now imports the constant.
+
 ### Fixed
 
 - `agent ingest` now checks that the configured provider has usable credentials
