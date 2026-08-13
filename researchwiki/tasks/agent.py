@@ -128,6 +128,25 @@ def _cmd_ingest(args) -> int:
               file=sys.stderr)
         return 1
 
+    # Validate argv before the environment, so a typo'd path stays a
+    # user-input error (1) instead of being masked by a credentials error (2)
+    # — the ordering `test_missing_pdf_rejected` pins. Called for the
+    # validation only; the returned list is deliberately discarded so that
+    # dedup still happens inside `new_batch`, *after* the batch-mode decision
+    # below reads the raw argv count.
+    from . import _ingest_batch
+    _ingest_batch._resolve_inputs(args.pdfs)
+
+    # Now the environment. Fail before extraction and reconcile, not in the
+    # author phase an hour of PDF work later. `--stub` never reaches a
+    # provider, so it is exempt. `--resume` returned above without this check
+    # on purpose: plan.json owns the original `--stub` flag, which this frame
+    # can't see, and each resumed worker is itself a `researchwiki agent
+    # ingest` that preflights here.
+    if not args.stub:
+        from ..agents.llm import preflight_providers
+        preflight_providers()
+
     # Resolve n_drafts once, before batch reconstruction or single-PDF run:
     # CLI `-n` wins; else the models config's `ingest.n_drafts`; else 1 (single
     # draft — the multi-draft author tournament is opt-in, since it roughly

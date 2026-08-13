@@ -14,6 +14,32 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Fixed
+
+- `agent ingest` now checks that the configured provider has usable credentials
+  *before* extracting the PDF and reconciling metadata, instead of discovering it
+  in the author phase at the end of that work. The old failure was the worst one
+  a new user could hit on their first command: an uncaught `RuntimeError` escaped
+  as exit **3** — "internal bug, file a report" — for what is a plain
+  configuration error, and because `call_openai_compatible` substitutes the
+  literal string `lm-studio` for an unset `OPENAI_API_KEY`, the diagnostic read
+  `Incorrect API key provided: lm-studio`, quoting a value the user had never
+  typed. It is now exit **2** with the missing variable, the endpoint that needs
+  it, and the config file actually in force.
+
+  The check resolves the endpoint through the same precedence as `llm.call`
+  (`RW_LLM_BASE_URL` → the config's `base_url:` → the LM Studio default), so a
+  preflight verdict can't disagree with what the call site would do. Loopback
+  endpoints and `chat-relay` need no credentials and pass; `--stub` skips the
+  check entirely. It is deliberately stricter than `has_synchronous_llm()`,
+  which answers "is any key set anywhere" and so waves through the case README
+  and `prompts/init.md` both name as the one that actually happens — an
+  Anthropic key set, the config copy skipped, every role still routed to
+  OpenAI. That case now fails with the `cp config/models.anthropic.yaml` hint.
+
+  Argv is still validated first: a path that doesn't exist remains exit 1, so a
+  typo isn't reported as missing credentials.
+
 ## [0.3.0] - 2026-08-11
 
 ### Added
