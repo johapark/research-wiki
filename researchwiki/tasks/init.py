@@ -33,18 +33,35 @@ from ..paths import ensure_scaffold, inbox_dir, wiki_dir, wiki_root
 
 # ── Provider wiring ──────────────────────────────────────────────────────────
 
-# Menu order → internal provider id.
+# Menu order → internal provider id. Mirrors README's *Providers* table, in
+# its order, because the two disagreeing is what this menu got wrong before:
+# it labelled Anthropic "default, ~$0.10/paper" and offered it as entry 1,
+# while README and `model_config._FALLBACK_ROLES` both make OpenAI the default
+# at ~$0.01/paper. A user who ran the wizard instead of reading the README was
+# steered onto a 10x-dearer setup and told it was the default.
 _PROVIDER_MENU: list[tuple[str, str, str]] = [
-    ("anthropic", "Anthropic cloud", "default, ~$0.10/paper; needs ANTHROPIC_API_KEY"),
-    ("openai-compatible", "OpenAI-compatible cloud", "OpenAI / Gemini / Groq / OpenRouter; needs OPENAI_API_KEY + base URL"),
-    ("local", "Local LLM", "LM Studio / vLLM / llama.cpp / ollama; free per paper"),
+    ("openai", "OpenAI / ChatGPT", "RECOMMENDED — ~$0.01/paper; needs OPENAI_API_KEY and no config file"),
+    ("openai-compatible", "Other OpenAI-compatible cloud", "Gemini / Groq / OpenRouter / Together; needs that provider's key + base URL"),
+    ("anthropic", "Anthropic cloud", "highest fidelity, ~$0.10/paper; needs ANTHROPIC_API_KEY"),
+    ("local", "Local LLM", "LM Studio / vLLM / llama.cpp / ollama; no key, ~free after the download"),
     ("chat-relay", "Chat-relay", "no API key or server; the chat agent fills each prompt"),
 ]
 
-# Which config/ template each provider copies to config/models.yaml. Chat-relay
-# keeps the anthropic template — it is an env override (RW_LLM_PROVIDER), not a
-# distinct role config.
-_TEMPLATE_BY_PROVIDER: dict[str, str] = {
+# Which config/ template each provider copies to config/models.yaml.
+#
+# `openai` maps to None on purpose: with no config file the loader falls back
+# to `_FALLBACK_ROLES`, which already routes every role to OpenAI — so the
+# default path is genuinely zero-config, exactly as README documents it.
+# Copying `models.chatgpt.yaml` here would NOT be equivalent: that template
+# puts author/critic/judge on gpt-5.6-terra (~$0.071/paper by its own header)
+# where the fallback uses gpt-5.6-luna (~$0.009/paper). Writing a file that
+# silently costs ~7x more than writing nothing is not a sane default.
+#
+# Chat-relay keeps the anthropic template — it is an env override
+# (RW_LLM_PROVIDER) rather than a distinct role config, but the config still
+# supplies the model *names* the relay reports per phase.
+_TEMPLATE_BY_PROVIDER: dict[str, str | None] = {
+    "openai": None,
     "anthropic": "models.anthropic.yaml",
     "openai-compatible": "models.openai-compatible.yaml",
     "local": "models.lmstudio.yaml",
@@ -112,8 +129,9 @@ LIMIT 5
 
 # ── Pure helpers (unit-tested) ───────────────────────────────────────────────
 
-def _template_for_provider(provider: str) -> str:
-    """config/ template filename for a provider id."""
+def _template_for_provider(provider: str) -> str | None:
+    """config/ template filename for a provider id, or None when the provider
+    needs no config file (see `_TEMPLATE_BY_PROVIDER`)."""
     return _TEMPLATE_BY_PROVIDER[provider]
 
 
@@ -129,6 +147,12 @@ def _env_updates_for_provider(
     if provider == "anthropic":
         if api_key:
             u["ANTHROPIC_API_KEY"] = api_key
+    elif provider == "openai":
+        # Deliberately no RW_LLM_BASE_URL: the built-in fallback already points
+        # at api.openai.com, and README asks users to keep that var out of .env
+        # so swapping backends stays a one-line shell export.
+        if api_key:
+            u["OPENAI_API_KEY"] = api_key
     elif provider == "openai-compatible":
         if api_key:
             u["OPENAI_API_KEY"] = api_key
@@ -186,6 +210,30 @@ def _ask(prompt: str, default: str | None = None) -> str:
     return ans or (default or "")
 
 
+def _ask_choice(n_options: int, default: str = "1") -> int:
+    """Prompt until the answer is one of 1..n_options; return a 0-based index.
+
+    Re-prompts on bad input rather than falling back to a default. The old
+    behavior resolved anything unparseable to menu entry 1 with a printed
+    "defaulting to Anthropic" — so a slipped keystroke silently chose the
+    dearest provider on the list. A menu that costs money per wrong answer
+    should ask again.
+
+    `_ask` returns the default on EOF, and the default is always a valid
+    choice, so this terminates on a closed stdin instead of spinning.
+    """
+    while True:
+        raw = _ask(f"Choose 1-{n_options}", default=default).strip()
+        try:
+            i = int(raw)
+        except ValueError:
+            print(f"  '{raw}' isn't a number — enter 1-{n_options}.")
+            continue
+        if 1 <= i <= n_options:
+            return i - 1
+        print(f"  {i} is out of range — enter 1-{n_options}.")
+
+
 def _confirm(prompt: str, default: bool = True) -> bool:
     d = "Y/n" if default else "y/N"
     ans = _ask(f"{prompt} [{d}]").strip().lower()
@@ -223,30 +271,22 @@ def _step_provider(root: Path) -> None:
         if not _confirm("Reconfigure the provider?", default=False):
             print("Keeping the current provider.")
             return
+    elif os.environ.get("OPENAI_API_KEY"):
+        # No config file *is* the configured state for the default provider, so
+        # a re-run has to recognize it — otherwise the wizard re-asks a user who
+        # is already set up and reads as though nothing took.
+        print("No config/models.yaml — the built-in defaults route every role to "
+              "OpenAI, and OPENAI_API_KEY is set. You're already configured.")
+        if not _confirm("Reconfigure the provider?", default=False):
+            print("Keeping the built-in OpenAI defaults.")
+            return
 
     print("Which LLM provider will you use?")
     for i, (_pid, label, blurb) in enumerate(_PROVIDER_MENU, 1):
         print(f"  {i}. {label} — {blurb}")
-    choice = _ask("Choose 1-4", default="1")
-    try:
-        provider = _PROVIDER_MENU[int(choice) - 1][0]
-    except (ValueError, IndexError):
-        print(f"'{choice}' isn't a valid choice — defaulting to Anthropic.")
-        provider = "anthropic"
+    provider = _PROVIDER_MENU[_ask_choice(len(_PROVIDER_MENU))][0]
 
-    # Copy the matching template → config/models.yaml.
-    template = config_dir / _template_for_provider(provider)
-    if template.exists():
-        if models_yaml.exists() and not _confirm(
-            f"Overwrite existing config/models.yaml with the {provider} template?", default=True
-        ):
-            print("Left config/models.yaml untouched.")
-        else:
-            shutil.copyfile(template, models_yaml)
-            print(f"Wrote config/models.yaml from {template.name}.")
-    else:
-        print(f"⚠ template {template} not found — skipping config copy. "
-              f"You'll need to create config/models.yaml by hand.")
+    _write_models_config(config_dir, models_yaml, provider)
 
     # Collect + persist required env vars (skip any already set in the shell).
     api_key = base_url = None
@@ -255,6 +295,11 @@ def _step_provider(root: Path) -> None:
             print("ANTHROPIC_API_KEY already set in your shell — leaving it.")
         else:
             api_key = _ask("Anthropic API key (blank to set later)") or None
+    elif provider == "openai":
+        if os.environ.get("OPENAI_API_KEY"):
+            print("OPENAI_API_KEY already set in your shell — leaving it.")
+        else:
+            api_key = _ask("OpenAI API key (blank to set later)") or None
     elif provider == "openai-compatible":
         if os.environ.get("OPENAI_API_KEY"):
             print("OPENAI_API_KEY already set in your shell — leaving it.")
@@ -284,6 +329,45 @@ def _step_provider(root: Path) -> None:
     _report_readiness(provider)
 
 
+def _write_models_config(config_dir: Path, models_yaml: Path, provider: str) -> None:
+    """Put `config/models.yaml` into the state the chosen provider needs.
+
+    For every provider but OpenAI that means copying a template. For OpenAI it
+    means the *absence* of the file, since the built-in fallback already routes
+    every role there — so an existing `models.yaml` left over from a previous
+    run has to go, or it silently overrides the choice just made and the wizard
+    reports success for a provider the user didn't pick.
+    """
+    template_name = _template_for_provider(provider)
+
+    if template_name is None:
+        if not models_yaml.exists():
+            print("No config/models.yaml needed — the built-in defaults already "
+                  "route every role to OpenAI.")
+            return
+        if _confirm("Remove the existing config/models.yaml so the built-in "
+                    "OpenAI defaults apply?", default=True):
+            models_yaml.unlink()
+            print("Removed config/models.yaml — built-in OpenAI defaults now apply.")
+        else:
+            print("⚠ Left config/models.yaml in place. It overrides this choice — "
+                  "whatever providers it names are what will actually run.")
+        return
+
+    template = config_dir / template_name
+    if not template.exists():
+        print(f"⚠ template {template} not found — skipping config copy. "
+              f"You'll need to create config/models.yaml by hand.")
+        return
+    if models_yaml.exists() and not _confirm(
+        f"Overwrite existing config/models.yaml with the {provider} template?", default=True
+    ):
+        print("Left config/models.yaml untouched.")
+        return
+    shutil.copyfile(template, models_yaml)
+    print(f"Wrote config/models.yaml from {template.name}.")
+
+
 def _warn_gitignore(root: Path) -> None:
     gi = root / ".gitignore"
     if gi.exists() and ".env" in gi.read_text(encoding="utf-8"):
@@ -293,16 +377,37 @@ def _warn_gitignore(root: Path) -> None:
 
 
 def _report_readiness(provider: str) -> None:
+    """Report whether the provider just configured can actually run.
+
+    Uses the same provider-aware check `agent ingest` preflights with, so the
+    wizard's verdict and the first ingest's outcome can't disagree. The check
+    this replaced (`has_synchronous_llm`) answered "is any key set anywhere",
+    and so printed a ✓ for an Anthropic key against an OpenAI-routed config —
+    the precise mix-up this step exists to catch.
+    """
     try:
-        from ..agents.llm import has_any_llm, has_synchronous_llm
+        from ..agents import model_config as _mc
+        from ..agents.llm import missing_provider_credentials
     except Exception:  # pragma: no cover - defensive; llm deps optional
         return
-    ok = has_any_llm() if provider == "chat-relay" else has_synchronous_llm()
-    if ok:
-        print("✓ Provider looks reachable.")
-    else:
-        print("… Provider not reachable yet — set the missing key/URL (in .env or your "
-              "shell) before the first ingest.")
+    # config/models.yaml was just written or removed, and each of these reads
+    # it behind an lru_cache — without clearing, the verdict describes the
+    # config as it was when the process started.
+    for fn in (_mc._config, _mc.base_url, _mc._ingest_settings):
+        cache_clear = getattr(fn, "cache_clear", None)
+        if cache_clear:
+            cache_clear()
+
+    problems = missing_provider_credentials()
+    if not problems:
+        if provider == "chat-relay":
+            print("✓ Chat-relay configured — no key needed; a chat agent answers "
+                  "each prompt from .llm-relay/pending/.")
+        else:
+            print("✓ Provider configured — every role has the credentials it needs.")
+        return
+    for p in problems:
+        print(f"… Not ready yet — {p}")
 
 
 def _step_categories(root: Path) -> None:
@@ -316,13 +421,13 @@ def _step_categories(root: Path) -> None:
             _print_category_help()
             return
 
+    from .bootstrap_categories import MIN_INBOX_FOR_BOOTSTRAP
     print("\nTwo ways to seed categories:")
-    print("  1. Bootstrap — drop ≥5 PDFs in inbox/ and let the classifier propose a "
-          "taxonomy from your actual papers.")
+    print(f"  1. Bootstrap — drop ≥{MIN_INBOX_FOR_BOOTSTRAP} PDFs in inbox/ and let the "
+          f"classifier propose a taxonomy from your actual papers.")
     print("  2. Manual — type the category slugs yourself.")
-    choice = _ask("Choose 1-2", default="2")
 
-    if choice == "1":
+    if _ask_choice(2, default="2") == 0:
         _bootstrap_categories()
     else:
         _manual_categories(root)
@@ -330,9 +435,14 @@ def _step_categories(root: Path) -> None:
 
 
 def _bootstrap_categories() -> None:
+    # Import the threshold rather than restating it: this used to hardcode 5
+    # against the real value of 3, so users with 3-4 PDFs were told bootstrap
+    # was unavailable when it would have worked.
+    from .bootstrap_categories import MIN_INBOX_FOR_BOOTSTRAP
     n_pdfs = len(list(inbox_dir().glob("*.pdf")))
-    if n_pdfs < 5:
-        print(f"Only {n_pdfs} PDF(s) in inbox/ — bootstrap needs ≥5. Drop more PDFs and "
+    if n_pdfs < MIN_INBOX_FOR_BOOTSTRAP:
+        print(f"Only {n_pdfs} PDF(s) in inbox/ — bootstrap needs "
+              f"≥{MIN_INBOX_FOR_BOOTSTRAP}. Drop more PDFs and "
               f"re-run `researchwiki bootstrap-categories --apply`, or set categories "
               f"manually now.")
         if _confirm("Set categories manually instead?", default=True):
@@ -401,9 +511,11 @@ def _step_confirm() -> None:
     print("\nNext: drop a PDF in inbox/ and run")
     print("    researchwiki agent ingest inbox/<file>.pdf")
     print("or just tell your LLM \"ingest the PDFs in inbox/\".")
-    print("\nChange settings later: swap providers by copying another config/models.*.yaml "
-          "template (or editing .env); manage categories per the tips above; re-run "
-          "`researchwiki init` any time (it's idempotent).")
+    print("\nChange settings later: swap providers by copying another "
+          "config/models.*.yaml template over config/models.yaml — or delete that "
+          "file to fall back to the built-in OpenAI defaults; keys live in .env; "
+          "manage categories per the tips above; re-run `researchwiki init` any "
+          "time (it's idempotent).")
 
 
 def _scaffold(quiet: bool = False) -> int:

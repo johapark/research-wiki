@@ -67,17 +67,16 @@ For the local path: 7–8B models handle `classifier` / `keywords` / `reconcile`
 
 ## Step 3 — Categories (run bootstrap by default)
 
-**Default action when `inbox/` has any PDFs: run `researchwiki bootstrap-categories` (print-only) and surface the proposed taxonomy to the user.** Do NOT default to the shipped categories table in `CLAUDE.md` — it is tuned for biology + ML and will be wrong for other domains. Empty `wiki/{category}/` directories mean the taxonomy has not been chosen yet, regardless of what the table shows.
+**Default action when `inbox/` has any PDFs: run `researchwiki bootstrap-categories` (print-only) and surface the proposed taxonomy to the user.** A fresh wiki has no content categories at all — `init` creates only `other` and the four page-type dirs — so the taxonomy genuinely has to be chosen here. Any category table you may have seen in a README is one author's example, not a default anyone inherits.
 
 ```bash
-researchwiki bootstrap-categories            # print-only
-researchwiki bootstrap-categories --apply    # rewrite CLAUDE.md table + categories.py atomically
+researchwiki bootstrap-categories            # print-only (needs ≥3 PDFs in inbox/)
+researchwiki bootstrap-categories --apply    # mkdir each wiki/<slug>/
 ```
 
 Skip bootstrap *only* when:
-- The user explicitly asks for the shipped defaults (*"use the defaults"*, *"keep the defaults"*).
-- `inbox/` is empty — defer until they drop PDFs.
-- The user wants to hand-edit (`CLAUDE.md` Categories table + `researchwiki/categories.py` `VALID_CATEGORIES` set must agree).
+- `inbox/` has fewer than 3 PDFs — defer until they drop more (that's `MIN_INBOX_FOR_BOOTSTRAP`).
+- The user wants to name the categories themselves: `mkdir wiki/<slug>/` is the entire operation, since a category is valid iff its directory exists. Then `researchwiki reindex`.
 
 `other` must always be present (abstention bucket).
 
