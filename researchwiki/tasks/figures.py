@@ -150,23 +150,32 @@ def main(argv: list[str]) -> int:
             else:
                 print("  no captions detected at all — use --page N.", file=sys.stderr)
             return 1
-        print(f"{ref.label} → page {ref.page}")
-        print(f"  {ref.caption}")
+        # Some layouts keep a caption and its plate on different pages — an
+        # accepted manuscript with the captions collected, or a preprint that
+        # appends every figure after the manuscript. Rendering the caption page
+        # then shows text and no figure, silently.
+        #
+        # Tables are exempt from all of this: a table *is* text with rules, so
+        # low artwork coverage on its page is correct, not a symptom.
+        coverage = figlib.artwork_coverage(pdf) if ref.kind == "Figure" else []
+        moved = figlib.prefer_artwork_page(ref, coverage) if coverage else ref
 
-        # Accepted manuscripts often collect every caption onto one page and
-        # put the plates several pages later. Rendering the caption page then
-        # shows text and no figure, silently. Warn and name candidates rather
-        # than rendering them — an extra page is extra context the caller
-        # didn't ask to spend.
-        densities = figlib.graphics_per_page(pdf)
-        here = densities[ref.page - 1] if ref.page <= len(densities) else 0
-        if here < figlib.GRAPHICS_FLOOR:
-            candidates = figlib.artwork_candidates(densities, ref.page)
+        print(f"{moved.label} → page {moved.page}")
+        print(f"  {ref.caption}")
+        if moved.page != ref.page:
+            # Evidence, not a guess: the plate prints the same label.
+            print(f"  (caption is on page {ref.page}; page {moved.page} repeats "
+                  f"the label and carries the artwork — this paper appends its "
+                  f"plates after the manuscript)")
+
+        here = coverage[moved.page - 1] if moved.page <= len(coverage) else 1.0
+        if coverage and here < figlib.ARTWORK_FLOOR:
+            candidates = figlib.artwork_candidates(coverage, moved.page)
             print()
-            print(f"  ⚠ page {ref.page} carries the caption but almost no artwork "
-                  f"({here} drawable object{'s' if here != 1 else ''}) — this paper "
-                  f"looks like an accepted manuscript with its plates collected "
-                  f"separately.")
+            print(f"  ⚠ page {moved.page} carries the caption but almost no "
+                  f"artwork ({here * 100:.0f}% of the page), and no later page "
+                  f"repeats the label — the plate is probably appended after "
+                  f"the manuscript without a printed label.")
             if candidates:
                 shown = ", ".join(str(p) for p in candidates[:5])
                 print(f"    pages with artwork after it: {shown}. Plate order "
@@ -174,7 +183,7 @@ def main(argv: list[str]) -> int:
                       f"so check rather than assume:")
                 print(f"      researchwiki figures {args.stem} --page {candidates[0]}")
         print()
-        return _render_and_report(args.stem, pdf, [ref.page], args.dpi, args.as_json)
+        return _render_and_report(args.stem, pdf, [moved.page], args.dpi, args.as_json)
 
     # Default: list. No render, no image tokens.
     if args.as_json:

@@ -19,12 +19,15 @@ Known miss, accepted: a caption whose title opens on a lowercase proper noun
 ("Table 9: mdCATH test set...") is filtered out with the false positives.
 `figures --page N` is the escape hatch, and a caption list that is one short
 is a better failure than one carrying three sentences that aren't captions.
+
+A caption is not always on the same page as its figure. `artwork_coverage` and
+`prefer_artwork_page` handle the two layouts in this corpus where it isn't.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pypdfium2
@@ -62,6 +65,7 @@ class FigureRef:
     page: int        # 1-based, as printed by the renderer
     extended: bool   # Extended Data / supplementary series
     caption: str     # the caption's first line, trimmed
+    also_on: tuple[int, ...] = ()   # later pages repeating this label
 
     @property
     def label(self) -> str:
@@ -108,10 +112,14 @@ def locate_in_texts(pages: list[str]) -> list[FigureRef]:
     with real judgement in them — can be exercised against text fixtures
     rather than requiring a PDF that renders the awkward case.
 
-    First occurrence wins: a paper that reprints "Figure 3" in a supplementary
-    recap should resolve to the page where it was introduced.
+    The first occurrence is the caption of record — a paper that reprints
+    "Figure 3" in a supplementary recap should resolve to where it was
+    introduced. Later occurrences are kept in `also_on` rather than dropped,
+    because in the append-the-plates layout the label is printed on the plate
+    as well, and that is where the artwork is: see `prefer_artwork_page`.
     """
     seen: dict[tuple[str, bool, int], FigureRef] = {}
+    repeats: dict[tuple[str, bool, int], list[int]] = {}
     for page_no, text in enumerate(pages, start=1):
         for m in _CAPTION_RE.finditer(text):
             token = m.group(1)
@@ -120,6 +128,12 @@ def locate_in_texts(pages: list[str]) -> list[FigureRef]:
             number = int(m.group(2))
             key = (kind, extended, number)
             if key in seen:
+                # Keep later occurrences rather than dropping them. In the
+                # append-the-plates-at-the-end layout the label is printed on
+                # the plate too, so a repeat is often where the artwork
+                # actually is — see `prefer_artwork_page`.
+                if page_no != seen[key].page:
+                    repeats.setdefault(key, []).append(page_no)
                 continue
             line = text[m.start():].split("\n", 1)[0].strip()
             seen[key] = FigureRef(
@@ -129,38 +143,86 @@ def locate_in_texts(pages: list[str]) -> list[FigureRef]:
                 extended=extended,
                 caption=line,
             )
-    return sorted(
-        seen.values(), key=lambda f: (f.kind, f.extended, f.number)
-    )
+    out = [
+        replace(ref, also_on=tuple(sorted(set(repeats.get(key, ())))))
+        for key, ref in seen.items()
+    ]
+    return sorted(out, key=lambda f: (f.kind, f.extended, f.number))
 
 
-def graphics_per_page(
+def prefer_artwork_page(ref: FigureRef, coverage: list[float]) -> FigureRef:
+    """Re-point `ref` at a repeat of its label that actually carries artwork.
+
+    Only moves when the first occurrence has no artwork *and* a later one does,
+    so an ordinary paper — caption and figure on the same page — is untouched.
+
+    This is evidence, not a guess: the page it moves to prints the same figure
+    label. `aygun-2026` is the case it was written for — legends collected on
+    p30-31, plates appended on p37+ with "Extended Data Fig. 1" printed on the
+    plate itself, which first-occurrence-wins was discarding.
+    """
+    def cov(page: int) -> float:
+        return coverage[page - 1] if 1 <= page <= len(coverage) else 0.0
+
+    if cov(ref.page) >= ARTWORK_FLOOR:
+        return ref
+    for page in ref.also_on:
+        if cov(page) >= ARTWORK_FLOOR:
+            return replace(ref, page=page)
+    return ref
+
+
+def artwork_coverage(
     pdf_path: Path | str, max_pages: int = MAX_SCAN_PAGES
-) -> list[int]:
-    """Count drawable objects (paths + images) per page, 0-indexed.
+) -> list[float]:
+    """Fraction of each page's area covered by drawables, 0-indexed.
 
-    Exists for one real corpus shape: an accepted manuscript that collects all
-    figure captions onto their own page and puts the artwork several pages
-    later. `fonseca-2026` does exactly this — captions on p29-30, artwork on
-    p34-37 — so resolving "Figure 1" to its caption page and rendering that
-    yields a page of caption text and no figure.
+    Exists for the layouts where a caption and its artwork are on *different*
+    pages, so resolving a caption and rendering its page shows text and no
+    figure. Two real shapes in this corpus:
 
-    Counting objects is the cheap way to tell the two apart: a caption page has
-    ~0 drawables, an artwork page has hundreds. Used only to *warn* and point
-    at candidates; the caller still decides what to render, because rendering
-    an extra page it didn't ask for would double the context spend silently.
+      - accepted manuscripts that collect every caption onto one page with the
+        plates a few pages later (`fonseca-2026`: captions p29-30, plates
+        p31-37);
+      - preprints that run the whole manuscript and then append the figures at
+        the end, which puts a much larger gap between the two.
+
+    **Area, not object count.** Counting objects gets this backwards in both
+    directions: a page holding one full-page raster figure has a single image
+    object (muslu-2026 p7 — one object covering 38% of the page), while a
+    plain text page with a header rule and a logo has two. Summing bounding-box
+    areas separates them cleanly — measured on this corpus, caption-only and
+    plain text pages land at ~1.5% while every real figure page checked ran
+    15-98%.
+
+    Used only to *warn* and point at candidates; the caller still chooses what
+    to render, because rendering a page it didn't ask for spends context it
+    didn't agree to spend.
     """
     pdf_path = Path(pdf_path)
     doc = pypdfium2.PdfDocument(str(pdf_path))
-    out: list[int] = []
+    out: list[float] = []
     try:
         for i in range(min(len(doc), max_pages)):
             page = doc[i]
             try:
-                out.append(sum(
-                    1 for o in page.get_objects(max_depth=8)
-                    if o.type in (_PAGEOBJ_PATH, _PAGEOBJ_IMAGE)
-                ))
+                width, height = page.get_size()
+                page_area = width * height
+                if page_area <= 0:
+                    out.append(0.0)
+                    continue
+                total = 0.0
+                for obj in page.get_objects(max_depth=8):
+                    if obj.type not in (_PAGEOBJ_PATH, _PAGEOBJ_IMAGE):
+                        continue
+                    try:
+                        left, bottom, right, top = obj.get_bounds()
+                    except Exception:
+                        continue  # malformed object; contributes nothing
+                    total += max(0.0, right - left) * max(0.0, top - bottom)
+                # Overlapping objects can sum past 1.0; the cap keeps the value
+                # readable without changing any comparison against the floor.
+                out.append(min(total / page_area, 1.0))
             finally:
                 page.close()
     finally:
@@ -168,28 +230,29 @@ def graphics_per_page(
     return out
 
 
-# A page with fewer drawables than this is text; a figure page has hundreds.
-# Set well above 0 because a plain page still carries a rule or a logo.
-GRAPHICS_FLOOR = 8
+# Below this fraction a page is text. Caption-only and plain prose pages
+# measured ~1.5% across this corpus; the lowest real figure page was ~15%.
+ARTWORK_FLOOR = 0.06
 
 
 def artwork_candidates(
-    densities: list[int], caption_page: int, window: int = 10
+    coverage: list[float], caption_page: int, window: int | None = None
 ) -> list[int]:
     """1-based artwork pages after `caption_page`, **nearest first**.
 
-    Nearest rather than densest: in this layout the plates follow the caption
-    block in the same order the captions are listed, so the page closest to
-    Figure 1's caption is Figure 1's plate. Ordering by object count instead
-    put `fonseca-2026`'s 963-object Figure 4 page ahead of Figure 1's, which
-    is confidently wrong rather than merely unhelpful.
+    Nearest rather than largest: plates follow the caption block in roughly the
+    order the captions are listed, so the page closest to Figure 1's caption is
+    the better guess. Ordering by size instead put `fonseca-2026`'s densest
+    (last) plate ahead of the first one — confidently wrong rather than merely
+    unhelpful.
+
+    `window` defaults to the rest of the document. A bounded window was the
+    first design and it broke on the append-at-the-end layout, where the gap
+    between a caption and its plate runs to 20+ pages.
     """
     start = caption_page  # 0-indexed index of the page after the caption page
-    return [
-        i + 1
-        for i in range(start, min(len(densities), start + window))
-        if densities[i] >= GRAPHICS_FLOOR
-    ]
+    end = len(coverage) if window is None else min(len(coverage), start + window)
+    return [i + 1 for i in range(start, end) if coverage[i] >= ARTWORK_FLOOR]
 
 
 def resolve(

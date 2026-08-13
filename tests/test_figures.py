@@ -302,26 +302,80 @@ def test_parse_pages_rejects_junk(spec):
 # caption-page render then shows text and no figure, silently.
 
 def test_artwork_candidates_are_nearest_first():
-    """Nearest, not densest: plates follow the caption block roughly in order,
-    so sorting by object count put fonseca's 963-object last plate ahead of
-    the first one."""
-    # fonseca-2026's real per-page counts: captions on 29-30, plates after.
-    densities = [0] * 28 + [1, 1, 287, 1, 230, 32, 231, 61, 963]
-    assert figlib.artwork_candidates(densities, caption_page=29) == \
+    """Nearest, not largest: plates follow the caption block roughly in order,
+    so sorting by coverage put fonseca's densest (last) plate ahead of the
+    first one."""
+    # fonseca-2026's measured coverage: captions on 29-30, plates after.
+    cov = [0.0] * 28 + [0.02, 0.02, 0.98, 0.02, 0.71, 0.30, 0.66, 0.19, 0.94]
+    assert figlib.artwork_candidates(cov, caption_page=29) == \
         [31, 33, 34, 35, 36, 37]
 
 
-def test_artwork_candidates_ignores_sparse_pages():
-    """A rule or a logo is not artwork."""
-    densities = [0, 2, 1, 300, 3]
-    assert figlib.artwork_candidates(densities, caption_page=1) == [4]
+def test_artwork_candidates_ignores_text_pages():
+    """A header rule and a logo are not artwork. Measured across the corpus,
+    caption-only and prose pages sit at ~1.5%; the lowest real figure page
+    was ~15%."""
+    cov = [0.0, 0.015, 0.01, 0.38, 0.02]
+    assert figlib.artwork_candidates(cov, caption_page=1) == [4]
 
 
 def test_artwork_candidates_empty_when_nothing_follows():
-    assert figlib.artwork_candidates([0, 500, 1, 1], caption_page=2) == []
+    assert figlib.artwork_candidates([0.0, 0.9, 0.01, 0.01], caption_page=2) == []
 
 
-def test_artwork_candidates_respects_window():
-    densities = [0] * 5 + [900]
-    assert figlib.artwork_candidates(densities, caption_page=1, window=3) == []
-    assert figlib.artwork_candidates(densities, caption_page=1, window=10) == [6]
+def test_artwork_candidates_scans_to_end_of_document_by_default():
+    """The window was bounded at 10 pages in the first version, which broke on
+    the append-the-plates-at-the-end layout — aygun-2026 has 19 pages between
+    Figure 1's legend (p15) and the first plate (p34)."""
+    cov = [0.0] * 33 + [1.0, 1.0, 0.79]
+    assert figlib.artwork_candidates(cov, caption_page=15) == [34, 35, 36]
+    assert figlib.artwork_candidates(cov, caption_page=15, window=10) == []
+
+
+# ---------- caption and plate on different pages ----------
+#
+# Two layouts put them apart. `fonseca-2026` collects captions onto one page
+# with the plates a few pages later; `aygun-2026` runs the whole manuscript
+# (legends on p15-17, p30-31) and appends every plate at p34-44. Rendering the
+# caption page shows text and no figure.
+
+def test_repeated_label_is_recorded_not_discarded():
+    refs = figlib.locate_in_texts([
+        "Extended Data Fig. 1 | Relative performance of base methods\n",  # legend
+        "prose\n",
+        "Extended Data Fig. 1 ACCELERATED ARTICLE PREVIEW\n",             # plate
+    ])
+    assert len(refs) == 1
+    assert refs[0].page == 1
+    assert refs[0].also_on == (3,)
+
+
+def test_prefers_the_repeat_that_carries_artwork():
+    """aygun-2026's Extended Data figures: legend on p30, plate on p37 with the
+    label printed on it. Evidence, not a guess — the destination page repeats
+    the same label."""
+    ref = figlib.locate_in_texts([
+        "Extended Data Fig. 1 | Relative performance\n", "x\n", "Extended Data Fig. 1 X\n",
+    ])[0]
+    coverage = [0.0, 0.0, 0.42]
+    assert figlib.prefer_artwork_page(ref, coverage).page == 3
+
+
+def test_does_not_move_when_the_caption_page_already_has_artwork():
+    """The ordinary layout — caption under its figure — must be untouched."""
+    ref = figlib.locate_in_texts([
+        "Fig. 1 | A thing\n", "x\n", "Fig. 1 X again\n",
+    ])[0]
+    assert figlib.prefer_artwork_page(ref, [0.30, 0.0, 0.90]).page == 1
+
+
+def test_does_not_move_when_no_repeat_has_artwork():
+    ref = figlib.locate_in_texts([
+        "Fig. 1 | A thing\n", "x\n", "Fig. 1 X again\n",
+    ])[0]
+    assert figlib.prefer_artwork_page(ref, [0.0, 0.0, 0.01]).page == 1
+
+
+def test_prefer_artwork_page_tolerates_short_coverage_list():
+    ref = figlib.locate_in_texts(["Fig. 1 | A thing\n"])[0]
+    assert figlib.prefer_artwork_page(ref, []).page == 1

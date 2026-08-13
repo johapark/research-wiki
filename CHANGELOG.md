@@ -45,11 +45,28 @@ the reasoning behind any line below.
   (accepted manuscripts). Validated across all 115 corpus PDFs plus the five
   bundled benchmark fixtures: 1,108 captions, no body-prose false positives.
 
-  Where a paper collects its captions onto one page and its plates several
-  pages later — the accepted-manuscript layout — rendering the caption page
-  would show text and no figure. The command counts drawable objects per page,
-  says so, and names the artwork pages that follow rather than rendering one
-  it wasn't asked for.
+  A caption is not always on the same page as its figure, and two layouts in
+  this corpus put them apart: accepted manuscripts that collect every caption
+  onto one page with the plates a few pages later (`fonseca-2026`), and
+  preprints that run the whole manuscript and append every plate at the end
+  (`aygun-2026` — legends p15-17 and p30-31, plates p34-44). Rendering the
+  caption page shows text and no figure.
+
+  Handled in two steps. Where the plate prints the figure label as well — as
+  appended Extended Data plates usually do — the label's later occurrence is
+  preferred over its first, so `--figure "ed 1"` renders the plate rather than
+  the legend. That is evidence rather than a guess: the destination page
+  carries the same label. Where no repeat exists, the command says the page it
+  is about to render has no artwork and names the pages that do, without
+  rendering them.
+
+  Artwork is measured as **fraction of page area covered**, not object count.
+  Counting objects gets it wrong in both directions: a page holding one
+  full-page raster figure has a single image object, while a plain text page
+  with a header rule and a logo has two. Across this corpus, caption-only and
+  prose pages measure ~1.5% while every real figure page ran 15-98%. Tables are
+  exempt from the check entirely — a table is text with rules, so low coverage
+  on its page is correct rather than a symptom.
 
 ### Fixed
 
