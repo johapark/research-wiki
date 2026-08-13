@@ -14,6 +14,37 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- Two warnings for config states the provider-resolution layering can produce but
+  could not previously report. Precedence itself was never ambiguous —
+  `RW_MODELS_CONFIG` selects the file, the file merges over `_FALLBACK_ROLES`,
+  `RW_LLM_PROVIDER` and `RW_LLM_BASE_URL` override last — but two of those layers
+  can still combine into something unrunnable:
+
+  - **`RW_LLM_PROVIDER` replaces the provider and not the model.** The two halves
+    of a routing decision arrive from different layers, so
+    `RW_MODELS_CONFIG=models.chatgpt.yaml RW_LLM_PROVIDER=anthropic` resolved to
+    `anthropic/gpt-5.6-terra` and failed at the API on an unknown model, naming
+    neither the env var nor the config. The pre-existing mixing banner returns
+    early unless the config declares ≥2 providers, so it was silent on exactly
+    this shape — a *uniform* config whose provider the env var replaces wholesale.
+    The check compares config-provider against forced-provider rather than model
+    name families, so `models.glm.yaml` running `glm-4.7-flash` through
+    `provider: anthropic` (z.ai's Anthropic-compatible endpoint) is not flagged.
+    `chat-relay` is exempt — it treats the model string as a label.
+
+  - **An OpenAI-compatible role with no `base_url:` silently means localhost.**
+    `base_url()` returns None and `call_openai_compatible` reads None as the LM
+    Studio default, so a cloud config missing one key becomes a local one. The
+    asymmetry that hid it: a *missing* config file falls back to OpenAI, while a
+    *present* file with no `base_url:` falls back to `http://localhost:1234/v1`.
+    Fires on the merged view, so a partial config inheriting the all-OpenAI
+    fallback roles is caught too. Silent when `RW_LLM_BASE_URL` supplies the
+    endpoint. No shipped template trips it, and a test now pins that.
+
+  Both fire once per process on stderr, like the existing banner.
+
 ### Changed
 
 - `researchwiki init` now recommends OpenAI/ChatGPT as the default provider, matching
