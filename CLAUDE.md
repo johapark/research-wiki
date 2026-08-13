@@ -421,7 +421,7 @@ When asked to benchmark/test an LLM by ingesting a `benchmark-fixtures/` paper: 
 | "How does A compare to B?" | `wiki/synthesis/{a-vs-b}.md` |
 | "Trajectory of field F?" | `wiki/synthesis/{f-trajectory}.md` |
 
-Use `researchwiki synthesize --title "…" --topic-seed "…" --papers <stems>` to scaffold. With `--topic-seed` + `--papers` set, the stub's *Evidence from the wiki* section pre-populates with `claim_lookup` hits and each paper's claims. `researchwiki claims --by-stem <stem>` dumps one paper's citable surface (`--include-context` adds source-PDF chunks).
+Use `researchwiki synthesize --title "…" --topic-seed "…" --papers <stems>` to scaffold. With `--topic-seed` + `--papers` set, the stub's *Evidence from the wiki* section pre-populates with `claim_lookup` hits and each paper's claims. `researchwiki claims --by-stem <stem>` dumps one paper's citable surface (`--include-context` adds source-PDF chunks, each tagged with where in the PDF it sits — `§results, p. 7`; blank on claims graded before that existed, filled on the next `grade`).
 
 After authoring, run both gates (both exit 0): `check-grounding` (structural) + `grade synthesis` (fidelity). Then `check-coverage` (advisory recall).
 

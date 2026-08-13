@@ -50,7 +50,12 @@ def _fmt(hit: dict) -> str:
     if "supporting_text" in hit and hit["supporting_text"]:
         # Indent the chunk under the claim so it's visually subordinate.
         chunk = hit["supporting_text"].replace("\n", " ").strip()
-        out += f"\n      ⤷ source: {chunk}"
+        # Where in the PDF that chunk sits — '§results, p. 7'. Absent on rows
+        # graded before the chunk index carried provenance; they pick it up on
+        # the next `grade`, since a stale-format index is rebuilt on read.
+        where = (hit.get("supporting_provenance") or "").strip()
+        label = f"source ({where})" if where else "source"
+        out += f"\n      ⤷ {label}: {chunk}"
     return out
 
 

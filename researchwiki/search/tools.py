@@ -36,8 +36,11 @@ def pdf_section_search(stem: str, query: str, k: int = 3) -> list[dict]:
     paragraph the page didn't quote. The chunk index is built lazily on
     first call and cached under `.grade-cache/{stem}/`.
 
-    Each hit: {chunk_id, score, text}. On failure returns a single-element
-    list whose only entry has a `note` field explaining why.
+    Each hit: {chunk_id, score, text, page_start, page_end, section,
+    provenance}. `provenance` is the display form ('§results, p. 7') and is
+    empty for a PDF whose headings/pages couldn't be resolved. On failure
+    returns a single-element list whose only entry has a `note` field
+    explaining why.
 
     Example: pdf_section_search("smith-2024-...", "training data composition", k=3)
     """
@@ -52,7 +55,15 @@ def pdf_section_search(stem: str, query: str, k: int = 3) -> list[dict]:
     except Exception as e:
         return [{"note": f"query failed: {e}"}]
     return [
-        {"chunk_id": c.chunk_id, "score": float(c.score), "text": c.text}
+        {
+            "chunk_id": c.chunk_id,
+            "score": float(c.score),
+            "text": c.text,
+            "page_start": c.page_start,
+            "page_end": c.page_end,
+            "section": c.section,
+            "provenance": c.provenance(),
+        }
         for c in chunks
     ]
 
@@ -91,7 +102,8 @@ def claims_by_stem(stem: str, *, include_context: bool = False) -> list[dict]:
     on this paper yet — surface but don't filter on them, so the caller can
     detect un-graded papers.
 
-    `include_context=True` adds a `supporting_text` field — the verbatim
+    `include_context=True` adds `supporting_text` (the verbatim chunk) and
+    `supporting_provenance` (where in the PDF it sits) — the verbatim
     source-PDF chunk the grader matched to. Useful when an LLM judge needs
     the experimental setting alongside the bare claim (off by default to keep
     JSON dumps narrow).
@@ -103,7 +115,7 @@ def claims_by_stem(stem: str, *, include_context: bool = False) -> list[dict]:
             """
             SELECT id, paper_stem, section, position, text, claim_slug,
                    semantic_score, bm25_top1, bm25_top1_chunk_id,
-                   supporting_text, last_graded_at
+                   supporting_text, supporting_provenance, last_graded_at
               FROM claims
              WHERE paper_stem = ? AND is_cross_ref = 0
              ORDER BY
@@ -133,6 +145,7 @@ def claims_by_stem(stem: str, *, include_context: bool = False) -> list[dict]:
         }
         if include_context:
             item["supporting_text"] = r["supporting_text"]
+            item["supporting_provenance"] = r["supporting_provenance"]
         out.append(item)
     return out
 
@@ -157,7 +170,8 @@ def claim_lookup(query: str, k: int = 5, *, include_context: bool = False) -> li
     for returned rows. Falls back to ordering by `semantic_score` when
     scores tie.
 
-    `include_context=True` adds a `supporting_text` field — the verbatim
+    `include_context=True` adds `supporting_text` (the verbatim chunk) and
+    `supporting_provenance` (where in the PDF it sits) — the verbatim
     source-PDF chunk the grader matched to (≤500 chars). Off by default.
 
     Returns [] if no claims match. Use this BEFORE `pdf_section_search` —
@@ -191,6 +205,7 @@ def claim_lookup(query: str, k: int = 5, *, include_context: bool = False) -> li
         }
         if include_context:
             item["supporting_text"] = r["supporting_text"]
+            item["supporting_provenance"] = r["supporting_provenance"]
         out.append(item)
     return out
 
@@ -208,7 +223,7 @@ def _claim_lookup_fts(conn, tokens: list[str], k: int):
     sql = """
         SELECT c.id, c.paper_stem, c.section, c.position, c.text, c.claim_slug,
                c.semantic_score, c.bm25_top1, c.bm25_top1_chunk_id,
-               c.supporting_text,
+               c.supporting_text, c.supporting_provenance,
                -bm25(claims_fts) AS match_score
         FROM claims_fts
         JOIN claims c ON c.id = claims_fts.rowid
@@ -243,7 +258,7 @@ def _claim_lookup_like(conn, tokens: list[str], k: int):
     sql = f"""
         SELECT id, paper_stem, section, position, text, claim_slug,
                semantic_score, bm25_top1, bm25_top1_chunk_id,
-               supporting_text,
+               supporting_text, supporting_provenance,
                ({like_clauses}) AS match_score
         FROM claims
         WHERE is_cross_ref = 0 AND ({like_clauses}) > 0

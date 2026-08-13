@@ -16,6 +16,37 @@ the reasoning behind any line below.
 
 ### Added
 
+- **PDF chunks carry their page and section.** A claim's `supporting_text` was
+  an anonymous 250-word window — nothing could say it came from §Results, p. 7,
+  which is the first thing a reader wants when deciding whether a weak grade is
+  the claim's fault or retrieval's. `Chunk` and `RetrievedChunk` now carry
+  `page_start` / `page_end` / `section`, and `claims --include-context`,
+  `pdf-search` and `grade --weakest` print the label.
+
+  Note the two `section` axes, which are different things: `claims.section`
+  names the *wiki page's* H2 (key_contributions / results / limitations /
+  methodology), while this one names the *PDF's* own section. Both are useful
+  and neither replaces the other.
+
+  Labels are omitted rather than guessed. A paper with no detectable headings
+  gets `None`, because a wrong section on displayed evidence is worse than no
+  section. The `supporting_provenance` column is likewise blank on claims
+  graded before this existed; they fill in on the next `grade`.
+
+  Two supporting changes worth knowing about. `pdf.text.extract_pdf_page_texts`
+  returns per-page text whose join reproduces `extract_pdf` byte for byte —
+  the invariant page offsets are measured against, pinned by a test.
+  `pdf.sections.section_spans` returns the segmentation `anchor_sections` had
+  always computed internally and discarded, so the boundaries used for labelling
+  and the text used for claim extraction cannot drift apart.
+
+- `.grade-cache/` indexes now record a `cache_version`. `build_pdf_index`
+  returns early when the directory exists, so without one this release's schema
+  change would have left every existing index in place — missing the new fields,
+  reporting no error. A version mismatch rebuilds instead. Expect a one-time
+  rebuild of the per-paper chunk indexes (and their embeddings) on first use
+  after upgrading: a few minutes across a ~100-paper corpus.
+
 - **`researchwiki figures <stem>`** — list a paper's figure and table captions;
   render one page when a question actually turns on it. Rule 3 tooling for the
   case `pdf-search` can't serve, where the passage says "see Fig. 4" and Fig. 4

@@ -56,7 +56,9 @@ def main(argv: list[str]) -> int:
         return 1
     for h in hits:
         text = (h.get("text") or "").strip()
-        print(f"chunk:{h['chunk_id']}  score={h['score']:.2f}")
+        where = (h.get("provenance") or "").strip()
+        head = f"chunk:{h['chunk_id']}  score={h['score']:.2f}"
+        print(f"{head}  [{where}]" if where else head)
         print(f"  › {text}")
         print()
     return 0

@@ -341,6 +341,59 @@ def extract_pdf(path: Path, max_pages: int = 20) -> tuple[str, dict[str, Any]]:
     return _repair_ligatures("\n\n".join(parts)), meta
 
 
+PAGE_SEPARATOR = "\n\n"
+
+
+def extract_pdf_page_texts(path: Path, max_pages: int = 20) -> list[str]:
+    """Per-page text, ligature-repaired, one string per page.
+
+    **Invariant:** `PAGE_SEPARATOR.join(extract_pdf_page_texts(p, n))` equals
+    `extract_pdf(p, n)[0]` byte for byte, which is what lets a caller compute
+    the page a character offset falls on without re-deriving the text. Pinned
+    by `tests/test_chunk_provenance.py`.
+
+    Repair is applied per page rather than to the join. The two agree because
+    `_repair_ligatures`'s patterns are word-shaped and no word survives a page
+    break — verified across 15 corpus papers when this was introduced — and
+    per-page is the order that keeps page lengths meaningful *after* repair,
+    which is the thing offsets are measured against.
+    """
+    pdf = pypdfium2.PdfDocument(str(path))
+    try:
+        parts = _extract_all_pages(pdf, max_pages=max_pages)
+    finally:
+        pdf.close()
+    return [_repair_ligatures(part) for part in parts]
+
+
+def page_offsets(page_texts: list[str]) -> list[int]:
+    """Start offset of each page within `PAGE_SEPARATOR.join(page_texts)`."""
+    offsets: list[int] = []
+    cursor = 0
+    for i, text in enumerate(page_texts):
+        offsets.append(cursor)
+        cursor += len(text) + (len(PAGE_SEPARATOR) if i < len(page_texts) - 1 else 0)
+    return offsets
+
+
+def page_for_offset(offsets: list[int], offset: int) -> int | None:
+    """1-based page number containing `offset`. None when out of range.
+
+    `offsets` is ascending, so this is a right-bisect: the page is the last one
+    whose start is <= the offset.
+    """
+    if not offsets or offset < 0:
+        return None
+    lo, hi = 0, len(offsets)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if offsets[mid] <= offset:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo if lo >= 1 else None
+
+
 def _trim_doi_noise(doi: str) -> str:
     """Strip trailing punctuation + alpha-suffix noise from a DOI capture.
 
