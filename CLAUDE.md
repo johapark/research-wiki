@@ -409,7 +409,7 @@ When asked to benchmark/test an LLM by ingesting a `benchmark-fixtures/` paper: 
 1. Answer from `wiki/` first. `researchwiki claims "<topic>"` is the **first stop** for factual claims (pre-graded, BM25+semantic-scored). Each hit prints its `[[stem#claim_slug]]` citation form — copy that directly into prose. `researchwiki search` for page-level discovery.
 
    **Structural/bibliometric questions go to the DB.** Corpus counts/filters — "how many cgt papers from 2024?", "which lack a DOI?", "everything in *Nature*" — via `researchwiki db papers [--year/--category/--page-type/--no-doi/--venue/--author/--status] [--count] [--json]` or `researchwiki db query "SELECT …"` for ad-hoc. Ingest telemetry (model quality/cost, hardest sections, token spend) via `researchwiki insights`.
-2. Insufficient (Rule 3): re-read PDFs; update paper pages if worth keeping.
+2. Insufficient (Rule 3): re-read PDFs; update paper pages if worth keeping. `researchwiki pdf-search <stem> "<query>"` for a raw passage. When the evidence is *in a figure* — the passage says "see Fig. 4" and Fig. 4 is where the number lives — `researchwiki figures <stem>` lists captions (free, and often answers it), and `--figure N` renders that one page to `.figures-cache/` for you to `Read`. Render one page, only when the caption doesn't settle it: the PNG costs context in proportion to its pixel area.
 3. No paper covers it (Rule 4): say so.
 4. Cite facts with `[[wikilink]]`; mention sections in prose.
 5. Non-trivial cross-paper → create a synthesis page. **This is how the wiki compounds.**

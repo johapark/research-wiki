@@ -14,6 +14,31 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- **`researchwiki figures <stem>`** — list a paper's figure and table captions;
+  render one page when a question actually turns on it. Rule 3 tooling for the
+  case `pdf-search` can't serve, where the passage says "see Fig. 4" and Fig. 4
+  is where the number lives.
+
+  Listing is free and is the default mode — captions carry the quantitative
+  results often enough to answer the question outright, which is why
+  `sections.py` extracts them for the claim pipeline in the first place.
+  `--figure N` (or `--page N`, the escape hatch when a caption isn't detected)
+  renders one page to `.figures-cache/{stem}/`, gitignored and safe to delete.
+  More than one page needs an explicit `--pages`: rendering is free local
+  compute, but reading a PNG costs context in proportion to its pixel area.
+
+  Rendering, not object extraction, because a PDF image object is a *placed
+  raster* — the vector paths that every matplotlib/R/Illustrator plot is made of
+  are invisible to an image-object walk in any library. Measured over 12 random
+  corpus papers: 498 image objects against 73,294 path objects.
+
+  No new dependency: pypdfium2 and numpy were already required, and PNG
+  encoding is ~30 lines of stdlib `zlib`+`struct` rather than pulling in Pillow
+  for `PdfBitmap.to_pil()`. Nothing runs at ingest, nothing is backfilled, and
+  no page field or `lint` check was added.
+
 ### Fixed
 
 - **A promote that didn't complete reported success.** `promote_to_wiki` is five

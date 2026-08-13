@@ -103,7 +103,7 @@ The `researchwiki concepts` task applies these reciprocally (like `claim-overlap
 
 1. **Scaffold.** `researchwiki concepts <term> --thesis "<one sentence>"` (or answer the prompt interactively) gathers the member papers (pages mentioning the term), pulls each one's top graded claims, and writes a grounded stub with the spoke list pre-populated. (Digest-style manual path: create the file, fill the YAML, and assemble the spoke list from `researchwiki lint` + `researchwiki search "<term>"`.)
 2. **Write the Definition** from the members' own framing — `researchwiki claims "<term>"` surfaces the pre-graded, citable units. Cite each sentence to the paper it came from.
-3. **Fill the spoke list.** For each member, one line on how that paper uses the concept. `researchwiki claims --by-stem <stem>` dumps a paper's citable surface. Keep bullets specific ("uses PPR over a passage graph" beats "uses retrieval").
+3. **Fill the spoke list.** For each member, one line on how that paper uses the concept. `researchwiki claims --by-stem <stem>` dumps a paper's citable surface. Keep bullets specific ("uses PPR over a passage graph" beats "uses retrieval"). Where a paper's use of the concept is carried by a figure rather than prose, `researchwiki figures <stem>` lists its captions and `--figure N` renders that page — captions alone usually suffice.
 4. **Add Cross-domain connections** only if the span is real and you can cite the contrast.
 5. **Set `concept_span:`** from the extractor's report and order the spoke list by category.
 6. **Update `wiki/index.md`** — append under a `## concepts` section: `[[concepts/<slug>]] — one-line what-it-bridges.`
