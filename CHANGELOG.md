@@ -81,6 +81,29 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Documentation corrections, all of which described behaviour the code no longer has:
+
+  - README presented `config/models.chatgpt.yaml` as the zero-config default routing
+    every role to `gpt-5.6-luna` at ~$0.01/paper. It is neither: the template puts
+    author/critic/judge on `gpt-5.6-terra` (~$0.07/paper by its own header), while the
+    *fallback* — used when no `config/models.yaml` exists — is the all-luna table. So
+    the documented `cp config/models.chatgpt.yaml config/models.yaml` made a reader ~7x
+    more expensive than the default it claimed to be. The two are now described
+    separately, and the copy example points at a template that actually changes
+    something.
+  - `researchwiki/categories.py` has no `VALID_CATEGORIES` set — categories are derived
+    from the filesystem — but README and `prompts/init.md` both told users (and the LLM
+    driving setup) to edit it. `mkdir wiki/<slug>/` is the whole operation.
+  - `bootstrap-categories --apply` does not rewrite the CLAUDE.md table or
+    `categories.py`; it creates directories. Both docs claimed otherwise.
+  - README's category table was labelled "Shipped defaults". A fresh `init` creates only
+    `other` plus the four page-type dirs, so following it produced a rejected
+    `--category`. Now labelled as one author's example. The same claim is corrected in
+    `prompts/bootstrap-categories-system.md`, where it was steering the taxonomy proposer.
+  - README said `models.anthropic.yaml` routes to Sonnet 4.6; it routes to Sonnet 5.
+  - "Your first ingest (~5 min, ~$0.05)" contradicted the ~$0.01/paper figure four lines
+    below it.
+
 - `agent ingest` now checks that the configured provider has usable credentials
   *before* extracting the PDF and reconciling metadata, instead of discovering it
   in the author phase at the end of that work. The old failure was the worst one
