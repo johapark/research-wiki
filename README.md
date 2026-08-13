@@ -29,7 +29,7 @@ First, **where are your papers now?** The two answers need different steps:
 Then three ways to drive the setup itself — pick one:
 
 - **Talk to your LLM.** Clone, drop PDFs in `inbox/`, open the directory in Claude Code (or any agent that reads `CLAUDE.md` / `AGENTS.md`), say *"initialize this for me — I have N PDFs in inbox/."* The agent walks the steps in [`prompts/init.md`](./prompts/init.md).
-- **Run the wizard.** `researchwiki init` — interactive terminal wizard (provider → categories → dashboard → confirm). Prompts you for each decision and writes `.env` / `config/models.yaml`.
+- **Run the wizard.** `researchwiki init` — interactive terminal wizard (provider → categories → dashboard → confirm). Prompts you for each decision and writes `.env`, plus `config/models.yaml` for any provider that needs one. It offers the same five providers as the table below and recommends OpenAI, which needs no config file at all.
 - **Do it manually.** The sub-sections below walk the same steps as a reference.
 
 Taxonomy comes from *your* papers: `researchwiki bootstrap-categories` derives categories from what's in `inbox/`, **not** the biology+ML defaults listed below. Importing a library instead? Either run it on a first `--limit` wave once those papers land, or let the per-paper classifier place them — see [Categories](#categories).
@@ -89,32 +89,32 @@ OPENAI_API_KEY="sk-..."                # OpenAI cloud (default, Bearer)
 
 | Provider | Setup | Cost |
 | --- | --- | --- |
-| **OpenAI** (default) | Set `OPENAI_API_KEY`. The default config (and the zero-config fallback) already routes every role to `gpt-5.6-luna` — nothing to copy. | ~$0.01/paper |
-| **Anthropic** | `cp config/models.anthropic.yaml config/models.yaml`, set `ANTHROPIC_API_KEY`. Routes to Sonnet 4.6 + Haiku 4.5. | ~$0.10/paper |
+| **OpenAI** (default) | Set `OPENAI_API_KEY`. With no `config/models.yaml` at all, every role runs on `gpt-5.6-luna` — nothing to copy. | ~$0.01/paper |
+| **Anthropic** | `cp config/models.anthropic.yaml config/models.yaml`, set `ANTHROPIC_API_KEY`. Routes to Sonnet 5 + Haiku 4.5. | ~$0.10/paper |
 | **Other OpenAI-compatible** (Gemini, Groq, OpenRouter, …) | `cp config/models.gemini.yaml config/models.yaml` (Gemini — ready-made) or `config/models.openai-compatible.yaml` (generic template), set `OPENAI_API_KEY` + `RW_LLM_BASE_URL`. | provider-dependent |
 | **Local LLM** (LM Studio / vLLM / llama.cpp / ollama) | Any OpenAI-compatible server. `provider: lmstudio` on a role; base URL defaults to `http://localhost:1234/v1` (override with `RW_LLM_BASE_URL`). [Details](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama). | ~free after download |
 | **Chat-relay** (no API key/server) | `export RW_LLM_PROVIDER=chat-relay`; the chat agent in your terminal fills each prompt in `.llm-relay/pending/`. [Details](./WORKFLOW.md#chat-relay-subscription-users--no-api-key). | chat subscription |
 
 ### Model config
 
-Which model runs each role is read from `config/models.yaml` — **gitignored** (your local, mutable copy). The repo ships committed templates; copy one:
+Which model runs each role is read from `config/models.yaml` — **gitignored** (your local, mutable copy). **You usually need no file at all**: with none present, every role runs on `gpt-5.6-luna` at ~$0.01/paper. Copy a template only to change something:
 
 | Template | Routes to |
 |---|---|
-| `config/models.chatgpt.yaml` | **Default (recommended)** — GPT-5-class **gpt-5.6-luna** across every role; ~$0.01/paper measured over 13 ingests. Zero-config fallback when no `config/models.yaml` is present. Set `OPENAI_API_KEY` to an OpenAI key and go. |
-| `config/models.anthropic.yaml` | Sonnet 4.6 + Haiku 4.5. Highest fidelity; ~$0.10/paper. |
+| `config/models.chatgpt.yaml` | **gpt-5.6-terra** for author/critic/judge, **gpt-5.6-luna** for the rest — the higher-fidelity OpenAI option, ~$0.07/paper (n=4). Note this is **not** the zero-config default, and copying it costs ~7× more than copying nothing. |
+| `config/models.anthropic.yaml` | Sonnet 5 + Haiku 4.5. Highest fidelity; ~$0.10/paper. |
 | `config/models.gemini.yaml` | **Recommended free API** — Google Gemini via its OpenAI-compatible endpoint. **Gemini 3.5 Flash** for author/critic/judge, **Gemini 3.1 Flash-Lite** for classifier/proposer/extractor. Best-grading free option in our dogfooding (see below); set `OPENAI_API_KEY` to a Gemini key and go. |
 | `config/models.lmstudio.yaml` | **Recommended local** — pure-local, every role on one LM Studio model. Runs **Qwen3.6-35B-A3B** in our setup (see [Local LLMs](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama)): no API key, nothing leaves the machine, ~free after the one-time download. |
 | `config/models.openai-compatible.yaml` | Generic template for any OpenAI-compatible cloud (OpenAI, Groq, Together, Fireworks, DeepInfra, OpenRouter, Cerebras, Anyscale, …); worked examples in the file's comments. |
 | `config/models.glm.yaml` | GLM-4.7-Flash via z.ai's Anthropic-compatible endpoint (free tier). |
 
 ```bash
-cp config/models.chatgpt.yaml config/models.yaml     # the default; or the others
+cp config/models.anthropic.yaml config/models.yaml   # or any other template
 ```
 
-**Which one?** The **default is `config/models.chatgpt.yaml`** — OpenAI's GPT-5-class models across the pipeline, holding cost near ~$0.01/paper (measured mean over 13 ingests: 25.8K input / 3.5K output tokens); in benchmarking it captured every critical headline claim with verbatim comparator figures. For a **zero-cost cloud** start, use `config/models.gemini.yaml` — in our ingest history Gemini 3.5 Flash produced the highest-grading drafts of any free provider (mean claim-fidelity ≈ 0.80, edging Qwen's ≈ 0.78 and Solar's ≈ 0.75). Two caveats to weigh: the free tier is rate-limited (~5 requests/min — the config already serializes drafting to stay under it) and **Google may train on free-tier prompts/responses**, so for unpublished or confidential PDFs stay on OpenAI/Anthropic or the local path. For a **fully private, no-key** setup, use `config/models.lmstudio.yaml` with Qwen3.6-35B ([details](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama)) — it trades a little fidelity for keeping every paper on your own hardware.
+**Which one?** For OpenAI, **copy nothing** — the built-in default runs every role on `gpt-5.6-luna` at ~$0.01/paper (measured mean over 13 ingests: 25.8K input / 3.5K output tokens), and in benchmarking it captured every critical headline claim with verbatim comparator figures. Copy `config/models.chatgpt.yaml` only if you want `gpt-5.6-terra` on the three quality-sensitive roles, which is ~7× dearer (~$0.07/paper, n=4) for a modest fidelity gain. For a **zero-cost cloud** start, use `config/models.gemini.yaml` — in our ingest history Gemini 3.5 Flash produced the highest-grading drafts of any free provider (mean claim-fidelity ≈ 0.80, edging Qwen's ≈ 0.78 and Solar's ≈ 0.75). Two caveats to weigh: the free tier is rate-limited (~5 requests/min — the config already serializes drafting to stay under it) and **Google may train on free-tier prompts/responses**, so for unpublished or confidential PDFs stay on OpenAI/Anthropic or the local path. For a **fully private, no-key** setup, use `config/models.lmstudio.yaml` with Qwen3.6-35B ([details](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama)) — it trades a little fidelity for keeping every paper on your own hardware.
 
-With no `config/models.yaml` present, the loader falls back to a hardcoded table mirroring `models.chatgpt.yaml` — so the OpenAI default works with no copy at all (just set `OPENAI_API_KEY`). Copy a template only when you want to *change* something; delete the file to reset.
+With no `config/models.yaml` present, the loader falls back to a hardcoded table (`agents/model_config._FALLBACK_ROLES`) putting **every** role on `gpt-5.6-luna` — so the OpenAI default works with no copy at all (just set `OPENAI_API_KEY`). It is *not* a mirror of `models.chatgpt.yaml`, which upgrades three roles to `gpt-5.6-terra`. Deleting `config/models.yaml` resets you to this table.
 
 **Want to A/B backends, mix providers per role, run fully local, or use a chat subscription with no API key?** See [`WORKFLOW.md` → Provider setup in depth](./WORKFLOW.md#provider-setup-in-depth).
 
@@ -126,12 +126,14 @@ Open the clone in **Claude Code** (primary tested harness; Cursor / Aider / Code
 
 No fixed taxonomy — you propose categories from your actual papers. Two ways:
 
-1. **`researchwiki bootstrap-categories`** — drop 3+ PDFs in `inbox/`, run it; an LLM proposes a 2-to-N taxonomy grounded in them (size scales with corpus). Print-only; `--apply` atomically rewrites the CLAUDE.md table + `researchwiki/categories.py` and `mkdir`s each `wiki/<slug>/`.
-2. **Edit by hand** — CLAUDE.md's Categories table and `categories.py`'s `VALID_CATEGORIES` set (both must agree).
+1. **`researchwiki bootstrap-categories`** — drop 3+ PDFs in `inbox/`, run it; an LLM proposes a 2-to-N taxonomy grounded in them (size scales with corpus). Print-only; `--apply` creates each `wiki/<slug>/`.
+2. **Edit by hand** — `mkdir wiki/<slug>/`. That's the whole operation: a category is valid **iff its directory exists**, so there is no list to keep in sync. Run `researchwiki reindex` afterwards.
 
 Always keep **`other`** — the abstention bucket the classifier falls back to; `status` flags it past 10 papers and `suggest-splits` proposes promotions.
 
-**Shipped defaults** (biology + ML starting point — replace via bootstrap):
+**A fresh wiki ships no content categories.** `researchwiki init` creates only `other` plus the four **page-type dirs** — `synthesis`, `ideas`, `concepts`, `references` — which hold their own page types and are never content categories (the classifier can't target them). Everything else is yours to create, which is why `--category X` is rejected until `wiki/X/` exists: a typo can't silently spawn a category.
+
+For reference, the taxonomy this wiki's author ended up with after bootstrapping a biology + ML corpus — an example of the *shape* to aim for, not a default you inherit:
 
 | Category | Includes |
 | --- | --- |
@@ -141,11 +143,9 @@ Always keep **`other`** — the abstention bucket the classifier falls back to; 
 | `ai` | Pure CS / AI / ML — agent frameworks, LLM tooling, ML methodology |
 | `other` | Cross-cutting + abstention bucket |
 
-Plus the four **page-type dirs** every wiki gets regardless of domain — `synthesis`, `ideas`, `concepts`, `references`. They hold their own page types and are never content categories (the classifier can't target them).
-
 **Tip**: pick **durable** cuts — methods (`prime-editing`, `transformer-models`) or fields (`immunology`, `rna-biology`), not transient topic-surface slugs (`alphafold-class-papers`) that age when the vocabulary moves.
 
-### Your first ingest (~5 min, ~$0.05)
+### Your first ingest (~5 min, ~$0.01)
 
 Drop a PDF in `inbox/` and say *"Ingest the paper I just dropped in `inbox/`."* The LLM runs `researchwiki agent ingest`. ~3–5 min later: metadata reconciled (the extractor cross-checks Semantic Scholar), a draft written and graded against the PDF, promoted to `wiki/{category}/{stem}.md` with back-links added, and any synthesis-evolution proposals surfaced for review. Then ask *"What did we just learn?"* for a summary.
 

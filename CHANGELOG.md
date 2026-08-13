@@ -14,20 +14,70 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
-- Wiki-page writers that bypassed `wiki.commit_page` and left the state DB stale
-  until the next `db rebuild`. Seven write sites across four modules: the
-  memory-evolve applier (`agents/phases/evolution.py`), the claim-graph promotion
-  applier (`claim_graph/promote.py`), `attach`'s two `supplementary:` branches, and
-  `backfill`'s three frontmatter helpers. Each rewrote frontmatter the DB mirrors —
-  `doi` and `venue` are dedicated columns, `supplementary:` and `generated_at:` live
-  in `raw_frontmatter` — so `status`, `db query`, and `claims` could read a stale row
-  and `db verify` reported the page as `stale`. Every site now reconciles at write
-  time; `tests/test_db_write_paths_commit.py` pins the behaviour per branch, with a
-  negative control asserting an uncommitted raw write *is* still detected as stale.
+- Two warnings for config states the provider-resolution layering can produce but
+  could not previously report. Precedence itself was never ambiguous —
+  `RW_MODELS_CONFIG` selects the file, the file merges over `_FALLBACK_ROLES`,
+  `RW_LLM_PROVIDER` and `RW_LLM_BASE_URL` override last — but two of those layers
+  can still combine into something unrunnable:
+
+  - **`RW_LLM_PROVIDER` replaces the provider and not the model.** The two halves
+    of a routing decision arrive from different layers, so
+    `RW_MODELS_CONFIG=models.chatgpt.yaml RW_LLM_PROVIDER=anthropic` resolved to
+    `anthropic/gpt-5.6-terra` and failed at the API on an unknown model, naming
+    neither the env var nor the config. The pre-existing mixing banner returns
+    early unless the config declares ≥2 providers, so it was silent on exactly
+    this shape — a *uniform* config whose provider the env var replaces wholesale.
+    The check compares config-provider against forced-provider rather than model
+    name families, so `models.glm.yaml` running `glm-4.7-flash` through
+    `provider: anthropic` (z.ai's Anthropic-compatible endpoint) is not flagged.
+    `chat-relay` is exempt — it treats the model string as a label.
+
+  - **An OpenAI-compatible role with no `base_url:` silently means localhost.**
+    `base_url()` returns None and `call_openai_compatible` reads None as the LM
+    Studio default, so a cloud config missing one key becomes a local one. The
+    asymmetry that hid it: a *missing* config file falls back to OpenAI, while a
+    *present* file with no `base_url:` falls back to `http://localhost:1234/v1`.
+    Fires on the merged view, so a partial config inheriting the all-OpenAI
+    fallback roles is caught too. Silent when `RW_LLM_BASE_URL` supplies the
+    endpoint. No shipped template trips it, and a test now pins that.
+
+  Both fire once per process on stderr, like the existing banner.
 
 ### Changed
+
+- `researchwiki init` now recommends OpenAI/ChatGPT as the default provider, matching
+  README and `model_config._FALLBACK_ROLES`. Its menu had offered Anthropic as entry 1
+  labelled `default, ~$0.10/paper` — so the human-driven setup path steered new users
+  onto a ~10x-dearer provider and told them it was the default, while the LLM-driven
+  path (which reads the README) set them up on OpenAI at ~$0.01/paper. Every provider
+  is still offered; the menu now mirrors README's *Providers* table in its order, and
+  has five entries rather than four, since plain OpenAI and "other OpenAI-compatible
+  cloud" have different setup steps and were previously conflated into one.
+
+  Picking OpenAI writes **no** `config/models.yaml`: the built-in fallback already
+  routes every role there, which is what makes that path zero-config. It is
+  deliberately not `models.chatgpt.yaml` — that template puts author/critic/judge on
+  gpt-5.6-terra (~$0.071/paper by its own header) against the fallback's gpt-5.6-luna
+  (~$0.009/paper), so copying it would have made the recommended choice ~7x dearer
+  than choosing nothing. A leftover `models.yaml` from a previous run is offered for
+  removal, because otherwise it silently overrides the choice just made.
+
+- Invalid input at either wizard menu re-prompts instead of resolving to entry 1. The
+  provider menu's old fallback printed `defaulting to Anthropic` and continued, so one
+  slipped keystroke picked the dearest provider on the list; the category menu compared
+  the raw string to `"1"` and treated everything else as "manual".
+
+- The wizard's readiness check is now the same provider-aware check `agent ingest`
+  preflights with, so its verdict and the first ingest's outcome cannot disagree. It
+  previously used `has_synchronous_llm()` — "is any key set anywhere" — which printed
+  a ✓ for an Anthropic key against an OpenAI-routed config, the exact mix-up the step
+  exists to catch.
+
+- The wizard restated the bootstrap PDF threshold as 5 against the real
+  `MIN_INBOX_FOR_BOOTSTRAP = 3`, so users with 3–4 PDFs were told bootstrap was
+  unavailable when it would have worked. It now imports the constant.
 
 - `db rebuild` is no longer documented as a required post-ingest step. Per-page
   commits keep `papers`/`claims` current, leaving rebuild as the reconciler of last
@@ -39,6 +89,66 @@ the reasoning behind any line below.
   unconditionally, which is what makes the reproducibility property hold. Corrected
   the docstring rather than adding the optimization: a full rebuild of a ~500-page
   corpus runs in under a second.
+
+### Fixed
+
+- Documentation corrections, all of which described behaviour the code no longer has:
+
+  - README presented `config/models.chatgpt.yaml` as the zero-config default routing
+    every role to `gpt-5.6-luna` at ~$0.01/paper. It is neither: the template puts
+    author/critic/judge on `gpt-5.6-terra` (~$0.07/paper by its own header), while the
+    *fallback* — used when no `config/models.yaml` exists — is the all-luna table. So
+    the documented `cp config/models.chatgpt.yaml config/models.yaml` made a reader ~7x
+    more expensive than the default it claimed to be. The two are now described
+    separately, and the copy example points at a template that actually changes
+    something.
+  - `researchwiki/categories.py` has no `VALID_CATEGORIES` set — categories are derived
+    from the filesystem — but README and `prompts/init.md` both told users (and the LLM
+    driving setup) to edit it. `mkdir wiki/<slug>/` is the whole operation.
+  - `bootstrap-categories --apply` does not rewrite the CLAUDE.md table or
+    `categories.py`; it creates directories. Both docs claimed otherwise.
+  - README's category table was labelled "Shipped defaults". A fresh `init` creates only
+    `other` plus the four page-type dirs, so following it produced a rejected
+    `--category`. Now labelled as one author's example. The same claim is corrected in
+    `prompts/bootstrap-categories-system.md`, where it was steering the taxonomy proposer.
+  - README said `models.anthropic.yaml` routes to Sonnet 4.6; it routes to Sonnet 5.
+  - "Your first ingest (~5 min, ~$0.05)" contradicted the ~$0.01/paper figure four lines
+    below it.
+
+- `agent ingest` now checks that the configured provider has usable credentials
+  *before* extracting the PDF and reconciling metadata, instead of discovering it
+  in the author phase at the end of that work. The old failure was the worst one
+  a new user could hit on their first command: an uncaught `RuntimeError` escaped
+  as exit **3** — "internal bug, file a report" — for what is a plain
+  configuration error, and because `call_openai_compatible` substitutes the
+  literal string `lm-studio` for an unset `OPENAI_API_KEY`, the diagnostic read
+  `Incorrect API key provided: lm-studio`, quoting a value the user had never
+  typed. It is now exit **2** with the missing variable, the endpoint that needs
+  it, and the config file actually in force.
+
+  The check resolves the endpoint through the same precedence as `llm.call`
+  (`RW_LLM_BASE_URL` → the config's `base_url:` → the LM Studio default), so a
+  preflight verdict can't disagree with what the call site would do. Loopback
+  endpoints and `chat-relay` need no credentials and pass; `--stub` skips the
+  check entirely. It is deliberately stricter than `has_synchronous_llm()`,
+  which answers "is any key set anywhere" and so waves through the case README
+  and `prompts/init.md` both name as the one that actually happens — an
+  Anthropic key set, the config copy skipped, every role still routed to
+  OpenAI. That case now fails with the `cp config/models.anthropic.yaml` hint.
+
+  Argv is still validated first: a path that doesn't exist remains exit 1, so a
+  typo isn't reported as missing credentials.
+
+- Wiki-page writers that bypassed `wiki.commit_page` and left the state DB stale
+  until the next `db rebuild`. Seven write sites across four modules: the
+  memory-evolve applier (`agents/phases/evolution.py`), the claim-graph promotion
+  applier (`claim_graph/promote.py`), `attach`'s two `supplementary:` branches, and
+  `backfill`'s three frontmatter helpers. Each rewrote frontmatter the DB mirrors —
+  `doi` and `venue` are dedicated columns, `supplementary:` and `generated_at:` live
+  in `raw_frontmatter` — so `status`, `db query`, and `claims` could read a stale row
+  and `db verify` reported the page as `stale`. Every site now reconciles at write
+  time; `tests/test_db_write_paths_commit.py` pins the behaviour per branch, with a
+  negative control asserting an uncommitted raw write *is* still detected as stale.
 
 ## [0.3.0] - 2026-08-11
 

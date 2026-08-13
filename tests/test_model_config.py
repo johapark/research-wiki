@@ -32,12 +32,20 @@ def reset_cache_and_env(monkeypatch):
     model_config._ingest_settings.cache_clear()
     model_config.base_url.cache_clear()
     model_config._env_override_warned = False
+    model_config._env_model_mismatch_warned = False
+    model_config._missing_base_url_warned = False
     monkeypatch.delenv("RW_LLM_PROVIDER", raising=False)
+    # A developer with either of these exported would otherwise silence the
+    # base-URL warning and skew every config-selection test.
+    monkeypatch.delenv("RW_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("RW_MODELS_CONFIG", raising=False)
     yield
     model_config._config.cache_clear()
     model_config._ingest_settings.cache_clear()
     model_config.base_url.cache_clear()
     model_config._env_override_warned = False
+    model_config._env_model_mismatch_warned = False
+    model_config._missing_base_url_warned = False
 
 
 def _write_yaml(tmp_path: Path, contents: str) -> Path:
@@ -626,3 +634,162 @@ roles:
     assert cfg.temperature == 0.4
     assert cfg.max_tokens == 3000
     assert cfg.reasoning_effort == "medium"
+
+
+# ---------- provider/model mismatch under RW_LLM_PROVIDER ----------
+#
+# `for_phase` replaces the provider and nothing else, so the two halves of a
+# routing decision come from different layers and can contradict each other.
+# The pre-existing mixing banner returns early on a uniform config, which is
+# exactly the shape that produces the broken pair — hence a second warning.
+
+_OPENAI_UNIFORM_YAML = """
+base_url: https://api.openai.com/v1
+roles:
+  author: {provider: openai-compatible, model: gpt-5.6-terra}
+phases:
+  author: {role: author}
+"""
+
+
+def test_provider_override_on_uniform_config_warns_about_the_model(
+        tmp_path, monkeypatch, capsys):
+    """`RW_MODELS_CONFIG=<openai config> RW_LLM_PROVIDER=anthropic` resolves to
+    anthropic/gpt-5.6-terra — a pair no API serves. The mixing banner is silent
+    here (uniform config), so this is the only warning the user gets."""
+    _use_yaml(monkeypatch, _write_yaml(tmp_path, _OPENAI_UNIFORM_YAML))
+    monkeypatch.setenv("RW_LLM_PROVIDER", "anthropic")
+    cfg = model_config.for_phase("author")
+    assert (cfg.provider, cfg.model) == ("anthropic", "gpt-5.6-terra")
+
+    err = capsys.readouterr().err
+    assert "replaces the provider but NOT the model" in err
+    assert "anthropic/gpt-5.6-terra" in err
+
+
+def test_chat_relay_override_does_not_warn_about_the_model(
+        tmp_path, monkeypatch, capsys):
+    """Chat-relay hands prompts to a chat agent and treats the model string as
+    a label, so a 'mismatch' there is the documented workflow, not a defect."""
+    _use_yaml(monkeypatch, _write_yaml(tmp_path, _OPENAI_UNIFORM_YAML))
+    monkeypatch.setenv("RW_LLM_PROVIDER", "chat-relay")
+    model_config.for_phase("author")
+    assert "NOT the model" not in capsys.readouterr().err
+
+
+def test_matching_provider_override_does_not_warn(tmp_path, monkeypatch, capsys):
+    """Forcing the provider the config already uses changes nothing."""
+    _use_yaml(monkeypatch, _write_yaml(tmp_path, _OPENAI_UNIFORM_YAML))
+    monkeypatch.setenv("RW_LLM_PROVIDER", "openai-compatible")
+    model_config.for_phase("author")
+    assert "NOT the model" not in capsys.readouterr().err
+
+
+def test_anthropic_provider_with_non_claude_model_does_not_warn(
+        tmp_path, monkeypatch, capsys):
+    """The reason this check compares *layers* rather than model-name families:
+    models.glm.yaml legitimately runs glm-4.7-flash through `provider:
+    anthropic` (z.ai's Anthropic-compatible endpoint). A name heuristic would
+    flag that supported setup; comparing config-provider to forced-provider
+    doesn't, because nothing is being forced."""
+    root = _write_yaml(tmp_path, """
+roles:
+  author: {provider: anthropic, model: glm-4.7-flash}
+phases:
+  author: {role: author}
+""")
+    _use_yaml(monkeypatch, root)
+    cfg = model_config.for_phase("author")
+    assert (cfg.provider, cfg.model) == ("anthropic", "glm-4.7-flash")
+    assert "NOT the model" not in capsys.readouterr().err
+
+
+def test_model_mismatch_banner_fires_only_once(tmp_path, monkeypatch, capsys):
+    _use_yaml(monkeypatch, _write_yaml(tmp_path, _OPENAI_UNIFORM_YAML))
+    monkeypatch.setenv("RW_LLM_PROVIDER", "anthropic")
+    for _ in range(5):
+        model_config.for_phase("author")
+    assert capsys.readouterr().err.count("NOT the model") == 1
+
+
+# ---------- OpenAI-compatible roles with no base_url ----------
+#
+# base_url() returns None, and call_openai_compatible reads None as "use the
+# LM Studio default" — so a cloud config missing one key silently becomes a
+# localhost one. The asymmetry that hides it: a *missing* file falls back to
+# OpenAI, a *present* file with no base_url: falls back to localhost.
+
+_NO_BASE_URL_YAML = """
+roles:
+  author: {provider: openai-compatible, model: gpt-5.6-luna}
+phases:
+  author: {role: author}
+"""
+
+
+def test_openai_roles_without_base_url_warn(tmp_path, monkeypatch, capsys):
+    _use_yaml(monkeypatch, _write_yaml(tmp_path, _NO_BASE_URL_YAML))
+    model_config.for_phase("author")
+    err = capsys.readouterr().err
+    assert "no top-level `base_url:`" in err
+    assert "localhost:1234" in err
+
+
+def test_base_url_present_does_not_warn(tmp_path, monkeypatch, capsys):
+    _use_yaml(monkeypatch, _write_yaml(tmp_path, _OPENAI_UNIFORM_YAML))
+    model_config.for_phase("author")
+    assert "base_url:" not in capsys.readouterr().err
+
+
+def test_env_base_url_suppresses_the_warning(tmp_path, monkeypatch, capsys):
+    """RW_LLM_BASE_URL supplies the endpoint, so the config not declaring one
+    is no longer ambiguous."""
+    _use_yaml(monkeypatch, _write_yaml(tmp_path, _NO_BASE_URL_YAML))
+    monkeypatch.setenv("RW_LLM_BASE_URL", "https://api.openai.com/v1")
+    model_config.for_phase("author")
+    assert "base_url:" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("template", ["models.anthropic.yaml", "models.glm.yaml"])
+def test_shipped_templates_without_base_url_do_not_warn(
+        template, tmp_path, monkeypatch, capsys):
+    """The two shipped templates that declare no `base_url:` are both correct —
+    every role routes to the `anthropic` provider, which ignores it. Asserted
+    against the real files so adding an OpenAI-compatible role to either one
+    (without also adding base_url:) fails here rather than in someone's ingest."""
+    src = Path(__file__).resolve().parent.parent / "config" / template
+    root = _write_yaml(tmp_path, src.read_text(encoding="utf-8"))
+    _use_yaml(monkeypatch, root)
+    model_config.for_phase("author")
+    assert "base_url:" not in capsys.readouterr().err
+
+
+def test_partial_config_inheriting_fallback_roles_warns(tmp_path, monkeypatch, capsys):
+    """A config that declares only some roles inherits the rest from
+    `_FALLBACK_ROLES`, which are all OpenAI-compatible — so an anthropic-looking
+    partial config with no `base_url:` still sends five of six roles to
+    localhost. Warning correctly fires on the merged view, not the file's text."""
+    root = _write_yaml(tmp_path, """
+roles:
+  author: {provider: anthropic, model: claude-sonnet-5}
+phases:
+  author: {role: author}
+""")
+    _use_yaml(monkeypatch, root)
+    model_config.for_phase("author")
+    assert "no top-level `base_url:`" in capsys.readouterr().err
+
+
+def test_missing_config_file_does_not_warn(tmp_path, monkeypatch, capsys):
+    """A fresh clone resolves to the fallback roles *and* _FALLBACK_BASE_URL,
+    so there is no ambiguity to report."""
+    monkeypatch.setattr(model_config, "wiki_root", lambda: tmp_path)
+    model_config.for_phase("author")
+    assert "base_url:" not in capsys.readouterr().err
+
+
+def test_base_url_banner_fires_only_once(tmp_path, monkeypatch, capsys):
+    _use_yaml(monkeypatch, _write_yaml(tmp_path, _NO_BASE_URL_YAML))
+    for _ in range(5):
+        model_config.for_phase("author")
+    assert capsys.readouterr().err.count("no top-level `base_url:`") == 1

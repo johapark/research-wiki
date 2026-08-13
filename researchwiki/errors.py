@@ -25,6 +25,7 @@ Subclasses live next to the resource they describe, not here:
   - `db.connection.StateDBUnavailable`     — state.db unopenable / unreadable
   - `grade.grounding.ClaimDBUnavailable`   — claims table unreachable
   - `index.types.SearchBackendUnavailable` — index not built yet
+  - `agents.llm.ProviderUnavailable`       — configured LLM has no credentials
 
 `EnvironmentFailure` subclasses `RuntimeError` so that pre-existing
 `except RuntimeError` handlers (and the graceful-degradation `except Exception`

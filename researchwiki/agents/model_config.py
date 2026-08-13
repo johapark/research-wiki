@@ -349,6 +349,100 @@ def _maybe_warn_env_override_defeats_mixing() -> None:
     _env_override_warned = True
 
 
+_env_model_mismatch_warned = False
+
+
+def _maybe_warn_env_override_model_mismatch() -> None:
+    """Fire once per process when `RW_LLM_PROVIDER` forces a provider the
+    resolved config did not choose its *models* for.
+
+    `for_phase` overrides the provider and nothing else, so the two halves of a
+    routing decision arrive from different layers and can contradict each other:
+    `RW_MODELS_CONFIG=models.chatgpt.yaml RW_LLM_PROVIDER=anthropic` resolves to
+    `anthropic/gpt-5.6-terra`, which no API serves. The call then fails on an
+    unknown model, naming neither the env var nor the config that produced it.
+
+    Distinct from `_maybe_warn_env_override_defeats_mixing`, which returns early
+    unless the config declares ≥2 providers — and so stays silent on exactly
+    this case, a *uniform* config whose provider the env var replaces wholesale.
+
+    `chat-relay` is exempt: it hands prompts to a chat agent and treats the
+    model string as a label, so a "mismatch" there is the documented workflow.
+    """
+    global _env_model_mismatch_warned
+    if _env_model_mismatch_warned:
+        return
+    env_provider = (os.environ.get("RW_LLM_PROVIDER") or "").strip()
+    if not env_provider or env_provider.lower() == "chat-relay":
+        return
+    roles, _ = _config()
+    clashing = {n: c for n, c in roles.items()
+                if c.provider.lower() != env_provider.lower()}
+    if not clashing:
+        return
+    role_name, cfg = sorted(clashing.items())[0]
+    chosen_for = ", ".join(sorted({c.provider for c in clashing.values()}))
+    print(
+        f"⚠  RW_LLM_PROVIDER={env_provider!r} replaces the provider but NOT the "
+        f"model.\n"
+        f"    {config_path().name} picked its models for {chosen_for} — e.g. role "
+        f"{role_name!r} now resolves to {env_provider}/{cfg.model}.\n"
+        f"    If that pair isn't real, unset RW_LLM_PROVIDER and pick a config "
+        f"with RW_MODELS_CONFIG instead.",
+        file=sys.stderr,
+    )
+    _env_model_mismatch_warned = True
+
+
+_missing_base_url_warned = False
+
+
+def _maybe_warn_missing_base_url() -> None:
+    """Fire once per process when a config declares OpenAI-compatible roles but
+    no top-level `base_url:`.
+
+    `base_url()` returns None there and `call_openai_compatible` reads None as
+    "use the LM Studio default", so a cloud config missing one key silently
+    becomes a localhost one. The asymmetry is what makes it hard to spot: a
+    *missing* config file falls back to OpenAI (`_FALLBACK_BASE_URL`), while a
+    *present* file with no `base_url:` falls back to http://localhost:1234/v1.
+    Same "unspecified endpoint", two different answers.
+
+    No shipped template trips this — the two without `base_url:`
+    (models.anthropic.yaml, models.glm.yaml) both route to the `anthropic`
+    provider, which ignores it — so this is aimed at hand-edited configs.
+    Silent when RW_LLM_BASE_URL is set, since that supplies the endpoint.
+    """
+    global _missing_base_url_warned
+    if _missing_base_url_warned:
+        return
+    if os.environ.get("RW_LLM_BASE_URL"):
+        return
+    path = config_path()
+    if not path.exists() or base_url() is not None:
+        return
+    # Lazy import: llm imports this module at module scope, so the reverse
+    # edge has to be deferred to call time.
+    from .llm import _DEFAULT_LOCAL_BASE_URL, _OPENAI_COMPAT_PROVIDERS
+    roles, _ = _config()
+    compat = sorted(n for n, c in roles.items()
+                    if c.provider.lower() in _OPENAI_COMPAT_PROVIDERS)
+    if not compat:
+        return
+    # "resolve to", not "declares": the fallback fills roles the file omits, so
+    # some of these are inherited rather than written down in it.
+    shown = ", ".join(compat[:4]) + (", …" if len(compat) > 4 else "")
+    print(
+        f"⚠  With {path.name} in force, role(s) {shown} resolve to an "
+        f"OpenAI-compatible provider, but no top-level `base_url:` is set.\n"
+        f"    Those calls will go to {_DEFAULT_LOCAL_BASE_URL} (the LM Studio "
+        f"default), not to a cloud endpoint.\n"
+        f"    Add `base_url:` to the config, or set RW_LLM_BASE_URL.",
+        file=sys.stderr,
+    )
+    _missing_base_url_warned = True
+
+
 def for_phase(name: str) -> ModelConfig:
     """Resolve a phase to its effective ModelConfig.
 
@@ -395,9 +489,11 @@ def for_phase(name: str) -> ModelConfig:
     # Env-var override applied last — wins over config/models.yaml. Used by
     # subscription users to flip every phase to chat-relay without editing
     # the YAML.
+    _maybe_warn_missing_base_url()
     env_provider = os.environ.get("RW_LLM_PROVIDER")
     if env_provider:
         _maybe_warn_env_override_defeats_mixing()
+        _maybe_warn_env_override_model_mismatch()
         cfg = replace(cfg, provider=env_provider)
     return cfg
 

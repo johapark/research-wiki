@@ -47,10 +47,12 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
 from . import model_config
+from ..errors import EnvironmentFailure
 
 
 # --- Client-side rate limiting -------------------------------------------
@@ -149,6 +151,120 @@ def is_real_mode_available() -> bool:
 _DEFAULT_LOCAL_BASE_URL = "http://localhost:1234/v1"
 
 _OPENAI_COMPAT_PROVIDERS = frozenset({"openai-compatible", "lmstudio", "openai"})
+
+
+class ProviderUnavailable(EnvironmentFailure):
+    """The configured LLM provider has no usable credentials — exit code 2.
+
+    Raised by `preflight_providers()` before a run spends anything, not by the
+    call sites: a provider that 401s mid-pipeline is the same condition
+    discovered too late.
+    """
+
+
+def _resolved_openai_base_url() -> str:
+    """The endpoint an `openai-compatible` role will actually POST to.
+
+    Mirrors `call`'s precedence exactly — `RW_LLM_BASE_URL`, then the config's
+    top-level `base_url:`, then the LM Studio localhost default — because a
+    preflight that resolves the endpoint differently from the call site is
+    worse than no preflight at all.
+    """
+    return (
+        os.environ.get("RW_LLM_BASE_URL")
+        or model_config.base_url()
+        or _DEFAULT_LOCAL_BASE_URL
+    )
+
+
+def _is_local_endpoint(url: str) -> bool:
+    """True for a loopback endpoint, which needs no API key — LM Studio, vLLM,
+    llama.cpp and ollama all ignore the Bearer token."""
+    try:
+        host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return False
+    return host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+
+
+def missing_provider_credentials() -> list[str]:
+    """Every provider this config routes to but has no usable credentials for.
+
+    Returns one human-readable problem per unusable provider, empty when the
+    config is runnable. Pure environment + config inspection: no network, no
+    tokens, microseconds.
+
+    Checks *all* registered phases rather than a curated ingest subset. An
+    ingest already reaches nearly every phase — author, critic, debug, evolve,
+    keywords, link_generation, memory_evolution, reconcile, short_name,
+    target_claims, and classifier via the category auto-suggest — so a
+    hand-listed subset would be a near-superset that silently rots as phases
+    are added, which is how the gap this closes appeared in the first place.
+
+    Deliberately stricter than `has_synchronous_llm()`, which answers "is any
+    key set anywhere" and so returns True for the failure README and
+    prompts/init.md both call the one that actually happens: an Anthropic key
+    set, the config copy skipped, and every role therefore still routed to
+    OpenAI.
+    """
+    providers: set[str] = set()
+    for name in model_config.list_phases():
+        try:
+            providers.add(model_config.for_phase(name).provider.lower().strip())
+        except model_config.PhaseNotRegistered:
+            continue
+
+    problems: list[str] = []
+    if "anthropic" in providers and not os.environ.get("ANTHROPIC_API_KEY"):
+        problems.append(
+            "anthropic: ANTHROPIC_API_KEY is not set — put it in .env at the "
+            "wiki root (loaded on every invocation) or export it."
+        )
+    if providers & _OPENAI_COMPAT_PROVIDERS:
+        url = _resolved_openai_base_url()
+        if not _is_local_endpoint(url) and not os.environ.get("OPENAI_API_KEY"):
+            msg = (
+                f"openai-compatible: OPENAI_API_KEY is not set and the endpoint "
+                f"is remote ({url}) — set that provider's key in .env, or point "
+                f"RW_LLM_BASE_URL at a local server."
+            )
+            if os.environ.get("ANTHROPIC_API_KEY"):
+                # The documented trap: an Anthropic key is present, so the user
+                # believes they are configured, but no config file means every
+                # role still resolves to the OpenAI-compatible fallback.
+                msg += (
+                    "\n    You have ANTHROPIC_API_KEY set but this config routes "
+                    "to OpenAI — Anthropic needs its own config file: "
+                    "`cp config/models.anthropic.yaml config/models.yaml`."
+                )
+            problems.append(msg)
+    # chat-relay needs no credentials; the stub path never reaches a provider.
+    return problems
+
+
+def preflight_providers() -> None:
+    """Raise `ProviderUnavailable` before a run spends anything, if it can't run.
+
+    `agent ingest` used to discover a missing key only in the author phase —
+    after PDF extraction and metadata reconcile had already run — and let it
+    escape as an uncaught RuntimeError, so a plain configuration error exited 3
+    ("internal bug — file a report") with a traceback. Worse, the
+    OpenAI-compatible path defaults an unset `OPENAI_API_KEY` to the literal
+    string `lm-studio`, so the diagnostic a new user actually got was a 401
+    quoting a value they had never typed.
+    """
+    problems = missing_provider_credentials()
+    if not problems:
+        return
+    cfg = model_config.config_path()
+    where = str(cfg) if cfg.exists() else f"{cfg} (missing — using built-in defaults)"
+    raise ProviderUnavailable(
+        "no usable LLM provider for this run.\n"
+        + "\n".join(f"  - {p}" for p in problems)
+        + f"\n  active model config: {where}"
+        + "\n  fix: see README.md § Providers, or run `researchwiki init`."
+    )
+
 
 # Retry policy for transient OpenAI-compatible failures. Gemini's free tier
 # returns 503 ("model experiencing high demand") and 429 (rate limit) under

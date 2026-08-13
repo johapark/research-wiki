@@ -45,6 +45,12 @@ def wiki(tmp_path, monkeypatch):
     root.mkdir()
     from researchwiki import paths
     monkeypatch.setattr(paths, "wiki_root", lambda: root)
+    # Satisfy `agent ingest`'s provider preflight. `conftest._no_dotenv_leak`
+    # keeps the repo's real .env out of the test environment, so without this
+    # every CLI-driven test here would exit 2 on missing credentials before
+    # reaching the stubbed `_worker`. These tests pin batch orchestration, not
+    # provider config — the preflight itself is covered in test_preflight.py.
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-used")
     return root
 
 
