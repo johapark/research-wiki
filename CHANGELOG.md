@@ -14,6 +14,8 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-13
+
 ### Added
 
 - Two warnings for config states the provider-resolution layering can produce but
@@ -89,6 +91,17 @@ the reasoning behind any line below.
   unconditionally, which is what makes the reproducibility property hold. Corrected
   the docstring rather than adding the optimization: a full rebuild of a ~500-page
   corpus runs in under a second.
+
+- The version-bump rule in `CONTRIBUTING.md` § *Releasing* now reads the
+  breaking-change surface table in both directions: a change that **adds** to a listed
+  surface takes MINOR, and one that only alters behaviour behind an existing surface
+  takes PATCH. It replaces "any `feat` → MINOR", which keyed the number to a
+  Conventional-Commits label chosen per commit rather than to SemVer's actual MINOR
+  clause — new functionality introduced to *the public API*. This release is the
+  demonstration: its one `feat` adds two stderr warnings inside `model_config.py` and
+  no command, flag, `--json` key or frontmatter field, so under the old rule it would
+  have shipped as 0.4.0 — the same slot 0.3.0 used for `import` and `export`. The
+  table stays the single arbiter, so the choice is still mechanical.
 
 ### Fixed
 
@@ -563,7 +576,8 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/johapark/research-wiki/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/johapark/research-wiki/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/johapark/research-wiki/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/johapark/research-wiki/compare/v0.1.0...v0.2.0
