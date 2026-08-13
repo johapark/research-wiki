@@ -39,6 +39,18 @@ the reasoning behind any line below.
   for `PdfBitmap.to_pil()`. Nothing runs at ingest, nothing is backfilled, and
   no page field or `lint` check was added.
 
+  Caption detection spans the separator styles the corpus actually uses —
+  `Fig. 1 | T` (Nature), `Figure 1: T` (preprints), `Fig 1. T` (PLOS),
+  `Fig. 1 T` (BMC, none at all) and `Figure 1- T` / `Figure 2 - T`
+  (accepted manuscripts). Validated across all 115 corpus PDFs plus the five
+  bundled benchmark fixtures: 1,108 captions, no body-prose false positives.
+
+  Where a paper collects its captions onto one page and its plates several
+  pages later — the accepted-manuscript layout — rendering the caption page
+  would show text and no figure. The command counts drawable objects per page,
+  says so, and names the artwork pages that follow rather than rendering one
+  it wasn't asked for.
+
 ### Fixed
 
 - **A promote that didn't complete reported success.** `promote_to_wiki` is five

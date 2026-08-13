@@ -28,13 +28,25 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pypdfium2
+import pypdfium2.raw
+
+_PAGEOBJ_PATH = pypdfium2.raw.FPDF_PAGEOBJ_PATH
+_PAGEOBJ_IMAGE = pypdfium2.raw.FPDF_PAGEOBJ_IMAGE
 
 # Group 1: the label token (may carry an "Extended Data" prefix).
 # Group 2: the number.
 # Then a separator and the start of a title — uppercase, digit, or quote/paren.
+#
+# The separator set is the venue-variable part, and each member is a style seen
+# in the corpus or the benchmark fixtures: `Fig. 1 | Title` (Nature),
+# `Figure 1: Title` (most preprints), `Fig 1. Title` (PLOS), `Fig. 1 Title`
+# (BMC, no separator at all), and `Figure 1- Title` / `Figure 2 - Title`
+# (fonseca-2026, hyphen with or without a leading space). Requiring whitespace
+# *after* the separator is what keeps a cross-reference range out: "Figure 1-3
+# show..." has a digit where the space must be.
 _CAPTION_RE = re.compile(
     r'^[ \t]*((?:Extended\s+Data\s+)?(?:Fig(?:ure)?|Table)\.?)'
-    r'\s*(\d+)\s*[|.:]?\s+(["“(]?[A-Z0-9])',
+    r'\s*(\d+)\s*[|.:–—-]?\s+(["“(]?[A-Z0-9])',
     re.MULTILINE,
 )
 
@@ -120,6 +132,64 @@ def locate_in_texts(pages: list[str]) -> list[FigureRef]:
     return sorted(
         seen.values(), key=lambda f: (f.kind, f.extended, f.number)
     )
+
+
+def graphics_per_page(
+    pdf_path: Path | str, max_pages: int = MAX_SCAN_PAGES
+) -> list[int]:
+    """Count drawable objects (paths + images) per page, 0-indexed.
+
+    Exists for one real corpus shape: an accepted manuscript that collects all
+    figure captions onto their own page and puts the artwork several pages
+    later. `fonseca-2026` does exactly this — captions on p29-30, artwork on
+    p34-37 — so resolving "Figure 1" to its caption page and rendering that
+    yields a page of caption text and no figure.
+
+    Counting objects is the cheap way to tell the two apart: a caption page has
+    ~0 drawables, an artwork page has hundreds. Used only to *warn* and point
+    at candidates; the caller still decides what to render, because rendering
+    an extra page it didn't ask for would double the context spend silently.
+    """
+    pdf_path = Path(pdf_path)
+    doc = pypdfium2.PdfDocument(str(pdf_path))
+    out: list[int] = []
+    try:
+        for i in range(min(len(doc), max_pages)):
+            page = doc[i]
+            try:
+                out.append(sum(
+                    1 for o in page.get_objects(max_depth=8)
+                    if o.type in (_PAGEOBJ_PATH, _PAGEOBJ_IMAGE)
+                ))
+            finally:
+                page.close()
+    finally:
+        doc.close()
+    return out
+
+
+# A page with fewer drawables than this is text; a figure page has hundreds.
+# Set well above 0 because a plain page still carries a rule or a logo.
+GRAPHICS_FLOOR = 8
+
+
+def artwork_candidates(
+    densities: list[int], caption_page: int, window: int = 10
+) -> list[int]:
+    """1-based artwork pages after `caption_page`, **nearest first**.
+
+    Nearest rather than densest: in this layout the plates follow the caption
+    block in the same order the captions are listed, so the page closest to
+    Figure 1's caption is Figure 1's plate. Ordering by object count instead
+    put `fonseca-2026`'s 963-object Figure 4 page ahead of Figure 1's, which
+    is confidently wrong rather than merely unhelpful.
+    """
+    start = caption_page  # 0-indexed index of the page after the caption page
+    return [
+        i + 1
+        for i in range(start, min(len(densities), start + window))
+        if densities[i] >= GRAPHICS_FLOOR
+    ]
 
 
 def resolve(

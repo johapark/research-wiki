@@ -152,6 +152,27 @@ def main(argv: list[str]) -> int:
             return 1
         print(f"{ref.label} → page {ref.page}")
         print(f"  {ref.caption}")
+
+        # Accepted manuscripts often collect every caption onto one page and
+        # put the plates several pages later. Rendering the caption page then
+        # shows text and no figure, silently. Warn and name candidates rather
+        # than rendering them — an extra page is extra context the caller
+        # didn't ask to spend.
+        densities = figlib.graphics_per_page(pdf)
+        here = densities[ref.page - 1] if ref.page <= len(densities) else 0
+        if here < figlib.GRAPHICS_FLOOR:
+            candidates = figlib.artwork_candidates(densities, ref.page)
+            print()
+            print(f"  ⚠ page {ref.page} carries the caption but almost no artwork "
+                  f"({here} drawable object{'s' if here != 1 else ''}) — this paper "
+                  f"looks like an accepted manuscript with its plates collected "
+                  f"separately.")
+            if candidates:
+                shown = ", ".join(str(p) for p in candidates[:5])
+                print(f"    pages with artwork after it: {shown}. Plate order "
+                      f"needn't follow caption order (tables often come first), "
+                      f"so check rather than assume:")
+                print(f"      researchwiki figures {args.stem} --page {candidates[0]}")
         print()
         return _render_and_report(args.stem, pdf, [ref.page], args.dpi, args.as_json)
 

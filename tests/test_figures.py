@@ -37,6 +37,28 @@ def test_locates_nature_style_pipe_captions():
     assert [(r.label, r.page) for r in refs] == [("Figure 1", 2), ("Figure 2", 3)]
 
 
+@pytest.mark.parametrize("line,label", [
+    ("Fig. 1 | Construction of the pangenome.", "Figure 1"),      # Nature
+    ("Figure 1: Tree construction process.", "Figure 1"),         # most preprints
+    ("Fig 1. The scHilda framework, divided in two.", "Figure 1"),  # PLOS
+    ("Fig. 1 Overview of VariantMedium workflow.", "Figure 1"),   # BMC, no separator
+    ("Figure 1- Study flow diagram.", "Figure 1"),                # hyphen, no space
+    ("Figure 2 - Primary and secondary outcomes.", "Figure 2"),   # hyphen, spaced
+])
+def test_separator_styles_seen_in_the_corpus(line, label):
+    """Each of these is a real caption from a corpus paper or benchmark
+    fixture. The two hyphen forms are `fonseca-2026`, which the first version
+    of this regex missed entirely — it accepted only `|`, `.` and `:`."""
+    refs = figlib.locate_in_texts([line + "\n"])
+    assert [r.label for r in refs] == [label]
+
+
+def test_cross_reference_range_is_not_a_caption():
+    """`Figure 1-3 show ...` must not read as a hyphen-separated caption. The
+    separator has to be followed by whitespace, and a range has a digit."""
+    assert figlib.locate_in_texts(["Figure 1-3 show the recall curves.\n"]) == []
+
+
 def test_locates_colon_and_period_styles():
     """Most non-Nature venues typeset `Figure 1:` or `Figure 1.` — the style
     `sections.py`'s pipe-only CAPTION_START_RE deliberately skips."""
@@ -271,3 +293,35 @@ def test_parse_pages_rejects_junk(spec):
     from researchwiki.tasks.figures import _parse_pages
     with pytest.raises(ValueError):
         _parse_pages(spec)
+
+
+# ---------- caption page vs. artwork page ----------
+#
+# Accepted manuscripts collect every caption onto one page and put the plates
+# several pages later (`fonseca-2026`: captions p29-30, artwork p31-37). A
+# caption-page render then shows text and no figure, silently.
+
+def test_artwork_candidates_are_nearest_first():
+    """Nearest, not densest: plates follow the caption block roughly in order,
+    so sorting by object count put fonseca's 963-object last plate ahead of
+    the first one."""
+    # fonseca-2026's real per-page counts: captions on 29-30, plates after.
+    densities = [0] * 28 + [1, 1, 287, 1, 230, 32, 231, 61, 963]
+    assert figlib.artwork_candidates(densities, caption_page=29) == \
+        [31, 33, 34, 35, 36, 37]
+
+
+def test_artwork_candidates_ignores_sparse_pages():
+    """A rule or a logo is not artwork."""
+    densities = [0, 2, 1, 300, 3]
+    assert figlib.artwork_candidates(densities, caption_page=1) == [4]
+
+
+def test_artwork_candidates_empty_when_nothing_follows():
+    assert figlib.artwork_candidates([0, 500, 1, 1], caption_page=2) == []
+
+
+def test_artwork_candidates_respects_window():
+    densities = [0] * 5 + [900]
+    assert figlib.artwork_candidates(densities, caption_page=1, window=3) == []
+    assert figlib.artwork_candidates(densities, caption_page=1, window=10) == [6]
