@@ -16,6 +16,29 @@ the reasoning behind any line below.
 
 ### Added
 
+- **`researchwiki remove <stem>`** — retract a paper and every generated trace
+  of it. Deleting a page by hand used to strand the PDF, the `index.md` bullet,
+  inbound back-links, `[[stem#slug]]` anchors on synthesis pages, concept
+  spokes, claim-graph edges and four tables' worth of rows; `lint` reported the
+  wreckage and nothing cleaned it up.
+
+  **Generated text is removed, authored text is reported.** Back-link bullets
+  and the catalogue entry were written by `promote`, so they go. A sentence on a
+  synthesis or idea page citing the paper was written by a human and has passed
+  both gates, so it is listed with file and line for the reviewer to resolve —
+  no rewrite rule is safe there, since stripping the citation leaves an
+  unsupported claim and deleting the sentence can remove a conclusion several
+  papers jointly carried. Expect `lint` to report `dangling_claim_anchors` on
+  exactly the listed pages afterwards: that is the to-do queue, not a defect.
+  A concept hub gets both treatments — its generated spoke registry is cleaned
+  (and `concept_span` recomputed), its authored Definition is not.
+
+  Dry run is the default; `--apply` is required to write. `--keep-pdf` retains
+  `papers/{stem}.pdf` when the page is wrong but the paper should be re-ingested.
+  The whole removal runs inside the mutation journal below, so a failure
+  part-way through rolls back rather than half-removing. `log.md` is
+  append-only, so a removal appends an entry rather than editing history.
+
 - **`promote_to_wiki` is transactional.** Its five steps — page write + DB row,
   PDF move, back-links into N existing pages, `index.md`, `log.md` — were each
   individually atomic with nothing binding them, so a failure after the PDF move

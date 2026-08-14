@@ -396,6 +396,10 @@ For a bulk import use `migrate` (above), which runs these for you in the right o
 
 When `lint --json` flags `missing_doi`/`stem_year_drift`/`unknown-` stem or agent landed bad metadata: re-ingest with overrides (not YAML-patching). Full workflow in [`prompts/recovery.md`](./prompts/recovery.md).
 
+### Remove — retract a paper
+
+Trigger: ingested in error, retracted upstream, superseded under a different stem, or a mis-typed commentary. `researchwiki remove <stem>` (dry run by default; `--apply` writes, `--keep-pdf` leaves the PDF re-ingestable). Removes the page, PDF, caches, back-link bullets, `index.md` entry, concept spokes and DB rows; **reports but never edits** authored `[[stem#slug]]` / footnote citations on synthesis + idea + concept pages — expect `dangling_claim_anchors` on exactly those pages afterwards, which is the to-do queue, not a defect. Runs inside the mutation journal. Full procedure in [`prompts/remove-paper.md`](./prompts/remove-paper.md). **Not** for re-ingesting with corrected metadata — that's `prompts/recovery.md`.
+
 ### Recategorize — move a paper to a different category
 
 Follow [`prompts/recategorize.md`](./prompts/recategorize.md). Directory is canonical (`db rebuild` ignores YAML `category:`); procedure repoints inbound links, updates YAML, verifies via `lint`.
