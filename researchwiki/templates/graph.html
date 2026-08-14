@@ -175,8 +175,13 @@ const EDGE = {
 
 /* ---------- model ---------- */
 const nodes = DATA.nodes.map((n,i) => ({...n, i,
-  x:Math.cos(i*2.399)*260*Math.sqrt(i/DATA.nodes.length+.02),
-  y:Math.sin(i*2.399)*260*Math.sqrt(i/DATA.nodes.length+.02),
+  // Seed on a phyllotaxis disc scaled to roughly the *final* extent (~22·√n).
+  // A tight seed radius looks tidier for a moment and then explodes: every node
+  // starts inside every other node's repulsion range, so tick 1 is the most
+  // violent frame of the whole run. Starting near the answer removes that phase
+  // instead of having to damp it.
+  x:Math.cos(i*2.399)*22*Math.sqrt(DATA.nodes.length)*Math.sqrt(i/DATA.nodes.length+.02),
+  y:Math.sin(i*2.399)*22*Math.sqrt(DATA.nodes.length)*Math.sqrt(i/DATA.nodes.length+.02),
   vx:0, vy:0, pinned:false, r:0, shown:true}));
 const byId = new Map(nodes.map(n => [n.id, n]));
 for (const n of nodes) n.r = Math.min(13, 3.2 + Math.sqrt(n.deg) * 1.55);
@@ -247,7 +252,7 @@ const edgeVisible = e =>
    parks itself instead of burning CPU forever. */
 let K = 60;
 //: Re-heat for a change that invalidates every position — a filter, a reset.
-function kick(){ alpha = Math.max(alpha, 0.55); }
+function kick(){ alpha = Math.max(alpha, 0.30); }
 //: Re-heat for a change that moved exactly one node. Low enough that the settled
 //: layout gives locally instead of lurching, but non-zero so neighbours follow.
 function nudge(){ alpha = Math.max(alpha, 0.10); }
@@ -261,7 +266,7 @@ function step(){
   const vis = nodes.filter(n => n.shown);
   const n = vis.length;
   if (!n) return;
-  const CUT = (6*K) * (6*K), GRAV = 0.014, DAMP = 0.82;
+  const CUT = (6*K) * (6*K), GRAV = 0.014, DAMP = 0.74;
 
   for (let a=0; a<n; a++){
     const A = vis[a];
@@ -288,7 +293,10 @@ function step(){
     const ft = f / (1 + Math.log1p(e.t.deg));
     e.s.vx += dx*fs; e.s.vy += dy*fs; e.t.vx -= dx*ft; e.t.vy -= dy*ft;
   }
-  const cap = K * 0.6;
+  // Per-tick displacement ceiling. At K*0.6 a node could move ~32px per tick
+  // on this corpus — ~1900px/s at 60fps, which is the thrash. K*0.15 keeps the
+  // motion readable as motion rather than as a jolt.
+  const cap = K * 0.15;
   for (const N of vis){
     if (N.pinned || N === dragNode){ N.vx = N.vy = 0; continue; }
     N.vx *= DAMP; N.vy *= DAMP;
@@ -297,7 +305,7 @@ function step(){
     const lim = sp > cap ? cap/sp : 1;
     N.x += N.vx * alpha * lim; N.y += N.vy * alpha * lim;
   }
-  alpha *= 0.988;
+  alpha *= 0.992;
   if (alpha < 0.004) alpha = 0;
 }
 
@@ -420,18 +428,25 @@ function fitView(){
   ty = -((y0+y1)/2) * scale + (padT-padB)/2;
 }
 
+//: Ticks burned before the first paint. The layout's opening frames are its most
+//: violent and least informative, so they happen off-screen: the graph appears
+//: already roughly arranged and then eases into place. 140 ticks leaves alpha near
+//: 0.12 (0.992^260), so what remains visible is the gentle tail. The decay is
+//: slower than it looks like it should be (0.992, not 0.988): total relaxation
+//: scales as 1/(1-decay), and the extra iterations are spent here, off-screen,
+//: where they cost nothing to watch.
+const WARMUP_TICKS = 260;
+function warmup(){ for (let i = 0; i < WARMUP_TICKS && alpha > 0; i++) step(); }
+
 function frame(){
   if (alpha > 0) step();
   // Fit as soon as the layout is visually settled rather than fully frozen —
   // waiting for alpha to reach exactly 0 costs several seconds of staring at an
   // off-screen graph.
-  // Twice: once when it looks settled (fast feedback) and again when the sim
-  // actually freezes, because the graph is still expanding at the first fit and
-  // a single early fit leaves the outer ring cropped.
-  if (nodes.some(n => n.shown)){
-    if (fitsDone === 0 && alpha < 0.06){ fitsDone = 1; fitView(); }
-    else if (fitsDone === 1 && alpha === 0){ fitsDone = 2; fitView(); }
-  }
+  // A single fit, taken after warmup() has already done the expanding. Fitting
+  // twice mid-settle moved the camera under the user, which reads as shake even
+  // though nothing about the layout was wrong.
+  if (fitsDone === 0 && nodes.some(n => n.shown)){ fitsDone = 1; fitView(); }
   draw();
   requestAnimationFrame(frame);
 }
@@ -633,9 +648,11 @@ tb.onclick = () => {
 document.getElementById('reset').onclick = () => {
   for (const n of nodes) n.pinned = false;
   deselect();
-  // Re-fit rather than snapping to 1:1 — "reset" should mean "show me
-  // everything again", which is what the user actually wants from it.
-  alpha = 1; fitsDone = 0;
+  // The button says *view*, and it used to re-run the entire layout from alpha=1 —
+  // the same conflation as kick-vs-nudge. Positions are already good; only the
+  // camera and the pins needed resetting. `nudge()` is there solely so nodes just
+  // unpinned can drift back, not to re-derive the layout.
+  nudge(); fitView();
 };
 const tableBtn = document.getElementById('tableBtn'), tablePanel = document.getElementById('table');
 tableBtn.onclick = () => {
@@ -668,7 +685,10 @@ if (!nodes.length){
   d.textContent = 'No wiki pages yet — run `researchwiki agent ingest` first.';
   document.body.appendChild(d);
 } else {
-  resize(); applyFilters(); frame();
+  resize(); applyFilters();
+  warmup();            // hot phase, off-screen
+  fitView(); fitsDone = 1;
+  frame();
 }
 </script>
 </body>

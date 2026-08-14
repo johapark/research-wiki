@@ -14,6 +14,36 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`visualize`'s layout no longer thrashes on load or on `reset view`.** Four
+  causes, all in the annealing rather than the input handling that the earlier click
+  fix addressed. The per-tick displacement ceiling was `K * 0.6` — about 32px per
+  node per tick on a 477-page corpus, ~1900px/s at 60fps. Nodes were seeded on a
+  tight disc, so every one started inside every other one's repulsion range and
+  tick 1 was the most violent frame of the run. `reset view` set `alpha = 1`,
+  re-deriving a layout that was already correct, which made a *camera* button the
+  most violent action in the UI. And the camera was fitted twice mid-settle, which
+  reads as shake even when the layout is fine.
+
+  The hot phase now runs in `warmup()` before the first paint — 260 ticks, 96ms, so
+  the graph appears roughly arranged and eases into place. Alpha decays slower
+  (0.992) because total relaxation scales as 1/(1-decay) and those extra iterations
+  are spent off-screen where they cost nothing to watch. Measured over the frames a
+  viewer actually sees:
+
+  | | before | after |
+  |---|---|---|
+  | worst per-tick node movement | 27.2px | **0.8px** |
+  | mean per-tick movement | 10.3px | **0.4px** |
+  | ticks moving >15px (of 200) | 50 | **0** |
+  | after `reset view` (60 ticks) | 20.0px mean | **0.5px mean** |
+
+  Convergence quality held: mean nearest-neighbour spacing 35.0px against 37.6px
+  before, and zero overlapping node pairs. An intermediate version was calmer but
+  visibly under-relaxed (30.2px, 4 overlaps), which is why the warmup budget and
+  decay were raised rather than just damping the motion.
+
 ## [0.4.0] - 2026-08-14
 
 ### Added

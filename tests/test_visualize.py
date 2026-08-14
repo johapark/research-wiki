@@ -303,9 +303,44 @@ def test_a_press_is_not_a_drag_until_it_moves():
     assert "pinned = true" not in mousedown
 
 
-def test_the_two_reheat_levels_stay_distinct():
+def _alpha_floor(src: str, fn: str) -> float:
+    import re
+    m = re.search(rf"function {fn}\(\)\{{ alpha = Math\.max\(alpha, ([\d.]+)\); \}}", src)
+    assert m, f"could not find {fn}()'s alpha floor"
+    return float(m.group(1))
+
+
+def test_the_two_reheat_levels_stay_distinct_and_ordered():
     """`kick()` is for a change that invalidates every position; `nudge()` is for
-    one node moving. Collapsing them re-introduces the shake."""
+    one node moving. Collapsing them re-introduces the shake.
+
+    Asserts the *relationship*, not the constants — an earlier version of this test
+    pinned `0.55` literally and broke the moment the layout was tuned calmer, which
+    told us nothing about whether the distinction still held.
+    """
     src = _template()
-    assert "function kick(){ alpha = Math.max(alpha, 0.55); }" in src
-    assert "function nudge(){ alpha = Math.max(alpha, 0.10); }" in src
+    kick, nudge = _alpha_floor(src, "kick"), _alpha_floor(src, "nudge")
+    assert 0 < nudge < kick <= 1.0
+    assert kick / nudge >= 2, "the levels should differ by enough to be worth having"
+
+
+def test_the_hot_phase_runs_before_the_first_paint():
+    """The layout's opening frames are its most violent. They are burned in
+    `warmup()` off-screen, so a viewer never sees them — measured at 27px of
+    per-tick node movement before this, under 1px after."""
+    src = _template()
+    assert "function warmup()" in src and "WARMUP_TICKS" in src
+    boot = src[src.index("resize(); applyFilters();"):]
+    assert boot.index("warmup();") < boot.index("frame();"), (
+        "warmup must run before the render loop starts, or the point is lost"
+    )
+
+
+def test_reset_view_does_not_restart_the_layout():
+    """It is a *camera* action. It used to set `alpha = 1`, which made it the most
+    violent thing in the UI — worse than first load."""
+    src = _template()
+    handler = _code_only(src[src.index("getElementById('reset').onclick"):][:600])
+    assert "fitView()" in handler
+    assert "alpha = 1" not in handler
+    assert "kick()" not in handler
