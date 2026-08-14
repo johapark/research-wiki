@@ -59,9 +59,14 @@ SECTION_ALIASES: list[tuple[str, re.Pattern[str]]] = [
     ("Key Contributions", re.compile(
         rf"(?im){_H2}(key\s+contributions?|contributions?|key\s+findings?|"
         rf"key\s+points?|key\s+takeaways?|main\s+contributions?|highlights){_TAIL}")),
+    # `architect\w*` rather than `architecture`: an LLM-authored page in the
+    # maintainer's corpus read "## Methodology and Architecting". The suffix is
+    # decoration on a heading whose first word already decides the section, so
+    # tolerating its inflections costs nothing and a typo'd heading otherwise
+    # yields zero claims and stays invisible to `ungraded_papers`.
     ("Methodology and Architecture", re.compile(
-        rf"(?im){_H2}(methodology(?:\s+and\s+architecture)?|methods?|approach|"
-        rf"architecture|how\s+it\s+works|what\s+they\s+did|"
+        rf"(?im){_H2}(methodology(?:\s+and\s+architect\w*)?|methods?|approach|"
+        rf"architect\w*|how\s+it\s+works|what\s+they\s+did|"
         rf"technical\s+(?:approach|details)|implementation){_TAIL}")),
     ("Results", re.compile(
         rf"(?im){_H2}(results?|findings?|evaluation|experiments?|benchmarks?|"
@@ -122,19 +127,51 @@ class HeadingPlan:
         return [c for c in self.changes if c.graded]
 
 
+#: Decorations that never change *which* section a heading is. Stripped before
+#: matching so `SECTION_ALIASES` stays a readable list of surface forms instead of
+#: growing a parenthetical and slash variant of every entry.
+#:
+#: A parenthetical qualifier scopes the section without redefining it
+#: ("Key Contributions (as a Review)", "(as stated in the abstract)"). A slashed
+#: pair names the same section twice ("Results / Findings") — both halves are
+#: already aliases of one canonical name, so the first is enough.
+_QUALIFIER_RE = re.compile(r"\s*\([^)]*\)\s*$")
+_SLASHED_ALT_RE = re.compile(r"\s*/\s*\S.*$")
+
+
+def _undecorate(heading_text: str) -> str:
+    """Strip a trailing parenthetical and a slashed alternative, in that order."""
+    t = _QUALIFIER_RE.sub("", heading_text.strip())
+    return _SLASHED_ALT_RE.sub("", t).strip()
+
+
 def canonical_for(heading_text: str) -> str | None:
     """Canonical name for one H2's text, or None if unmapped/ambiguous.
 
     Canonical names map to themselves — asserted in tests over `CANONICAL_H2`,
     so adding a required section can't silently escape the table.
+
+    Matching is tried on the heading as written and then on an undecorated form
+    (see `_undecorate`). The ambiguity guard runs against **both**, so stripping a
+    qualifier can never smuggle a heading past it — `## Discussion (results)`
+    stays ambiguous rather than becoming Results.
     """
-    line = f"## {heading_text.strip()}"
-    for _suggestion, pattern, _why in AMBIGUOUS_HEADINGS:
-        if pattern.match(line):
-            return None
-    for canonical, pattern in SECTION_ALIASES:
-        if pattern.match(line):
-            return canonical
+    candidates = [heading_text.strip()]
+    bare = _undecorate(heading_text)
+    if bare and bare != candidates[0]:
+        candidates.append(bare)
+
+    for cand in candidates:
+        line = f"## {cand}"
+        for _suggestion, pattern, _why in AMBIGUOUS_HEADINGS:
+            if pattern.match(line):
+                return None
+
+    for cand in candidates:
+        line = f"## {cand}"
+        for canonical, pattern in SECTION_ALIASES:
+            if pattern.match(line):
+                return canonical
     return None
 
 
