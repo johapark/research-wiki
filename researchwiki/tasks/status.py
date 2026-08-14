@@ -512,6 +512,21 @@ def main(argv: list[str]) -> int:
         print(f"    - {f.name}")
     if len(ingest_files) > 5:
         print(f"    ... ({len(ingest_files) - 5} more)")
+
+    # Interrupted multi-file mutations. Reported, never drained — `status` is
+    # read-only, and the next ingest rolls these back on its own.
+    try:
+        from ..mutation import pending_journals
+        journals = pending_journals()
+    except Exception:
+        journals = []
+    if journals:
+        print(f"  interrupted mutations:          {len(journals)}")
+        for j in journals[:5]:
+            print(f"    - {j.get('operation', '?')} "
+                  f"({j.get('status', '?')}, attempts={j.get('attempts', 0)}) "
+                  f"{(j.get('details') or {}).get('stem', '')}")
+        print("    → the next `agent ingest` rolls these back automatically")
     print(f"  PDFs failed parsing:            {len(failed)}")
     for key, note in failed[:8]:
         # The note is the actionable half — it says what the page was built from

@@ -165,3 +165,123 @@ def test_cli_maps_promote_failure_to_exit_2(monkeypatch, capsys, tmp_path):
     assert "already exists" in err
     assert "recovery.md" in err
     assert "Traceback" not in err, "known-failure mode must not print a stack trace"
+
+
+# ---------- the real promote, rolled back (WI-4) ----------
+#
+# The tests above stub `promote_to_wiki`. These drive the real one, so what is
+# pinned is that a failure mid-promote leaves the tree as it found it — which
+# is what WI-1 could only report and WI-4 actually fixes.
+
+@pytest.fixture
+def wiki_root(tmp_path, monkeypatch):
+    from researchwiki import mutation as mut
+    from researchwiki import paths, wiki as wiki_mod
+    from researchwiki.agents import promote as pm
+
+    (tmp_path / "wiki" / "compbio").mkdir(parents=True)
+    (tmp_path / "papers").mkdir()
+    (tmp_path / "inbox").mkdir()
+    (tmp_path / "wiki" / "index.md").write_text(
+        "# index.md\n\n## compbio\n\n", encoding="utf-8")
+    (tmp_path / "wiki" / "log.md").write_text("# log\n\n", encoding="utf-8")
+
+    monkeypatch.setattr(paths, "wiki_root", lambda: tmp_path)
+    monkeypatch.setattr(mut, "mutation_dir", lambda: tmp_path / ".mutation")
+    monkeypatch.setattr(pm, "wiki_dir", lambda: tmp_path / "wiki")
+    monkeypatch.setattr(pm, "papers_dir", lambda: tmp_path / "papers")
+    monkeypatch.setattr(pm, "_suggest_category", lambda *a, **k: ("compbio", "strong"))
+    monkeypatch.setattr(wiki_mod, "commit_page", lambda md: None)
+    monkeypatch.delenv("RW_MUTATION_JOURNAL", raising=False)
+    return tmp_path
+
+
+def _promote(tmp_path, **over):
+    from researchwiki.agents import promote as pm
+    pdf = tmp_path / "inbox" / "in.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    kwargs = dict(
+        stem="smith-2024-a-paper",
+        draft_text="## Summary\nbody\n\n## Key Contributions\n- one\n",
+        metadata={"title": "A paper", "year": 2024},
+        candidates=[],
+        source_pdf_path=pdf,
+        attempt_id="a1",
+        short_name="Smith 2024",
+        hook="Does a thing.",
+        keywords=["a", "b", "c", "d", "e"],
+    )
+    kwargs.update(over)
+    return pm.promote_to_wiki(**kwargs)
+
+
+def test_real_promote_rolls_back_a_failed_pdf_move(wiki_root, monkeypatch):
+    from researchwiki.agents import promote as pm
+    index_before = (wiki_root / "wiki" / "index.md").read_text(encoding="utf-8")
+    log_before = (wiki_root / "wiki" / "log.md").read_text(encoding="utf-8")
+
+    monkeypatch.setattr(pm, "_move_pdf", lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("papers/smith-2024-a-paper.pdf already exists")))
+
+    res = _promote(wiki_root)
+
+    assert res.promoted is False
+    assert not (wiki_root / "wiki" / "compbio" / "smith-2024-a-paper.md").exists(), \
+        "the page must be un-written, not left as an orphan"
+    assert (wiki_root / "inbox" / "in.pdf").exists(), "the input stays re-ingestable"
+    assert (wiki_root / "wiki" / "index.md").read_text(encoding="utf-8") == index_before
+    assert (wiki_root / "wiki" / "log.md").read_text(encoding="utf-8") == log_before
+    from researchwiki import mutation as mut
+    assert mut.pending_journals() == [], "a completed rollback leaves no journal"
+
+
+def test_real_promote_commits_the_happy_path(wiki_root):
+    from researchwiki import mutation as mut
+    res = _promote(wiki_root)
+
+    assert res.promoted is True
+    page = wiki_root / "wiki" / "compbio" / "smith-2024-a-paper.md"
+    assert page.exists()
+    assert (wiki_root / "papers" / "smith-2024-a-paper.pdf").exists()
+    assert not (wiki_root / "inbox" / "in.pdf").exists(), "inbox PDF was moved"
+    assert "smith-2024-a-paper" in (wiki_root / "wiki" / "index.md").read_text(encoding="utf-8")
+    assert mut.pending_journals() == []
+
+
+def test_real_promote_rolls_back_a_late_failure(wiki_root, monkeypatch):
+    """A failure *after* the PDF move — the window WI-1 could only report."""
+    from researchwiki.agents import promote as pm
+    monkeypatch.setattr(pm, "_append_index_entry", lambda **k: (_ for _ in ()).throw(
+        OSError("disk full")))
+
+    with pytest.raises(OSError):
+        _promote(wiki_root)
+
+    assert not (wiki_root / "wiki" / "compbio" / "smith-2024-a-paper.md").exists()
+    assert not (wiki_root / "papers" / "smith-2024-a-paper.pdf").exists(), \
+        "the moved PDF is put back"
+    assert (wiki_root / "inbox" / "in.pdf").exists()
+
+
+def test_rollback_restores_a_backlink_target(wiki_root, monkeypatch):
+    """Back-links are spliced into *existing* pages — the rollback case that
+    plain 'delete what we created' would get wrong."""
+    from researchwiki.agents import promote as pm
+
+    other = wiki_root / "wiki" / "compbio" / "other-2020-paper.md"
+    other.write_text("# Other\n\n## Related Papers\n\n- existing bullet\n",
+                     encoding="utf-8")
+    before = other.read_text(encoding="utf-8")
+
+    class _Cand:
+        wikilink = "compbio/other-2020-paper"
+        kind = "topical"
+        verified = True
+
+    monkeypatch.setattr(pm, "_append_log_entry", lambda **k: (_ for _ in ()).throw(
+        OSError("boom at the last step")))
+
+    with pytest.raises(OSError):
+        _promote(wiki_root, candidates=[_Cand()])
+
+    assert other.read_text(encoding="utf-8") == before

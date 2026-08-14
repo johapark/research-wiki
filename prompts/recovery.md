@@ -39,18 +39,24 @@ researchwiki db rebuild && researchwiki reindex
 
 Trigger: `agent ingest` exited **2** with *"promote did not complete — the paper is PARTIALLY landed"*, or a `--resume` reported inputs **"no longer on disk"**.
 
-Promote is five steps with no transaction — page write + DB commit → PDF move → back-links → `index.md` → `log.md` — and only the first two have run. The usual cause is a duplicate: `_move_pdf` refuses a stem collision that isn't a preprint→journal upgrade.
+Promote runs inside a write-ahead journal (`.mutation/`), so the usual outcome is that nothing landed at all — the rollback already undid it and the exit code is just telling you *why*. The usual cause is a duplicate: `_move_pdf` refuses a stem collision that isn't a preprint→journal upgrade. Fix the cause and re-run; there is normally nothing to clean up.
 
-Check the four things in order, then decide:
+Check by hand only when one of these is true:
+
+- **`status` still lists an interrupted mutation.** The process died before the rollback finished. The next `agent ingest` drains it automatically; run one, or call the drain directly. A journal reporting 5 failed attempts has given up and needs a look.
+- **`RW_MUTATION_JOURNAL=0` was set.** Journalling was off, so the half-landed state below is real.
+- **The page exists but its DB row doesn't, or vice versa.** File state is journalled; the `state.db` row is not. A crash-recovered rollback removes the page and leaves the row for `db rebuild` to reconcile — run `researchwiki db rebuild`.
+
+In those three cases, check the four things in order:
 
 ```bash
-ls wiki/*/<stem>.md                       # 1. page written?  (expected: yes)
+ls wiki/*/<stem>.md                       # 1. page written?
 ls papers/<stem>.pdf inbox/               # 2. which side is the PDF on?
-grep -n "\[\[.*/<stem>\]\]" wiki/index.md # 3. index bullet?  (expected: absent)
-grep -n "<stem>" wiki/log.md              # 4. log entry?     (expected: absent)
+grep -n "\[\[.*/<stem>\]\]" wiki/index.md # 3. index bullet?
+grep -n "<stem>" wiki/log.md              # 4. log entry?
 ```
 
-**The page is the thing to remove** — it is on disk and in `state.db`, but no back-link, bullet or log entry points at it, so nothing else in the wiki depends on it yet:
+All four absent → nothing landed; just re-run. A page with no bullet and no log entry is the half-landed shape, and **the page is the thing to remove** — nothing else in the wiki points at it yet:
 
 ```bash
 rm wiki/<cat>/<stem>.md

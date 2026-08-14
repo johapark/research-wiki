@@ -61,6 +61,7 @@ config/models.yaml
 .semantic-cache
 .claim-graph
 .figures-cache
+.mutation
 .evolve-cache
 .agent-output
 .llm-relay

@@ -16,6 +16,36 @@ the reasoning behind any line below.
 
 ### Added
 
+- **`promote_to_wiki` is transactional.** Its five steps — page write + DB row,
+  PDF move, back-links into N existing pages, `index.md`, `log.md` — were each
+  individually atomic with nothing binding them, so a failure after the PDF move
+  left a paper half-landed. They now run inside a write-ahead journal under
+  `.mutation/` (gitignored): either every step lands or the tree is restored,
+  including back-link targets the mutation had already modified and the inbox
+  PDF the move had already consumed.
+
+  A crash leaves a journal rather than a mess. `researchwiki status` reports it
+  under *Workflow state*; the next `agent ingest` drains it before starting —
+  recovery on the next run rather than a repair command nobody remembers exists.
+  A rollback that fails five times stops retrying and says so instead of
+  spinning on every subsequent run.
+
+  Two things worth knowing. The commit point is explicit, and cleanup runs
+  *after* it, so a failure while discarding backups can never undo committed
+  work. And the transaction spans two storage systems: file state is journalled,
+  the `state.db` row is not. An in-process rollback deletes the row explicitly; a
+  crash-recovered one can't, so it removes the page and leaves the row for the
+  next `db rebuild`, which is the right way round given markdown is canonical and
+  the DB is derived.
+
+  `RW_MUTATION_JOURNAL=0` bypasses journalling entirely — an escape hatch for one
+  release if this interacts badly with something, not a supported mode.
+
+  Adapted from OpenKB's `mutation.py` (Apache-2.0), minus its hardlink backups:
+  those are an optimisation for whole-tree snapshots and break on exactly the
+  cloud-synced volumes `wiki/` and `papers/` tend to live on here. A promote
+  touches a handful of files, so plain copies are fine.
+
 - **PDF chunks carry their page and section.** A claim's `supporting_text` was
   an anonymous 250-word window — nothing could say it came from §Results, p. 7,
   which is the first thing a reader wants when deciding whether a weak grade is

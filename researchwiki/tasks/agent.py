@@ -112,6 +112,20 @@ def _batch_passthrough_args(args) -> list[str]:
     return out
 
 
+def _drain_pending_mutations() -> None:
+    """Roll back any mutation interrupted by an earlier crash, before starting.
+
+    Runs on the write paths only. A read-only command must never mutate, so
+    `status` reports pending journals instead (see `mutation.pending_journals`).
+    """
+    try:
+        from ..mutation import recover_pending
+        for note in recover_pending():
+            print(f"researchwiki: recovery — {note}", file=sys.stderr)
+    except Exception as e:  # recovery must never block the run it precedes
+        print(f"researchwiki: recovery pass failed: {e}", file=sys.stderr)
+
+
 def _cmd_ingest(args) -> int:
     # --resume takes over completely: the batch dir's plan.json is the
     # source of truth for subcommand + passthrough flags.
@@ -197,6 +211,8 @@ def _cmd_ingest(args) -> int:
         promote_mode = "always"
     elif args.force_sandbox:
         promote_mode = "never"
+
+    _drain_pending_mutations()
 
     try:
         ctx = run_ingest(

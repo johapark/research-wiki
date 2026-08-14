@@ -186,6 +186,17 @@ def ingest_dir() -> Path:
     return wiki_root() / ".ingest"
 
 
+def mutation_dir() -> Path:
+    """Write-ahead journals + backups for multi-file mutations (`.mutation/`).
+
+    Not under `wiki/`: a journal isn't wiki content, and `wiki/` is commonly a
+    symlink into a synced vault. Gitignored. Normally empty — a directory with
+    contents means a mutation was interrupted, and the next ingest drains it
+    (`researchwiki.mutation.recover_pending`).
+    """
+    return wiki_root() / ".mutation"
+
+
 def evolve_cache_dir() -> Path:
     """Derived cache for memory_evolve's judged-pair ledger (`.evolve-cache/`).
 
