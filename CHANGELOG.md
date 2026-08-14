@@ -16,6 +16,26 @@ the reasoning behind any line below.
 
 ### Added
 
+- **`researchwiki eval-triggers`** — check that CLAUDE.md's prompt pointers fire
+  when they should. Each `prompts/*.md` is reachable only through the sentence
+  in CLAUDE.md that gates it, which makes that sentence load-bearing, and nothing
+  tested it across 23 prompt files.
+
+  A generator reads one prompt's gating text *and its body* and writes N requests
+  that should route to it plus N near-misses that shouldn't; a grader then routes
+  each using only the gating text of *every* prompt, so a competing trigger can
+  steal and picking the wrong prompt is observable rather than scored as a pass.
+  Graders run bounded-concurrent, and a grading that errors is excluded from the
+  denominators rather than counted as a failure — without that, one timeout
+  silently depresses a pass rate.
+
+  `--dry-run` lists what it would test, spends nothing, and reports prompt files
+  no pointer reaches at all. The gating text is the enclosing CLAUDE.md section
+  rather than the link's own line, because CLAUDE.md is loaded whole and the link
+  is not always in the sentence stating the trigger. Costs tokens; run it after
+  editing a trigger, not on a schedule. Method adapted from OpenKB's
+  `skill/evaluator.py` (Apache-2.0).
+
 - **`researchwiki remove <stem>`** — retract a paper and every generated trace
   of it. Deleting a page by hand used to strand the PDF, the `index.md` bullet,
   inbound back-links, `[[stem#slug]]` anchors on synthesis pages, concept
