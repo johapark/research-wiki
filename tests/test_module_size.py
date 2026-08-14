@@ -1,232 +1,258 @@
-"""Enforce a per-module line limit so files stay legible to agents.
+"""Keep every module small enough for an agent to hold in context.
 
-A module an agent cannot hold in context is a module an agent edits blind. The
-limit is a legibility budget, not a style preference, which is why it is a test
-rather than a lint rule: it fails the build the moment a new file crosses it.
+A file that does not fit in a context window is a file that gets edited blind, so
+the ceiling is a legibility budget rather than a matter of taste. It lives in the
+test suite because that is the only place a budget actually holds: a convention in
+a style guide is advisory, and a `lint` finding is something you can run past.
 
-**The grandfather list is a ratchet, not an amnesty.** Existing debt is exempted
-*at its current size* — `path -> ceiling` — so a listed module may shrink freely
-but cannot grow. A bare set (the shape this pattern is usually written with)
-exempts a file forever and is how `agents/runner.py` reached 1214 lines without
-anything objecting. Recording the count means the next 50 lines have to argue
-for themselves.
+**Existing debt is pinned, not pardoned.** `_DEBT` maps a module to the size it
+was when this gate landed, so a listed file may shrink as much as you like and
+cannot gain a single line. The obvious alternative — a plain set of exempt paths —
+grants a permanent licence to grow, which is how `agents/runner.py` got to 1214
+lines with no test ever objecting. Pinning the number means the next fifty lines
+have to justify themselves in review.
 
-Adapted from OpenKB's `tests/test_file_size.py` (Apache 2.0), which supplied the
-limit, the remediation-in-the-failure-message idea, and the tests-for-the-
-detector discipline. The dict-shaped ratchet and the stale-entry check are ours.
+`test_debt_list_has_no_dead_entries` is the other half of the ratchet: a module
+that has been split back under the ceiling looks *identical to a passing gate*, so
+without that check the list would quietly turn into a monument to work already
+finished.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Iterator, NamedTuple
+
+import pytest
 
 import researchwiki
 
-LIMIT = 800
+MAX_LINES = 800
 
-# Resolve the package from the imported module rather than by path math off
-# `__file__`, so moving this test file can never make the gate silently vacuous.
-_PKG = Path(researchwiki.__file__).resolve().parent
-_REPO_ROOT = _PKG.parent
+# Locate the package through the import system rather than by walking up from
+# `__file__`. If this test is ever moved, path arithmetic would silently point at
+# a directory with no modules in it and the gate would pass by scanning nothing.
+_PACKAGE = Path(researchwiki.__file__).resolve().parent
+_REPO = _PACKAGE.parent
 
-# Grandfathered debt: posix path relative to the repo root -> line ceiling,
-# which is the module's size when the gate was introduced (2026-08-14).
+# Module (repo-relative, posix) -> pinned ceiling, set 2026-08-14.
 #
-# Adding an entry is a deliberate act — it records that a module is too long and
-# nobody split it today. Raising a ceiling is the same act again. The direction
-# of travel is down; when a module drops under LIMIT, delete its entry (
-# `test_no_stale_grandfather_entries` insists on it).
-_GRANDFATHERED: dict[str, int] = {
-    # Agent-ingest orchestrator: phase sequencing, retry/DEBUG loop, sandbox vs
-    # promote routing. Split by phase boundary.
+# Every entry is an admission that a file is too long and was not split that day.
+# Editing a number upward is the same admission again, so do it in a commit that
+# says why. When a module drops under MAX_LINES, delete its line.
+_DEBT: dict[str, int] = {
+    # Agent-ingest orchestrator: phase sequencing, the retry/DEBUG loop, and
+    # sandbox-vs-promote routing. Splits along the phase boundary.
     "researchwiki/agents/runner.py": 1214,
-    # Metadata reconcile phase: PDF-side extraction vs provider records, plus
-    # the sanity gate. Split the gate out from the reconciliation.
+    # Metadata reconcile: PDF-side extraction against provider records, plus the
+    # sanity gate. The gate is the separable half.
     "researchwiki/agents/phases/reconcile.py": 1131,
-    # Concept-candidate detection: term mining, scoring, triage labelling.
-    # Mining and labelling are separable.
+    # Concept candidates: term mining, scoring, triage labelling. Mining and
+    # labelling do not need to share a module.
     "researchwiki/concepts/candidates.py": 1074,
-    # Transactional promote: five journalled steps plus rollback. Steps could
-    # each be a unit under a thin coordinator.
+    # Transactional promote: five journalled steps and their rollback. Each step
+    # could stand alone under a thin coordinator.
     "researchwiki/agents/promote.py": 920,
-    # Retrieval benchmark: fixture loading, scoring, reporting in one file.
+    # Retrieval benchmark: fixture loading, scoring and reporting in one file.
     "researchwiki/benchmark/retrieval.py": 909,
     # Provider client: request shaping, cache_control placement, retry, and the
-    # per-provider quirks. Split per provider family.
+    # per-provider quirks. Splits per provider family.
     "researchwiki/agents/llm.py": 902,
-    # Backfill targets (hook / keywords / doi) share only a work-list idiom;
-    # one module per target is the natural shape.
+    # Backfill targets (hook / keywords / doi) share only a work-list idiom.
     "researchwiki/tasks/backfill.py": 854,
-    # Memory-evolution phase: candidate selection, proposal drafting, emit.
+    # Memory evolution: candidate selection, proposal drafting, emit.
     "researchwiki/agents/phases/evolution.py": 843,
-    # `researchwiki/tasks/lint/__init__.py` was here at 831. Its two emitters
-    # moved to `lint/report.py` (2026-08-14) and the dispatcher is now 261 lines,
-    # so the entry is gone rather than commented out — the list is the remaining
-    # debt, not a changelog.
+    # `researchwiki/tasks/lint/__init__.py` sat here at 831 until its two emitters
+    # moved to `lint/report.py`; at 265 lines it no longer needs an entry, and the
+    # entry is gone rather than commented out. This list is current debt, not a log.
 }
 
 
-def _line_count(path: Path) -> int:
-    """Physical line count.
+class Oversize(NamedTuple):
+    """One module that fails the gate, and which of the two ways it failed."""
 
-    `splitlines()` on bytes handles `\\n`, `\\r\\n` and bare `\\r` alike, so an
-    unusual line-ending style cannot under-count and slip a long file past the
-    gate. Reading bytes also avoids a decode error on a stray non-UTF-8 byte
-    turning a size check into a crash.
+    path: str
+    lines: int
+    ceiling: int | None      # None => never had an exemption
+
+    @property
+    def is_debt_growth(self) -> bool:
+        return self.ceiling is not None
+
+    def describe(self) -> str:
+        if self.ceiling is None:
+            return f"{self.path}: {self.lines} lines"
+        return (f"{self.path}: {self.lines} lines, pinned at {self.ceiling} "
+                f"(+{self.lines - self.ceiling})")
+
+
+def count_lines(module: Path) -> int:
+    """Physical lines in `module`.
+
+    Counted from bytes via `splitlines()`, which treats `\\n`, `\\r\\n` and a lone
+    `\\r` as breaks alike — a file saved with classic-Mac endings would otherwise
+    read as one enormous line and sail through. Bytes also mean a stray non-UTF-8
+    character fails that file's own decode rather than crashing the whole gate.
     """
-    return len(path.read_bytes().splitlines())
+    return len(module.read_bytes().splitlines())
 
 
-def _py_files(pkg: Path) -> list[Path]:
-    return [p for p in sorted(pkg.rglob("*.py")) if "__pycache__" not in p.parts]
+def python_modules(root: Path) -> Iterator[Path]:
+    for module in sorted(root.rglob("*.py")):
+        if "__pycache__" not in module.parts:
+            yield module
 
 
-def _violations(
-    root: Path, pkg: Path, limit: int, grandfathered: dict[str, int]
-) -> tuple[list[tuple[str, int]], list[tuple[str, int, int]]]:
-    """Split every module into the two ways it can fail the gate.
-
-    Returns `(over_limit, grown)`:
-      - `over_limit`: not grandfathered and at/over `limit` — `(rel, n)`.
-      - `grown`: grandfathered but now larger than its recorded ceiling —
-        `(rel, n, ceiling)`.
-
-    Two lists rather than one because the remediation differs: a new offender
-    should be split, whereas a grown one has already been argued about and the
-    question is only whether the growth was worth it.
-    """
-    over: list[tuple[str, int]] = []
-    grown: list[tuple[str, int, int]] = []
-    for path in _py_files(pkg):
-        rel = path.relative_to(root).as_posix()
-        n = _line_count(path)
-        ceiling = grandfathered.get(rel)
-        if ceiling is not None:
-            if n > ceiling:
-                grown.append((rel, n, ceiling))
-            continue
-        if n >= limit:
-            over.append((rel, n))
-    return over, grown
+def scan(
+    *, package: Path, repo: Path, ceiling: int, debt: dict[str, int]
+) -> list[Oversize]:
+    """Every module that either crosses `ceiling` or outgrew its pinned size."""
+    failures: list[Oversize] = []
+    for module in python_modules(package):
+        rel = module.relative_to(repo).as_posix()
+        lines = count_lines(module)
+        pinned = debt.get(rel)
+        if pinned is not None:
+            if lines > pinned:
+                failures.append(Oversize(rel, lines, pinned))
+        elif lines >= ceiling:
+            failures.append(Oversize(rel, lines, None))
+    return failures
 
 
-# --------------------------------------------------------------------------
-# Detector tests — the gate is only as trustworthy as its own coverage.
-# --------------------------------------------------------------------------
+def _write(directory: Path, name: str, lines: int) -> Path:
+    target = directory / name
+    target.write_text("value = 0\n" * lines, encoding="utf-8")
+    return target
 
 
-def test_detector_flags_oversize(tmp_path):
-    (tmp_path / "big.py").write_text("x = 1\n" * 5)
-    (tmp_path / "small.py").write_text("x = 1\n" * 2)
-    over, grown = _violations(tmp_path, tmp_path, limit=3, grandfathered={})
-    assert [name for name, _ in over] == ["big.py"]
-    assert grown == []
-
-
-def test_boundary_is_inclusive(tmp_path):
-    # The module docstring promises files stay *under* the limit, so one sitting
-    # exactly on it violates. Pinned because `>=` vs `>` is a one-character slip
-    # that silently widens the budget.
-    (tmp_path / "edge.py").write_text("x = 1\n" * 3)
-    over, _ = _violations(tmp_path, tmp_path, limit=3, grandfathered={})
-    assert [name for name, _ in over] == ["edge.py"]
-
-
-def test_bare_cr_line_endings_are_counted(tmp_path):
-    (tmp_path / "cr.py").write_bytes(b"x = 1\r" * 10)
-    assert _line_count(tmp_path / "cr.py") == 10
-
-
-def test_undecodable_bytes_do_not_crash_the_count(tmp_path):
-    # A stray latin-1 byte in a source file should fail the *file*, not the
-    # gate — reading bytes is what makes that true.
-    (tmp_path / "odd.py").write_bytes(b"x = '\xff'\n" * 4)
-    assert _line_count(tmp_path / "odd.py") == 4
-
-
-def test_grandfathered_under_ceiling_is_exempt(tmp_path):
-    (tmp_path / "old.py").write_text("x = 1\n" * 5)
-    over, grown = _violations(tmp_path, tmp_path, limit=3, grandfathered={"old.py": 5})
-    assert over == []
-    assert grown == []
-
-
-def test_grandfathered_may_shrink(tmp_path):
-    (tmp_path / "old.py").write_text("x = 1\n" * 4)
-    over, grown = _violations(tmp_path, tmp_path, limit=3, grandfathered={"old.py": 5})
-    assert (over, grown) == ([], [])
-
-
-def test_grandfathered_growth_is_flagged(tmp_path):
-    # The whole point of the dict shape: exempt at recorded size, not forever.
-    (tmp_path / "old.py").write_text("x = 1\n" * 6)
-    over, grown = _violations(tmp_path, tmp_path, limit=3, grandfathered={"old.py": 5})
-    assert over == []
-    assert grown == [("old.py", 6, 5)]
+def _scan_tmp(directory: Path, *, ceiling: int, debt=None) -> list[Oversize]:
+    return scan(package=directory, repo=directory, ceiling=ceiling, debt=debt or {})
 
 
 # --------------------------------------------------------------------------
-# The gate itself.
+# The detector, exercised on throwaway trees. A gate nobody tested is a gate
+# that reports "all clear" for whatever reason it likes.
 # --------------------------------------------------------------------------
 
 
-def test_no_module_exceeds_limit():
-    files = _py_files(_PKG)
-    assert files, f"no Python files found under {_PKG} — the scan would be vacuous"
+def test_only_the_long_module_is_reported(tmp_path):
+    _write(tmp_path, "sprawling.py", 6)
+    _write(tmp_path, "tidy.py", 2)
+    assert [f.path for f in _scan_tmp(tmp_path, ceiling=4)] == ["sprawling.py"]
 
-    over, grown = _violations(_REPO_ROOT, _PKG, LIMIT, _GRANDFATHERED)
 
-    problems: list[str] = []
-    if over:
-        listing = "\n".join(f"  - {rel}: {n} lines" for rel, n in over)
-        problems.append(
-            f"These modules reach or exceed the {LIMIT}-line limit:\n{listing}\n"
-            "How to fix: split cohesive groups into focused modules by "
-            "responsibility. Grandfathering a NEW file is not the intended "
-            "escape hatch — the list is for debt that predates this gate."
+def test_a_module_sitting_exactly_on_the_ceiling_fails():
+    # The docstring promises modules stay *under* the budget, so landing on it is
+    # already too big. Asserted because `>=` versus `>` is a one-character slip
+    # that widens the budget without anyone noticing.
+    assert MAX_LINES == 800
+
+
+def test_the_ceiling_is_inclusive(tmp_path):
+    _write(tmp_path, "borderline.py", 4)
+    assert [f.path for f in _scan_tmp(tmp_path, ceiling=4)] == ["borderline.py"]
+
+
+def test_generated_directories_are_not_scanned(tmp_path):
+    cached = tmp_path / "__pycache__"
+    cached.mkdir()
+    _write(cached, "stale.py", 50)
+    assert _scan_tmp(tmp_path, ceiling=4) == []
+
+
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n", b"\r"])
+def test_every_line_ending_counts(tmp_path, ending):
+    target = tmp_path / "endings.py"
+    target.write_bytes(b"value = 0" + ending + (b"value = 1" + ending) * 6)
+    assert count_lines(target) == 7
+
+
+def test_a_bad_byte_fails_its_own_file_not_the_gate(tmp_path):
+    target = tmp_path / "latin.py"
+    target.write_bytes(b"label = '\xff'\n" * 3)
+    assert count_lines(target) == 3
+
+
+def test_pinned_module_within_its_size_passes(tmp_path):
+    _write(tmp_path, "known.py", 9)
+    assert _scan_tmp(tmp_path, ceiling=4, debt={"known.py": 9}) == []
+
+
+def test_pinned_module_may_shrink(tmp_path):
+    _write(tmp_path, "known.py", 6)
+    assert _scan_tmp(tmp_path, ceiling=4, debt={"known.py": 9}) == []
+
+
+def test_pinned_module_may_not_grow(tmp_path):
+    # The entire reason the debt list stores a number instead of a bare path.
+    _write(tmp_path, "known.py", 11)
+    failures = _scan_tmp(tmp_path, ceiling=4, debt={"known.py": 9})
+    assert [(f.path, f.lines, f.ceiling) for f in failures] == [("known.py", 11, 9)]
+    assert failures[0].is_debt_growth
+
+
+def test_the_two_failure_modes_are_told_apart(tmp_path):
+    _write(tmp_path, "known.py", 11)
+    _write(tmp_path, "fresh.py", 7)
+    failures = {f.path: f.is_debt_growth
+                for f in _scan_tmp(tmp_path, ceiling=4, debt={"known.py": 9})}
+    assert failures == {"known.py": True, "fresh.py": False}
+
+
+# --------------------------------------------------------------------------
+# The gate.
+# --------------------------------------------------------------------------
+
+
+def test_no_module_is_too_long():
+    modules = list(python_modules(_PACKAGE))
+    assert modules, f"scanned {_PACKAGE} and found no modules — the gate is inert"
+
+    failures = scan(package=_PACKAGE, repo=_REPO, ceiling=MAX_LINES, debt=_DEBT)
+    if not failures:
+        return
+
+    complaints: list[str] = []
+    fresh = [f for f in failures if not f.is_debt_growth]
+    grown = [f for f in failures if f.is_debt_growth]
+    if fresh:
+        complaints.append(
+            f"Over the {MAX_LINES}-line budget:\n"
+            + "\n".join(f"  - {f.describe()}" for f in fresh)
+            + "\n  Fix: lift a cohesive group into its own module. Pinning a new "
+              "file in _DEBT is not the intended way out — that list is for debt "
+              "this gate inherited."
         )
     if grown:
-        listing = "\n".join(
-            f"  - {rel}: {n} lines, ceiling {ceiling} (+{n - ceiling})"
-            for rel, n, ceiling in grown
+        complaints.append(
+            "Already-pinned modules that grew:\n"
+            + "\n".join(f"  - {f.describe()}" for f in grown)
+            + "\n  Fix: put the new code in a focused sibling, or split the file "
+              "while you are in it. Raising the pin is available and is a decision "
+              "to record in the commit message, not a formality."
         )
-        problems.append(
-            f"These grandfathered modules grew past their recorded ceiling:\n{listing}\n"
-            "How to fix: move the new code into a focused sibling module, or "
-            "take the opportunity to split the file. If the growth is genuinely "
-            "unavoidable, raise the ceiling in _GRANDFATHERED — but that is a "
-            "decision to record, not a formality: the direction of travel is down."
-        )
-    if problems:
-        raise AssertionError("\n\n".join(problems))
+    raise AssertionError("\n\n".join(complaints))
 
 
-def test_no_stale_grandfather_entries():
-    """A ratchet that never releases is just a list of excuses.
+def test_debt_list_has_no_dead_entries():
+    """Prune entries that no longer hold anything back.
 
-    Two ways an entry goes stale: the module was split below `LIMIT` (so the
-    exemption is no longer doing anything), or it was renamed/deleted (so the
-    entry silently protects nothing). Both should be pruned, and neither is
-    visible from `test_no_module_exceeds_limit` — passing the gate is exactly
-    what a stale entry looks like.
+    An entry goes dead two ways: the module was split under the budget, or it was
+    renamed away. Neither is visible from the gate above — a dead entry produces a
+    green run, which is precisely why it needs its own assertion.
     """
-    stale: list[str] = []
-    for rel, ceiling in sorted(_GRANDFATHERED.items()):
-        path = _REPO_ROOT / rel
-        if not path.exists():
-            stale.append(f"  - {rel}: no such file (renamed or deleted?)")
-            continue
-        n = _line_count(path)
-        if n < LIMIT:
-            stale.append(
-                f"  - {rel}: now {n} lines, under the {LIMIT} limit "
-                f"(ceiling {ceiling}) — exemption no longer needed"
-            )
-    if stale:
-        listing = "\n".join(stale)
+    dead: list[str] = []
+    for rel, pinned in sorted(_DEBT.items()):
+        module = _REPO / rel
+        if not module.exists():
+            dead.append(f"  - {rel}: gone (renamed or deleted)")
+        elif (lines := count_lines(module)) < MAX_LINES:
+            dead.append(f"  - {rel}: down to {lines} lines, inside the "
+                        f"{MAX_LINES} budget (pinned at {pinned})")
+    if dead:
         raise AssertionError(
-            "Stale _GRANDFATHERED entries in this test:\n"
-            f"{listing}\n\n"
-            "How to fix: delete the entry. Someone did the work — the list "
-            "should show what is left, not what used to be true."
+            "Dead entries in _DEBT:\n" + "\n".join(dead)
+            + "\n\nFix: delete them. Someone did the work; the list should show "
+              "what is still outstanding."
         )
