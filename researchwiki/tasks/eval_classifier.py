@@ -8,12 +8,17 @@ For each paper in the wiki:
 Report: overall accuracy, per-category precision/recall, confusion matrix,
 abstention rate. No side effects — the held-out indexes are temporary.
 
-Run: `researchwiki eval-classifier`. Read-only over the wiki state.
+Run: `researchwiki eval classifier`. Read-only over the wiki state.
+
+The `eval-classifier` spelling still works and delegates here — kept because
+`CONTRIBUTING.md` counts the CLI as a published surface, so removing a command
+name is a breaking change even for one nobody has scripted.
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -25,8 +30,10 @@ from ..search import build_documents_from_wiki, suggest_category
 def main(argv: list[str]) -> int:
     argparse.ArgumentParser(
         prog="researchwiki eval-classifier",
-        description="Leave-one-out evaluation of the category classifier.",
+        description="Deprecated alias for `researchwiki eval classifier`.",
     ).parse_args(argv)
+    print("note: `eval-classifier` is now `researchwiki eval classifier`.",
+          file=sys.stderr)
     return evaluate()
 
 

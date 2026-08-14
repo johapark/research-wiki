@@ -16,7 +16,7 @@ the reasoning behind any line below.
 
 ### Added
 
-- **`researchwiki eval-triggers`** — check that CLAUDE.md's prompt pointers fire
+- **`researchwiki eval triggers`** — check that CLAUDE.md's prompt pointers fire
   when they should. Each `prompts/*.md` is reachable only through the sentence
   in CLAUDE.md that gates it, which makes that sentence load-bearing, and nothing
   tested it across 23 prompt files.
@@ -27,14 +27,25 @@ the reasoning behind any line below.
   steal and picking the wrong prompt is observable rather than scored as a pass.
   Graders run bounded-concurrent, and a grading that errors is excluded from the
   denominators rather than counted as a failure — without that, one timeout
-  silently depresses a pass rate.
-
-  `--dry-run` lists what it would test, spends nothing, and reports prompt files
-  no pointer reaches at all. The gating text is the enclosing CLAUDE.md section
-  rather than the link's own line, because CLAUDE.md is loaded whole and the link
-  is not always in the sentence stating the trigger. Costs tokens; run it after
-  editing a trigger, not on a schedule. Method adapted from OpenKB's
+  silently depresses a pass rate. `--dry-run` prices the run and spends nothing.
+  The gating text is the enclosing CLAUDE.md section rather than the link's own
+  line, because CLAUDE.md is loaded whole and the link is not always in the
+  sentence stating the trigger. Method adapted from OpenKB's
   `skill/evaluator.py` (Apache-2.0).
+
+  It shares a command with the existing classifier eval rather than adding a
+  top-level name: **`researchwiki eval classifier`** is the same leave-one-out
+  category evaluation as before, and `eval-classifier` still works as a
+  deprecated alias. The eval family is one command, not two.
+
+- **`lint` reports unreachable prompts** — `orphan_prompts` (a `prompts/*.md`
+  no CLAUDE.md pointer reaches, so the agent has no condition under which it
+  would read it) and `broken_prompt_pointers` (a pointer whose file is missing).
+  The same class of check as `broken_wikilinks`, one layer up. Free and
+  deterministic, so it belongs in the health check that already runs rather than
+  behind the paid eval above. Prompts whose name carries `-system` are exempt:
+  those are LLM system prompts loaded by code through `prompt_lib` and are
+  correctly absent from CLAUDE.md.
 
 - **`researchwiki remove <stem>`** — retract a paper and every generated trace
   of it. Deleting a page by hand used to strand the PDF, the `index.md` bullet,

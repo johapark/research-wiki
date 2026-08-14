@@ -1,4 +1,4 @@
-"""Trigger-eval harness.
+"""`researchwiki eval` — the trigger-routing harness.
 
 Tests the *harness*, not the triggers — whether a given trigger line is any good
 is what running the command tells you, and that costs tokens. What is pinned here
@@ -8,6 +8,7 @@ is the machinery that makes those numbers trustworthy:
     failure (without this one timeout silently depresses a pass rate);
   - routing to the *wrong* prompt counts as a miss, not a pass;
   - code-loaded `*-system` prompts are not reported as orphans;
+  - the free reachability check lives in `lint`, not here;
   - `--dry-run` spends nothing.
 
 Hermetic: the LLM is a stub, no network.
@@ -21,7 +22,8 @@ from pathlib import Path
 import pytest
 
 from researchwiki.eval import triggers as tr
-from researchwiki.tasks import eval_triggers as cli
+from researchwiki.eval import pointers as ptr
+from researchwiki.tasks import eval as cli
 
 
 @pytest.fixture
@@ -46,14 +48,14 @@ def repo(tmp_path, monkeypatch):
 
     from researchwiki import paths
     monkeypatch.setattr(paths, "wiki_root", lambda: tmp_path)
-    monkeypatch.setattr(tr, "wiki_root", lambda: tmp_path)
+    monkeypatch.setattr(ptr, "wiki_root", lambda: tmp_path)
     return tmp_path
 
 
 # ---------- pointer extraction ----------
 
 def test_collects_pointers_with_their_trigger_line(repo):
-    pointers = tr.collect_pointers()
+    pointers = ptr.collect()
     assert [p.slug for p in pointers] == ["recovery", "share-page"]
     assert "missing_doi" in pointers[0].line
     assert "Re-ingest after broken metadata" in pointers[0].body
@@ -65,23 +67,23 @@ def test_anchored_links_resolve_to_the_same_prompt(tmp_path, monkeypatch):
     (tmp_path / "CLAUDE.md").write_text(
         "See [`recovery.md` § Half-landed](./prompts/recovery.md#half-landed-promote).\n",
         encoding="utf-8")
-    monkeypatch.setattr(tr, "wiki_root", lambda: tmp_path)
-    assert [p.slug for p in tr.collect_pointers()] == ["recovery"]
+    monkeypatch.setattr(ptr, "wiki_root", lambda: tmp_path)
+    assert [p.slug for p in ptr.collect()] == ["recovery"]
 
 
 def test_a_pointer_to_a_missing_file_is_skipped(tmp_path, monkeypatch):
     (tmp_path / "prompts").mkdir()
     (tmp_path / "CLAUDE.md").write_text(
         "See [`gone.md`](./prompts/gone.md).\n", encoding="utf-8")
-    monkeypatch.setattr(tr, "wiki_root", lambda: tmp_path)
-    assert tr.collect_pointers() == []
+    monkeypatch.setattr(ptr, "wiki_root", lambda: tmp_path)
+    assert ptr.collect() == []
 
 
 def test_system_prompts_are_not_orphans(repo):
     """`ask-system` and `author-system-research` are loaded by code through
     `prompt_lib`, so their absence from CLAUDE.md is correct. Counting them
     would be seven permanent false positives in the real repo."""
-    assert tr.orphan_prompts() == ["unlinked"]
+    assert ptr.orphans() == ["unlinked"]
 
 
 @pytest.mark.parametrize("slug,gated", [
@@ -91,7 +93,7 @@ def test_system_prompts_are_not_orphans(repo):
     ("suggest-splits-system", False),
 ])
 def test_is_gated_prompt(slug, gated):
-    assert tr.is_gated_prompt(slug) is gated
+    assert ptr.is_gated_prompt(slug) is gated
 
 
 # ---------- scoring ----------
@@ -192,19 +194,21 @@ def test_dry_run_spends_nothing(repo, monkeypatch, capsys):
         raise AssertionError("dry run must not call the provider")
     monkeypatch.setattr(tr.llm, "call", boom)
 
-    assert cli.main(["--dry-run"]) == 0
+    assert cli.main(["triggers", "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert "2 trigger-gated prompt(s)" in out
     assert "would spend 2 generator call(s) + 20 grader call(s)" in out
 
 
-def test_dry_run_names_orphans(repo, capsys):
-    cli.main(["--dry-run"])
-    assert "unlinked" in capsys.readouterr().out
+def test_dry_run_points_at_lint_for_orphans(repo, capsys):
+    """Reachability moved to `lint` — free, and part of the health check the
+    user already runs. The paid command says where it went."""
+    cli.main(["triggers", "--dry-run"])
+    assert "lint" in capsys.readouterr().out
 
 
 def test_slug_filter_narrows_the_run(repo, capsys):
-    cli.main(["--dry-run", "--slug", "recovery"])
+    cli.main(["triggers", "--dry-run", "--slug", "recovery"])
     out = capsys.readouterr().out
     assert "recovery" in out and "share-page" not in out
 
@@ -212,15 +216,15 @@ def test_slug_filter_narrows_the_run(repo, capsys):
 def test_no_pointers_exits_1(tmp_path, monkeypatch, capsys):
     (tmp_path / "CLAUDE.md").write_text("# nothing here\n", encoding="utf-8")
     (tmp_path / "prompts").mkdir()
-    monkeypatch.setattr(tr, "wiki_root", lambda: tmp_path)
-    assert cli.main([]) == 1
+    monkeypatch.setattr(ptr, "wiki_root", lambda: tmp_path)
+    assert cli.main(["triggers"]) == 1
     assert "no prompt pointers" in capsys.readouterr().err
 
 
 def test_provider_failure_exits_2(repo, monkeypatch, capsys):
     monkeypatch.setattr(tr, "generate_cases",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no key")))
-    assert cli.main([]) == 2
+    assert cli.main(["triggers"]) == 2
     assert "provider error" in capsys.readouterr().err
 
 
@@ -232,9 +236,8 @@ def test_json_report_shape(repo, monkeypatch, capsys):
         tr.Graded(case=c, chose=(c.slug if c.should_fire else None)) for c in cases
     ])
 
-    assert cli.main(["--json"]) == 0
+    assert cli.main(["triggers", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["orphan_prompts"] == ["unlinked"]
     assert payload["prompts"]["recovery"]["recall"] == 1.0
     assert payload["prompts"]["recovery"]["precision"] == 1.0
     assert payload["prompts"]["recovery"]["misses"] == []
@@ -248,7 +251,7 @@ def test_text_report_names_the_miss(repo, monkeypatch, capsys):
         tr.Graded(case=c, chose=None) for c in cases
     ])
 
-    cli.main([])
+    cli.main(["triggers"])
     out = capsys.readouterr().out
     assert "misses" in out
     assert "a request it should have caught" in out
@@ -271,9 +274,9 @@ def test_gating_text_is_the_enclosing_section(tmp_path, monkeypatch):
         "[`prompts/export-bibliography.md`](./prompts/export-bibliography.md).\n\n"
         "### Something Else\n\nUnrelated.\n",
         encoding="utf-8")
-    monkeypatch.setattr(tr, "wiki_root", lambda: tmp_path)
+    monkeypatch.setattr(ptr, "wiki_root", lambda: tmp_path)
 
-    p = tr.collect_pointers()[0]
+    p = ptr.collect()[0]
     assert "can I get a bib file" in p.line, "the trigger sentence must be included"
     assert "Something Else" not in p.line, "the next section must not bleed in"
     assert p.line.startswith("### Export")
@@ -285,8 +288,8 @@ def test_section_extraction_stops_at_the_next_heading(tmp_path, monkeypatch):
     (tmp_path / "CLAUDE.md").write_text(
         "## First\n\nSee [`a`](./prompts/a.md).\n\n## Second\n\nother content\n",
         encoding="utf-8")
-    monkeypatch.setattr(tr, "wiki_root", lambda: tmp_path)
-    assert "other content" not in tr.collect_pointers()[0].line
+    monkeypatch.setattr(ptr, "wiki_root", lambda: tmp_path)
+    assert "other content" not in ptr.collect()[0].line
 
 
 def test_section_is_capped(tmp_path, monkeypatch):
@@ -295,8 +298,8 @@ def test_section_is_capped(tmp_path, monkeypatch):
     (tmp_path / "CLAUDE.md").write_text(
         "## Big\n\nSee [`a`](./prompts/a.md).\n\n" + ("filler line\n" * 500),
         encoding="utf-8")
-    monkeypatch.setattr(tr, "wiki_root", lambda: tmp_path)
-    assert len(tr.collect_pointers()[0].line) <= tr.MAX_SECTION_CHARS
+    monkeypatch.setattr(ptr, "wiki_root", lambda: tmp_path)
+    assert len(ptr.collect()[0].line) <= ptr.MAX_SECTION_CHARS
 
 
 def test_a_link_before_any_heading_still_resolves(tmp_path, monkeypatch):
@@ -304,5 +307,5 @@ def test_a_link_before_any_heading_still_resolves(tmp_path, monkeypatch):
     (tmp_path / "prompts" / "a.md").write_text("x", encoding="utf-8")
     (tmp_path / "CLAUDE.md").write_text(
         "Preamble with [`a`](./prompts/a.md) before any heading.\n", encoding="utf-8")
-    monkeypatch.setattr(tr, "wiki_root", lambda: tmp_path)
-    assert tr.collect_pointers()[0].line.startswith("Preamble")
+    monkeypatch.setattr(ptr, "wiki_root", lambda: tmp_path)
+    assert ptr.collect()[0].line.startswith("Preamble")

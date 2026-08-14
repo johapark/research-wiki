@@ -6,6 +6,11 @@ load-bearing: if it doesn't fire, the procedure may as well not exist. Nothing
 tested it — 23 prompt files, every one reached only through a sentence in a file
 that has to stay lean.
 
+Reachability — which prompts CLAUDE.md can reach at all — is next door in
+`pointers`, and is consumed by `lint` rather than here: it costs nothing, so it
+belongs in the health check that already runs, not behind a command someone has
+to remember. This module is only the part that needs a model.
+
 Method, adapted from OpenKB's `skill/evaluator.py` (Apache-2.0):
 
 1. A **generator** reads one prompt's pointer *and its body* and writes N requests
@@ -33,27 +38,15 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from ..agents import llm
-from ..paths import wiki_root
+from .pointers import Pointer
 
 # How many graders may be in flight. The generator is one call per prompt; the
 # graders are 2N per prompt, which is where the parallelism is worth having and
 # where an unbounded fan-out would trip provider rate limits.
 MAX_CONCURRENCY = 6
 DEFAULT_COUNT = 5
-
-# `[`label`](./prompts/slug.md)` or `[…](./prompts/slug.md#anchor)`, anywhere in
-# a CLAUDE.md line. The pointer is whatever sentence carries that link.
-_POINTER_RE = re.compile(r"\[[^\]]*\]\(\./prompts/([a-z0-9-]+)\.md(?:#[^)]*)?\)")
-
-
-@dataclass
-class Pointer:
-    slug: str
-    line: str          # the CLAUDE.md text that gates the prompt (see collect_pointers)
-    body: str          # the prompt file's own text
 
 
 @dataclass
@@ -94,103 +87,6 @@ class SlugReport:
     def precision(self) -> float | None:
         return (self.should_not_hit / self.should_not_total
                 if self.should_not_total else None)
-
-
-_HEADING_RE = re.compile(r"^#{2,4}\s+\S")
-
-# A section longer than this is truncated for the grader's catalogue. Generous:
-# the point is to bound the catalogue when 17 sections are concatenated, not to
-# trim any particular one.
-MAX_SECTION_CHARS = 1200
-
-
-def _enclosing_section(lines: list[str], idx: int) -> str:
-    """The `##`/`###` block containing line `idx`, heading included.
-
-    **Not just the link's own line.** CLAUDE.md is loaded whole on every turn,
-    so what actually gates a prompt is the surrounding section, and the link is
-    not always in the sentence that states the trigger — `export-bibliography`
-    states its trigger ("*can I get a bib file*") one paragraph above the
-    paragraph carrying the link. Extracting the link's line alone would feed the
-    grader a passage about citekeys and then score the trigger as having missed,
-    blaming the prompt for this function's choice.
-    """
-    start = 0
-    for i in range(idx, -1, -1):
-        if _HEADING_RE.match(lines[i]):
-            start = i
-            break
-    end = len(lines)
-    for i in range(idx + 1, len(lines)):
-        if _HEADING_RE.match(lines[i]):
-            end = i
-            break
-    section = "\n".join(ln for ln in lines[start:end] if ln.strip()).strip()
-    return section[:MAX_SECTION_CHARS]
-
-
-def collect_pointers(claude_md: Path | None = None,
-                     prompts_dir: Path | None = None) -> list[Pointer]:
-    """Every `prompts/*.md` reachable from CLAUDE.md, with the text that gates it.
-
-    "The text that gates it" is the enclosing section, not the link's line —
-    see `_enclosing_section`. A prompt with no pointer at all is unreachable by
-    the contract and is reported by `orphan_prompts` rather than silently
-    skipped; that is itself a finding.
-    """
-    claude_md = claude_md or (wiki_root() / "CLAUDE.md")
-    prompts_dir = prompts_dir or (wiki_root() / "prompts")
-    if not claude_md.exists():
-        return []
-
-    lines = claude_md.read_text(encoding="utf-8").splitlines()
-    seen: dict[str, Pointer] = {}
-    for idx, line in enumerate(lines):
-        for slug in _POINTER_RE.findall(line):
-            if slug in seen:
-                continue
-            body_path = prompts_dir / f"{slug}.md"
-            if not body_path.exists():
-                continue
-            seen[slug] = Pointer(
-                slug=slug,
-                line=_enclosing_section(lines, idx),
-                body=body_path.read_text(encoding="utf-8"),
-            )
-    return sorted(seen.values(), key=lambda p: p.slug)
-
-
-# Prompts whose name carries `-system` are LLM *system prompts* loaded by code
-# through `agents.prompt_lib.load_prompt` — `ask-system`, `concept-triage-system`,
-# `suggest-splits-system`, and the `author-system-research` / `author-system-review`
-# pair. They are not trigger-gated procedures and are correctly absent from
-# CLAUDE.md, so counting them as orphans would report seven permanent false
-# positives and make the check worthless.
-#
-# Substring, not suffix: two of the seven carry a variant suffix after it
-# (`author-system-research`), which a `.endswith()` rule missed.
-SYSTEM_PROMPT_MARKER = "-system"
-
-
-def is_gated_prompt(slug: str) -> bool:
-    return SYSTEM_PROMPT_MARKER not in slug
-
-
-def orphan_prompts(claude_md: Path | None = None,
-                   prompts_dir: Path | None = None) -> list[str]:
-    """Trigger-gated prompt files no CLAUDE.md line points at.
-
-    Unreachable by the contract — the agent has no condition under which it
-    would read them — which is a finding in its own right, and free to compute.
-    """
-    prompts_dir = prompts_dir or (wiki_root() / "prompts")
-    if not prompts_dir.is_dir():
-        return []
-    linked = {p.slug for p in collect_pointers(claude_md, prompts_dir)}
-    return sorted(
-        p.stem for p in prompts_dir.glob("*.md")
-        if p.stem not in linked and is_gated_prompt(p.stem)
-    )
 
 
 # ---------- generation ----------
