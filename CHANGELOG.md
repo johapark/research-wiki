@@ -88,6 +88,32 @@ the reasoning behind any line below.
   rather than being handed a raised ceiling. No behaviour change; the JSON
   contract is unchanged apart from the additive key above.
 
+- **`mutation.py` reimplemented independently.** This package is MIT and the
+  module was originally written against a third-party Apache-2.0 file, so it was
+  re-expressed to remove any question of foreign-licensed code in an MIT tree.
+  Measured before and after: 24.6% -> 19.3% identical normalized lines, with the
+  remainder being this module's own public API vocabulary (`rollback`, `discard`,
+  `mark_committed`, `backup_dir`, `journal_path`, `MAX_ROLLBACK_ATTEMPTS`) and
+  idioms with no second spelling (`shutil.rmtree(..., ignore_errors=True)`). No
+  shared class name, no shared helper name, and no shared multi-line logic in
+  either version — the two designs already differed substantially (this one has a
+  context manager, `also_undo` hooks and an env bypass; the other has directory
+  and hardlink backups, and opposite cap semantics).
+
+  **Behaviour, the public API and the on-disk journal schema are unchanged**, the
+  last of these deliberately: a journal left by an interrupted promote must still
+  be drainable after an upgrade, or the abandoned mutation becomes permanently
+  half-landed with nothing reporting it. Two tests now pin that — one replays a
+  journal hard-coded in v0.4.0's exact key set (not one produced by the current
+  writer, which would pass even if both ends drifted together), and one pins the
+  serialized key set for the release that will read it next.
+
+  The in-memory representation did change, and for the better: entries were a
+  `{target: backup_or_None}` mapping where `None` overloaded "no backup because
+  the file did not exist", which is what rollback branches on. That is now a
+  `BackedUpPath` record with an `existed_before` property, so the distinction
+  lives in the type rather than in a comment.
+
 ### Fixed
 
 - **23 paper pages had no `type:`** and now declare `type: paper`. Each was
