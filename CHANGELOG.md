@@ -14,6 +14,97 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- **`researchwiki visualize`** — renders the corpus as a self-contained interactive
+  graph at `output/graph.html`. No CDN, no build step, no server: one file that
+  opens from `file://`. Draws both edge kinds — `[[wikilinks]]` and the typed
+  claim edges from `.claim-graph/edges.db` — with `contradicts` styled loud,
+  because `claim-graph --tensions` can list tensions but cannot show you that
+  four of them land on one paper. Filters by page type, free-text, and a
+  tensions-only mode; click a node for its claim relations; a table view carries
+  the same data non-visually. `--json` emits the graph instead of the page.
+
+  Only live claim statuses are drawn by default — `stale` means the claim the
+  edge was judged against has changed, so it is an assertion nobody currently
+  stands behind. Parallel claim pairs collapse per page pair, which is why the
+  argument is semantic and not about volume: widening to `stale` on a corpus
+  holding 13,535 of them adds only ~20 visible edges.
+
+  Page type is encoded by **shape as well as hue** so identity never rests on
+  color alone. The palette is validated all-pairs against the render surface
+  rather than eyeballed — which caught a neutral-vs-aqua pair at CVD ΔE 2.0,
+  indistinguishable to a deuteranope, that looked perfectly fine on screen.
+
+- **`researchwiki export --format okf`** — emits the corpus as an Open Knowledge
+  Format bundle (OKF v0.2), folded into the existing `export` command rather than
+  added as a subcommand. Writes a directory tree, so it requires `--out` and
+  refuses a non-empty directory that isn't already one of its bundles.
+
+  **The two formats have different scope on purpose.** The bibliography carries
+  only pages describing somebody else's publication, because a BibTeX entry for a
+  synthesis page would assert a publication that does not exist. OKF's unit is a
+  *concept* — explicitly including abstract ideas with no underlying resource — so
+  it carries every page type and omits `resource` where nothing is published. A
+  page absent from the `.bib` and present in the bundle is correct in both; the
+  `export` docstring says so at length, since "aligning" the two lists is the
+  tempting wrong fix.
+
+  Two mappings worth calling out. The wiki's `[^id]:` footnote labels *are* OKF's
+  `sources[].id`, arrived at independently for the same stated reason (agents
+  rewrite these documents, so a positional reference misattributes silently), so
+  per-claim attribution carries over with the body unchanged. And `verified` is
+  emitted **only** for graded paper pages, from `claims.last_graded_at`;
+  synthesis/idea/concept pages get none, because `check-grounding` and
+  `grade synthesis` persist nothing and a trust tier with no record behind it is
+  the exact falsehood those gates exist to prevent. The report counts them so
+  "unverified" is not read as "ungraded".
+
+- **`lint`'s `missing_type` check** (new `--json` key; additive) — pages carrying no
+  `type:` at all. Invisible to every other check by construction: consumers read
+  the field as `fm.get("type", "paper")`, so a page that lost it behaves as a
+  paper and `page_type_mismatches` — applying the same default — cannot see it.
+  The stakes are attribution: a commentary without `type` has its claims
+  extracted and credited to the commentator, the exact failure `type: commentary`
+  exists to prevent. 23 pages in the maintainer's corpus had none.
+
+  Also one of only three OKF conformance criteria, so this is a prerequisite for
+  emitting a conformant Open Knowledge Format bundle.
+
+- **`tests/test_module_size.py`** — 800-line cap per module, since a file an agent
+  can't hold in context is one it edits blind. Nine existing modules are
+  grandfathered **at their current size** (`path -> ceiling`), so they may shrink
+  but not grow; the usual bare exemption set is how `agents/runner.py` reached
+  1214 lines with nothing objecting. A companion check fails on stale entries, so
+  the list shows remaining debt rather than accumulating excuses.
+
+### Changed
+
+- **`lint`'s emitters moved to `tasks/lint/report.py`.** `_emit_json` and
+  `_emit_prose` were 58% of the package `__init__` and decide nothing — both take
+  finished results as kwargs and only choose how to print. The dispatcher now
+  reads as a list of checks (831 → 261 lines) and left the module-size grandfather
+  list entirely — the ratchet above asked for the split on its first encounter
+  rather than being handed a raised ceiling. No behaviour change; the JSON
+  contract is unchanged apart from the additive key above.
+
+### Fixed
+
+- **23 paper pages had no `type:`** and now declare `type: paper`. Each was
+  verified paper-shaped first (no `primary_paper`, no `issuer`, not in a
+  page-type dir, has a `## Summary`) rather than defaulted, since the failure this
+  guards against is precisely a non-paper page being treated as one.
+
+- **Seven drifted claim-section headings on six paper pages**, which were yielding
+  zero claims from sections that plainly had them — extraction matches H2 names
+  exactly. `migrate.sections.canonical_for` now also strips a trailing
+  parenthetical qualifier (`## Key Contributions (as a Review)`) and a slashed
+  alternative (`## Results / Findings`), and tolerates an inflected architecture
+  suffix (`## Methodology and Architecting`). The ambiguity guard runs against both
+  the decorated and undecorated form, so `## Discussion (results)` still refuses to
+  become Results. Recovered **38 citable claims**; `migrate` gains the same
+  tolerance for future imports.
+
 ## [0.4.0] - 2026-08-14
 
 ### Added
