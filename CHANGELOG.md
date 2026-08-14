@@ -80,6 +80,15 @@ the reasoning behind any line below.
 
 ### Changed
 
+- **`output/` is now the umbrella for everything the repo emits outward**, and
+  `share-page` writes to `output/share/<slug>.md` instead of `share/`. Three
+  generators had begun scattering outbound artifacts across two top-level
+  directories (`share/`, plus `output/graph.html` and `output/okf/` from this
+  release); collecting them means one gitignore rule covers the category, so the
+  next generator needs no `.gitignore` change to stay out of git. The old `share/`
+  path stays ignored — a stale copy on a second synced machine should not surface
+  as untracked just because the convention moved.
+
 - **`lint`'s emitters moved to `tasks/lint/report.py`.** `_emit_json` and
   `_emit_prose` were 58% of the package `__init__` and decide nothing — both take
   finished results as kwargs and only choose how to print. The dispatcher now

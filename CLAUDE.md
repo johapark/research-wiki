@@ -451,7 +451,7 @@ After writing or substantially editing a **multi-topic page** (synthesis, whitep
 
 ### Share a wiki page as a standalone document
 
-When user asks to share a synthesis or idea page, produce a self-contained markdown at `share/<slug>.md` (gitignored). Strip `[[wikilinks]]`, framework-specific YAML, and self-referential phrasing; rewrite footnotes to full academic citations with DOI links. Procedure in [`prompts/share-page.md`](./prompts/share-page.md). **Not** `researchwiki export`, which emits the corpus as a bibliography — "export" belongs to that command.
+When user asks to share a synthesis or idea page, produce a self-contained markdown at `output/share/<slug>.md` (gitignored — `output/` is the umbrella for everything emitted for an outside reader). Strip `[[wikilinks]]`, framework-specific YAML, and self-referential phrasing; rewrite footnotes to full academic citations with DOI links. Procedure in [`prompts/share-page.md`](./prompts/share-page.md). **Not** `researchwiki export`, which emits the corpus as a bibliography — "export" belongs to that command.
 
 ### Lint — periodic health check
 

@@ -1,6 +1,6 @@
 # Share a wiki page as a standalone document
 
-**Trigger:** user asks to "share", "make shareable", or "send" a synthesis/idea page to someone outside this repo. Output goes to `share/<slug>.md` (gitignored).
+**Trigger:** user asks to "share", "make shareable", or "send" a synthesis/idea page to someone outside this repo. Output goes to `output/share/<slug>.md` (gitignored).
 
 **Not this file:** `researchwiki export` emits the *corpus* as a bibliography (BibTeX/RIS/CSL-JSON) for a reference manager — see [`prompts/export-bibliography.md`](./export-bibliography.md). The word "export" belongs to that command; this one produces a document for a human reader, which is why it is "share".
 
@@ -45,18 +45,18 @@ The wiki's `[[category/stem]]` wikilinks, framework-specific YAML fields (`type`
    - `What would update this page` (the gate-skip-section heading) → `What would update this analysis` (or similar)
    - `claim_id:NNN` references → drop entirely (these are repo-internal row keys)
 
-7. **Save** to `share/<slug>.md`.
+7. **Save** to `output/share/<slug>.md`.
 
 8. **Verify** the output:
    ```bash
    # No bare wikilinks remain
-   grep -nE "\[\[" share/<slug>.md
+   grep -nE "\[\[" output/share/<slug>.md
    # No framework leakage
-   grep -niE "\bwiki\b|claim_id|referenced_papers|topic_seed|category_suggestion|model_prior" share/<slug>.md
+   grep -niE "\bwiki\b|claim_id|referenced_papers|topic_seed|category_suggestion|model_prior" output/share/<slug>.md
    # Footnote refs/defs reconcile
    python3 -c "
    import re
-   t = open('share/<slug>.md').read()
+   t = open('output/share/<slug>.md').read()
    refs = set(re.findall(r'\[\^([a-z0-9-]+)\](?!:)', t))
    defs = set(re.findall(r'^\[\^([a-z0-9-]+)\]:', t, re.MULTILINE))
    print(f'orphan refs (no def): {refs - defs or \"(none)\"}')
@@ -65,7 +65,7 @@ The wiki's `[[category/stem]]` wikilinks, framework-specific YAML fields (`type`
    ```
    First two greps should return nothing. Footnote reconciliation should show no orphan refs. (Unused defs flagged by the simple Python regex may be false positives when an inline ref is followed by a sentence colon — `Luo et al. (2024)[^luo-2024]:` — markdown parses these correctly as refs, only column-0 lines are real defs.)
 
-9. **Do not commit** `share/`. The directory is gitignored (`.gitignore` carries `share/`) and the artifact is per-task, not durable repo state.
+9. **Do not commit** the artifact. It lives under `output/`, the umbrella for everything this repo emits for an outside reader (`output/graph.html`, `output/okf/`, `output/share/`), which is gitignored wholesale — the artifact is per-task, not durable repo state.
 
 ## Notes
 
