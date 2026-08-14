@@ -185,6 +185,28 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- **`eval classifier` reported 0% abstention on runs that abstained.** `other`
+  is both a real content category and the abstention bucket, and
+  `suggest_category_llm` expresses "I don't know" by returning
+  `category="other"`. The eval counted an abstention only when the classifier
+  returned `None` at all, so every abstain-to-`other` was recorded as an
+  ordinary prediction — a number whose label did not describe what it measured.
+
+  `Suggestion.abstained` now carries the decision the classifier already made,
+  and the report separates two things that were conflated. **Placement** is
+  where the paper ends up on disk: an abstention still files it under `other`,
+  so it stays in the confusion matrix under `other` rather than being hidden,
+  because hiding it would under-report how `other` fills up. **Commitment** is
+  whether the classifier named a category or declined. An abstention onto a
+  genuinely-`other` paper is correct placement *and* a declined commitment at
+  once, which one counter could not express.
+
+  Per-category output now also notes how much of a category's predicted volume
+  arrived by abstention — the number that says whether `other` is a judgement or
+  a shrug. And the confidence column is labelled as the classifier's own
+  self-report, since `suggest_category` is LLM-first and the figure is not a
+  neighbour-vote share.
+
 - **A promote that didn't complete reported success.** `promote_to_wiki` is five
   multi-file steps with no transaction binding them — page write + DB commit → PDF
   move → back-links → `index.md` → `log.md` — and returns `promoted=False` rather

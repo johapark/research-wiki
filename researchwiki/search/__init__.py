@@ -46,6 +46,13 @@ class Suggestion:
     confidence: float                     # top_count / len(paper_hits)
     top_3: list[tuple[str, int]]          # [(category, count), ...] sorted desc
     strength: str = "strong"              # 'strong' (≥ min_agreement) | 'weak' (top-1 fallback)
+    # True when the classifier *declined* rather than chose. `category` is then
+    # "other" — but so is a deliberate `other` for a genuinely cross-cutting
+    # paper, and the two are different events. Without this flag the decision is
+    # unrecoverable downstream: `eval classifier` counted abstentions to `other`
+    # as ordinary predictions and reported 0% abstention on a run that abstained
+    # ten times.
+    abstained: bool = False
 
 
 def get_default_backend() -> SearchBackend:
@@ -289,14 +296,14 @@ def suggest_category_llm(
         # abstain to `other`. Never auto-creates a new category.
         return Suggestion(
             category="other", confidence=0.0,
-            top_3=top_3, strength="weak",
+            top_3=top_3, strength="weak", abstained=True,
         )
 
     if confidence < LLM_ABSTAIN_THRESHOLD:
         # LLM was unsure — abstain to `other`.
         return Suggestion(
             category="other", confidence=confidence,
-            top_3=top_3, strength="weak",
+            top_3=top_3, strength="weak", abstained=True,
         )
 
     # Confident LLM call — strong if confidence is high *and* matches the
