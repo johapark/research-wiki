@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>research wiki · knowledge graph</title>
+<!--
+  Self-contained by design: no CDN, no build step, no external font. The file
+  opens from file:// and survives being copied to another machine.
+
+  Palette is the dataviz reference instance, dark steps, validated all-pairs
+  against the #1a1a19 surface (worst CVD dE 9.4, worst normal-vision dE 20.9).
+  Page type is carried by SHAPE as well as hue, so identity never rests on color
+  alone — which is also what lets the contradiction edge use status-critical red
+  next to an orange idea node (they are a 2.5px line and a filled triangle, not
+  two series in a bar chart).
+
+  Dark-only, deliberately: this is a full-bleed canvas tool. A light mode would
+  need the light steps re-validated against the light surface, which is a
+  separate pass, not an automatic flip.
+-->
+<style>
+:root{
+  /* chart chrome & ink */
+  --plane:#0d0d0d;
+  --surface:#1a1a19;
+  --ink:#ffffff;
+  --ink-2:#c3c2b7;
+  --muted:#898781;
+  --hairline:rgba(255,255,255,.10);
+  --raise:rgba(255,255,255,.04);
+  /* node roles: 3 categorical slots + the neutral substrate */
+  --paper:#c3c2b7;
+  --synthesis:#3987e5;
+  --idea:#d95926;
+  --concept:#199e70;
+  /* status (reserved; never a series) */
+  --critical:#d03b3b;
+  --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--plane);color:var(--ink);font-family:var(--sans)}
+#stage{position:fixed;inset:0;background:var(--surface)}
+canvas{display:block;width:100%;height:100%;cursor:grab}
+canvas.dragging{cursor:grabbing}
+
+/* ---------- chrome ---------- */
+.panel{
+  position:fixed;background:rgba(26,26,25,.93);border:1px solid var(--hairline);
+  border-radius:10px;backdrop-filter:blur(8px);font-size:12px;line-height:1.5;
+}
+#bar{top:12px;left:12px;right:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:9px 11px}
+#bar h1{margin:0 6px 0 0;font-size:12px;font-weight:600;letter-spacing:.02em}
+#bar .count{color:var(--muted);font-variant-numeric:tabular-nums}
+.sep{width:1px;height:18px;background:var(--hairline);margin:0 2px}
+label.chk{display:inline-flex;align-items:center;gap:5px;color:var(--ink-2);cursor:pointer;user-select:none;white-space:nowrap}
+label.chk input{accent-color:#6da7ec;margin:0}
+input[type=search]{
+  font:inherit;font-family:var(--sans);color:var(--ink);background:var(--raise);
+  border:1px solid var(--hairline);border-radius:6px;padding:4px 8px;width:190px;
+}
+input[type=search]::placeholder{color:var(--muted)}
+button{
+  font:inherit;font-size:12px;color:var(--ink-2);background:var(--raise);
+  border:1px solid var(--hairline);border-radius:6px;padding:4px 9px;cursor:pointer;
+}
+button:hover{color:var(--ink);border-color:rgba(255,255,255,.22)}
+button[aria-pressed=true]{color:var(--ink);border-color:rgba(255,255,255,.30);background:rgba(255,255,255,.08)}
+
+/* ---------- legend ---------- */
+#legend{bottom:12px;left:12px;padding:10px 12px;max-width:250px}
+#legend h2{margin:0 0 7px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+#legend h2:not(:first-child){margin-top:11px}
+.key{display:flex;align-items:center;gap:7px;color:var(--ink-2);padding:1px 0}
+.key .sw{width:13px;height:13px;flex:0 0 13px;display:grid;place-items:center}
+.key .n{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums;padding-left:8px}
+.key .ln{width:15px;height:0;border-top-width:2px;border-top-style:solid;flex:0 0 15px}
+
+/* ---------- detail ---------- */
+#detail{top:64px;right:12px;width:290px;max-height:calc(100vh - 92px);overflow:auto;padding:12px 13px;display:none}
+#detail.on{display:block}
+#detail .t{font-size:13px;font-weight:600;line-height:1.35;margin:0 0 3px}
+#detail .m{color:var(--muted);font-size:11px;margin-bottom:8px}
+#detail .hook{color:var(--ink-2);margin-bottom:10px}
+#detail h3{margin:10px 0 4px;font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+#detail ul{margin:0;padding-left:0;list-style:none}
+#detail li{padding:2px 0;color:var(--ink-2);display:flex;gap:6px;align-items:baseline}
+#detail li .rel{color:var(--muted);flex:0 0 auto;font-size:11px}
+#detail .close{position:absolute;top:9px;right:10px;padding:1px 7px;line-height:1.4}
+
+/* ---------- tooltip ---------- */
+#tip{
+  position:fixed;pointer-events:none;opacity:0;transition:opacity .09s;z-index:9;
+  background:rgba(13,13,13,.96);border:1px solid var(--hairline);border-radius:7px;
+  padding:6px 9px;font-size:12px;max-width:290px;
+}
+#tip .tt{font-weight:600;margin-bottom:2px}
+#tip .tm{color:var(--muted);font-size:11px}
+
+/* ---------- table view (accessibility channel) ---------- */
+#table{top:64px;left:12px;bottom:12px;width:min(680px,calc(100vw - 24px));overflow:auto;padding:0;display:none}
+#table.on{display:block}
+#table table{border-collapse:collapse;width:100%;font-size:12px}
+#table th,#table td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--hairline);vertical-align:top}
+#table th{position:sticky;top:0;background:rgba(26,26,25,.98);color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+#table td.num{font-variant-numeric:tabular-nums;color:var(--ink-2)}
+#table tr:hover td{background:rgba(255,255,255,.03);cursor:pointer}
+#empty{position:fixed;inset:0;display:grid;place-items:center;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<div id="bar" class="panel">
+  <h1>knowledge graph</h1>
+  <span class="count" id="stat"></span>
+  <span class="sep"></span>
+  <input type="search" id="q" placeholder="filter by title, stem, category…" aria-label="Filter nodes">
+  <span class="sep"></span>
+  <span id="typeFilters"></span>
+  <span class="sep"></span>
+  <label class="chk"><input type="checkbox" id="showWiki" checked> wikilinks</label>
+  <label class="chk"><input type="checkbox" id="showClaim" checked> claim edges</label>
+  <button id="tensions" aria-pressed="false" title="Show only papers joined by a contradicts edge">tensions only</button>
+  <span class="sep"></span>
+  <button id="tableBtn" aria-pressed="false">table</button>
+  <button id="reset">reset view</button>
+</div>
+
+<div id="legend" class="panel">
+  <h2>Page type</h2>
+  <div id="typeKeys"></div>
+  <h2>Edges</h2>
+  <div id="edgeKeys"></div>
+</div>
+
+<div id="detail" class="panel">
+  <button class="close" id="detailClose" aria-label="Close">✕</button>
+  <p class="t" id="dTitle"></p>
+  <div class="m" id="dMeta"></div>
+  <div class="hook" id="dHook"></div>
+  <div id="dRels"></div>
+</div>
+
+<div id="table" class="panel">
+  <table>
+    <thead><tr><th>Page</th><th>Type</th><th>Category</th><th>Year</th><th>Links</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div id="tip"><div class="tt"></div><div class="tm"></div></div>
+
+<script>
+const DATA = __GRAPH_DATA__;
+
+/* Shape carries page type alongside hue, so a colorblind reader loses nothing.
+   Anything not listed falls through to a hollow ring in the substrate ink —
+   commentary, guidance, whitepaper, book all read as "a document, not authored
+   analysis", which is exactly their relationship to the corpus. */
+const ROLE = {
+  paper:      {color:'var(--paper)',      hex:'#c3c2b7', shape:'circle',   label:'paper'},
+  synthesis:  {color:'var(--synthesis)',  hex:'#3987e5', shape:'square',   label:'synthesis'},
+  idea:       {color:'var(--idea)',       hex:'#d95926', shape:'triangle', label:'idea'},
+  concept:    {color:'var(--concept)',    hex:'#199e70', shape:'diamond',  label:'concept'},
+};
+const FALLBACK = {hex:'#c3c2b7', shape:'ring', label:'other'};
+const roleOf = t => ROLE[t] || FALLBACK;
+
+const EDGE = {
+  wikilink:    {hex:'rgba(255,255,255,.14)', w:1,   label:'wikilink'},
+  claim:       {hex:'rgba(195,194,183,.50)', w:1.5, label:'claim relation'},
+  contradicts: {hex:'#d03b3b',               w:2.5, label:'contradicts'},
+};
+
+/* ---------- model ---------- */
+const nodes = DATA.nodes.map((n,i) => ({...n, i,
+  x:Math.cos(i*2.399)*260*Math.sqrt(i/DATA.nodes.length+.02),
+  y:Math.sin(i*2.399)*260*Math.sqrt(i/DATA.nodes.length+.02),
+  vx:0, vy:0, pinned:false, r:0, shown:true}));
+const byId = new Map(nodes.map(n => [n.id, n]));
+for (const n of nodes) n.r = Math.min(13, 3.2 + Math.sqrt(n.deg) * 1.55);
+
+const edges = [];
+for (const e of DATA.edges) {
+  const s = byId.get(e.source), t = byId.get(e.target);
+  if (s && t) edges.push({...e, s, t});
+}
+// Adjacency for the detail panel and the tensions filter.
+const adj = new Map(nodes.map(n => [n.id, []]));
+for (const e of edges) { adj.get(e.s.id).push(e); adj.get(e.t.id).push(e); }
+const inTension = new Set();
+for (const e of edges) if (e.relation === 'contradicts') { inTension.add(e.s.id); inTension.add(e.t.id); }
+
+/* ---------- view state ---------- */
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let W=0, H=0, DPR=1;
+let scale=1, tx=0, ty=0;                    // world -> screen
+let hover=null, selected=null, dragNode=null, panning=false, last=null;
+let alpha=1;                                 // simulation temperature
+const ui = {wiki:true, claim:true, tensions:false, types:new Set(), q:''};
+
+function resize(){
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', () => { resize(); kick(); });
+
+/* ---------- filtering ---------- */
+function applyFilters(){
+  const q = ui.q.trim().toLowerCase();
+  for (const n of nodes) {
+    let ok = ui.types.has(n.type) || (!ROLE[n.type] && ui.types.has('other'));
+    if (ok && ui.tensions) ok = inTension.has(n.id);
+    if (ok && q) {
+      ok = (n.title + ' ' + n.stem + ' ' + n.category + ' ' + n.label).toLowerCase().includes(q);
+    }
+    n.shown = ok;
+  }
+  document.getElementById('stat').textContent =
+    `${nodes.filter(n=>n.shown).length}/${nodes.length} pages · ` +
+    `${DATA.meta.n_wikilinks} wikilinks · ${DATA.meta.n_claim_edges} claim edges`;
+  buildTable();
+  recomputeK();   // k depends on the visible count, so filtering re-spaces the layout
+  kick();
+}
+const edgeVisible = e =>
+  e.s.shown && e.t.shown &&
+  (e.kind === 'wikilink' ? ui.wiki : ui.claim) &&
+  (!ui.tensions || e.relation === 'contradicts');
+
+/* ---------- force layout ----------
+   Fruchterman-Reingold: repulsion k^2/d, attraction d^2/k, with k derived from
+   area-per-node. A plain inverse-square repulsion was tried first and collapsed
+   this corpus into one unreadable ball — at ~18 edges per node the attractive
+   term overwhelms a 1/d^2 push long before clusters separate. FR's weaker-but-
+   longer-range k^2/d is what actually spreads a dense graph.
+
+   Attraction is divided by each endpoint's degree so a 90-link hub doesn't reel
+   the whole corpus into the middle; that is the standard fix and it is what
+   makes the peripheral clusters legible.
+
+   O(n^2) per tick is fine here (a few hundred nodes, and the pair loop skips
+   beyond 6k). `alpha` cools to zero so the layout settles and the render loop
+   parks itself instead of burning CPU forever. */
+let K = 60;
+function kick(){ alpha = Math.max(alpha, 0.55); }
+
+function recomputeK(){
+  const n = Math.max(1, nodes.filter(x => x.shown).length);
+  K = Math.sqrt((1500 * 950) / n) * 0.85;
+}
+
+function step(){
+  const vis = nodes.filter(n => n.shown);
+  const n = vis.length;
+  if (!n) return;
+  const CUT = (6*K) * (6*K), GRAV = 0.014, DAMP = 0.82;
+
+  for (let a=0; a<n; a++){
+    const A = vis[a];
+    for (let b=a+1; b<n; b++){
+      const B = vis[b];
+      let dx = B.x-A.x, dy = B.y-A.y;
+      let d2 = dx*dx + dy*dy;
+      if (d2 < 1e-4){ dx = (Math.random()-.5)*.1; dy = (Math.random()-.5)*.1; d2 = dx*dx+dy*dy; }
+      if (d2 > CUT) continue;
+      const d = Math.sqrt(d2);
+      const f = (K*K) / d / d;      // k^2/d as a magnitude, /d to normalize dx,dy
+      const fx = dx*f, fy = dy*f;
+      A.vx -= fx; A.vy -= fy; B.vx += fx; B.vy += fy;
+    }
+    A.vx -= A.x * GRAV; A.vy -= A.y * GRAV;
+  }
+  for (const e of edges){
+    if (!edgeVisible(e)) continue;
+    const dx = e.t.x-e.s.x, dy = e.t.y-e.s.y;
+    const d = Math.hypot(dx,dy) || 1;
+    // /d normalizes the direction; degree damping keeps hubs from collapsing it
+    const f = (d*d) / K / d;
+    const fs = f / (1 + Math.log1p(e.s.deg));
+    const ft = f / (1 + Math.log1p(e.t.deg));
+    e.s.vx += dx*fs; e.s.vy += dy*fs; e.t.vx -= dx*ft; e.t.vy -= dy*ft;
+  }
+  const cap = K * 0.6;
+  for (const N of vis){
+    if (N.pinned || N === dragNode){ N.vx = N.vy = 0; continue; }
+    N.vx *= DAMP; N.vy *= DAMP;
+    // clamp per-tick displacement, or the first few hot ticks fling nodes off-screen
+    const sp = Math.hypot(N.vx, N.vy);
+    const lim = sp > cap ? cap/sp : 1;
+    N.x += N.vx * alpha * lim; N.y += N.vy * alpha * lim;
+  }
+  alpha *= 0.988;
+  if (alpha < 0.004) alpha = 0;
+}
+
+/* ---------- drawing ---------- */
+const sx = x => x*scale + tx + W/2;
+const sy = y => y*scale + ty + H/2;
+
+function shapePath(p, x, y, r, shape){
+  p.beginPath();
+  if (shape === 'square')        p.rect(x-r, y-r, r*2, r*2);
+  else if (shape === 'triangle'){const h=r*1.16; p.moveTo(x,y-h); p.lineTo(x+h,y+h*0.82); p.lineTo(x-h,y+h*0.82); p.closePath();}
+  else if (shape === 'diamond'){ const h=r*1.28; p.moveTo(x,y-h); p.lineTo(x+h,y); p.lineTo(x,y+h); p.lineTo(x-h,y); p.closePath();}
+  else                           p.arc(x, y, r, 0, Math.PI*2);
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+
+  // edges, contradictions last so they are never buried
+  const vis = edges.filter(edgeVisible);
+  vis.sort((a,b) => (a.relation==='contradicts') - (b.relation==='contradicts'));
+  for (const e of vis){
+    const spec = e.relation === 'contradicts' ? EDGE.contradicts : EDGE[e.kind];
+    const lit = selected && (e.s.id===selected.id || e.t.id===selected.id);
+    ctx.strokeStyle = spec.hex;
+    ctx.lineWidth = Math.max(0.6, spec.w * (lit ? 1.9 : 1) * Math.min(1.4, scale));
+    ctx.globalAlpha = selected && !lit ? 0.22 : 1;
+    // dashed = candidate; a judged-but-unconfirmed relation should not read as
+    // settled fact just because it is easier to draw a solid line.
+    ctx.setLineDash(e.kind === 'claim' && e.status === 'candidate' ? [4,3] : []);
+    ctx.beginPath();
+    ctx.moveTo(sx(e.s.x), sy(e.s.y));
+    ctx.lineTo(sx(e.t.x), sy(e.t.y));
+    ctx.stroke();
+  }
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+
+  // nodes
+  const surf = getComputedStyle(document.body).getPropertyValue('--surface').trim() || '#1a1a19';
+  for (const n of nodes){
+    if (!n.shown) continue;
+    const role = roleOf(n.type);
+    const X = sx(n.x), Y = sy(n.y), R = Math.max(2.2, n.r*Math.min(1.5, scale));
+    const dim = selected && selected.id !== n.id && !adj.get(selected.id).some(e => e.s.id===n.id || e.t.id===n.id);
+    ctx.globalAlpha = dim ? 0.28 : 1;
+    // 2px surface ring so overlapping marks stay separable
+    shapePath(ctx, X, Y, R+1.4, role.shape);
+    ctx.fillStyle = surf; ctx.fill();
+    shapePath(ctx, X, Y, R, role.shape);
+    if (role.shape === 'ring'){
+      ctx.strokeStyle = role.hex; ctx.lineWidth = 1.6; ctx.stroke();
+    } else {
+      ctx.fillStyle = role.hex; ctx.fill();
+    }
+    if (n === hover || (selected && n.id === selected.id)){
+      shapePath(ctx, X, Y, R+3.4, role.shape);
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.4; ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Labels: a rank budget plus real collision rejection.
+  //
+  // A degree *threshold* does not work — this corpus averages ~18 links per
+  // node, so `deg >= 12` selects most of it and the centre renders as a mat of
+  // overlapping text that hides the structure the labels are meant to explain.
+  // Rank instead (highest degree first, budget grows with zoom), and skip any
+  // label whose box would overlap one already placed. Selection/hover always
+  // win their slot, because a label you asked for must never lose to a hub.
+  ctx.font = '11px system-ui,-apple-system,"Segoe UI",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  const budget = scale >= 2.4 ? 220 : scale >= 1.5 ? 120 : scale >= 0.9 ? 55 : 26;
+  const placed = [];
+  const fits = (x, y, w, h) => {
+    for (const r of placed){
+      if (Math.abs(x-r.x)*2 < w+r.w+6 && Math.abs(y-r.y)*2 < h+r.h+3) return false;
+    }
+    return true;
+  };
+  const forced = nodes.filter(n => n.shown && (n === hover || (selected && n.id === selected.id)));
+  const ranked = nodes.filter(n => n.shown && !forced.includes(n))
+                      .sort((a,b) => b.deg - a.deg);
+  let drawn = 0;
+  for (const n of [...forced, ...ranked]){
+    const force = forced.includes(n);
+    if (!force && (drawn >= budget || scale < 0.4)) break;
+    const X = sx(n.x), Y = sy(n.y) - Math.max(2.2, n.r*Math.min(1.5,scale)) - 4;
+    if (X < -60 || X > W+60 || Y < 8 || Y > H+20) continue;   // off-screen: skip, don't spend budget
+    const w = ctx.measureText(n.label).width, h = 11;
+    if (!force && !fits(X, Y-h/2, w, h)) continue;
+    placed.push({x:X, y:Y-h/2, w, h});
+    ctx.lineWidth = 3; ctx.strokeStyle = surf;
+    ctx.strokeText(n.label, X, Y);
+    ctx.fillStyle = force ? '#ffffff' : '#898781';
+    ctx.fillText(n.label, X, Y);
+    if (!force) drawn++;
+  }
+}
+
+/* Fit the settled layout to the viewport. Without this the graph opens at an
+   arbitrary 1:1 scale — on a 477-node corpus that means it runs off three edges
+   and the first thing a user does is hunt for the zoom control. Runs once when
+   the sim first cools, and again on demand from "reset view". */
+let fitsDone = 0;
+function fitView(){
+  const vis = nodes.filter(n => n.shown);
+  if (!vis.length) return;
+  // Quantile box, not the full extent: a couple of far-flung singletons would
+  // otherwise set the scale and shrink the part anyone came to look at. The
+  // trimmed nodes stay reachable by zooming out, and the table view lists them.
+  const q = (arr, p) => arr[Math.min(arr.length-1, Math.max(0, Math.round((arr.length-1)*p)))];
+  const xs = vis.map(n => n.x).sort((a,b) => a-b);
+  const ys = vis.map(n => n.y).sort((a,b) => a-b);
+  const x0 = q(xs, 0.01), x1 = q(xs, 0.99), y0 = q(ys, 0.01), y1 = q(ys, 0.99);
+  const padL = 24, padR = 24, padT = 62, padB = 24;   // top bar and legend sit over the canvas
+  const w = Math.max(1, x1-x0), h = Math.max(1, y1-y0);
+  scale = Math.min(6, Math.max(0.18, Math.min((W-padL-padR)/w, (H-padT-padB)/h) * 0.94));
+  // centre the bbox, then nudge down so the top bar doesn't cover the first row
+  tx = -((x0+x1)/2) * scale;
+  ty = -((y0+y1)/2) * scale + (padT-padB)/2;
+}
+
+function frame(){
+  if (alpha > 0) step();
+  // Fit as soon as the layout is visually settled rather than fully frozen —
+  // waiting for alpha to reach exactly 0 costs several seconds of staring at an
+  // off-screen graph.
+  // Twice: once when it looks settled (fast feedback) and again when the sim
+  // actually freezes, because the graph is still expanding at the first fit and
+  // a single early fit leaves the outer ring cropped.
+  if (nodes.some(n => n.shown)){
+    if (fitsDone === 0 && alpha < 0.06){ fitsDone = 1; fitView(); }
+    else if (fitsDone === 1 && alpha === 0){ fitsDone = 2; fitView(); }
+  }
+  draw();
+  requestAnimationFrame(frame);
+}
+
+/* ---------- picking ---------- */
+function pick(px, py){
+  let best=null, bd=Infinity;
+  for (const n of nodes){
+    if (!n.shown) continue;
+    const d = Math.hypot(px - sx(n.x), py - sy(n.y));
+    const hit = Math.max(9, n.r*Math.min(1.5,scale) + 5);   // target bigger than the mark
+    if (d < hit && d < bd){ bd = d; best = n; }
+  }
+  return best;
+}
+
+/* ---------- interaction ---------- */
+const tip = document.getElementById('tip');
+function showTip(n, px, py){
+  tip.querySelector('.tt').textContent = n.title;
+  const bits = [roleOf(n.type).label, n.category];
+  if (n.year) bits.push(n.year);
+  if (n.venue) bits.push(n.venue);
+  bits.push(`${n.deg} link${n.deg===1?'':'s'}`);
+  tip.querySelector('.tm').textContent = bits.join(' · ');
+  tip.style.opacity = 1;
+  const r = tip.getBoundingClientRect();
+  tip.style.left = Math.min(px+14, window.innerWidth - r.width - 10) + 'px';
+  tip.style.top  = Math.min(py+14, window.innerHeight - r.height - 10) + 'px';
+}
+const hideTip = () => { tip.style.opacity = 0; };
+
+cv.addEventListener('mousemove', ev => {
+  const px = ev.clientX, py = ev.clientY;
+  if (dragNode){
+    dragNode.x = (px - tx - W/2)/scale; dragNode.y = (py - ty - H/2)/scale;
+    kick(); return;
+  }
+  if (panning && last){ tx += px-last.x; ty += py-last.y; last = {x:px,y:py}; return; }
+  const n = pick(px, py);
+  if (n !== hover){ hover = n; cv.style.cursor = n ? 'pointer' : 'grab'; }
+  n ? showTip(n, px, py) : hideTip();
+});
+cv.addEventListener('mousedown', ev => {
+  const n = pick(ev.clientX, ev.clientY);
+  if (n){ dragNode = n; n.pinned = true; }
+  else { panning = true; last = {x:ev.clientX, y:ev.clientY}; cv.classList.add('dragging'); }
+});
+window.addEventListener('mouseup', () => { dragNode=null; panning=false; last=null; cv.classList.remove('dragging'); });
+cv.addEventListener('click', ev => {
+  const n = pick(ev.clientX, ev.clientY);
+  n ? select(n) : deselect();
+});
+cv.addEventListener('dblclick', ev => {
+  const n = pick(ev.clientX, ev.clientY);
+  if (n) { n.pinned = false; kick(); }
+});
+cv.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  const k = Math.exp(-ev.deltaY * 0.0014);
+  const ns = Math.min(6, Math.max(0.18, scale*k));
+  // zoom about the pointer so the thing under the cursor stays put
+  const wx = (ev.clientX - tx - W/2)/scale, wy = (ev.clientY - ty - H/2)/scale;
+  scale = ns;
+  tx = ev.clientX - W/2 - wx*scale; ty = ev.clientY - H/2 - wy*scale;
+}, {passive:false});
+cv.addEventListener('mouseleave', hideTip);
+
+/* ---------- detail panel ---------- */
+const detail = document.getElementById('detail');
+function select(n){
+  selected = n;
+  document.getElementById('dTitle').textContent = n.title;
+  const bits = [roleOf(n.type).label, n.category];
+  if (n.year) bits.push(n.year);
+  if (n.venue) bits.push(n.venue);
+  document.getElementById('dMeta').textContent = bits.join(' · ');
+  document.getElementById('dHook').textContent = n.hook || '';
+
+  const claims = adj.get(n.id).filter(e => e.kind === 'claim');
+  const links  = adj.get(n.id).filter(e => e.kind === 'wikilink');
+  const other = e => (e.s.id === n.id ? e.t : e.s);
+  const host = document.getElementById('dRels');
+  host.innerHTML = '';
+  const section = (title, items) => {
+    if (!items.length) return;
+    const h = document.createElement('h3'); h.textContent = title; host.appendChild(h);
+    const ul = document.createElement('ul');
+    for (const [rel, node, extra] of items){
+      const li = document.createElement('li');
+      const s = document.createElement('span'); s.className = 'rel'; s.textContent = rel;
+      const a = document.createElement('span'); a.textContent = node.label + (extra || '');
+      li.append(s, a);
+      li.style.cursor = 'pointer';
+      li.onclick = () => { select(node); centerOn(node); };
+      ul.appendChild(li);
+    }
+    host.appendChild(ul);
+  };
+  section('Claim relations', claims.map(e => [
+    e.relation, other(e),
+    (e.n > 1 ? ` ×${e.n}` : '') + (e.status === 'candidate' ? ' (candidate)' : ''),
+  ]));
+  section(`Wikilinks (${links.length})`, links.slice(0, 40).map(e => ['→', other(e), '']));
+  detail.classList.add('on');
+}
+function deselect(){ selected = null; detail.classList.remove('on'); }
+function centerOn(n){ tx = -n.x*scale; ty = -n.y*scale; }
+document.getElementById('detailClose').onclick = deselect;
+window.addEventListener('keydown', e => { if (e.key === 'Escape') deselect(); });
+
+/* ---------- chrome wiring ---------- */
+const typesPresent = [...new Set(nodes.map(n => ROLE[n.type] ? n.type : 'other'))]
+  .sort((a,b) => (a==='other') - (b==='other') || a.localeCompare(b));
+typesPresent.forEach(t => ui.types.add(t));
+
+const tf = document.getElementById('typeFilters');
+for (const t of typesPresent){
+  const lab = document.createElement('label'); lab.className = 'chk';
+  const cb = document.createElement('input'); cb.type='checkbox'; cb.checked=true;
+  cb.onchange = () => { cb.checked ? ui.types.add(t) : ui.types.delete(t); applyFilters(); };
+  lab.append(cb, document.createTextNode(t === 'other' ? 'other' : roleOf(t).label));
+  tf.appendChild(lab);
+}
+
+// Legend — always present, and it doubles as the type census.
+const tk = document.getElementById('typeKeys');
+for (const t of typesPresent){
+  const role = t === 'other' ? FALLBACK : roleOf(t);
+  const n = nodes.filter(x => (ROLE[x.type] ? x.type : 'other') === t).length;
+  const row = document.createElement('div'); row.className = 'key';
+  const sw = document.createElement('span'); sw.className = 'sw';
+  const c = document.createElement('canvas'); c.width = c.height = 26; c.style.width = c.style.height = '13px';
+  const g = c.getContext('2d'); g.setTransform(2,0,0,2,0,0);
+  shapePath(g, 6.5, 6.5, 4.6, role.shape);
+  if (role.shape === 'ring'){ g.strokeStyle = role.hex; g.lineWidth = 1.5; g.stroke(); }
+  else { g.fillStyle = role.hex; g.fill(); }
+  sw.appendChild(c);
+  const nm = document.createElement('span'); nm.textContent = role.label;
+  const ct = document.createElement('span'); ct.className='n'; ct.textContent = n;
+  row.append(sw, nm, ct); tk.appendChild(row);
+}
+const ek = document.getElementById('edgeKeys');
+const edgeRows = [
+  ['wikilink', EDGE.wikilink, DATA.meta.n_wikilinks, false],
+  ['claim relation', EDGE.claim, DATA.meta.n_claim_edges, false],
+  ['contradicts', EDGE.contradicts, DATA.meta.relation_counts.contradicts || 0, false],
+  ['candidate (unconfirmed)', EDGE.claim, null, true],
+];
+for (const [label, spec, n, dashed] of edgeRows){
+  const row = document.createElement('div'); row.className='key';
+  const ln = document.createElement('span'); ln.className='ln';
+  ln.style.borderTopColor = spec.hex;
+  ln.style.borderTopWidth = spec.w + 'px';
+  if (dashed) ln.style.borderTopStyle = 'dashed';
+  const nm = document.createElement('span'); nm.textContent = label;
+  row.append(ln, nm);
+  if (n !== null){ const c = document.createElement('span'); c.className='n'; c.textContent=n; row.appendChild(c); }
+  ek.appendChild(row);
+}
+
+document.getElementById('q').oninput = e => { ui.q = e.target.value; applyFilters(); };
+document.getElementById('showWiki').onchange = e => { ui.wiki = e.target.checked; kick(); };
+document.getElementById('showClaim').onchange = e => { ui.claim = e.target.checked; kick(); };
+const tb = document.getElementById('tensions');
+tb.onclick = () => {
+  ui.tensions = !ui.tensions;
+  tb.setAttribute('aria-pressed', String(ui.tensions));
+  applyFilters();
+};
+document.getElementById('reset').onclick = () => {
+  for (const n of nodes) n.pinned = false;
+  deselect();
+  // Re-fit rather than snapping to 1:1 — "reset" should mean "show me
+  // everything again", which is what the user actually wants from it.
+  alpha = 1; fitsDone = 0;
+};
+const tableBtn = document.getElementById('tableBtn'), tablePanel = document.getElementById('table');
+tableBtn.onclick = () => {
+  const on = !tablePanel.classList.contains('on');
+  tablePanel.classList.toggle('on', on);
+  tableBtn.setAttribute('aria-pressed', String(on));
+};
+
+/* Table view: the non-visual channel. Same filtered set, sorted by degree, so
+   the graph's claims are checkable without reading a picture. */
+function buildTable(){
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  const rows = nodes.filter(n => n.shown).sort((a,b) => b.deg - a.deg || a.id.localeCompare(b.id));
+  for (const n of rows){
+    const tr = document.createElement('tr');
+    tr.onclick = () => { select(n); centerOn(n); };
+    for (const [v, cls] of [[n.title,''],[roleOf(n.type).label,''],[n.category,''],[n.year||'','num'],[n.deg,'num']]){
+      const td = document.createElement('td'); td.textContent = v; if (cls) td.className = cls;
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+/* ---------- go ---------- */
+if (!nodes.length){
+  document.getElementById('stage').innerHTML = '';
+  const d = document.createElement('div'); d.id='empty';
+  d.textContent = 'No wiki pages yet — run `researchwiki agent ingest` first.';
+  document.body.appendChild(d);
+} else {
+  resize(); applyFilters(); frame();
+}
+</script>
+</body>
+</html>

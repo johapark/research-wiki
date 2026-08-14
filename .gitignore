@@ -17,6 +17,10 @@
 # Local-only shareable artifacts.
 share/
 
+# Generated artifacts (`visualize` writes output/graph.html). Regenerable from
+# wiki/ in under a second, and it embeds page titles from a private corpus.
+output/
+
 # Per-user "I dismissed the suggest-splits warning at this time" stamp.
 # Touched by `researchwiki suggest-splits`; status uses it to suppress
 # the `wiki/other/` saturation warning for the decay window.

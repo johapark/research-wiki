@@ -96,7 +96,9 @@ exclude = ["tests*", "internal*", "wiki*"]
 [tool.setuptools.package-data]
 # Bundle the English wordlist used by `pdf.py` for ligature repair so the
 # package works on any platform without an OS-provided `/usr/share/dict/words`.
-researchwiki = ["pdf/data/*.txt"]
+# `templates/graph.html` is the `visualize` renderer — it must ship, because the
+# command's whole promise is a self-contained page with no build step.
+researchwiki = ["pdf/data/*.txt", "templates/*.html"]
 
 [tool.pytest.ini_options]
 # Unit tests cover the pure, deterministic operators (stem derivation, the
