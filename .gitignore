@@ -14,7 +14,17 @@
 # Obsidian Web Clipper drops — per-user captured content, never part of the repo.
 # No trailing slash, same reason as above: it may be a symlink into the vault.
 /Clippings
-# Local-only shareable artifacts.
+# Everything this repo emits for someone else to look at, under one roof:
+#   output/graph.html   `visualize`
+#   output/okf/         `export --format okf`
+#   output/share/       `prompts/share-page.md`
+# All of it is per-user, regenerable from wiki/, and carries page titles from a
+# private corpus — so the umbrella is ignored wholesale rather than per-artifact,
+# and a new generator needs no .gitignore change to stay out of git.
+output/
+
+# Legacy location of output/share/, kept ignored so a stale directory on a second
+# synced machine doesn't surface as untracked after the move.
 share/
 
 # Per-user "I dismissed the suggest-splits warning at this time" stamp.

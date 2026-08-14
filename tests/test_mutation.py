@@ -297,3 +297,88 @@ def test_disabled_by_env_is_a_passthrough(root, monkeypatch):
 def test_journalling_enabled_flag(monkeypatch, value, expected):
     monkeypatch.setenv("RW_MUTATION_JOURNAL", value)
     assert mut.journalling_enabled() is expected
+
+
+# ---------------------------------------------------------------- on-disk contract
+
+#: A journal exactly as v0.4.0 wrote one, key-for-key. Hard-coded rather than
+#: produced by the current `_journal_document`, which is the whole point: a
+#: round-trip through today's writer would still pass if both ends drifted
+#: together, and the file that matters is the one already sitting in somebody's
+#: `.mutation/` when they upgrade mid-mutation.
+_V0_4_0_JOURNAL = {
+    "version": 1,
+    "operation": "promote",
+    "status": "active",
+    "attempts": 0,
+    "created_at": "2026-08-14T12:00:00",
+    "details": {"stem": "smith-2024-a-paper-about-things"},
+}
+
+
+def test_a_journal_written_by_the_previous_release_still_recovers(root):
+    """The rollback path is only worth having if it survives an upgrade.
+
+    An interrupted promote leaves a journal on disk. If a release changes how that
+    file is read, the user's next run silently cannot undo the mutation the
+    previous run abandoned — and the failure mode is a permanently half-landed
+    paper, not an error anybody sees.
+    """
+    mdir = root / ".mutation"
+    backup_dir = mdir / "20260814T120000-deadbeef"
+    backup_dir.mkdir(parents=True)
+
+    modified = _write(root / "wiki" / "cgt" / "page.md", "MUTATED\n")
+    _write(backup_dir / "000-page.md", "ORIGINAL\n")
+    created = _write(root / "wiki" / "cgt" / "brand-new.md", "created by the mutation\n")
+
+    journal = mdir / "20260814T120000-deadbeef.json"
+    journal.write_text(json.dumps({
+        **_V0_4_0_JOURNAL,
+        "backup_dir": str(backup_dir),
+        "entries": [
+            {"target": str(modified), "backup": str(backup_dir / "000-page.md")},
+            {"target": str(created), "backup": None},
+        ],
+    }), encoding="utf-8")
+
+    notes = mut.recover_pending()
+
+    assert modified.read_text(encoding="utf-8") == "ORIGINAL\n"
+    assert not created.exists(), "a path the mutation created must be removed"
+    assert not journal.exists() and not backup_dir.exists()
+    assert notes and "rolled back interrupted promote" in notes[0]
+
+
+def test_the_journal_we_write_matches_the_documented_key_set(root):
+    """Pin the serialized shape, since `recover_pending` in a *future* release
+    will be reading files this one wrote."""
+    page = _write(root / "wiki" / "cgt" / "page.md", "before\n")
+    snap = mut.snapshot([page], operation="promote", details={"stem": "s"})
+
+    document = json.loads(snap.journal_path.read_text(encoding="utf-8"))
+    assert set(document) == {
+        "version", "operation", "status", "attempts", "created_at",
+        "backup_dir", "details", "entries",
+    }
+    assert document["version"] == mut.JOURNAL_VERSION == 1
+    assert document["status"] == "active"
+    assert set(document["entries"][0]) == {"target", "backup"}
+
+    snap.mark_committed()
+    assert json.loads(snap.journal_path.read_text(encoding="utf-8"))["status"] == "committed"
+    snap.discard()
+
+
+def test_a_created_path_is_recorded_without_a_backup(root):
+    """`BackedUpPath.existed_before` is what rollback turns on, so the two cases
+    have to be distinguishable in the record itself."""
+    existing = _write(root / "wiki" / "cgt" / "here.md", "content\n")
+    absent = root / "wiki" / "cgt" / "not-yet.md"
+
+    snap = mut.snapshot([existing, absent], operation="promote")
+    by_target = {e.target: e for e in snap.entries}
+
+    assert by_target[existing.resolve()].existed_before is True
+    assert by_target[absent.resolve()].existed_before is False
+    snap.discard()

@@ -299,9 +299,14 @@ def test_check_returns_empty_list_when_nothing_duplicates(monkeypatch):
 
 def test_check_is_wired_into_the_lint_orchestrator():
     """The JSON key and the prose section both have to exist, or the finding
-    never reaches a reviewer."""
+    never reaches a reviewer.
+
+    The emitters live in `lint.report`, not the package `__init__` — the check
+    must be reachable in whichever module renders it, so read that one.
+    """
     from researchwiki.tasks import lint as lint_pkg
+    from researchwiki.tasks.lint import report as lint_report
     assert lint_pkg.find_duplicate_claim_sets is find_duplicate_claim_sets
-    src = (lint_pkg.__file__ and open(lint_pkg.__file__, encoding="utf-8").read()) or ""
+    src = open(lint_report.__file__, encoding="utf-8").read()
     assert '"duplicate_claim_sets": kw["duplicate_claim_sets"]' in src
     assert "Near-duplicate claim sets" in src

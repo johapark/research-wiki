@@ -161,7 +161,9 @@ You do not need to move anything into `inbox/` — point `import` at wherever yo
 
 ### Export your library
 
-**And back out again.** `researchwiki export --format bibtex > refs.bib` writes the corpus as BibTeX, RIS or CSL-JSON — for a manuscript's reference list, or to load into a reference manager. Zero tokens, no network, byte-identical across runs, so the file can live in version control. The citekey is the page's own stem, which is the only key that can't change under you when you ingest another paper by the same author. Where the corpus is thin the export says so instead of inventing: a paper with no recorded venue becomes `@misc` rather than an `@article` with a missing `journal`, and `--json` gives you the list of pages to go fix. Your own synthesis and idea pages are deliberately left out — they have no DOI or venue, and an entry for one would claim a publication that doesn't exist. Details in [`prompts/export-bibliography.md`](./prompts/export-bibliography.md).
+**And back out again.** `researchwiki export --format bibtex > refs.bib` writes the corpus as BibTeX, RIS or CSL-JSON — for a manuscript's reference list, or to load into a reference manager. Zero tokens, no network, byte-identical across runs, so the file can live in version control. The citekey is the page's own stem, which is the only key that can't change under you when you ingest another paper by the same author. Where the corpus is thin the export says so instead of inventing: a paper with no recorded venue becomes `@misc` rather than an `@article` with a missing `journal`, and `--json` gives you the list of pages to go fix. **In the bibliography formats** your own synthesis and idea pages are deliberately left out — they have no DOI or venue, and an entry for one would claim a publication that doesn't exist. Details in [`prompts/export-bibliography.md`](./prompts/export-bibliography.md).
+
+**Or as a portable knowledge bundle.** `researchwiki export --format okf --out output/okf` writes the corpus as an [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf) bundle — a directory of markdown concepts with YAML frontmatter that any OKF-aware agent or viewer can read without an SDK. Here your synthesis, idea and concept pages **are** included, and that is the same reasoning inverted: OKF's unit is a *concept*, explicitly covering abstract ideas, so a page with nothing published behind it simply carries no `resource` — whereas leaving it out would ship a knowledge base with its knowledge removed. Wikilinks become ordinary markdown links, footnote citations become OKF `sources` entries, and graded paper pages carry a machine-confirmed `verified` stamp. Pages whose gates leave no record behind get none, and the run says how many — so "unverified" is never read as "ungraded".
 
 Most users won't run `researchwiki` commands directly — the LLM picks among them based on what you ask. For the full command table and a copy-paste-able walkthrough, see [`WORKFLOW.md` → CLI reference](./WORKFLOW.md#cli-reference).
 
@@ -189,6 +191,20 @@ wiki/
 - **`papers/{stem}.pdf` + `papers/{stem}.supp/`.** Canonical PDFs + supplementary attachments (listed under `supplementary:` YAML). The LLM `Read`s these on demand (Rule 3).
 
 See [CLAUDE.md Page Types](./CLAUDE.md) for the full contracts.
+
+### Seeing the shape of it
+
+`researchwiki visualize` writes an interactive graph to `output/graph.html` — one
+self-contained file, no server and no build step, so it opens straight from disk.
+Page type is drawn by shape as well as colour, and there are two kinds of edge:
+the `[[wikilinks]]` the pages carry, and the typed claim relations the judges
+found between *individual claims* (`builds_on`, `corroborates`, `contradicts`, …).
+Contradictions are drawn loud, which is the reason to look at a picture rather
+than a list — `claim-graph --tensions` will tell you a contradiction exists, but
+only the graph shows you that four of them land on the same paper. Useful for
+deciding whether a dense cluster has earned a synthesis page, and for spotting a
+component that has drifted loose from the rest of the corpus. A table view carries
+the same data for reading rather than looking.
 
 ## Optional Dataview dashboard
 

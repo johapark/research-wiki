@@ -62,6 +62,40 @@ def test_canonical_set_covers_parser_and_coherence():
     assert tuple(h.lower() for h in ON_PAGE_H2) == tuple(n for n, _ in SECTION_KEYS)
 
 
+@pytest.mark.parametrize("heading,expected", [
+    # Parenthetical qualifiers scope a section without redefining it. All four
+    # forms below were live in the maintainer's corpus and each yielded zero
+    # claims from a section that plainly had them.
+    ("Key Contributions (as a Review)", "Key Contributions"),
+    ("Key Contributions (as stated in the abstract)", "Key Contributions"),
+    # A slashed pair names one section twice; both halves are already aliases.
+    ("Results / Findings", "Results"),
+    # An inflected suffix on a heading whose first word already decides it.
+    ("Methodology and Architecting", "Methodology and Architecture"),
+])
+def test_decorated_headings_resolve_to_their_canonical_name(heading, expected):
+    assert canonical_for(heading) == expected
+
+
+@pytest.mark.parametrize("heading", [
+    "Discussion (results)",          # qualifier must not smuggle it past the guard
+    "Results and Discussion (2026)",
+    "Discussion / Results",
+])
+def test_undecorating_cannot_defeat_the_ambiguity_guard(heading):
+    """Stripping decoration runs the ambiguity check against both forms.
+
+    Otherwise `## Discussion (results)` would strip to `Discussion`, miss the
+    guard on the decorated form, and import discussion prose as graded claims.
+    """
+    assert canonical_for(heading) is None
+
+
+def test_qualifier_only_heading_is_not_mapped():
+    # `## (draft)` undecorates to the empty string; that must not match anything.
+    assert canonical_for("(draft)") is None
+
+
 def test_rename_makes_an_unciteable_page_citeable():
     body = ("## Key Findings\n\n- Scanned 17,000 variants for surface abundance.\n")
     assert _claims(body) == []          # the silent failure

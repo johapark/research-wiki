@@ -1,51 +1,54 @@
 """All-or-nothing multi-file mutations for the wiki tree.
 
-`fsatomic` makes a single write atomic. That is not enough for the operations
+`fsatomic` makes a single write atomic, which is not enough for the operations
 that touch several files at once: `promote_to_wiki` writes a page, moves a PDF,
-splices back-links into N existing pages, and appends to `index.md` and
-`log.md`. Each step is individually atomic and nothing binds them, so a failure
-after step two leaves a paper half-landed — a page on disk with no PDF, no
-back-links, no catalogue entry (see CHANGELOG 0.3.2, and `prompts/recovery.md`
-§ Half-landed promote).
+splices back-links into N existing pages, and appends to `index.md` and `log.md`.
+Every step is individually atomic and nothing binds them, so a failure after step
+two leaves a paper half-landed — a page on disk with no PDF, no back-links and no
+catalogue entry (see CHANGELOG 0.3.2 and `prompts/recovery.md` § Half-landed
+promote).
 
-The shape here is adapted from OpenKB's `mutation.py` (Apache-2.0), reduced to
-the four ideas that carry the weight:
+Four properties carry the weight:
 
 1. **Declare the touched paths up front.** Everything that will be written is
-   backed up before anything is written. A path that doesn't exist yet is
-   recorded as "created" so rollback removes it.
-2. **Journal with an explicit commit point.** `mark_committed()` flips the
-   journal the instant the work is durable. `discard()` is *post-commit*
-   cleanup and is best-effort: it runs after the commit point, so its failure
-   must never trigger a rollback. That ordering is the subtle part.
-3. **Recover on the next run, not via a repair command.** `recover_pending()`
-   drains stale journals: `active` rolls back, `committed` is discarded.
-4. **Cap rollback attempts.** A deterministically-failing rollback (ENOSPC, a
-   permission problem) must surface rather than spin on every subsequent run.
+   copied aside before anything is written. A path that does not exist yet is
+   recorded with no backup, so rolling back deletes it instead of restoring it.
+2. **An explicit commit point.** `mark_committed()` flips the journal the moment
+   the work is durable. `discard()` is *post-commit* cleanup and is best-effort by
+   contract: it runs after the commit point, so its failure must never trigger a
+   rollback. That ordering is the subtle part, and getting it backwards would let
+   a tidy-up error undo landed work.
+3. **Recovery happens on the next run, not through a repair command.**
+   `recover_pending()` drains whatever journals it finds: `active` rolls back,
+   `committed` is cleaned up.
+4. **Rollback attempts are capped.** A rollback failing deterministically —
+   ENOSPC, a permission problem — must eventually surface to a human instead of
+   being re-attempted on every subsequent run forever.
 
-Deliberately *not* adopted: OpenKB's hardlink backups. They are an O(1)-per-file
-optimisation for whole-tree snapshots, they carry real edge cases (EXDEV, and
-cloud-sync folders that refuse hardlinks), and this repo's `wiki/` and `papers/`
-are commonly symlinks into a synced vault — exactly that environment. A promote
-touches a handful of files; plain copies are fine.
+**Backups are plain copies, deliberately.** Hardlinking a backup is an
+O(1)-per-file trick that pays off when snapshotting whole trees, but it brings
+EXDEV and "this filesystem refuses hardlinks" handling with it, and `wiki/` and
+`papers/` here are commonly symlinks into a cloud-synced vault — precisely the
+environment where that breaks. A promote touches a handful of files, so copying
+them is cheap and has no edge cases.
 
 **The transaction spans two storage systems.** File state is journalled and
-survives a crash; the DB row written by `wiki.commit_page` is not. Callers
+survives a crash; the `state.db` row written by `wiki.commit_page` is not. Callers
 register an in-process undo with `also_undo()`, which runs on an in-process
-rollback but *cannot* run during crash recovery — nothing is persisted to
-replay it. That is deliberate rather than an oversight: the markdown page is
-canonical and the DB is a derived index, so a crash-recovered rollback removes
-the page and the next `db rebuild` reconciles the orphaned row. `db verify`
-reports the drift in the meantime.
+rollback but *cannot* run during crash recovery, because nothing about it is
+persisted to replay. That is a decision rather than an oversight: the markdown
+page is canonical and the DB is a derived index, so a crash-recovered rollback
+removes the page and the next `db rebuild` reconciles the orphaned row. `db
+verify` reports the drift meanwhile.
 
-Set `RW_MUTATION_JOURNAL=0` to bypass journalling entirely (mutations run
-unwrapped, exactly as before this module existed). An escape hatch for one
+Set `RW_MUTATION_JOURNAL=0` to bypass journalling entirely — mutations then run
+unwrapped, exactly as they did before this module existed. An escape hatch for one
 release, not a supported mode.
 """
 
 from __future__ import annotations
 
-import datetime as _dt
+import datetime
 import json
 import os
 import shutil
@@ -59,135 +62,184 @@ from .fsatomic import write_json_atomic
 from .log import log
 from .paths import mutation_dir
 
-# A rollback that keeps failing for the same reason must stop retrying. Without
-# a cap it is re-attempted on every subsequent run forever, re-doing the failed
-# work and never releasing its backup directory.
+#: Give up re-trying a rollback after this many failures. A rollback that fails
+#: for a standing reason will fail identically next time, and without a ceiling it
+#: is retried on every run forever — redoing the failed work each time and never
+#: releasing its backup directory.
 MAX_ROLLBACK_ATTEMPTS = 5
 
+#: On-disk journal schema. Bump only for a change old journals cannot be read
+#: through; `recover_pending` must keep draining journals written by the release
+#: before this one, or an upgrade mid-mutation loses its rollback.
 JOURNAL_VERSION = 1
+
+_ACTIVE = "active"
+_COMMITTED = "committed"
 
 
 def journalling_enabled() -> bool:
-    """False when `RW_MUTATION_JOURNAL=0`. Any other value (or unset) is on."""
+    """False only when `RW_MUTATION_JOURNAL=0`. Unset or anything else is on."""
     return os.environ.get("RW_MUTATION_JOURNAL", "1").strip() != "0"
+
+
+@dataclass(frozen=True)
+class BackedUpPath:
+    """One declared path and the copy taken of it, if there was anything to copy.
+
+    A record per path rather than a `{target: backup_or_None}` mapping, because
+    `None` there had to mean "no backup exists *because the file did not*", and
+    that sentinel reading is what the undo logic turns on. Naming it
+    `existed_before` puts the distinction in the type instead of in a comment.
+    """
+
+    target: Path
+    backup: Path | None
+
+    @property
+    def existed_before(self) -> bool:
+        return self.backup is not None
+
+    def undo(self) -> None:
+        """Put this path back the way it was. Raises `RuntimeError` on failure."""
+        if not self.existed_before:
+            self._uncreate()
+        else:
+            self._restore()
+
+    def _uncreate(self) -> None:
+        """The mutation brought this path into being, so undoing means removing it."""
+        try:
+            self.target.unlink(missing_ok=True)
+        except OSError as exc:
+            raise RuntimeError(f"rollback could not remove {self.target}: {exc}") from exc
+
+    def _restore(self) -> None:
+        source = self.backup
+        assert source is not None       # guarded by `existed_before`
+        if not source.exists():
+            # The backup is gone — hand-cleaned `.mutation/`, or a recovery that
+            # got part-way. Overwriting the target with nothing would destroy
+            # content we have no copy of, so leave whatever is there and say so.
+            log(f"WARN: no backup left for {self.target}; current file kept as-is",
+                tag="mutation")
+            return
+        try:
+            self.target.parent.mkdir(parents=True, exist_ok=True)
+            staged = self.target.with_suffix(self.target.suffix + ".rollback-tmp")
+            shutil.copy2(source, staged)
+            os.replace(staged, self.target)
+        except OSError as exc:
+            raise RuntimeError(f"rollback could not restore {self.target}: {exc}") from exc
+
+    def as_journal_record(self) -> dict:
+        return {"target": str(self.target),
+                "backup": str(self.backup) if self.backup else None}
+
+    @classmethod
+    def from_journal_record(cls, record: dict) -> "BackedUpPath":
+        raw = record.get("backup")
+        return cls(target=Path(record["target"]), backup=Path(raw) if raw else None)
+
+
+def _undo_each(paths: Iterable[BackedUpPath]) -> None:
+    """Undo every declared path, or raise on the first one that will not budge.
+
+    Raising rather than continuing is intentional: a half-restored tree that
+    reported success is worse than one that stopped and left its journal behind
+    for `recover_pending` to try again.
+    """
+    for entry in paths:
+        entry.undo()
 
 
 @dataclass
 class Snapshot:
-    """A declared set of paths, backed up, with a journal recording the intent."""
+    """A declared set of paths, copied aside, with a journal recording the intent."""
 
     operation: str
     journal_path: Path
     backup_dir: Path
-    details: dict = field(default_factory=dict)
-    # target -> backup path, or None when the target did not exist (rollback
-    # removes it rather than restoring it).
-    entries: dict[Path, Path | None] = field(default_factory=dict)
+    details: dict[str, object] = field(default_factory=dict)
+    entries: list[BackedUpPath] = field(default_factory=list)
     attempts: int = 0
     committed: bool = False
-    # In-process only, never persisted — see the module docstring on why crash
-    # recovery cannot replay these.
-    _undo: list[Callable[[], None]] = field(default_factory=list, repr=False)
+    # In-process only and never serialized — see the module docstring for why
+    # crash recovery is unable to replay these.
+    _undo_hooks: list[Callable[[], None]] = field(default_factory=list, repr=False)
 
     # ---------- registration ----------
 
     def also_undo(self, fn: Callable[[], None]) -> None:
-        """Register a non-file undo to run on an in-process rollback.
+        """Register a non-file undo, run on an in-process rollback.
 
-        For state that isn't a file — the `state.db` row `commit_page` writes.
-        Runs last-registered-first, after the files are restored.
+        For state that is not a file — the `state.db` row `commit_page` writes.
+        Hooks run in reverse registration order, after the files are back.
         """
-        self._undo.append(fn)
+        self._undo_hooks.append(fn)
 
     # ---------- journal ----------
 
-    def _payload(self, status: str) -> dict:
+    def _journal_document(self, status: str) -> dict:
+        stamped = datetime.datetime.now().replace(microsecond=0).isoformat()
         return {
             "version": JOURNAL_VERSION,
             "operation": self.operation,
             "status": status,
             "attempts": self.attempts,
-            "created_at": _dt.datetime.now().replace(microsecond=0).isoformat(),
+            "created_at": stamped,
             "backup_dir": str(self.backup_dir),
             "details": self.details,
-            "entries": [
-                {"target": str(t), "backup": (str(b) if b else None)}
-                for t, b in self.entries.items()
-            ],
+            "entries": [e.as_journal_record() for e in self.entries],
         }
 
-    def _write(self, status: str) -> None:
-        write_json_atomic(self.journal_path, self._payload(status))
+    def _persist(self, status: str) -> None:
+        write_json_atomic(self.journal_path, self._journal_document(status))
 
     def mark_committed(self) -> None:
-        """The commit point. After this, recovery discards rather than rolls back."""
+        """The commit point. Past here, recovery cleans up instead of undoing."""
         self.committed = True
-        self._write("committed")
+        self._persist(_COMMITTED)
 
     # ---------- outcomes ----------
 
     def discard(self) -> None:
-        """Post-commit cleanup: drop the backups and the journal.
+        """Post-commit cleanup: drop the copies and the journal.
 
-        Best-effort by contract. This runs *after* the commit point, so a
-        failure here means some bytes are left in `.mutation/` — untidy, never
-        incorrect, and never a reason to undo committed work.
+        Best-effort by contract. It runs *after* the commit point, so failing here
+        leaves some bytes in `.mutation/` — untidy, never incorrect, and never a
+        reason to undo work that already landed.
         """
         try:
             shutil.rmtree(self.backup_dir, ignore_errors=True)
             self.journal_path.unlink(missing_ok=True)
-        except OSError as e:
-            log(f"WARN: could not clean up journal {self.journal_path.name}: {e}",
+        except OSError as exc:
+            log(f"WARN: could not clean up journal {self.journal_path.name}: {exc}",
                 tag="mutation")
 
     def rollback(self) -> None:
-        """Restore every declared path, then run the registered undos.
+        """Put every declared path back, then run the registered hooks.
 
-        Raises the first failure after recording the attempt, so the journal
-        survives for the recovery drain to retry.
+        The attempt is recorded before the work starts, so a failure leaves an
+        `active` journal with an incremented count for the recovery drain to pick
+        up rather than a journal that looks untried.
         """
         self.attempts += 1
-        self._write("active")
-        _restore_entries(self.entries)
-        for fn in reversed(self._undo):
+        self._persist(_ACTIVE)
+        _undo_each(self.entries)
+        for hook in reversed(self._undo_hooks):
             try:
-                fn()
-            except Exception as e:  # an undo must not mask the original failure
-                log(f"WARN: rollback undo failed: {e}", tag="mutation")
+                hook()
+            except Exception as exc:   # a hook must not mask the original failure
+                log(f"WARN: rollback undo failed: {exc}", tag="mutation")
         self.discard()
 
 
-def _restore_entries(entries: dict[Path, Path | None]) -> None:
-    """Copy each backup back over its target; remove targets that were created."""
-    for target, backup in entries.items():
-        if backup is None:
-            # Didn't exist before the mutation — a rollback un-creates it.
-            try:
-                Path(target).unlink(missing_ok=True)
-            except OSError as e:
-                raise RuntimeError(f"rollback could not remove {target}: {e}") from e
-            continue
-        src = Path(backup)
-        if not src.exists():
-            # Backup lost (manual cleanup, or a partial recovery). Leave the
-            # target as-is rather than deleting content we cannot restore.
-            log(f"WARN: backup missing for {target}; leaving current file in place",
-                tag="mutation")
-            continue
-        try:
-            dest = Path(target)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            tmp = dest.with_suffix(dest.suffix + ".rollback-tmp")
-            shutil.copy2(src, tmp)
-            os.replace(tmp, dest)
-        except OSError as e:
-            raise RuntimeError(f"rollback could not restore {target}: {e}") from e
-
-
-def _new_journal_paths() -> tuple[Path, Path]:
+def _allocate_journal() -> tuple[Path, Path]:
+    """Reserve a journal file and its sibling backup directory under `.mutation/`."""
     root = mutation_dir()
     root.mkdir(parents=True, exist_ok=True)
-    ident = f"{_dt.datetime.now().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
+    stamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+    ident = f"{stamp}-{uuid.uuid4().hex[:8]}"
     return root / f"{ident}.json", root / ident
 
 
@@ -197,37 +249,39 @@ def snapshot(
     operation: str,
     details: dict | None = None,
 ) -> Snapshot:
-    """Back up `paths` and open a journal. Duplicates and None entries are ignored.
+    """Copy `paths` aside and open a journal. `None` and repeats are ignored.
 
-    Every path is resolved, so two spellings of the same file (a relative and an
-    absolute, or one reached through a symlinked parent) collapse to one entry
-    rather than backing the file up twice and restoring it twice.
+    Each path is resolved first, so two spellings of one file — a relative and an
+    absolute, or one reached through a symlinked parent — collapse to a single
+    entry instead of being backed up twice and restored twice.
     """
-    journal_path, backup_dir = _new_journal_paths()
+    journal_path, backup_dir = _allocate_journal()
     backup_dir.mkdir(parents=True, exist_ok=True)
 
-    entries: dict[Path, Path | None] = {}
-    for i, raw in enumerate(paths):
+    entries: list[BackedUpPath] = []
+    claimed: set[Path] = set()
+    for raw in paths:
         if raw is None:
             continue
         target = Path(raw).resolve()
-        if target in entries:
+        if target in claimed:
             continue
+        claimed.add(target)
         if target.exists():
-            backup = backup_dir / f"{i:03d}-{target.name}"
+            backup = backup_dir / f"{len(entries):03d}-{target.name}"
             shutil.copy2(target, backup)
-            entries[target] = backup
+            entries.append(BackedUpPath(target=target, backup=backup))
         else:
-            entries[target] = None
+            entries.append(BackedUpPath(target=target, backup=None))
 
     snap = Snapshot(
         operation=operation,
         journal_path=journal_path,
         backup_dir=backup_dir,
-        details=details or {},
+        details=dict(details or {}),
         entries=entries,
     )
-    snap._write("active")
+    snap._persist(_ACTIVE)
     return snap
 
 
@@ -244,10 +298,10 @@ def mutation(
             ...                 # do the work
             snap.mark_committed()
 
-    Leaving the block without `mark_committed()` — by exception *or* by an
-    early `return` — rolls everything back. That is deliberate: `promote`
-    returns early on failure, and the shape that makes "forgot to commit"
-    behave like "failed" is the safe one.
+    Leaving the block without `mark_committed()` rolls everything back — whether
+    it left by exception or by an early `return`. That is deliberate: `promote`
+    returns early on failure, and the shape where "forgot to commit" behaves like
+    "failed" is the safe one to get wrong.
 
     A no-op passthrough when `RW_MUTATION_JOURNAL=0`.
     """
@@ -256,7 +310,7 @@ def mutation(
             operation=operation,
             journal_path=Path(os.devnull),
             backup_dir=Path(os.devnull),
-            details=details or {},
+            details=dict(details or {}),
         )
         return
 
@@ -266,9 +320,9 @@ def mutation(
     except BaseException:
         try:
             snap.rollback()
-        except Exception as e:
+        except Exception as exc:
             log(f"ERROR: rollback failed for {operation}; journal retained at "
-                f"{snap.journal_path} — the next ingest will retry it: {e}",
+                f"{snap.journal_path} — the next ingest will retry it: {exc}",
                 tag="mutation")
         raise
     else:
@@ -281,70 +335,77 @@ def mutation(
 # ---------- recovery ----------
 
 def pending_journals() -> list[dict]:
-    """Every journal on disk, parsed. Read-only — safe for `status`.
+    """Every journal currently on disk, parsed. Read-only, so `status` may call it.
 
-    Each dict carries its own `journal_path` so a caller can report or drain it.
+    Each dict carries its own `journal_path` so a caller can report on it or drain
+    it. Unparseable files are skipped rather than raised on: a stray or truncated
+    `.json` must not brick the write paths that drain this.
     """
     root = mutation_dir()
     if not root.is_dir():
         return []
-    out: list[dict] = []
+    found: list[dict] = []
     for path in sorted(root.glob("*.json")):
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            document = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        data["journal_path"] = str(path)
-        out.append(data)
-    return out
+        document["journal_path"] = str(path)
+        found.append(document)
+    return found
+
+
+def _clean_up(journal_path: Path, backup_dir: Path) -> None:
+    shutil.rmtree(backup_dir, ignore_errors=True)
+    journal_path.unlink(missing_ok=True)
 
 
 def recover_pending() -> list[str]:
-    """Drain stale journals. Returns a human-readable line per journal handled.
+    """Drain stale journals. Returns one human-readable line per journal handled.
 
-    `active` rolls back, `committed` is discarded. A journal whose rollback has
-    already failed `MAX_ROLLBACK_ATTEMPTS` times is left alone and reported, so
-    a deterministic failure surfaces instead of being retried forever.
+    `active` is rolled back and `committed` is cleaned up. A journal whose
+    rollback has already failed `MAX_ROLLBACK_ATTEMPTS` times is left untouched
+    and reported, so a standing failure reaches a human instead of being retried
+    forever.
 
-    Called at the start of the write paths (`agent ingest`, `ingest`). Never
-    from a read-only command.
+    Called at the start of the write paths (`agent ingest`, `ingest`), never from
+    a read-only command.
     """
     notes: list[str] = []
-    for data in pending_journals():
-        journal_path = Path(data["journal_path"])
-        status = data.get("status")
-        operation = data.get("operation", "?")
-        backup_dir = Path(data.get("backup_dir", ""))
+    for document in pending_journals():
+        journal_path = Path(document["journal_path"])
+        operation = document.get("operation", "?")
+        backup_dir = Path(document.get("backup_dir", ""))
 
-        if status == "committed":
-            shutil.rmtree(backup_dir, ignore_errors=True)
-            journal_path.unlink(missing_ok=True)
+        if document.get("status") == _COMMITTED:
+            _clean_up(journal_path, backup_dir)
             notes.append(f"discarded committed journal for {operation}")
             continue
 
-        attempts = int(data.get("attempts", 0))
-        if attempts >= MAX_ROLLBACK_ATTEMPTS:
+        already_tried = int(document.get("attempts", 0))
+        if already_tried >= MAX_ROLLBACK_ATTEMPTS:
             notes.append(
-                f"journal for {operation} left in place after {attempts} failed "
+                f"journal for {operation} left in place after {already_tried} failed "
                 f"rollback attempts — inspect {journal_path} by hand"
             )
             continue
 
-        entries = {
-            Path(e["target"]): (Path(e["backup"]) if e.get("backup") else None)
-            for e in data.get("entries", [])
-        }
-        data["attempts"] = attempts + 1
-        data["status"] = "active"
-        write_json_atomic(journal_path, {k: v for k, v in data.items()
-                                         if k != "journal_path"})
+        entries = [BackedUpPath.from_journal_record(r)
+                   for r in document.get("entries", [])]
+
+        # Record this attempt before making it, so a crash mid-rollback still
+        # counts against the cap and cannot loop forever.
+        this_attempt = already_tried + 1
+        document["attempts"] = this_attempt
+        document["status"] = _ACTIVE
+        write_json_atomic(journal_path,
+                          {k: v for k, v in document.items() if k != "journal_path"})
         try:
-            _restore_entries(entries)
-        except Exception as e:
-            notes.append(f"rollback of {operation} failed (attempt {attempts + 1}): {e}")
+            _undo_each(entries)
+        except Exception as exc:
+            notes.append(f"rollback of {operation} failed (attempt {this_attempt}): {exc}")
             continue
-        shutil.rmtree(backup_dir, ignore_errors=True)
-        journal_path.unlink(missing_ok=True)
+        _clean_up(journal_path, backup_dir)
         notes.append(
             f"rolled back interrupted {operation} ({len(entries)} path(s) restored)"
         )

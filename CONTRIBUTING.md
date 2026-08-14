@@ -80,6 +80,17 @@ help, and point the operator at the remediation command.
 `2` environment error (missing index, provider unreachable), `3` internal bug.
 Prefer a `--json` mode on anything an agent might parse.
 
+**Keep modules under 800 lines.** A module an agent can't hold in context is one
+an agent edits blind, so this is a legibility budget rather than a style
+preference — `tests/test_module_size.py` fails the build when a new file crosses
+it. Nine modules predate the gate and are exempted **at their current size** in
+that test's `_GRANDFATHERED` dict, so a listed file may shrink freely but cannot
+grow; a bare exemption list is how `agents/runner.py` reached 1214 lines with
+nothing objecting. Split cohesive groups into focused siblings rather than adding
+an entry — the list is for existing debt, not an escape hatch for new code. When
+a module drops back under the limit, delete its entry (a test insists, because a
+stale exemption is indistinguishable from a passing gate).
+
 ## Content vs framework
 
 `wiki/`, `papers/`, and `inbox/` are **gitignored user content** — someone's
