@@ -298,6 +298,18 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- **Clicking a node in `visualize` threw the whole graph around.** `mousedown`
+  resolved a press to a drag before anything had moved, so the first `mousemove`
+  took the drag branch and floored `alpha` at 0.55 — which on a settled 477-node
+  layout permits ~32px of movement per node per tick, so a few pixels of hand
+  jitter re-annealed the entire graph. `mouseup` then cleared the drag but not
+  `pinned`, leaving the clicked node nailed down for the layout to re-settle
+  around. A press is now provisional until it clears 4px, and the drag path uses a
+  gentler `nudge()` (alpha floor 0.10): conflating the two re-heat levels was the
+  root of it, since `kick()` is for a change that invalidates every position and
+  exactly one node had moved. Verified by driving synthetic events at a settled
+  layout — jittery click 0.550 → 0.000, drag 0.550 → 0.100, selection still works.
+
 - **23 paper pages had no `type:`** and now declare `type: paper`. Each was
   verified paper-shaped first (no `primary_paper`, no `issuer`, not in a
   page-type dir, has a `## Summary`) rather than defaulted, since the failure this
