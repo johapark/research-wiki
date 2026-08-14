@@ -35,6 +35,42 @@ researchwiki db rebuild && researchwiki reindex
   suppresses the guard for the whole run, including any collision you did *not*
   intend.
 
+## Half-landed promote
+
+Trigger: `agent ingest` exited **2** with *"promote did not complete — the paper is PARTIALLY landed"*, or a `--resume` reported inputs **"no longer on disk"**.
+
+Promote runs inside a write-ahead journal (`.mutation/`), so the usual outcome is that nothing landed at all — the rollback already undid it and the exit code is just telling you *why*. The usual cause is a duplicate: `_move_pdf` refuses a stem collision that isn't a preprint→journal upgrade. Fix the cause and re-run; there is normally nothing to clean up.
+
+Check by hand only when one of these is true:
+
+- **`status` still lists an interrupted mutation.** The process died before the rollback finished. The next `agent ingest` drains it automatically; run one, or call the drain directly. A journal reporting 5 failed attempts has given up and needs a look.
+- **`RW_MUTATION_JOURNAL=0` was set.** Journalling was off, so the half-landed state below is real.
+- **The page exists but its DB row doesn't, or vice versa.** File state is journalled; the `state.db` row is not. A crash-recovered rollback removes the page and leaves the row for `db rebuild` to reconcile — run `researchwiki db rebuild`.
+
+In those three cases, check the four things in order:
+
+```bash
+ls wiki/*/<stem>.md                       # 1. page written?
+ls papers/<stem>.pdf inbox/               # 2. which side is the PDF on?
+grep -n "\[\[.*/<stem>\]\]" wiki/index.md # 3. index bullet?
+grep -n "<stem>" wiki/log.md              # 4. log entry?
+```
+
+All four absent → nothing landed; just re-run. A page with no bullet and no log entry is the half-landed shape, and **the page is the thing to remove** — nothing else in the wiki points at it yet:
+
+```bash
+rm wiki/<cat>/<stem>.md
+researchwiki db rebuild                   # drops the claims + papers rows
+```
+
+Then resolve the cause and re-ingest from wherever the PDF actually is:
+
+- **Duplicate** (`papers/<stem>.pdf` already existed) — the honest question is which copy to keep. Same paper → delete the incoming one from `inbox/` and stop. Genuinely different paper on the same stem → see *PDF Management Rules* in `CLAUDE.md` for disambiguation.
+- **Preprint→journal upgrade that wasn't classified as one** — fix the DOI on the existing page first (`researchwiki preprint-check --doi <preprint-doi>`), then re-run.
+- **Anything else** — re-run `researchwiki agent ingest <path-to-pdf>`; note the path is `papers/<stem>.pdf` if the move had already happened.
+
+Batch note: an input the resume calls unresumable is recorded terminal in `checkpoint.json` under `unresumable` and is never re-queued, so finishing it by hand is the only path. `worker_started: true` means the subprocess ran and died mid-promote (check the four things above); `false` means the file left `inbox/` some other way.
+
 ## Override flags
 
 LLM-reconcile is on by default since R3, so most overrides are cold paths now.

@@ -180,7 +180,12 @@ def _run_paper(argv: list[str]) -> int:
         for c in graded[:args.weakest]:
             print(f"    [{c.section}#{c.position}] score={c.top1_score:.2f}")
             print(f"      claim: {c.text[:200]}")
-            print(f"      chunk: {c.supporting_text[:200]}")
+            # `c.section` above is the wiki page's H2; the provenance below is
+            # the PDF's own section and page — different axes, both useful when
+            # deciding whether a weak score is the claim's fault or retrieval's.
+            where = (c.supporting_provenance or "").strip()
+            print(f"      chunk{f' ({where})' if where else ''}: "
+                  f"{c.supporting_text[:200]}")
     return 0
 
 

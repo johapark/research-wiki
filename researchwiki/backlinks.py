@@ -134,6 +134,34 @@ def _drop_none_placeholder(section_body: str) -> str:
     return (out + "\n") if out else ""
 
 
+def remove_related_paper(target_path: Path, stem: str) -> int:
+    """Drop every Related-Papers bullet pointing at `stem`. Returns how many.
+
+    The inverse of `append_related_paper`, for `researchwiki remove`. Matches
+    the same wikilink forms that function treats as "already linked" —
+    `[[category/stem]]`, bare `[[stem]]`, aliased `[[stem|…]]`, and claim
+    anchors `[[stem#slug]]` — because a bullet written in any of them is the
+    same back-link.
+
+    Scoped to *bullet lines* on purpose. A generated back-link is always a
+    bullet; a mention inside a paragraph is prose somebody wrote, and this
+    command does not rewrite prose (see `removal.scan`, which reports those
+    instead). Returns 0 and writes nothing when the file has no such bullet.
+    """
+    if not target_path.exists():
+        return 0
+    text = target_path.read_text(encoding="utf-8")
+    pattern = re.compile(
+        rf"^\s*[-*]\s+.*\[\[(?:[^\]|#/]+/)?{re.escape(stem)}(?:[#|][^\]]*)?\]\].*$\n?",
+        re.MULTILINE,
+    )
+    new_text, n = pattern.subn("", text)
+    if n:
+        from .fsatomic import write_text_atomic
+        write_text_atomic(target_path, new_text)
+    return n
+
+
 def append_related_paper(
     target_path: Path, source_key: str,
     note: str = TOPICAL_NOTE,

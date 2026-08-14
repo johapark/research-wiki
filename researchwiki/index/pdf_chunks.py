@@ -16,6 +16,7 @@ terms in unrelated papers.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,7 +25,13 @@ import numpy as np
 import tantivy
 
 from ..paths import grade_cache_dir, resolve_pdf
-from ..pdf.text import extract_pdf
+from ..pdf.sections import section_for_offset, section_spans
+from ..pdf.text import (
+    PAGE_SEPARATOR,
+    extract_pdf_page_texts,
+    page_for_offset,
+    page_offsets,
+)
 
 
 CHUNK_WORDS = 250
@@ -33,12 +40,48 @@ MAX_PDF_PAGES = 80
 TOPK_DEFAULT = 5
 EMBEDDINGS_FILENAME = "embeddings.npy"
 EMBEDDINGS_META_FILENAME = "embeddings_meta.json"
+INDEX_META_FILENAME = "index_meta.json"
+
+# Bump when the Tantivy schema or the chunking changes. `build_pdf_index`
+# returns early when the index directory exists, so without a recorded version
+# a schema change would silently leave every existing index in place, missing
+# the new fields and reporting no error. Nothing else in `.grade-cache/`
+# carries a format version — `embeddings_meta.json` records the model and dim,
+# which is a different question.
+#   1 — (implicit) chunk_id + text
+#   2 — page_start / page_end / section provenance
+CACHE_VERSION = 2
+
+_WORD_RE = re.compile(r"\S+")
 
 
 @dataclass
 class Chunk:
     chunk_id: int
     text: str
+    # Provenance, all optional: a PDF with no detectable headings yields no
+    # spans, and `None` is the honest answer there. A wrong section label on
+    # displayed evidence is worse than no label.
+    page_start: int | None = None   # 1-based, as the renderer numbers pages
+    page_end: int | None = None     # equal to page_start unless the window spans a break
+    section: str | None = None      # PDF section name, e.g. 'results'
+
+    def provenance(self) -> str:
+        """`§results, p. 7` / `p. 7-8` / `''` — the display form.
+
+        Note this is the *PDF's* section, which is a different axis from the
+        `claims.section` column (that one names the wiki page's H2:
+        key_contributions / results / limitations / methodology).
+        """
+        bits = []
+        if self.section:
+            bits.append(f"§{self.section}")
+        if self.page_start:
+            if self.page_end and self.page_end != self.page_start:
+                bits.append(f"pp. {self.page_start}-{self.page_end}")
+            else:
+                bits.append(f"p. {self.page_start}")
+        return ", ".join(bits)
 
 
 @dataclass
@@ -46,30 +89,73 @@ class RetrievedChunk:
     chunk_id: int
     score: float
     text: str
+    page_start: int | None = None
+    page_end: int | None = None
+    section: str | None = None
+
+    def provenance(self) -> str:
+        """Display form, e.g. `§results, p. 7`. Empty when unlabelled."""
+        return Chunk(
+            chunk_id=self.chunk_id, text=self.text,
+            page_start=self.page_start, page_end=self.page_end,
+            section=self.section,
+        ).provenance()
 
 
-def _chunk_text(text: str, chunk_words: int = CHUNK_WORDS, overlap: int = OVERLAP_WORDS) -> list[Chunk]:
+def _chunk_text(
+    text: str,
+    chunk_words: int = CHUNK_WORDS,
+    overlap: int = OVERLAP_WORDS,
+    *,
+    page_starts: list[int] | None = None,
+    spans: list[tuple[int, int, str]] | None = None,
+) -> list[Chunk]:
     """Sliding-window chunker. Whitespace-split; chunks overlap by `overlap` words.
 
     For dense scientific text, ~250 words ≈ 350 tokens — well under typical
     sentence-encoder context limits (512), with enough surrounding context
     that a single claim's supporting evidence usually fits in one chunk.
+
+    `page_starts` (from `pdf.text.page_offsets`) and `spans` (from
+    `pdf.sections.section_spans`) are both optional. Supplied, each chunk is
+    labelled with the page range it covers and the section its *start* falls
+    in; omitted, the chunk text is unchanged and the labels are None. Both index
+    into the same string this is chunking, which is why `extract_pdf_page_texts`
+    guarantees its join reproduces `extract_pdf` exactly.
+
+    Words are located with a regex rather than `str.split()` so each window
+    knows its character span; the emitted text is still the joined words, so
+    chunk text is byte-identical to what the previous implementation produced.
     """
-    words = text.split()
-    if not words:
+    matches = list(_WORD_RE.finditer(text))
+    if not matches:
         return []
     step = max(1, chunk_words - overlap)
     chunks: list[Chunk] = []
     cid = 0
     i = 0
-    while i < len(words):
-        window = words[i : i + chunk_words]
+    while i < len(matches):
+        window = matches[i : i + chunk_words]
         if len(window) < 30 and chunks:
             # Trailing tail too short to be meaningful; skip
             break
-        chunks.append(Chunk(chunk_id=cid, text=" ".join(window)))
+        start_off, end_off = window[0].start(), window[-1].end()
+        page_start = page_end = None
+        if page_starts:
+            page_start = page_for_offset(page_starts, start_off)
+            page_end = page_for_offset(page_starts, end_off - 1) or page_start
+        chunks.append(Chunk(
+            chunk_id=cid,
+            text=" ".join(m.group() for m in window),
+            page_start=page_start,
+            page_end=page_end,
+            # The start's section, not the end's: a window straddling a
+            # heading belongs to the section it opens in, which is where its
+            # first and most-weighted sentences are.
+            section=section_for_offset(spans, start_off) if spans else None,
+        ))
         cid += 1
-        if i + chunk_words >= len(words):
+        if i + chunk_words >= len(matches):
             break
         i += step
     return chunks
@@ -79,11 +165,31 @@ def _build_schema() -> tantivy.Schema:
     sb = tantivy.SchemaBuilder()
     sb.add_unsigned_field("chunk_id", stored=True, indexed=True)
     sb.add_text_field("text", stored=True, index_option="position")
+    # Provenance: stored for display, not indexed — nothing queries by page or
+    # section, and indexing them would change BM25 term statistics.
+    sb.add_unsigned_field("page_start", stored=True, indexed=False)
+    sb.add_unsigned_field("page_end", stored=True, indexed=False)
+    sb.add_text_field("section", stored=True, index_option="basic")
     return sb.build()
 
 
 def _index_path_for(stem: str) -> Path:
     return grade_cache_dir() / stem
+
+
+def _read_index_version(idx_dir: Path) -> int:
+    """Recorded cache version, 1 for an index written before versioning."""
+    try:
+        meta = json.loads((idx_dir / INDEX_META_FILENAME).read_text(encoding="utf-8"))
+        return int(meta.get("cache_version", 1))
+    except Exception:
+        return 1
+
+
+def _write_index_meta(idx_dir: Path) -> None:
+    (idx_dir / INDEX_META_FILENAME).write_text(
+        json.dumps({"cache_version": CACHE_VERSION}), encoding="utf-8"
+    )
 
 
 def build_pdf_index(
@@ -105,17 +211,24 @@ def build_pdf_index(
                 lives elsewhere (e.g. still in inbox/).
     """
     idx_dir = _index_path_for(stem)
-    if idx_dir.exists() and not force:
+    # A stale-format index is rebuilt, not reused: the early return below is
+    # what would otherwise leave every pre-existing index without the
+    # provenance fields, silently and with no error.
+    stale = idx_dir.exists() and _read_index_version(idx_dir) != CACHE_VERSION
+    if idx_dir.exists() and not force and not stale:
         return idx_dir
-    if idx_dir.exists() and force:
+    if idx_dir.exists():
         shutil.rmtree(idx_dir)
 
     src = Path(pdf_path) if pdf_path is not None else resolve_pdf(stem)
     if not src.exists():
         raise FileNotFoundError(f"PDF not found: {src}")
     pdf_path = src
-    text, _meta = extract_pdf(pdf_path, max_pages=MAX_PDF_PAGES)
-    chunks = _chunk_text(text)
+    pages = extract_pdf_page_texts(pdf_path, max_pages=MAX_PDF_PAGES)
+    text = PAGE_SEPARATOR.join(pages)
+    chunks = _chunk_text(
+        text, page_starts=page_offsets(pages), spans=section_spans(text)
+    )
     if not chunks:
         raise RuntimeError(f"No chunks extracted from {pdf_path}; PDF may be unparseable.")
 
@@ -127,9 +240,18 @@ def build_pdf_index(
         doc = tantivy.Document()
         doc.add_unsigned("chunk_id", ch.chunk_id)
         doc.add_text("text", ch.text)
+        # Tantivy has no null: a page we couldn't place is simply absent from
+        # the document, and `_stored` reads it back as None.
+        if ch.page_start:
+            doc.add_unsigned("page_start", ch.page_start)
+        if ch.page_end:
+            doc.add_unsigned("page_end", ch.page_end)
+        if ch.section:
+            doc.add_text("section", ch.section)
         writer.add_document(doc)
     writer.commit()
     writer.wait_merging_threads()
+    _write_index_meta(idx_dir)
 
     # Embedding cache built alongside the BM25 index. Failures are non-fatal:
     # if the embedding model isn't installed, BM25 retrieval still works and
@@ -212,7 +334,10 @@ def _read_cached_chunk_texts(idx_dir: Path) -> list[str] | None:
 def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT) -> list[RetrievedChunk]:
     """Run a BM25 query against the paper's chunk index. Returns top-k chunks."""
     idx_dir = _index_path_for(stem)
-    if not idx_dir.exists():
+    # `build_pdf_index` also rebuilds a stale-format index, so calling it
+    # whenever the version doesn't match is what backfills provenance onto
+    # indexes written before it existed.
+    if not idx_dir.exists() or _read_index_version(idx_dir) != CACHE_VERSION:
         build_pdf_index(stem)
     index = tantivy.Index.open(str(idx_dir))
     index.reload()
@@ -233,11 +358,19 @@ def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT) -> list[Retrieved
     out: list[RetrievedChunk] = []
     for score, addr in res.hits:
         d = searcher.doc(addr).to_dict()
+
+        def _first(key, cast):
+            vals = d.get(key)
+            return cast(vals[0]) if vals else None
+
         out.append(
             RetrievedChunk(
                 chunk_id=int((d.get("chunk_id") or [0])[0]),
                 score=float(score),
                 text=(d.get("text") or [""])[0],
+                page_start=_first("page_start", int),
+                page_end=_first("page_end", int),
+                section=_first("section", str),
             )
         )
     return out

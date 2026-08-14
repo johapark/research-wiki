@@ -14,6 +14,236 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- **`researchwiki eval triggers`** — check that CLAUDE.md's prompt pointers fire
+  when they should. Each `prompts/*.md` is reachable only through the sentence
+  in CLAUDE.md that gates it, which makes that sentence load-bearing, and nothing
+  tested it across 23 prompt files.
+
+  A generator reads one prompt's gating text *and its body* and writes N requests
+  that should route to it plus N near-misses that shouldn't; a grader then routes
+  each using only the gating text of *every* prompt, so a competing trigger can
+  steal and picking the wrong prompt is observable rather than scored as a pass.
+  Graders run bounded-concurrent, and a grading that errors is excluded from the
+  denominators rather than counted as a failure — without that, one timeout
+  silently depresses a pass rate. `--dry-run` prices the run and spends nothing.
+  The gating text is the enclosing CLAUDE.md section rather than the link's own
+  line, because CLAUDE.md is loaded whole and the link is not always in the
+  sentence stating the trigger. Method adapted from OpenKB's
+  `skill/evaluator.py` (Apache-2.0).
+
+  It shares a command with the existing classifier eval rather than adding a
+  top-level name: **`researchwiki eval classifier`** is the same leave-one-out
+  category evaluation as before, and `eval-classifier` still works as a
+  deprecated alias. The eval family is one command, not two.
+
+- **`lint` reports unreachable prompts** — `orphan_prompts` (a `prompts/*.md`
+  no CLAUDE.md pointer reaches, so the agent has no condition under which it
+  would read it) and `broken_prompt_pointers` (a pointer whose file is missing).
+  The same class of check as `broken_wikilinks`, one layer up. Free and
+  deterministic, so it belongs in the health check that already runs rather than
+  behind the paid eval above. Prompts whose name carries `-system` are exempt:
+  those are LLM system prompts loaded by code through `prompt_lib` and are
+  correctly absent from CLAUDE.md.
+
+- **`researchwiki remove <stem>`** — retract a paper and every generated trace
+  of it. Deleting a page by hand used to strand the PDF, the `index.md` bullet,
+  inbound back-links, `[[stem#slug]]` anchors on synthesis pages, concept
+  spokes, claim-graph edges and four tables' worth of rows; `lint` reported the
+  wreckage and nothing cleaned it up.
+
+  **Generated text is removed, authored text is reported.** Back-link bullets
+  and the catalogue entry were written by `promote`, so they go. A sentence on a
+  synthesis or idea page citing the paper was written by a human and has passed
+  both gates, so it is listed with file and line for the reviewer to resolve —
+  no rewrite rule is safe there, since stripping the citation leaves an
+  unsupported claim and deleting the sentence can remove a conclusion several
+  papers jointly carried. Expect `lint` to report `dangling_claim_anchors` on
+  exactly the listed pages afterwards: that is the to-do queue, not a defect.
+  A concept hub gets both treatments — its generated spoke registry is cleaned
+  (and `concept_span` recomputed), its authored Definition is not.
+
+  Dry run is the default; `--apply` is required to write. `--keep-pdf` retains
+  `papers/{stem}.pdf` when the page is wrong but the paper should be re-ingested.
+  The whole removal runs inside the mutation journal below, so a failure
+  part-way through rolls back rather than half-removing. `log.md` is
+  append-only, so a removal appends an entry rather than editing history.
+
+- **`promote_to_wiki` is transactional.** Its five steps — page write + DB row,
+  PDF move, back-links into N existing pages, `index.md`, `log.md` — were each
+  individually atomic with nothing binding them, so a failure after the PDF move
+  left a paper half-landed. They now run inside a write-ahead journal under
+  `.mutation/` (gitignored): either every step lands or the tree is restored,
+  including back-link targets the mutation had already modified and the inbox
+  PDF the move had already consumed.
+
+  A crash leaves a journal rather than a mess. `researchwiki status` reports it
+  under *Workflow state*; the next `agent ingest` drains it before starting —
+  recovery on the next run rather than a repair command nobody remembers exists.
+  A rollback that fails five times stops retrying and says so instead of
+  spinning on every subsequent run.
+
+  Two things worth knowing. The commit point is explicit, and cleanup runs
+  *after* it, so a failure while discarding backups can never undo committed
+  work. And the transaction spans two storage systems: file state is journalled,
+  the `state.db` row is not. An in-process rollback deletes the row explicitly; a
+  crash-recovered one can't, so it removes the page and leaves the row for the
+  next `db rebuild`, which is the right way round given markdown is canonical and
+  the DB is derived.
+
+  `RW_MUTATION_JOURNAL=0` bypasses journalling entirely — an escape hatch for one
+  release if this interacts badly with something, not a supported mode.
+
+  Adapted from OpenKB's `mutation.py` (Apache-2.0), minus its hardlink backups:
+  those are an optimisation for whole-tree snapshots and break on exactly the
+  cloud-synced volumes `wiki/` and `papers/` tend to live on here. A promote
+  touches a handful of files, so plain copies are fine.
+
+- **PDF chunks carry their page and section.** A claim's `supporting_text` was
+  an anonymous 250-word window — nothing could say it came from §Results, p. 7,
+  which is the first thing a reader wants when deciding whether a weak grade is
+  the claim's fault or retrieval's. `Chunk` and `RetrievedChunk` now carry
+  `page_start` / `page_end` / `section`, and `claims --include-context`,
+  `pdf-search` and `grade --weakest` print the label.
+
+  Note the two `section` axes, which are different things: `claims.section`
+  names the *wiki page's* H2 (key_contributions / results / limitations /
+  methodology), while this one names the *PDF's* own section. Both are useful
+  and neither replaces the other.
+
+  Labels are omitted rather than guessed. A paper with no detectable headings
+  gets `None`, because a wrong section on displayed evidence is worse than no
+  section. The `supporting_provenance` column is likewise blank on claims
+  graded before this existed; they fill in on the next `grade`.
+
+  Two supporting changes worth knowing about. `pdf.text.extract_pdf_page_texts`
+  returns per-page text whose join reproduces `extract_pdf` byte for byte —
+  the invariant page offsets are measured against, pinned by a test.
+  `pdf.sections.section_spans` returns the segmentation `anchor_sections` had
+  always computed internally and discarded, so the boundaries used for labelling
+  and the text used for claim extraction cannot drift apart.
+
+- `.grade-cache/` indexes now record a `cache_version`. `build_pdf_index`
+  returns early when the directory exists, so without one this release's schema
+  change would have left every existing index in place — missing the new fields,
+  reporting no error. A version mismatch rebuilds instead. Expect a one-time
+  rebuild of the per-paper chunk indexes (and their embeddings) on first use
+  after upgrading: a few minutes across a ~100-paper corpus.
+
+- **`researchwiki figures <stem>`** — list a paper's figure and table captions;
+  render one page when a question actually turns on it. Rule 3 tooling for the
+  case `pdf-search` can't serve, where the passage says "see Fig. 4" and Fig. 4
+  is where the number lives.
+
+  Listing is free and is the default mode — captions carry the quantitative
+  results often enough to answer the question outright, which is why
+  `sections.py` extracts them for the claim pipeline in the first place.
+  `--figure N` (or `--page N`, the escape hatch when a caption isn't detected)
+  renders one page to `.figures-cache/{stem}/`, gitignored and safe to delete.
+  More than one page needs an explicit `--pages`: rendering is free local
+  compute, but reading a PNG costs context in proportion to its pixel area.
+
+  Rendering, not object extraction, because a PDF image object is a *placed
+  raster* — the vector paths that every matplotlib/R/Illustrator plot is made of
+  are invisible to an image-object walk in any library. Measured over 12 random
+  corpus papers: 498 image objects against 73,294 path objects.
+
+  No new dependency: pypdfium2 and numpy were already required, and PNG
+  encoding is ~30 lines of stdlib `zlib`+`struct` rather than pulling in Pillow
+  for `PdfBitmap.to_pil()`. Nothing runs at ingest, nothing is backfilled, and
+  no page field or `lint` check was added.
+
+  Caption detection spans the separator styles the corpus actually uses —
+  `Fig. 1 | T` (Nature), `Figure 1: T` (preprints), `Fig 1. T` (PLOS),
+  `Fig. 1 T` (BMC, none at all) and `Figure 1- T` / `Figure 2 - T`
+  (accepted manuscripts). Validated across all 115 corpus PDFs plus the five
+  bundled benchmark fixtures: 1,108 captions, no body-prose false positives.
+
+  A caption is not always on the same page as its figure, and two layouts in
+  this corpus put them apart: accepted manuscripts that collect every caption
+  onto one page with the plates a few pages later (`fonseca-2026`), and
+  preprints that run the whole manuscript and append every plate at the end
+  (`aygun-2026` — legends p15-17 and p30-31, plates p34-44). Rendering the
+  caption page shows text and no figure.
+
+  Handled in two steps. Where the plate prints the figure label as well — as
+  appended Extended Data plates usually do — the label's later occurrence is
+  preferred over its first, so `--figure "ed 1"` renders the plate rather than
+  the legend. That is evidence rather than a guess: the destination page
+  carries the same label. Where no repeat exists, the command says the page it
+  is about to render has no artwork and names the pages that do, without
+  rendering them.
+
+  Artwork is measured as **fraction of page area covered**, not object count.
+  Counting objects gets it wrong in both directions: a page holding one
+  full-page raster figure has a single image object, while a plain text page
+  with a header rule and a logo has two. Across this corpus, caption-only and
+  prose pages measure ~1.5% while every real figure page ran 15-98%. Tables are
+  exempt from the check entirely — a table is text with rules, so low coverage
+  on its page is correct rather than a symptom.
+
+### Fixed
+
+- **`eval classifier` reported 0% abstention on runs that abstained.** `other`
+  is both a real content category and the abstention bucket, and
+  `suggest_category_llm` expresses "I don't know" by returning
+  `category="other"`. The eval counted an abstention only when the classifier
+  returned `None` at all, so every abstain-to-`other` was recorded as an
+  ordinary prediction — a number whose label did not describe what it measured.
+
+  `Suggestion.abstained` now carries the decision the classifier already made,
+  and the report separates two things that were conflated. **Placement** is
+  where the paper ends up on disk: an abstention still files it under `other`,
+  so it stays in the confusion matrix under `other` rather than being hidden,
+  because hiding it would under-report how `other` fills up. **Commitment** is
+  whether the classifier named a category or declined. An abstention onto a
+  genuinely-`other` paper is correct placement *and* a declined commitment at
+  once, which one counter could not express.
+
+  Per-category output now also notes how much of a category's predicted volume
+  arrived by abstention — the number that says whether `other` is a judgement or
+  a shrug. And the confidence column is labelled as the classifier's own
+  self-report, since `suggest_category` is LLM-first and the figure is not a
+  neighbour-vote share.
+
+- **A promote that didn't complete reported success.** `promote_to_wiki` is five
+  multi-file steps with no transaction binding them — page write + DB commit → PDF
+  move → back-links → `index.md` → `log.md` — and returns `promoted=False` rather
+  than raising when a step after the page write fails. Nothing read that flag: the
+  only `.promoted` reads in the package were `gate.promoted`, a different object.
+  Execution fell through to `decision = "committed-to-wiki"`.
+
+  This was reachable without a crash. `_move_pdf` refuses a stem collision that
+  isn't a preprint→journal upgrade, i.e. **any duplicate PDF in a batch**, which
+  left a page on disk and in `state.db` with the PDF still in `inbox/`, no
+  back-links, no index bullet and no log entry — while the process exited 0 and the
+  checkpoint recorded `completed`. The warning did reach the log; the exit code was
+  what lied.
+
+  The commit phase now records a `promote-failed` iteration and raises
+  `PromoteFailed`, which the CLI maps to exit **2** (retryable — deleting the
+  duplicate makes the retry work) with an inspection checklist and no stack trace.
+
+- **`--resume` re-queued inputs whose PDF had already moved.** The batch checkpoint
+  is only written once a worker subprocess returns, so a worker that died
+  mid-promote recorded nothing, and `resume_batch` re-queued its input path by
+  name — a path `_move_pdf` had already `shutil.move`d out of `inbox/`. The re-run
+  was dead on arrival and the half-landed paper was never repaired.
+
+  Such inputs are now classified `unresumable` in `checkpoint.json`, reported with
+  what to check, and never re-queued. Whether the worker ever started is recovered
+  from the existence of its log file — `_worker` opens that before
+  `subprocess.run`, so no new bookkeeping was needed — which distinguishes "died
+  mid-promote" from "the user moved the file". The check also covers retryable
+  (exit 2) failures, whose exit code says retry but whose input is gone.
+
+### Changed
+
+- A batch containing a duplicate PDF now exits non-zero where it previously exited
+  0. Same for a resume that finds an input no longer on disk. Wrapper scripts that
+  branch on the exit status will see this.
+
 ## [0.3.1] - 2026-08-13
 
 ### Added

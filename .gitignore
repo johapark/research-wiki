@@ -60,6 +60,8 @@ config/models.yaml
 .grade-cache
 .semantic-cache
 .claim-graph
+.figures-cache
+.mutation
 .evolve-cache
 .agent-output
 .llm-relay

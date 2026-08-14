@@ -235,6 +235,48 @@ def extract_abstract(text: str, max_chars: int = 4000) -> str:
     return trimmed[:max_chars]
 
 
+def section_spans(text: str) -> list[tuple[int, int, str]]:
+    """`(start, end, name)` for each anchored section, in document order.
+
+    The segmentation `anchor_sections` has always computed internally, now
+    returned rather than discarded — `index/pdf_chunks` needs the boundaries
+    (to label a chunk with the section it fell in) while `anchor_sections`
+    needs the bounded text. One function computes it so the two cannot drift.
+
+    First match per name wins, matching the long-standing behaviour: a paper
+    heading both "Results" and "Experiments" anchors on whichever comes first,
+    and a running header repeating "Methods" on every page doesn't restart the
+    section. Each span runs to the next anchored heading, so unanchored prose
+    before the first heading belongs to no section.
+    """
+    positions: list[tuple[int, str]] = []
+    for name, pat in SECTION_PATTERNS:
+        for m in pat.finditer(text):
+            positions.append((m.start(), name))
+    if not positions:
+        return []
+    positions.sort()
+    seen: set[str] = set()
+    ordered: list[tuple[int, str]] = []
+    for pos, name in positions:
+        if name not in seen:
+            seen.add(name)
+            ordered.append((pos, name))
+    ordered.sort()
+    return [
+        (pos, ordered[i + 1][0] if i + 1 < len(ordered) else len(text), name)
+        for i, (pos, name) in enumerate(ordered)
+    ]
+
+
+def section_for_offset(spans: list[tuple[int, int, str]], offset: int) -> str | None:
+    """Name of the section containing `offset`, or None if it precedes them all."""
+    for start, end, name in spans:
+        if start <= offset < end:
+            return name
+    return None
+
+
 def anchor_sections(text: str, max_chars: int = 4000) -> dict[str, str]:
     """Find section headings, extract bounded text between them.
 
@@ -246,23 +288,9 @@ def anchor_sections(text: str, max_chars: int = 4000) -> dict[str, str]:
     headings while abstract / caption extraction still surfaces useful
     structure.
     """
-    positions: list[tuple[int, str]] = []
-    for name, pat in SECTION_PATTERNS:
-        for m in pat.finditer(text):
-            positions.append((m.start(), name))
     out: dict[str, str] = {}
-    if positions:
-        positions.sort()
-        seen: dict[str, int] = {}
-        ordered: list[tuple[int, str]] = []
-        for pos, name in positions:
-            if name not in seen:
-                seen[name] = pos
-                ordered.append((pos, name))
-        ordered.sort()
-        for idx, (pos, name) in enumerate(ordered):
-            end = ordered[idx + 1][0] if idx + 1 < len(ordered) else len(text)
-            out[name] = text[pos:end][:max_chars].strip()
+    for start, end, name in section_spans(text):
+        out[name] = text[start:end][:max_chars].strip()
 
     # Abstract: explicit-header detection runs through SECTION_PATTERNS, but
     # the resulting slice starts at the word "Abstract" itself — strip that

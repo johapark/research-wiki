@@ -233,6 +233,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         _safe_add_column(conn, "ALTER TABLE claims ADD COLUMN embed_model TEXT")
     if "supporting_text" not in cols:
         _safe_add_column(conn, "ALTER TABLE claims ADD COLUMN supporting_text TEXT")
+    if "supporting_provenance" not in cols:
+        _safe_add_column(
+            conn, "ALTER TABLE claims ADD COLUMN supporting_provenance TEXT"
+        )
     if "claim_slug" not in cols:
         # New rows get their slug computed at upsert time; existing rows are
         # backfilled on the next `db rebuild`.

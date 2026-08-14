@@ -61,6 +61,7 @@ class ClaimScore:
     top3_mean: float
     top1_chunk_id: int
     supporting_text: str
+    supporting_provenance: str     # where in the PDF that chunk sits, e.g. '§results, p. 7'
     numeric_tokens: list[str]
     numeric_unmatched: list[str]   # numeric tokens not found anywhere in the PDF
     semantic_score: float | None   # max cosine similarity over top-K chunks (bi-encoder); None if model unavailable
@@ -107,6 +108,7 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
             top3_mean=0.0,
             top1_chunk_id=-1,
             supporting_text="",
+            supporting_provenance="",
             numeric_tokens=[],
             numeric_unmatched=[],
             semantic_score=None,
@@ -125,6 +127,7 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
             top3_mean=0.0,
             top1_chunk_id=-1,
             supporting_text="",
+            supporting_provenance="",
             numeric_tokens=[],
             numeric_unmatched=[],
             semantic_score=None,
@@ -179,6 +182,7 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
         top3_mean=top3_mean,
         top1_chunk_id=top1.chunk_id,
         supporting_text=top1.text[:500],
+        supporting_provenance=top1.provenance(),
         numeric_tokens=nums,
         numeric_unmatched=unmatched,
         semantic_score=semantic_score,
@@ -217,6 +221,7 @@ def _persist_scores(stem: str, scored: list[ClaimScore], *, embed_model: str | N
                     bm25_top3_mean = ?,
                     bm25_top1_chunk_id = ?,
                     supporting_text = ?,
+                    supporting_provenance = ?,
                     semantic_score = ?,
                     embed_model = ?,
                     negation_mismatch = ?,
@@ -230,6 +235,7 @@ def _persist_scores(stem: str, scored: list[ClaimScore], *, embed_model: str | N
                     s.top3_mean if s.graded else None,
                     s.top1_chunk_id if s.graded and s.top1_chunk_id >= 0 else None,
                     s.supporting_text if s.graded and s.supporting_text else None,
+                    s.supporting_provenance if s.graded and s.supporting_provenance else None,
                     s.semantic_score,
                     embed_model if s.semantic_score is not None else None,
                     1 if s.negation_mismatch else 0,

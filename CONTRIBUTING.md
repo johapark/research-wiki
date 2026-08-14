@@ -105,6 +105,15 @@ aren't redistributable.
 - **`CHANGELOG.md`** — add user-visible changes under `## [Unreleased]` as you go,
   not in a scramble at release time. Internal refactors that change nothing for a
   user don't need an entry.
+- **`prompts/*.md` + their CLAUDE.md pointers** — a trigger-gated procedure is
+  only reachable through the sentence in CLAUDE.md that gates it, so a prompt
+  whose trigger doesn't fire may as well not exist. After editing a trigger (or
+  adding a prompt), run `researchwiki eval triggers --slug <slug>`: it generates
+  should-fire / should-not-fire requests, routes them using only the triggers,
+  and names the misses. `--dry-run` prices the run and spends nothing.
+  Costs tokens, so it's on-demand — not part of `pytest`. The free half (a prompt
+  no pointer reaches, a pointer with no file) is reported by `researchwiki lint`
+  as `orphan_prompts` / `broken_prompt_pointers`.
 
 ## Commits and PRs
 

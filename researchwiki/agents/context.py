@@ -59,6 +59,39 @@ class StemRenameRefused(RuntimeError):
         )
 
 
+class PromoteFailed(RuntimeError):
+    """Raised when `promote_to_wiki` returned `promoted=False`.
+
+    Promote is five multi-file steps (page write + DB commit → PDF move →
+    back-links → index.md → log.md) with no transaction binding them. When a
+    step after the page write fails — in practice `_move_pdf` refusing a stem
+    collision that isn't a journal upgrade — the page and its DB row are
+    already on disk while the PDF, back-links, index bullet and log entry are
+    not.
+
+    Before this existed the caller never read `PromotionResult.promoted`, so
+    that half-landed state was recorded as `committed-to-wiki` and the process
+    exited 0: a duplicate PDF in a batch reported success. The exception is
+    what makes the exit code tell the truth.
+
+    Carries what actually landed so the CLI handler can print an inspection
+    checklist rather than a stack trace.
+    """
+
+    def __init__(
+        self,
+        *,
+        stem: str | None,
+        page_path: Path | None,
+        warnings: list[str] | None = None,
+    ) -> None:
+        self.stem = stem
+        self.page_path = page_path
+        self.warnings = list(warnings or [])
+        detail = "; ".join(self.warnings) or "no reason recorded"
+        super().__init__(f"promote did not complete for stem '{stem}': {detail}")
+
+
 @dataclass
 class Context:
     """Mutable state passed through every phase of one ingest attempt."""

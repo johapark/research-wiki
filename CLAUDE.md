@@ -334,6 +334,8 @@ researchwiki agent ingest --resume .ingest/batch-<ts>/          # resume after a
 
 **Commentary guard.** `agent ingest` refuses to auto-promote a commentary-shaped PDF as `type: paper`: a strong masthead label (`Research Highlight`, `News & Views`) fires alone; otherwise `page_count == 1` **and** Crossref `reference-count == 0`, or a line-anchored `Editorial`/`Comment` plus one structural signal. Page lands in `.agent-output/` typed `commentary`, fired signals named in the gate reason and its frontmatter; `--auto-promote` overrides but still writes `type: commentary`. Unlike other gate failures this one is **not** DEBUG-repairable — no rewrite of the prose changes what the PDF is. Cost is near-zero: the Crossref lookup is gated on a local pre-trigger that fires on ~3% of PDFs, so the common path adds no network call. See `researchwiki/agents/commentary.py` and Page Types §7. The digest path has no guard — check the PDF's masthead yourself.
 
+**Promote is transactional.** Its five steps (page + DB row → PDF move → back-links → `index.md` → `log.md`) run inside a write-ahead journal under `.mutation/`, so a failure rolls the whole tree back rather than half-landing a paper. A failure still exits **2** naming the cause, and `--resume` records an input whose PDF already moved as `unresumable` rather than re-queueing a vanished path. A crash mid-promote leaves a journal: `status` reports it, the next `agent ingest` drains it automatically, and only a rollback that fails 5× needs hands ([`prompts/recovery.md` § Half-landed promote](./prompts/recovery.md#half-landed-promote)). `RW_MUTATION_JOURNAL=0` bypasses journalling — escape hatch, not a mode. One asymmetry to know: file state is journalled, the `state.db` row is not, so a *crash*-recovered rollback removes the page and leaves the row for the next `db rebuild`.
+
 **Digest-path fallback — `researchwiki ingest`** — recovery, unextractable PDFs, special page types, custom-voice cases. Workflow + page-contract template in [`prompts/ingest-digest.md`](./prompts/ingest-digest.md).
 
 #### After ingest (both paths)
@@ -394,6 +396,10 @@ For a bulk import use `migrate` (above), which runs these for you in the right o
 
 When `lint --json` flags `missing_doi`/`stem_year_drift`/`unknown-` stem or agent landed bad metadata: re-ingest with overrides (not YAML-patching). Full workflow in [`prompts/recovery.md`](./prompts/recovery.md).
 
+### Remove — retract a paper
+
+Trigger: ingested in error, retracted upstream, superseded under a different stem, or a mis-typed commentary. `researchwiki remove <stem>` (dry run by default; `--apply` writes, `--keep-pdf` leaves the PDF re-ingestable). Removes the page, PDF, caches, back-link bullets, `index.md` entry, concept spokes and DB rows; **reports but never edits** authored `[[stem#slug]]` / footnote citations on synthesis + idea + concept pages — expect `dangling_claim_anchors` on exactly those pages afterwards, which is the to-do queue, not a defect. Runs inside the mutation journal. Full procedure in [`prompts/remove-paper.md`](./prompts/remove-paper.md). **Not** for re-ingesting with corrected metadata — that's `prompts/recovery.md`.
+
 ### Recategorize — move a paper to a different category
 
 Follow [`prompts/recategorize.md`](./prompts/recategorize.md). Directory is canonical (`db rebuild` ignores YAML `category:`); procedure repoints inbound links, updates YAML, verifies via `lint`.
@@ -407,7 +413,7 @@ When asked to benchmark/test an LLM by ingesting a `benchmark-fixtures/` paper: 
 1. Answer from `wiki/` first. `researchwiki claims "<topic>"` is the **first stop** for factual claims (pre-graded, BM25+semantic-scored). Each hit prints its `[[stem#claim_slug]]` citation form — copy that directly into prose. `researchwiki search` for page-level discovery.
 
    **Structural/bibliometric questions go to the DB.** Corpus counts/filters — "how many cgt papers from 2024?", "which lack a DOI?", "everything in *Nature*" — via `researchwiki db papers [--year/--category/--page-type/--no-doi/--venue/--author/--status] [--count] [--json]` or `researchwiki db query "SELECT …"` for ad-hoc. Ingest telemetry (model quality/cost, hardest sections, token spend) via `researchwiki insights`.
-2. Insufficient (Rule 3): re-read PDFs; update paper pages if worth keeping.
+2. Insufficient (Rule 3): re-read PDFs; update paper pages if worth keeping. `researchwiki pdf-search <stem> "<query>"` for a raw passage. When the evidence is *in a figure* — the passage says "see Fig. 4" and Fig. 4 is where the number lives — `researchwiki figures <stem>` lists captions (free, and often answers it), and `--figure N` renders that one page to `.figures-cache/` for you to `Read`. Render one page, only when the caption doesn't settle it: the PNG costs context in proportion to its pixel area.
 3. No paper covers it (Rule 4): say so.
 4. Cite facts with `[[wikilink]]`; mention sections in prose.
 5. Non-trivial cross-paper → create a synthesis page. **This is how the wiki compounds.**
@@ -419,7 +425,7 @@ When asked to benchmark/test an LLM by ingesting a `benchmark-fixtures/` paper: 
 | "How does A compare to B?" | `wiki/synthesis/{a-vs-b}.md` |
 | "Trajectory of field F?" | `wiki/synthesis/{f-trajectory}.md` |
 
-Use `researchwiki synthesize --title "…" --topic-seed "…" --papers <stems>` to scaffold. With `--topic-seed` + `--papers` set, the stub's *Evidence from the wiki* section pre-populates with `claim_lookup` hits and each paper's claims. `researchwiki claims --by-stem <stem>` dumps one paper's citable surface (`--include-context` adds source-PDF chunks).
+Use `researchwiki synthesize --title "…" --topic-seed "…" --papers <stems>` to scaffold. With `--topic-seed` + `--papers` set, the stub's *Evidence from the wiki* section pre-populates with `claim_lookup` hits and each paper's claims. `researchwiki claims --by-stem <stem>` dumps one paper's citable surface (`--include-context` adds source-PDF chunks, each tagged with where in the PDF it sits — `§results, p. 7`; blank on claims graded before that existed, filled on the next `grade`).
 
 After authoring, run both gates (both exit 0): `check-grounding` (structural) + `grade synthesis` (fidelity). Then `check-coverage` (advisory recall).
 

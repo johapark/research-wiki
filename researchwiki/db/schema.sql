@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS claims (
     bm25_top3_mean       REAL,
     bm25_top1_chunk_id   INTEGER,
     supporting_text      TEXT,         -- verbatim text of the bm25_top1 chunk (≤500 chars). Cached source context for the claim — surfaces in `claims --by-stem` and is read by the cross-paper contradiction judge so it sees the experimental setting alongside the bare claim.
+    supporting_provenance TEXT,        -- where in the PDF that chunk sits, e.g. '§results, p. 7'. Display-only. NOTE this is the *PDF's* section, a different axis from the `section` column above, which names the wiki page's H2 (key_contributions / results / limitations / methodology).
     semantic_score       REAL,         -- max cosine similarity over top-K chunks (bi-encoder)
     embed_model          TEXT,         -- bi-encoder identifier (e.g. 'BAAI/bge-small-en-v1.5'); NULL if semantic skipped
     negation_mismatch    INTEGER,      -- 0/1; deterministic negation parity check

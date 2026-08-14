@@ -186,6 +186,17 @@ def ingest_dir() -> Path:
     return wiki_root() / ".ingest"
 
 
+def mutation_dir() -> Path:
+    """Write-ahead journals + backups for multi-file mutations (`.mutation/`).
+
+    Not under `wiki/`: a journal isn't wiki content, and `wiki/` is commonly a
+    symlink into a synced vault. Gitignored. Normally empty — a directory with
+    contents means a mutation was interrupted, and the next ingest drains it
+    (`researchwiki.mutation.recover_pending`).
+    """
+    return wiki_root() / ".mutation"
+
+
 def evolve_cache_dir() -> Path:
     """Derived cache for memory_evolve's judged-pair ledger (`.evolve-cache/`).
 
@@ -220,6 +231,17 @@ def grade_cache_dir() -> Path:
     """Per-PDF Tantivy chunk indexes for the coverage grader.
     Each paper gets its own subdirectory: .grade-cache/{stem}/."""
     return wiki_root() / ".grade-cache"
+
+
+def figures_cache_dir() -> Path:
+    """Rendered figure pages, per paper: `.figures-cache/{stem}/p{N}@{dpi}.png`.
+
+    A cache in the strict sense — nothing writes here until someone asks for a
+    figure, and a re-render costs ~0.03 s, so `rm -rf` is always safe. Local and
+    gitignored rather than beside the PDF, because `papers/` is commonly a
+    symlink into a synced vault and these are regenerable bytes.
+    """
+    return wiki_root() / ".figures-cache"
 
 
 def semantic_cache_dir() -> Path:

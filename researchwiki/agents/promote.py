@@ -32,6 +32,7 @@ from pathlib import Path
 
 from .. import backlinks as _bl
 from ..fsatomic import write_text_atomic
+from ..mutation import mutation as _mutation
 from ..paths import inbox_dir, papers_dir, wiki_dir
 from .commentary import gate_reason as commentary_gate_reason
 
@@ -747,7 +748,13 @@ def promote_to_wiki(
     keywords: list[str] | None = None,
     author_model: str | None = None,
 ) -> PromotionResult:
-    """Move PDF + write wiki page + add back-links + update index/log."""
+    """Move PDF + write wiki page + add back-links + update index/log.
+
+    All-or-nothing. The five steps below touch a page, a PDF, N back-link
+    targets, `index.md` and `log.md`; a failure part-way through used to leave
+    the paper half-landed. They now run inside a `mutation` journal, so either
+    every step lands or the tree is restored (see `researchwiki/mutation.py`).
+    """
     res = PromotionResult(promoted=True)
 
     # Category resolution.
@@ -760,39 +767,112 @@ def promote_to_wiki(
     category = cat_suggestion or "other"
     res.category = category
 
-    # Write the wiki page BEFORE moving the PDF. The frontmatter's pdf_path is
-    # computed from the stem (papers/{stem}.pdf), not from the move, so the page
-    # can be written first — and doing so keeps the source PDF in inbox/ until
-    # the page is durably committed. A failure here therefore leaves the paper
-    # fully re-ingestable (batch --resume re-runs the still-present inbox PDF)
-    # instead of stranding a moved PDF with no page.
     target_dir = wiki_dir() / category
     target_dir.mkdir(parents=True, exist_ok=True)
     page_path = target_dir / f"{stem}.md"
-    full_page = _build_frontmatter(
-        metadata, stem, category, draft_text,
-        short_name=short_name,
-        hook=hook,
-        category_strength=cat_strength,
-        keywords=keywords,
-        author_model=author_model,
+
+    # Every path the steps below can write, declared before any of them runs.
+    # Computable up front because the back-link targets come from candidates
+    # that were verified before promote was called — that is what makes the
+    # whole operation snapshottable.
+    touched = _promote_paths(
+        page_path=page_path,
+        stem=stem,
+        source_pdf_path=source_pdf_path,
+        candidates=candidates,
     )
-    write_text_atomic(page_path, full_page)
-    from ..wiki import commit_page as _commit_page
-    _commit_page(page_path)
-    res.wiki_path = page_path
 
-    # Move/copy PDF only after the page is committed.
-    try:
-        res.pdf_path, res.pdf_upgrade = _move_pdf(
-            source_pdf_path, stem, new_doi=metadata.get("doi"),
+    with _mutation(
+        touched,
+        operation="promote",
+        details={"stem": stem, "category": category},
+    ) as snap:
+        # Write the wiki page BEFORE moving the PDF. The frontmatter's pdf_path
+        # is computed from the stem (papers/{stem}.pdf), not from the move, so
+        # the page can be written first — and doing so keeps the source PDF in
+        # inbox/ until the page is durably committed.
+        full_page = _build_frontmatter(
+            metadata, stem, category, draft_text,
+            short_name=short_name,
+            hook=hook,
+            category_strength=cat_strength,
+            keywords=keywords,
+            author_model=author_model,
         )
-    except Exception as e:
-        res.warnings.append(f"PDF move/copy failed: {e}")
-        res.promoted = False
-        return res
+        write_text_atomic(page_path, full_page)
+        from ..wiki import commit_page as _commit_page
+        _commit_page(page_path)
+        # The one place this transaction spans two storage systems. The row is
+        # not in the file snapshot — SQLite isn't snapshotted here — so an
+        # in-process rollback deletes it explicitly. A *crash*-recovered
+        # rollback can't run this (nothing persists the callback), which is
+        # why markdown stays canonical: the page is removed and the next
+        # `db rebuild` reconciles the orphaned row.
+        snap.also_undo(lambda: _delete_db_row(stem))
+        res.wiki_path = page_path
 
-    # Back-links.
+        # Move/copy PDF only after the page is committed.
+        try:
+            res.pdf_path, res.pdf_upgrade = _move_pdf(
+                source_pdf_path, stem, new_doi=metadata.get("doi"),
+            )
+        except Exception as e:
+            res.warnings.append(f"PDF move/copy failed: {e}")
+            res.promoted = False
+            # Leaving the block without `mark_committed()` rolls everything
+            # back, so this early return un-writes the page and its DB row
+            # rather than stranding them.
+            return res
+
+        _finish_promote(
+            res=res, stem=stem, metadata=metadata, category=category,
+            candidates=candidates, page_path=page_path, attempt_id=attempt_id,
+            hook=hook, short_name=short_name,
+        )
+        snap.mark_committed()
+
+    return res
+
+
+def _delete_db_row(stem: str) -> None:
+    """Undo `commit_page`'s upsert. Best-effort, like `commit_page` itself."""
+    try:
+        from ..db import delete_page as _delete
+        _delete(stem)
+    except Exception as e:
+        from ..log import log as _log
+        _log(f"WARN: could not remove db row for {stem} during rollback: {e}",
+             tag="promote")
+
+
+def _promote_paths(
+    *,
+    page_path: Path,
+    stem: str,
+    source_pdf_path: Path,
+    candidates: list,
+) -> list[Path]:
+    """Every path `promote_to_wiki` may write. Order is irrelevant; duplicates
+    and non-existent entries are handled by `mutation.snapshot`."""
+    from ..paths import index_path as _index_path, log_path as _log_path
+
+    paths: list[Path] = [
+        page_path,
+        papers_dir() / f"{stem}.pdf",
+        Path(source_pdf_path),        # the move empties this; restore un-moves it
+        _index_path(),
+        _log_path(),
+    ]
+    paths += [wiki_dir() / f"{c.wikilink}.md" for c in candidates]
+    return paths
+
+
+def _finish_promote(
+    *, res, stem, metadata, category, candidates, page_path, attempt_id,
+    hook, short_name,
+) -> None:
+    """Steps 3-5: back-links, index bullet, log entry. Extracted so the
+    transactional body above reads as the sequence it is."""
     added, skipped = _append_backlinks(
         candidates=candidates,
         source_category=category,
@@ -838,5 +918,3 @@ def promote_to_wiki(
         attempt_id=attempt_id,
         gates_passed=True,
     )
-
-    return res

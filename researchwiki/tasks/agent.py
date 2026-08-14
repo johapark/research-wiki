@@ -26,7 +26,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from ..agents.runner import ReconcileFailed, StemRenameRefused, run_ingest
+from ..agents.runner import PromoteFailed, ReconcileFailed, StemRenameRefused, run_ingest
 from ..db.iterations import read_attempt
 from ..log import log
 
@@ -110,6 +110,20 @@ def _batch_passthrough_args(args) -> list[str]:
     if not args.llm_reconcile:
         out.append("--no-llm-reconcile")
     return out
+
+
+def _drain_pending_mutations() -> None:
+    """Roll back any mutation interrupted by an earlier crash, before starting.
+
+    Runs on the write paths only. A read-only command must never mutate, so
+    `status` reports pending journals instead (see `mutation.pending_journals`).
+    """
+    try:
+        from ..mutation import recover_pending
+        for note in recover_pending():
+            print(f"researchwiki: recovery — {note}", file=sys.stderr)
+    except Exception as e:  # recovery must never block the run it precedes
+        print(f"researchwiki: recovery pass failed: {e}", file=sys.stderr)
 
 
 def _cmd_ingest(args) -> int:
@@ -198,6 +212,8 @@ def _cmd_ingest(args) -> int:
     elif args.force_sandbox:
         promote_mode = "never"
 
+    _drain_pending_mutations()
+
     try:
         ctx = run_ingest(
             pdf,
@@ -268,6 +284,39 @@ def _cmd_ingest(args) -> int:
         print(
             "       or pass --allow-rename if the rename is intentional "
             "(prior page will be moved).",
+            file=sys.stderr,
+        )
+        return 2
+    except PromoteFailed as e:
+        # Known-failure mode: the wiki page landed but a later promote step
+        # didn't. Print exactly what is on disk so the half-landed state can be
+        # finished or undone by hand — no stack trace.
+        print(
+            "researchwiki agent ingest: promote did not complete — the paper is "
+            "PARTIALLY landed.",
+            file=sys.stderr,
+        )
+        print(f"  stem: {e.stem}", file=sys.stderr)
+        for w in e.warnings:
+            print(f"  cause: {w}", file=sys.stderr)
+        print("  on disk:", file=sys.stderr)
+        print(
+            f"    wiki page:  {e.page_path or '(not written)'}"
+            f"{'  ← written, plus its claims row' if e.page_path else ''}",
+            file=sys.stderr,
+        )
+        print(
+            "    PDF:        still in inbox/ (the move is what failed, in the "
+            "common case)",
+            file=sys.stderr,
+        )
+        print(
+            "    NOT done:   back-links, index.md bullet, log.md entry",
+            file=sys.stderr,
+        )
+        print(
+            "  fix: resolve the cause, delete the partial page, then re-run this "
+            "PDF. See prompts/recovery.md § Half-landed promote.",
             file=sys.stderr,
         )
         return 2
