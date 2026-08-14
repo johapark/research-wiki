@@ -250,3 +250,62 @@ def test_cli_missing_wiki_is_an_environment_error(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "wiki_root", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
     assert cli.main([]) == 2
+
+
+# ---------------------------------------------------------------- template invariants
+#
+# The renderer is JavaScript in an HTML template, so pytest cannot drive it. These
+# are source-level assertions, which is weak — but they pin the two specific
+# regressions that were shipped once, and a source check that names the bug beats
+# no check at all.
+
+def _template() -> str:
+    from importlib import resources
+    return (resources.files("researchwiki")
+            .joinpath("templates/graph.html").read_text(encoding="utf-8"))
+
+
+def _mousemove_handler(src: str) -> str:
+    start = src.index("cv.addEventListener('mousemove'")
+    return src[start:src.index("cv.addEventListener('mousedown'", start)]
+
+
+def _code_only(js: str) -> str:
+    """Drop `//` comments, so an assertion about what the code *calls* isn't
+    satisfied (or broken) by a comment explaining what it deliberately doesn't."""
+    import re
+    return "\n".join(re.sub(r"//.*$", "", line) for line in js.splitlines())
+
+
+def test_dragging_does_not_reheat_the_whole_layout():
+    """The shake. A press used to become a drag instantly, so one pixel of hand
+    jitter called `kick()` (alpha 0.55) and re-annealed a settled 477-node layout
+    — clicking a node to read its panel visibly threw the graph around. The drag
+    path must use the gentle `nudge()` instead, and only one node moved so there is
+    nothing a full re-heat could correctly fix."""
+    handler = _code_only(_mousemove_handler(_template()))
+    assert "nudge()" in handler
+    assert "kick()" not in handler, "the drag path must not re-heat the full layout"
+
+
+def test_a_press_is_not_a_drag_until_it_moves():
+    """Same bug, other half: a bare click must not pin the node it landed on.
+    Pinning is what a *drag* means, and a click that nails a node down leaves the
+    layout re-settling around it for reasons the user never asked for."""
+    src = _template()
+    assert "DRAG_SLOP" in src
+    handler = _mousemove_handler(src)
+    # The pin happens on the resolved-to-drag transition, inside mousemove, not on
+    # mousedown where a click is indistinguishable from a press.
+    assert "pinned = true" in handler
+    mousedown = src[src.index("cv.addEventListener('mousedown'"):
+                    src.index("window.addEventListener('mouseup'")]
+    assert "pinned = true" not in mousedown
+
+
+def test_the_two_reheat_levels_stay_distinct():
+    """`kick()` is for a change that invalidates every position; `nudge()` is for
+    one node moving. Collapsing them re-introduces the shake."""
+    src = _template()
+    assert "function kick(){ alpha = Math.max(alpha, 0.55); }" in src
+    assert "function nudge(){ alpha = Math.max(alpha, 0.10); }" in src

@@ -246,7 +246,11 @@ const edgeVisible = e =>
    beyond 6k). `alpha` cools to zero so the layout settles and the render loop
    parks itself instead of burning CPU forever. */
 let K = 60;
+//: Re-heat for a change that invalidates every position — a filter, a reset.
 function kick(){ alpha = Math.max(alpha, 0.55); }
+//: Re-heat for a change that moved exactly one node. Low enough that the settled
+//: layout gives locally instead of lurching, but non-zero so neighbours follow.
+function nudge(){ alpha = Math.max(alpha, 0.10); }
 
 function recomputeK(){
   const n = Math.max(1, nodes.filter(x => x.shown).length);
@@ -460,11 +464,31 @@ function showTip(n, px, py){
 }
 const hideTip = () => { tip.style.opacity = 0; };
 
+/* Press-and-hold is ambiguous until the pointer moves: it could become a drag or
+   stay a click. Treating it as a drag immediately is what made a plain click
+   shake the graph — one pixel of hand jitter entered the drag branch, which
+   re-heated the whole simulation, and the node was left pinned besides. So the
+   press is only *provisional* until it clears DRAG_SLOP. */
+const DRAG_SLOP = 4;                 // px of movement before a press becomes a drag
+let pressed = null;                  // node under an un-resolved mousedown
+let pressAt = null;                  // where that mousedown happened
+let didDrag = false;
+
 cv.addEventListener('mousemove', ev => {
   const px = ev.clientX, py = ev.clientY;
+
+  if (pressed && !dragNode && Math.hypot(px - pressAt.x, py - pressAt.y) > DRAG_SLOP){
+    dragNode = pressed;              // resolved: this is a drag
+    dragNode.pinned = true;          // dropped nodes stay put; double-click frees them
+    didDrag = true;
+  }
   if (dragNode){
     dragNode.x = (px - tx - W/2)/scale; dragNode.y = (py - ty - H/2)/scale;
-    kick(); return;
+    // Let the neighbours give a little without re-annealing the entire layout.
+    // `kick()`'s 0.55 is for a filter change, where every position is stale; here
+    // only one node moved, and re-heating the graph to match is what "shakes".
+    nudge();
+    return;
   }
   if (panning && last){ tx += px-last.x; ty += py-last.y; last = {x:px,y:py}; return; }
   const n = pick(px, py);
@@ -473,11 +497,19 @@ cv.addEventListener('mousemove', ev => {
 });
 cv.addEventListener('mousedown', ev => {
   const n = pick(ev.clientX, ev.clientY);
-  if (n){ dragNode = n; n.pinned = true; }
+  didDrag = false;
+  if (n){ pressed = n; pressAt = {x: ev.clientX, y: ev.clientY}; }
   else { panning = true; last = {x:ev.clientX, y:ev.clientY}; cv.classList.add('dragging'); }
 });
-window.addEventListener('mouseup', () => { dragNode=null; panning=false; last=null; cv.classList.remove('dragging'); });
+window.addEventListener('mouseup', () => {
+  dragNode = null; pressed = null; pressAt = null;
+  panning = false; last = null;
+  cv.classList.remove('dragging');
+});
 cv.addEventListener('click', ev => {
+  // A drag already did its job; opening the panel on top of it would be a second
+  // unasked-for effect from one gesture.
+  if (didDrag){ didDrag = false; return; }
   const n = pick(ev.clientX, ev.clientY);
   n ? select(n) : deselect();
 });
