@@ -114,6 +114,37 @@ def find_invalid_frontmatter(
     return findings, True
 
 
+def find_missing_type(
+    pages: list[Path], pages_fm: dict[Path, dict],
+) -> list[str]:
+    """Pages with no `type:` in frontmatter at all.
+
+    CLAUDE.md states every page declares `type:`, and nothing checked it. The
+    drift is invisible by construction: every consumer reads the field as
+    `fm.get("type", "paper")`, so a paper page missing it behaves correctly and
+    `find_page_type_mismatches` — which applies the same default — cannot see it
+    either. 23 pages in the maintainer's corpus had none when this check landed.
+
+    It matters in two places beyond tidiness. A *non*-paper page that loses the
+    field silently becomes a paper: its claims get extracted (`db.rebuild` keys
+    on `type: paper`) and a commentary's assertions get credited to the
+    commentator, which is the precise failure `type: commentary` exists to
+    prevent. And a non-empty `type` is one of only three OKF conformance
+    criteria, so these pages block emitting a conformant bundle.
+
+    Root bookkeeping files are exempt — they carry no frontmatter by design.
+    """
+    out: list[str] = []
+    for md in pages:
+        if _is_root_bookkeeping(md):
+            continue
+        raw = pages_fm.get(md, {}).get("type")
+        if not (isinstance(raw, str) and raw.strip()):
+            out.append(page_key(md))
+    out.sort()
+    return out
+
+
 def find_page_type_mismatches(
     pages: list[Path], pages_fm: dict[Path, dict],
 ) -> list[tuple[str, str]]:

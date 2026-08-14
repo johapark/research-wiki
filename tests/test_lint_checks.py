@@ -42,6 +42,7 @@ from researchwiki.tasks.lint.yaml_checks import (
     find_category_drift,
     find_missing_doi,
     find_missing_keywords,
+    find_missing_type,
     find_page_type_mismatches,
     find_stem_year_drift,
 )
@@ -210,6 +211,52 @@ def test_find_missing_backlinks_flags_concept_hub(tmp_wiki):
 
 
 # ---------- yaml-shape checks ----------
+
+def test_find_missing_type_flags_absent_and_blank(tmp_wiki):
+    a = _mkpage(tmp_wiki, "cgt/a", "")
+    b = _mkpage(tmp_wiki, "cgt/b", "")
+    c = _mkpage(tmp_wiki, "cgt/c", "")
+    fm = {a: {"title": "no type at all"}, b: {"type": "   "}, c: {"type": "paper"}}
+    assert find_missing_type([a, b, c], fm) == ["cgt/a", "cgt/b"]
+
+
+def test_find_missing_type_exempts_root_bookkeeping(tmp_wiki):
+    # index.md / log.md carry no frontmatter by design; demanding `type` of a
+    # catalogue would make the check permanently noisy and get it ignored.
+    idx = _mkpage(tmp_wiki, "index", "")
+    log = _mkpage(tmp_wiki, "log", "")
+    assert find_missing_type([idx, log], {idx: {}, log: {}}) == []
+
+
+def test_find_missing_type_is_what_page_type_mismatches_cannot_see(tmp_wiki):
+    """The two checks are not redundant.
+
+    `find_page_type_mismatches` reads `fm.get("type", "paper")`, so a commentary
+    page that lost its `type` looks like a conforming paper to it. That default
+    is why this check has to exist separately.
+    """
+    p = _mkpage(tmp_wiki, "cgt/lost-its-type", "")
+    fm = {p: {"primary_paper": "[[cgt/other]]"}}   # commentary shape, no type
+    assert find_page_type_mismatches([p], fm) == []
+    assert find_missing_type([p], fm) == ["cgt/lost-its-type"]
+
+
+def test_missing_type_is_wired_into_the_lint_orchestrator():
+    """A check nobody renders is a check nobody acts on.
+
+    Pins both ends: the dispatcher computes it, and `report` emits it in the
+    JSON contract and the prose report.
+    """
+    from researchwiki.tasks import lint as lint_pkg
+    from researchwiki.tasks.lint import report as lint_report
+    assert lint_pkg.find_missing_type is find_missing_type
+    dispatcher = open(lint_pkg.__file__, encoding="utf-8").read()
+    assert "missing_type = find_missing_type(pages, pages_fm)" in dispatcher
+    assert dispatcher.count("missing_type=missing_type") == 2   # json + prose
+    rendered = open(lint_report.__file__, encoding="utf-8").read()
+    assert '"missing_type": kw["missing_type"]' in rendered
+    assert "Pages with no `type:`" in rendered
+
 
 def test_find_page_type_mismatches_synthesis_with_paper_type(tmp_wiki):
     s = _mkpage(tmp_wiki, "synthesis/x", "")
