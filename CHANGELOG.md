@@ -14,6 +14,8 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-14
+
 ### Added
 
 - **`researchwiki visualize`** — renders the corpus as a self-contained interactive
@@ -77,72 +79,6 @@ the reasoning behind any line below.
   but not grow; the usual bare exemption set is how `agents/runner.py` reached
   1214 lines with nothing objecting. A companion check fails on stale entries, so
   the list shows remaining debt rather than accumulating excuses.
-
-### Changed
-
-- **`output/` is now the umbrella for everything the repo emits outward**, and
-  `share-page` writes to `output/share/<slug>.md` instead of `share/`. Three
-  generators had begun scattering outbound artifacts across two top-level
-  directories (`share/`, plus `output/graph.html` and `output/okf/` from this
-  release); collecting them means one gitignore rule covers the category, so the
-  next generator needs no `.gitignore` change to stay out of git. The old `share/`
-  path stays ignored — a stale copy on a second synced machine should not surface
-  as untracked just because the convention moved.
-
-- **`lint`'s emitters moved to `tasks/lint/report.py`.** `_emit_json` and
-  `_emit_prose` were 58% of the package `__init__` and decide nothing — both take
-  finished results as kwargs and only choose how to print. The dispatcher now
-  reads as a list of checks (831 → 261 lines) and left the module-size grandfather
-  list entirely — the ratchet above asked for the split on its first encounter
-  rather than being handed a raised ceiling. No behaviour change; the JSON
-  contract is unchanged apart from the additive key above.
-
-- **`mutation.py` reimplemented independently.** This package is MIT and the
-  module was originally written against a third-party Apache-2.0 file, so it was
-  re-expressed to remove any question of foreign-licensed code in an MIT tree.
-  Measured before and after: 24.6% -> 19.3% identical normalized lines, with the
-  remainder being this module's own public API vocabulary (`rollback`, `discard`,
-  `mark_committed`, `backup_dir`, `journal_path`, `MAX_ROLLBACK_ATTEMPTS`) and
-  idioms with no second spelling (`shutil.rmtree(..., ignore_errors=True)`). No
-  shared class name, no shared helper name, and no shared multi-line logic in
-  either version — the two designs already differed substantially (this one has a
-  context manager, `also_undo` hooks and an env bypass; the other has directory
-  and hardlink backups, and opposite cap semantics).
-
-  **Behaviour, the public API and the on-disk journal schema are unchanged**, the
-  last of these deliberately: a journal left by an interrupted promote must still
-  be drainable after an upgrade, or the abandoned mutation becomes permanently
-  half-landed with nothing reporting it. Two tests now pin that — one replays a
-  journal hard-coded in v0.4.0's exact key set (not one produced by the current
-  writer, which would pass even if both ends drifted together), and one pins the
-  serialized key set for the release that will read it next.
-
-  The in-memory representation did change, and for the better: entries were a
-  `{target: backup_or_None}` mapping where `None` overloaded "no backup because
-  the file did not exist", which is what rollback branches on. That is now a
-  `BackedUpPath` record with an `existed_before` property, so the distinction
-  lives in the type rather than in a comment.
-
-### Fixed
-
-- **23 paper pages had no `type:`** and now declare `type: paper`. Each was
-  verified paper-shaped first (no `primary_paper`, no `issuer`, not in a
-  page-type dir, has a `## Summary`) rather than defaulted, since the failure this
-  guards against is precisely a non-paper page being treated as one.
-
-- **Seven drifted claim-section headings on six paper pages**, which were yielding
-  zero claims from sections that plainly had them — extraction matches H2 names
-  exactly. `migrate.sections.canonical_for` now also strips a trailing
-  parenthetical qualifier (`## Key Contributions (as a Review)`) and a slashed
-  alternative (`## Results / Findings`), and tolerates an inflected architecture
-  suffix (`## Methodology and Architecting`). The ambiguity guard runs against both
-  the decorated and undecorated form, so `## Discussion (results)` still refuses to
-  become Results. Recovered **38 citable claims**; `migrate` gains the same
-  tolerance for future imports.
-
-## [0.4.0] - 2026-08-14
-
-### Added
 
 - **`researchwiki eval triggers`** — check that CLAUDE.md's prompt pointers fire
   when they should. Each `prompts/*.md` is reachable only through the sentence
@@ -311,7 +247,71 @@ the reasoning behind any line below.
   exempt from the check entirely — a table is text with rules, so low coverage
   on its page is correct rather than a symptom.
 
+### Changed
+
+- **`output/` is now the umbrella for everything the repo emits outward**, and
+  `share-page` writes to `output/share/<slug>.md` instead of `share/`. Three
+  generators had begun scattering outbound artifacts across two top-level
+  directories (`share/`, plus `output/graph.html` and `output/okf/` from this
+  release); collecting them means one gitignore rule covers the category, so the
+  next generator needs no `.gitignore` change to stay out of git. The old `share/`
+  path stays ignored — a stale copy on a second synced machine should not surface
+  as untracked just because the convention moved.
+
+- **`lint`'s emitters moved to `tasks/lint/report.py`.** `_emit_json` and
+  `_emit_prose` were 58% of the package `__init__` and decide nothing — both take
+  finished results as kwargs and only choose how to print. The dispatcher now
+  reads as a list of checks (831 → 261 lines) and left the module-size grandfather
+  list entirely — the ratchet above asked for the split on its first encounter
+  rather than being handed a raised ceiling. No behaviour change; the JSON
+  contract is unchanged apart from the additive key above.
+
+- **`mutation.py` reimplemented independently.** This package is MIT and the
+  module was originally written against a third-party Apache-2.0 file, so it was
+  re-expressed to remove any question of foreign-licensed code in an MIT tree.
+  Measured before and after: 24.6% -> 19.3% identical normalized lines, with the
+  remainder being this module's own public API vocabulary (`rollback`, `discard`,
+  `mark_committed`, `backup_dir`, `journal_path`, `MAX_ROLLBACK_ATTEMPTS`) and
+  idioms with no second spelling (`shutil.rmtree(..., ignore_errors=True)`). No
+  shared class name, no shared helper name, and no shared multi-line logic in
+  either version — the two designs already differed substantially (this one has a
+  context manager, `also_undo` hooks and an env bypass; the other has directory
+  and hardlink backups, and opposite cap semantics).
+
+  **Behaviour, the public API and the on-disk journal schema are unchanged**, the
+  last of these deliberately: a journal left by an interrupted promote must still
+  be drainable after an upgrade, or the abandoned mutation becomes permanently
+  half-landed with nothing reporting it. Two tests now pin that — one replays a
+  journal hard-coded in v0.4.0's exact key set (not one produced by the current
+  writer, which would pass even if both ends drifted together), and one pins the
+  serialized key set for the release that will read it next.
+
+  The in-memory representation did change, and for the better: entries were a
+  `{target: backup_or_None}` mapping where `None` overloaded "no backup because
+  the file did not exist", which is what rollback branches on. That is now a
+  `BackedUpPath` record with an `existed_before` property, so the distinction
+  lives in the type rather than in a comment.
+
+- A batch containing a duplicate PDF now exits non-zero where it previously exited
+  0. Same for a resume that finds an input no longer on disk. Wrapper scripts that
+  branch on the exit status will see this.
+
 ### Fixed
+
+- **23 paper pages had no `type:`** and now declare `type: paper`. Each was
+  verified paper-shaped first (no `primary_paper`, no `issuer`, not in a
+  page-type dir, has a `## Summary`) rather than defaulted, since the failure this
+  guards against is precisely a non-paper page being treated as one.
+
+- **Seven drifted claim-section headings on six paper pages**, which were yielding
+  zero claims from sections that plainly had them — extraction matches H2 names
+  exactly. `migrate.sections.canonical_for` now also strips a trailing
+  parenthetical qualifier (`## Key Contributions (as a Review)`) and a slashed
+  alternative (`## Results / Findings`), and tolerates an inflected architecture
+  suffix (`## Methodology and Architecting`). The ambiguity guard runs against both
+  the decorated and undecorated form, so `## Discussion (results)` still refuses to
+  become Results. Recovered **38 citable claims**; `migrate` gains the same
+  tolerance for future imports.
 
 - **`eval classifier` reported 0% abstention on runs that abstained.** `other`
   is both a real content category and the abstention bucket, and
@@ -365,12 +365,6 @@ the reasoning behind any line below.
   `subprocess.run`, so no new bookkeeping was needed — which distinguishes "died
   mid-promote" from "the user moved the file". The check also covers retryable
   (exit 2) failures, whose exit code says retry but whose input is gone.
-
-### Changed
-
-- A batch containing a duplicate PDF now exits non-zero where it previously exited
-  0. Same for a resume that finds an input no longer on disk. Wrapper scripts that
-  branch on the exit status will see this.
 
 ## [0.3.1] - 2026-08-13
 
