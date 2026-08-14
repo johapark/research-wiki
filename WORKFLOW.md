@@ -795,7 +795,10 @@ researchwiki/
 │   ├── grade.py            #   Per-paper fidelity + salience report
 │   ├── _grade_synthesis.py #   Synthesis/idea fidelity (misattribution check)
 │   ├── lint/               #   One module per check family (link, yaml, staleness,
-│   │                       #     claim_anchors, concept_contract, db_checks, …)
+│   │                       #     claim_anchors, concept_contract, db_checks, …);
+│   │                       #     `__init__` is the dispatcher and decides nothing,
+│   │                       #     `report.py` owns the --json contract + prose report
+│   ├── visualize.py        #   Thin CLI over visualize.py → output/graph.html
 │   ├── check_grounding.py  #   Structural citation check
 │   ├── check_coverage.py   #   Recall surface — unreferenced top-N hits
 │   │                       #     for a synthesis/idea page's topic_seed
@@ -820,8 +823,20 @@ researchwiki/
 ├── refexport.py            # The inverse of refimport/: corpus → BibTeX/RIS/CSL-JSON.
 │                           #   One module, not a package — escaping, one type table,
 │                           #   one wiki walk, three renderers. Zero tokens.
+├── okfexport.py            # Corpus → an Open Knowledge Format bundle (OKF v0.2),
+│                           #   behind the same `export` command. Separate module
+│                           #   from refexport because the scope differs: a
+│                           #   bibliography carries only published documents, an
+│                           #   OKF bundle carries every page type (its unit is a
+│                           #   "concept", abstract ideas included). Also emits a
+│                           #   tree, not a stream, so `--format okf` needs `--out`.
+├── visualize.py            # Corpus → a self-contained interactive graph (the
+│                           #   renderer is templates/graph.html). Draws wikilinks
+│                           #   AND typed claim edges; contradictions drawn loud.
 ├── names.py                # Author-name parsing, shared by stems (which surname
 │                           #   goes in a stem) and refexport (family/given for CSL)
+├── templates/              # Shipped assets read via importlib.resources
+│   └── graph.html          #   The visualize renderer: no CDN, no build step
 └── pdf/                    # pypdfium2-backed PDF text/structure extraction
 ```
 
@@ -1272,6 +1287,10 @@ researchwiki attach compbio/some-stem ~/Downloads/Methods.pdf              # 8. 
 researchwiki status                                  # 9. health: index, costs, pending proposals
 researchwiki lint --fix                              #    consistency report; --fix auto-inserts back-links
 researchwiki audit > /tmp/audit.md                   #    citation-graph audit (Semantic Scholar)
+
+researchwiki visualize --open                         # 10. corpus → output/graph.html (self-contained)
+researchwiki export --format bibtex > refs.bib        # 11. corpus → bibliography (published pages only)
+researchwiki export --format okf --out output/okf     #     corpus → OKF bundle (every page type; needs a dir)
 ```
 
 `researchwiki status` on a populated wiki prints per-category counts,

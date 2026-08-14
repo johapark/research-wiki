@@ -348,3 +348,27 @@ def test_cli_json_mode_emits_the_okf_report(wiki, monkeypatch, tmp_path, capsys)
     assert payload["okf_version"] == okfexport.OKF_VERSION
     assert payload["concepts"] == 5
     assert "stale_files" in payload
+
+
+def test_a_reserved_stem_in_a_category_dir_is_skipped_and_reported(wiki, tmp_path):
+    """§3.1 reserves `index.md`/`log.md` at *every* level, not just the root.
+
+    `wiki/cgt/index.md` is a legal wiki page, but emitting it as `cgt/index.md`
+    would give the bundle a second directory listing and a consumer would read it
+    as one. Skipped, and named in the report — the fix is to rename the page, and
+    dropping it silently would leave the omission invisible.
+    """
+    _page(tmp_path, "cgt/index", "## Summary\nnot really a listing", type="paper",
+          title="Sneaky", hook="h")
+    files, report = okfexport.collect_bundle()
+    assert "cgt/index.md" not in files
+    assert any(s["page"] == "cgt/index" and "reserved" in s["reason"]
+               for s in report.skipped)
+
+
+def test_wiki_root_bookkeeping_is_skipped_quietly(wiki):
+    """The root `index.md`/`log.md` are *expected* to be excluded — they get
+    regenerated — so they must not clutter the report the way a rename-me page
+    does."""
+    _, report = okfexport.collect_bundle()
+    assert not any(s["page"].startswith("wiki/") for s in report.skipped)

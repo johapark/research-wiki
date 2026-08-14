@@ -43,6 +43,7 @@ from pathlib import Path
 
 import yaml
 
+from .paths import wiki_dir
 from .wiki import Page, read_pages
 
 #: The spec revision this emitter targets. Declared in the bundle-root
@@ -134,16 +135,34 @@ class OkfReport:
 # ---------------------------------------------------------------- selection
 
 
-def _is_bundle_content(page: Page) -> bool:
-    """False for the pages that become OKF's own reserved files, or plumbing.
+#: Filenames OKF reserves at *every* level of the tree (§3.1), not just the root.
+#: A concept document may not use one, so a page whose stem is `index` or `log` is
+#: unemittable wherever it lives.
+_RESERVED_STEMS = frozenset({"index", "log"})
 
-    `wiki/index.md` and `wiki/log.md` are regenerated in OKF's shape (§8, §9) and
-    a concept document may not use those reserved names anywhere in the tree, so
-    the originals must not be emitted as concepts. Root-level pages generally are
-    excluded: `page_key` gives them a slash-free key, they are per-user dashboards
-    rather than knowledge, and they have nowhere to live in a category tree.
+
+def _skip_reason(page: Page) -> str | None:
+    """Why this page cannot be a concept document, or None if it can.
+
+    Two distinct exclusions, previously conflated:
+
+    - **Root-level pages** (`wiki/index.md`, `wiki/log.md`, `wiki/views.md`) are
+      the wiki's own bookkeeping. The first two are regenerated in OKF's shape
+      (§8, §9) and the rest are per-user dashboards with no place in a category
+      tree. Detected by comparing the parent directory against `wiki_dir()`, not
+      by looking for a slash in the page key — `Page.key` is always
+      `category/stem`, so a slash test is vacuous.
+    - **A reserved stem inside a category dir.** `wiki/cgt/index.md` is a
+      perfectly ordinary wiki page, but emitting it would put `cgt/index.md` in
+      the bundle, which §3.1 forbids and which a consumer would read as a
+      directory listing rather than as knowledge. Reported rather than dropped
+      silently, since the fix is to rename the page.
     """
-    return "/" in f"{page.category}/{page.stem}" and page.category not in ("wiki",)
+    if page.path.parent.resolve() == wiki_dir().resolve():
+        return "wiki-root bookkeeping page"
+    if page.stem in _RESERVED_STEMS:
+        return f"stem {page.stem!r} is an OKF reserved filename (§3.1)"
+    return None
 
 
 # ---------------------------------------------------------------- link rewriting
@@ -460,7 +479,16 @@ def collect_bundle(
     links it could not resolve instead of emitting paths to absent concepts.
     """
     report = OkfReport()
-    all_pages = [p for p in read_pages() if _is_bundle_content(p)]
+
+    all_pages: list[Page] = []
+    for page in read_pages():
+        reason = _skip_reason(page)
+        if reason is None:
+            all_pages.append(page)
+        elif page.stem in _RESERVED_STEMS and page.path.parent.resolve() != wiki_dir().resolve():
+            # A wiki-root bookkeeping page is expected and uninteresting; a
+            # reserved stem in a category dir is a page the user should rename.
+            report.skipped.append({"page": page.key, "reason": reason})
 
     selected: list[Page] = []
     for p in all_pages:
