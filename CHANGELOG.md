@@ -70,11 +70,14 @@ the reasoning behind any line below.
   the code is described.
 
   The ceiling is permissive by design — only `agents/runner.py` (817 code lines)
-  exceeds it, and it stays pinned in `_DEBT` at its current size. The trade is
-  that modules between ~500 and 800 code lines no longer carry a per-module
-  ratchet; lowering the ceiling is the lever if that starts letting sprawl
-  through. A string bound to a name still counts as code, so the rule can't be
-  dodged by moving text into a triple-quoted constant.
+  exceeds it — and the per-module ratchet is now a *separate* bound rather than a
+  consequence of it. All nine `_DEBT` pins (502-817) bind whether or not their
+  module sits under the ceiling, and retire at `RATCHET_RELEASE` (500) rather
+  than when the ceiling moves. That split exists because keying retirement on the
+  ceiling meant raising it deleted eight pins and handed those modules ~1,700
+  lines of unratcheted growth, though none had shrunk by a line. A string bound
+  to a name still counts as code, so the rule can't be dodged by moving text into
+  a triple-quoted constant.
 
 - **Extraction-noise repair moved to `researchwiki/pdf/repair.py`** (`repair_text`,
   formerly `text._repair_ligatures`). `pdf/text.py` is about getting bytes out of

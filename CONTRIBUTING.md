@@ -94,20 +94,23 @@ explanation as the decision deserves; the budget only counts what you have to
 hold in your head. A multi-line string bound to a name still counts, so the rule
 can't be dodged by moving code-adjacent text into a constant.
 
-The ceiling is permissive on purpose: the metric is what makes the gate rank
-modules honestly, so the bound only has to catch a module nobody would defend.
-One module exceeds it — `agents/runner.py` at 817 — and it is pinned **at its
-current size** in that test's `_DEBT` dict, so it may shrink freely but cannot
-grow; a bare exemption list is how it reached 817 with nothing objecting. Split
-cohesive groups into focused siblings rather than adding an entry — the list is
-for existing debt, not an escape hatch for new code. When a module drops back
-under the limit, delete its entry (a test insists, because a stale exemption is
-indistinguishable from a passing gate).
+**Two bounds, not one.** The 800 ceiling says how large any module may ever be,
+and it is permissive because the metric is what makes the gate rank modules
+honestly. The `_DEBT` dict in that test is a separate ratchet: nine modules are
+pinned **at their current size** (502-817 code lines) and may shrink freely but
+cannot gain a line — whether or not they sit under the ceiling. A bare exemption
+list is how `agents/runner.py` reached 817 with nothing objecting.
 
-Note the trade this bound accepts: everything between roughly 500 and 800 code
-lines now grows unchecked, where a tighter ceiling ratcheted each such module at
-its current size. If sprawl starts landing, lowering the ceiling is the first
-lever, not weakening the metric.
+The two retire on different rules, which matters: a pin is released when its
+module drops below `RATCHET_RELEASE` (500), *not* when the ceiling moves. Keying
+retirement on the ceiling meant raising it from 500 to 800 deleted eight pins and
+handed those modules ~1,700 lines of unratcheted growth, though none had shrunk
+by a line.
+
+Split cohesive groups into focused siblings rather than adding an entry — the
+list is for existing debt, not an escape hatch for new code. When a module drops
+below the release point, delete its entry (a test insists, because a stale
+exemption is indistinguishable from a passing gate).
 
 ## Content vs framework
 

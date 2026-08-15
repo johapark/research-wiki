@@ -32,17 +32,22 @@ that threshold scales with code, not with how well the code is described.
 the module carries, and the alternative is a rule you can slip past by moving
 text into a triple-quoted constant.
 
-**Existing debt is pinned, not pardoned.** `_DEBT` maps a module to the size it
-was when the pin was set, so a listed file may shrink as much as you like and
-cannot gain a single line. The obvious alternative — a plain set of exempt paths —
-grants a permanent licence to grow, which is how `agents/runner.py` got to 817
-code lines with no test ever objecting. Pinning the number means the next fifty
-lines have to justify themselves in review.
+**Two bounds, because they answer different questions.** `MAX_CODE_LINES` is the
+ceiling: how large any module may ever be. `_DEBT` is a ratchet: a module already
+large must not get larger, whether or not it is under the ceiling. A listed file
+may shrink as much as you like and cannot gain a single line. The alternative — a
+plain set of exempt paths — grants a permanent licence to grow, which is how
+`agents/runner.py` got to 817 code lines with no test ever objecting.
 
-`test_debt_list_has_no_dead_entries` is the other half of the ratchet: a module
-that has been split back under the ceiling looks *identical to a passing gate*, so
-without that check the list would quietly turn into a monument to work already
-finished.
+Keeping them separate is not theoretical. While the dead-entry rule was keyed on
+the ceiling, raising `MAX_CODE_LINES` 500 -> 800 forced eight pins at 502-661 to
+be deleted, handing those modules ~1,700 lines of unratcheted growth though none
+had shrunk by a line. `RATCHET_RELEASE` is now the retirement point, so the
+ceiling can move without silently unlatching every ratchet beneath it.
+
+`test_debt_list_has_no_dead_entries` is the other half: a module split back below
+`RATCHET_RELEASE` looks *identical to a passing gate*, so without that check the
+list would quietly turn into a monument to work already finished.
 """
 
 from __future__ import annotations
@@ -55,23 +60,27 @@ import pytest
 
 import researchwiki
 
-#: Code lines — docstrings, comments and blanks excluded, so this is not
-#: comparable to a `wc -l` figure.
+#: Hard ceiling: no module may reach this, pinned or not. Code lines —
+#: docstrings, comments and blanks excluded — so it is not a `wc -l` figure.
 #:
-#: Raised 500 -> 800 deliberately, and it is a real loosening rather than a
-#: recalibration: 500 was set to keep the flagged set at the size the
-#: physical-line gate had, and at 800 only `agents/runner.py` trips. The bet is
-#: that the *metric* was doing the work — counting logic instead of prose is what
-#: made the gate rank modules correctly — and that the ceiling can sit where it
-#: only catches a module nobody would defend, leaving ordinary judgement about
-#: cohesion to review rather than to a number.
-#:
-#: What that costs is the per-module ratchet on everything now under it: the
-#: eight modules pinned at 502-661 were deleted from `_DEBT` when this changed
-#: (the dead-entry check requires it), so each is free to grow to 799 with
-#: nothing objecting. That is ~1,700 code lines of licence, and it is the thing
-#: to reconsider first if this file starts letting real sprawl through.
+#: Set permissively on purpose. The *metric* is what makes this gate rank modules
+#: honestly (counting logic, not prose), so the ceiling only has to catch a module
+#: nobody would defend; ordinary judgement about cohesion belongs in review.
 MAX_CODE_LINES = 800
+
+#: Where the per-module ratchet stops applying. A module in `_DEBT` may not gain
+#: a line while it is at or above this; once it falls below, its entry is dead and
+#: the module rejoins the ordinary population governed only by the ceiling.
+#:
+#: This exists because the ceiling and the ratchet answer different questions, and
+#: tying them together broke the second one. When `MAX_CODE_LINES` moved 500 -> 800,
+#: the dead-entry rule — then keyed on the ceiling — required deleting eight pins
+#: at 502-661, handing those modules ~1,700 lines of unratcheted growth even
+#: though none of them had shrunk by a line. The ceiling says how large a module
+#: may ever be; the ratchet says a module already this large must not get larger.
+#: A release point of its own keeps the second promise while the first stays
+#: permissive.
+RATCHET_RELEASE = 500
 
 # Locate the package through the import system rather than by walking up from
 # `__file__`. If this test is ever moved, path arithmetic would silently point at
@@ -79,22 +88,41 @@ MAX_CODE_LINES = 800
 _PACKAGE = Path(researchwiki.__file__).resolve().parent
 _REPO = _PACKAGE.parent
 
-# Module (repo-relative, posix) -> pinned ceiling in CODE lines, re-pinned
-# 2026-08-14 when the gate stopped counting physical lines. The numbers dropped
-# by roughly a third in the switch and mean something different now; they are not
-# comparable to the physical-line pins this list carried before.
+# Module (repo-relative, posix) -> pinned size in CODE lines. Numbers are code
+# lines and are not comparable to the physical-line pins this list carried before
+# 2026-08-14.
 #
-# Every entry is an admission that a file is too long and was not split that day.
-# Editing a number upward is the same admission again, so do it in a commit that
-# says why. When a module drops under MAX_CODE_LINES, delete its line.
+# A pin means "already this large; must not get larger" — it binds whether or not
+# the module is under MAX_CODE_LINES, which is the whole reason the ratchet has
+# its own release point. Every entry is an admission that a file is too long and
+# was not split that day; editing a number upward is the same admission again, so
+# do it in a commit that says why. An entry retires when the module drops below
+# RATCHET_RELEASE (or disappears), not when the ceiling moves.
 _DEBT: dict[str, int] = {
     # Agent-ingest orchestrator: phase sequencing, the retry/DEBUG loop, and
-    # sandbox-vs-promote routing. Splits along the phase boundary.
-    #
-    # The last entry standing after the ceiling moved to 800. The other eight
-    # (502-661 code lines) were deleted because the dead-entry check requires it,
-    # not because their debt was paid — see MAX_CODE_LINES on what that gave up.
+    # sandbox-vs-promote routing. Splits along the phase boundary. The only entry
+    # that also exceeds MAX_CODE_LINES.
     "researchwiki/agents/runner.py": 817,
+    # Metadata reconcile: PDF-side extraction against provider records, plus the
+    # sanity gate. The gate is the separable half.
+    "researchwiki/agents/phases/reconcile.py": 661,
+    # Concept candidates: term mining, scoring, triage labelling. Mining and
+    # labelling do not need to share a module.
+    "researchwiki/concepts/candidates.py": 653,
+    # Retrieval benchmark: fixture loading, scoring and reporting in one file.
+    "researchwiki/benchmark/retrieval.py": 644,
+    # Backfill targets (hook / keywords / doi) share only a work-list idiom.
+    "researchwiki/tasks/backfill.py": 606,
+    # Lint's two emitters (human text, `--json`). Grows by one block per new
+    # check, which is exactly the drift a ratchet is for.
+    "researchwiki/tasks/lint/report.py": 565,
+    # Benchmark fixtures: YAML loading, scoring, and the report.
+    "researchwiki/tasks/benchmark_fixture.py": 525,
+    # Memory evolution: candidate selection, proposal drafting, emit.
+    "researchwiki/agents/phases/evolution.py": 524,
+    # Transactional promote: five journalled steps and their rollback. Each step
+    # could stand alone under a thin coordinator.
+    "researchwiki/agents/promote.py": 502,
 }
 
 
@@ -406,12 +434,46 @@ def test_debt_list_has_no_dead_entries():
         module = _REPO / rel
         if not module.exists():
             dead.append(f"  - {rel}: gone (renamed or deleted)")
-        elif (lines := count_code_lines(module)) < MAX_CODE_LINES:
-            dead.append(f"  - {rel}: down to {lines} code lines, inside the "
-                        f"{MAX_CODE_LINES}-code-line budget (pinned at {pinned})")
+        elif (lines := count_code_lines(module)) < RATCHET_RELEASE:
+            dead.append(f"  - {rel}: down to {lines} code lines, below the "
+                        f"{RATCHET_RELEASE}-line ratchet release (pinned at {pinned})")
     if dead:
         raise AssertionError(
             "Dead entries in _DEBT:\n" + "\n".join(dead)
             + "\n\nFix: delete them. Someone did the work; the list should show "
               "what is still outstanding."
         )
+
+
+# --------------------------------------------------------------------------
+# The ratchet and the ceiling are independent. Tying them together is the
+# regression these pin: raising the ceiling must not unlatch pins beneath it.
+# --------------------------------------------------------------------------
+
+
+def test_a_pinned_module_far_under_the_ceiling_still_cannot_grow(tmp_path):
+    """The whole point of a separate release. 9 lines is nowhere near the
+    ceiling, and the pin still binds."""
+    _write(tmp_path, "watched.py", 10)
+    failures = _scan_tmp(tmp_path, ceiling=800, debt={"watched.py": 9})
+    assert [(f.path, f.lines, f.ceiling) for f in failures] == [("watched.py", 10, 9)]
+
+
+def test_raising_the_ceiling_does_not_retire_a_pin():
+    """The regression itself: at a ceiling of 800 every pin except runner.py sits
+    underneath, and all of them must still be live."""
+    below = {rel: pin for rel, pin in _DEBT.items() if pin < MAX_CODE_LINES}
+    assert len(below) >= 8, "expected most pins to sit under the ceiling"
+    assert all(pin >= RATCHET_RELEASE for pin in below.values())
+
+
+def test_an_entry_is_dead_only_below_the_release_point():
+    assert RATCHET_RELEASE == 500
+    assert RATCHET_RELEASE < MAX_CODE_LINES, "release must sit under the ceiling"
+
+
+def test_every_pin_is_at_or_above_the_release_point():
+    """A pin below the release is self-contradictory: the dead-entry check would
+    demand its deletion on the next run."""
+    offenders = {rel: pin for rel, pin in _DEBT.items() if pin < RATCHET_RELEASE}
+    assert not offenders, f"pins below RATCHET_RELEASE: {offenders}"
