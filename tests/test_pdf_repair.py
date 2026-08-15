@@ -17,6 +17,8 @@ dictionary lookup alone, so without them it rewrites `p-values` into
 Tests use synthetic damage strings — no PDF I/O — so they're hermetic.
 """
 
+from pathlib import Path
+
 import pytest
 
 from researchwiki.pdf.repair import repair_text
@@ -241,3 +243,41 @@ def test_scientific_vocabulary_survives_a_full_sentence():
             "Bowtie and GATK, and p-values are reported for each ATAC-seq run.")
     assert repair_text(text) == text
 
+
+# --- graceful degradation -----------------------------------------------------
+
+def test_no_wordlist_degrades_to_elision_rather_than_crashing(monkeypatch):
+    """A checkout without the wordlist must still extract text. Elision is the
+    behaviour that needs no dictionary, so that is what remains."""
+    from researchwiki.pdf import repair as textmod
+    monkeypatch.setattr(textmod, "_DICTIONARY", None)
+    monkeypatch.setattr(textmod, "_DICTIONARY_PATH", Path("/nonexistent/words.txt"))
+    assert textmod.repair_text("con\x02text") == "context"
+    assert textmod.repair_text("dierent") == "dierent"
+
+
+def test_an_unreadable_wordlist_is_not_retried_per_word(monkeypatch, tmp_path):
+    """A directory at the wordlist path raises IsADirectoryError, not
+    FileNotFoundError — the narrower catch broke every extraction. The empty
+    result is cached, so a failed load costs one stat rather than one per token."""
+    from researchwiki.pdf import repair as textmod
+    monkeypatch.setattr(textmod, "_DICTIONARY", None)
+    monkeypatch.setattr(textmod, "_DICTIONARY_PATH", tmp_path)   # a directory
+    assert textmod._load_dictionary() == {}
+    assert textmod._DICTIONARY == {}
+
+
+# --- page offsets -------------------------------------------------------------
+
+def test_page_for_offset_reports_out_of_range_when_told_the_length():
+    from researchwiki.pdf.text import PAGE_SEPARATOR, page_for_offset, page_offsets
+    pages = ["aaaa", "bbbbbb", "cc"]
+    offsets = page_offsets(pages)
+    total = len(PAGE_SEPARATOR.join(pages))
+    assert page_for_offset(offsets, 0, total) == 1
+    assert page_for_offset(offsets, total - 1, total) == 3
+    assert page_for_offset(offsets, total, total) is None
+    assert page_for_offset(offsets, total + 500, total) is None
+    assert page_for_offset(offsets, -1, total) is None
+    # Without the length, page starts alone cannot detect the overrun.
+    assert page_for_offset(offsets, total + 500) == 3

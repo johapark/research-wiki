@@ -146,9 +146,12 @@ _DICTIONARY_PATH = Path(__file__).resolve().parent / "data" / "english_words.txt
 def _load_dictionary() -> dict[str, int]:
     """Lazy-load the bundled wordlist as `{word: frequency rank}`.
 
-    Returns an empty mapping when the file is missing (graceful degradation:
-    ligature repair becomes a no-op rather than crashing on a fresh checkout
-    that hasn't built the wordlist yet).
+    Returns an empty mapping when the file can't be read, which turns repair
+    into a no-op rather than crashing every extraction — a fresh checkout that
+    hasn't built the wordlist, an unreadable file, a zip-imported package. The
+    empty result is cached too: a load that failed once fails identically on
+    every subsequent call, and retrying it per word made a missing file cost a
+    filesystem stat per token.
     """
     global _DICTIONARY
     if _DICTIONARY is None:
@@ -160,7 +163,7 @@ def _load_dictionary() -> dict[str, int]:
             for i, w in enumerate(words):
                 ranked.setdefault(w.lower(), i)
             _DICTIONARY = ranked
-        except FileNotFoundError:
+        except OSError:
             _DICTIONARY = {}
     return _DICTIONARY
 

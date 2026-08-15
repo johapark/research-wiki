@@ -7,6 +7,16 @@ is the C++ engine Chrome ships for PDF rendering — battle-tested at scale,
 permissively licensed (BSD-3-Clause + Apache-2.0). pypdfium2 is the Python
 binding distributed as pre-built wheels.
 
+**Failure modes are split on purpose, so callers know which contract they get.**
+`extract_pdf` and `extract_pdf_page_texts` *raise* (`PdfiumError` on an
+unparseable file, `FileNotFoundError` on a missing one): they are the ingest and
+grading paths, where a PDF that cannot be read means the operation cannot
+proceed and a silent empty string would land a page grounded in nothing. The
+three probing functions — `pdf_shape`, `extract_ref_dois`, `cites_reference` —
+return an empty sentinel instead (`(None, "")`, `[]`, `False`), because each
+answers an optional question whose "don't know" is a legitimate answer and whose
+callers must not be aborted by one bad file in a corpus walk.
+
 API note: pypdfium2 only exposes the standard PDF info dictionary (Title,
 Author, Subject, Keywords, Creator, Producer, CreationDate, ModDate) as bare
 keys, not custom XMP fields like Springer's `/doi`. We normalize the keys to
@@ -157,7 +167,7 @@ def _slash_prefix_metadata(md: dict[str, Any]) -> dict[str, Any]:
 def extract_pdf(path: Path, max_pages: int = 20) -> tuple[str, dict[str, Any]]:
     """Return (concatenated first-N-pages text, slash-prefixed metadata dict).
 
-    Output is post-processed by `_repair_ligatures` to fix the common ligature-
+    Output is post-processed by `repair.repair_text` to fix the common ligature-
     glyph dropout pattern in scientific PDFs (see module-level commentary).
     """
     pdf = pypdfium2.PdfDocument(str(path))
@@ -181,7 +191,7 @@ def extract_pdf_page_texts(path: Path, max_pages: int = 20) -> list[str]:
     by `tests/test_chunk_provenance.py`.
 
     Repair is applied per page rather than to the join. The two agree because
-    `_repair_ligatures`'s patterns are word-shaped and no word survives a page
+    `repair_text`'s patterns are word-shaped and no word survives a page
     break — verified across 15 corpus papers when this was introduced — and
     per-page is the order that keeps page lengths meaningful *after* repair,
     which is the thing offsets are measured against.
@@ -204,13 +214,25 @@ def page_offsets(page_texts: list[str]) -> list[int]:
     return offsets
 
 
-def page_for_offset(offsets: list[int], offset: int) -> int | None:
+def page_for_offset(
+    offsets: list[int], offset: int, total_len: int | None = None
+) -> int | None:
     """1-based page number containing `offset`. None when out of range.
 
     `offsets` is ascending, so this is a right-bisect: the page is the last one
     whose start is <= the offset.
+
+    Page starts alone cannot say where the *last* page ends, so an offset past
+    the end of the text is indistinguishable from one on the final page unless
+    the caller says how long the text is. Pass `total_len` (the length of the
+    joined text these offsets index into) and an offset at or beyond it returns
+    None, as the docstring has always promised; omit it and the old behaviour
+    stands, since a caller that joined the pages itself cannot produce an
+    out-of-range offset anyway.
     """
     if not offsets or offset < 0:
+        return None
+    if total_len is not None and offset >= total_len:
         return None
     lo, hi = 0, len(offsets)
     while lo < hi:

@@ -142,8 +142,8 @@ def _chunk_text(
         start_off, end_off = window[0].start(), window[-1].end()
         page_start = page_end = None
         if page_starts:
-            page_start = page_for_offset(page_starts, start_off)
-            page_end = page_for_offset(page_starts, end_off - 1) or page_start
+            page_start = page_for_offset(page_starts, start_off, len(text))
+            page_end = page_for_offset(page_starts, end_off - 1, len(text)) or page_start
         chunks.append(Chunk(
             chunk_id=cid,
             text=" ".join(m.group() for m in window),

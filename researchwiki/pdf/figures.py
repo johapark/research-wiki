@@ -33,6 +33,8 @@ from pathlib import Path
 import pypdfium2
 import pypdfium2.raw
 
+from .repair import _INTERIOR_CTRL_RE
+
 _PAGEOBJ_PATH = pypdfium2.raw.FPDF_PAGEOBJ_PATH
 _PAGEOBJ_IMAGE = pypdfium2.raw.FPDF_PAGEOBJ_IMAGE
 
@@ -76,6 +78,13 @@ class FigureRef:
 def page_texts(pdf_path: Path | str, max_pages: int = MAX_SCAN_PAGES) -> list[str]:
     """Per-page text, 0-indexed list. Separate from `pdf.text.extract_pdf`,
     which joins pages and so cannot answer "which page is this on".
+
+    Interior control bytes are stripped, the same way `pdf_shape` does it and
+    for the same two reasons: a soft-hyphenated `Fig\\x02ure 3 | ...` should
+    still match the caption pattern, and a caption is printed straight to the
+    terminal, where a raw control byte is garbage on the reader's screen. The
+    full ligature repair is deliberately not run — it costs the 1.7 MB
+    dictionary to fix words nobody is grading against.
     """
     pdf_path = Path(pdf_path)
     if not pdf_path.exists():
@@ -88,7 +97,7 @@ def page_texts(pdf_path: Path | str, max_pages: int = MAX_SCAN_PAGES) -> list[st
             try:
                 tp = page.get_textpage()
                 try:
-                    out.append(tp.get_text_bounded() or "")
+                    out.append(_INTERIOR_CTRL_RE.sub("", tp.get_text_bounded() or ""))
                 finally:
                     tp.close()
             finally:
