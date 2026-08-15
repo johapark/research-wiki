@@ -260,6 +260,23 @@ def test_vault_plumbing_is_dropped_not_exported(wiki):
     assert not any(k.endswith("pdf_path") for k in fm)
 
 
+def test_mapped_keys_are_not_also_duplicated_as_extension_keys(wiki, tmp_path):
+    """`source_url` → `resource` and `generated_at` → `generated.at` are mapped;
+    they must not additionally leak through the `x_researchwiki_` passthrough
+    the way unmapped keys do."""
+    _page(tmp_path, "references/acme-2026-a-whitepaper",
+          "## Summary\nA whitepaper.",
+          type="whitepaper", title="Acme whitepaper", hook="A whitepaper.",
+          source_url="https://acme.example/wp.pdf",
+          author_model="claude-opus-4-7", generated_at="2026-06-11")
+    files, _ = okfexport.collect_bundle()
+    fm = yaml.safe_load(files["references/acme-2026-a-whitepaper.md"].split("---\n")[1])
+    assert fm["resource"] == "https://acme.example/wp.pdf"
+    assert fm["generated"]["at"] == "2026-06-11"
+    assert "x_researchwiki_source_url" not in fm
+    assert "x_researchwiki_generated_at" not in fm
+
+
 # ---------------------------------------------------------------- log
 
 def test_log_translates_to_okf_shape_newest_first(wiki):

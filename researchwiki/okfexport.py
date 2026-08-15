@@ -85,7 +85,8 @@ STATUS_MAP: dict[str, str] = {
 #: so an export never silently loses curation.
 _MAPPED_KEYS = frozenset({
     "type", "title", "hook", "doi", "tags", "keywords",
-    "author_model", "ingested_at", "status",
+    "author_model", "ingested_at", "generated_at", "status",
+    "source_url",   # → `resource`, when the page has no DOI
     # Dropped: local-vault plumbing with no meaning outside this repo.
     "pdf_path", "category", "referenced_papers",
 })
