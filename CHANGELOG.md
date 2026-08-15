@@ -14,6 +14,53 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Journal recovery could delete the working directory.** A journal document
+  with no `backup_dir` key fell back to `Path("")` — which is `.` — and cleanup
+  then ran `shutil.rmtree` on the wiki root, silently (`ignore_errors=True`).
+  One stray or truncated `.json` under `.mutation/` was the whole trigger, and
+  `recover_pending` auto-runs at ingest start. Recovery now removes a backup
+  directory only when the recorded path is strictly inside `.mutation/`; the
+  journal itself is still drained. It also leaves journals from a *newer*
+  schema version in place (draining one with old code could lose its rollback)
+  and reports orphaned backup directories instead of ignoring them.
+
+- **`remove --apply` failed for any paper with supplementary files.** The
+  removal plan declares directories (`papers/{stem}.supp/`, figure and grade
+  caches, evolution-proposal dirs), but the snapshot backed paths up with
+  `shutil.copy2`, which raises on a directory — so the removal died before
+  writing anything and stranded a journal-less backup dir in `.mutation/`.
+  Snapshots now back directories up with `copytree` and rollback restores or
+  removes them whole; a snapshot that fails mid-copy cleans up after itself.
+
+- **The `RW_MUTATION_JOURNAL=0` escape hatch crashed at every commit point.**
+  The passthrough snapshot's journal path is `/dev/null`, and `mark_committed()`
+  still persisted — dying on `PermissionError: /dev/null.tmp` *after* the
+  caller's work had landed, so a successful promote or removal reported
+  failure. Persist and cleanup are now no-ops on a disabled snapshot.
+
+- **`remove` could edit a stem-collision neighbour's bullets.** The index-bullet
+  and concept-spoke patterns matched the stem as a suffix or substring inside a
+  wikilink, so removing `lee-2025-…` also deleted `garcia-lee-2025-…`'s entries
+  — the shape a hyphenated surname produces. All removal patterns now anchor
+  the stem the way `backlinks.remove_related_paper` always did. The commentary
+  probe likewise no longer flags a commentary whose *body* merely mentions the
+  removed stem (`primary_paper:` matching ran to end-of-file under `DOTALL`).
+
+- **OKF export duplicated two mapped fields.** `source_url` (→ `resource`) and
+  `generated_at` (→ `generated.at`) were missing from the mapped-key set, so
+  they also leaked through the `x_researchwiki_` passthrough.
+
+- **`visualize` collapsed a `promoted` claim edge down to its weakest sibling.**
+  Only `confirmed` was special-cased when parallel edges collapse per page
+  pair; the strongest live status (`promoted` > `confirmed` > `candidate`) now
+  wins. The graph page is also written atomically, matching every other writer.
+
+- **`export --format okf` with a file at `--out` now exits 2, not 1** — an
+  unwritable output path is an environment failure per the documented contract,
+  not a malformed argument.
+
 ## [0.4.0] - 2026-08-14
 
 ### Added
