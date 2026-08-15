@@ -254,6 +254,54 @@ def test_a_failure_mid_removal_restores_the_supp_directory(wiki, monkeypatch):
     assert (wiki / "papers" / f"{STEM}.pdf").exists()
 
 
+# ---------- stem anchoring ----------
+
+def test_a_stem_suffix_collision_survives_removal(wiki):
+    """`garcia-smith-…` contains STEM (`smith-…`) as a suffix — the shape a
+    hyphenated surname produces. The earlier substring/suffix regexes deleted
+    the other paper's bullets and spokes along with the target's."""
+    other = f"garcia-{STEM}"
+    (wiki / "wiki" / "compbio" / f"{other}.md").write_text(
+        "---\ntype: paper\n---\n\n# Garcia-Smith\n", encoding="utf-8")
+    idx = wiki / "wiki" / "index.md"
+    idx.write_text(idx.read_text(encoding="utf-8")
+                   + f"- [[compbio/{other}]] — **Garcia-Smith 2024**: sibling.\n",
+                   encoding="utf-8")
+    hub = wiki / "wiki" / "concepts" / "pangenome.md"
+    hub.write_text(hub.read_text(encoding="utf-8")
+                   + f"- [[compbio/{other}]] — also builds one\n", encoding="utf-8")
+
+    removal.apply(removal.scan(STEM))
+
+    assert other in idx.read_text(encoding="utf-8"), \
+        "the suffix-colliding paper keeps its index bullet"
+    assert other in hub.read_text(encoding="utf-8"), \
+        "the suffix-colliding paper keeps its concept spoke"
+
+
+# ---------- commentary detection ----------
+
+def test_commentary_is_flagged_only_via_primary_paper(wiki):
+    """A commentary whose *body* mentions the stem is not orphaned by the
+    removal; only one naming it in `primary_paper:` is. The old probe used
+    DOTALL and matched to end-of-file."""
+    (wiki / "wiki" / "compbio" / "marchal-2026-highlight.md").write_text(
+        "---\ntype: commentary\n"
+        'primary_paper: "[[compbio/keep-2020-unrelated]]"\n---\n\n'
+        f"## Summary\nDiscusses [[compbio/{STEM}]] in passing.\n",
+        encoding="utf-8")
+    (wiki / "wiki" / "compbio" / "wu-2026-news-and-views.md").write_text(
+        "---\ntype: commentary\nprimary_paper:\n"
+        f'  - "[[compbio/{STEM}]]"\n'
+        '  - "Wu et al. (2026) — companion; not in this wiki"\n---\n\n'
+        "## Summary\nCovers the primary study.\n",
+        encoding="utf-8")
+
+    plan = removal.scan(STEM)
+    names = {p.name for p in plan.commentary_pages}
+    assert names == {"wu-2026-news-and-views.md"}
+
+
 # ---------- rollback ----------
 
 def test_a_failure_mid_removal_restores_everything(wiki, monkeypatch):

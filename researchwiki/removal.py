@@ -162,10 +162,16 @@ def scan(stem: str) -> RemovalPlan:
                 plan.concept_hubs.append(page)
             continue
 
-        if page_type == "commentary" and re.search(
-            rf"^primary_paper:.*{re.escape(stem)}", text, re.MULTILINE | re.DOTALL
-        ):
-            plan.commentary_pages.append(page)
+        if page_type == "commentary":
+            # The field's value plus any indented continuation lines (the YAML
+            # list form). Scoped that way rather than `.*` with DOTALL, which
+            # ran to end-of-file and flagged any commentary whose *body* merely
+            # mentioned the stem.
+            field_m = re.search(
+                r"^primary_paper:[^\n]*(?:\n[ \t]+[^\n]*)*", text, re.MULTILINE
+            )
+            if field_m and stem in field_m.group(0):
+                plan.commentary_pages.append(page)
 
         n_bullets = len([
             ln for ln in text.splitlines()
@@ -174,11 +180,13 @@ def scan(stem: str) -> RemovalPlan:
         if n_bullets:
             plan.backlink_pages.append((page, n_bullets))
 
-    # index.md bullet.
+    # index.md bullet. `_link_re` anchors the stem inside the wikilink, so a
+    # stem that is a suffix of another (`lee-2025-…` vs `garcia-lee-2025-…`)
+    # cannot match the other paper's bullet.
     idx = index_path()
     if idx.exists():
         plan.index_bullet = bool(re.search(
-            rf"^\s*[-*]\s+\[\[[^\]]*{re.escape(stem)}\]\]",
+            rf"^\s*[-*]\s+{_link_re(stem).pattern}",
             idx.read_text(encoding="utf-8"), re.MULTILINE,
         ))
 
@@ -289,8 +297,10 @@ def apply(plan: RemovalPlan, *, keep_pdf: bool = False) -> RemovalResult:
 def _strip_index_bullet(stem: str) -> bool:
     from .fsatomic import update_locked
 
+    # Same anchoring as `scan`'s probe: the wikilink must resolve to exactly
+    # this stem, or a suffix-collision would delete another paper's bullet.
     pattern = re.compile(
-        rf"^\s*[-*]\s+\[\[[^\]]*{re.escape(stem)}\]\].*$\n?", re.MULTILINE
+        rf"^\s*[-*]\s+{_link_re(stem).pattern}.*$\n?", re.MULTILINE
     )
 
     def mutate(text: str) -> str:
@@ -322,13 +332,16 @@ def _strip_concept_spoke(hub: Path, stem: str) -> bool:
 
     text = re.sub(r"^referenced_papers:\s*\[(.*?)\]", _drop_inline, text,
                   flags=re.MULTILINE | re.DOTALL)
+    # `_link_re` anchors the stem inside the wikilink; the earlier substring
+    # match (`[^\]]*stem[^\]]*`) also stripped spokes for any stem that merely
+    # *contained* this one.
     text = re.sub(
-        rf"^\s*-\s+\"?\[\[[^\]]*{re.escape(stem)}[^\]]*\]\]\"?\s*$\n?",
+        rf"^\s*-\s+\"?{_link_re(stem).pattern}\"?\s*$\n?",
         "", text, flags=re.MULTILINE,
     )
     # Spoke bullet in the body.
     text = re.sub(
-        rf"^\s*[-*]\s+.*\[\[[^\]]*{re.escape(stem)}[^\]]*\]\].*$\n?",
+        rf"^\s*[-*]\s+.*{_link_re(stem).pattern}.*$\n?",
         "", text, flags=re.MULTILINE,
     )
 
