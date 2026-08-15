@@ -355,8 +355,27 @@ def pending_journals() -> list[dict]:
     return found
 
 
-def _clean_up(journal_path: Path, backup_dir: Path) -> None:
-    shutil.rmtree(backup_dir, ignore_errors=True)
+def _removable_backup_dir(raw: object) -> Path | None:
+    """Validate a journal's recorded `backup_dir` before anything rmtree-s it.
+
+    Returns the path only when it is *strictly inside* `.mutation/`; anything
+    else — and above all a missing key, whose old `Path("")` fallback resolved
+    to the current working directory and handed the whole wiki root to
+    `shutil.rmtree` — comes back as None, meaning "do not remove anything".
+    Journal entries still restore individually; only the bulk delete is gated.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    root = mutation_dir().resolve()
+    candidate = Path(raw).resolve()
+    if candidate == root or root not in candidate.parents:
+        return None
+    return candidate
+
+
+def _clean_up(journal_path: Path, backup_dir: Path | None) -> None:
+    if backup_dir is not None:
+        shutil.rmtree(backup_dir, ignore_errors=True)
     journal_path.unlink(missing_ok=True)
 
 
@@ -366,7 +385,8 @@ def recover_pending() -> list[str]:
     `active` is rolled back and `committed` is cleaned up. A journal whose
     rollback has already failed `MAX_ROLLBACK_ATTEMPTS` times is left untouched
     and reported, so a standing failure reaches a human instead of being retried
-    forever.
+    forever. A journal from a *newer* schema than this release understands is
+    also left in place — draining it with old code could lose its rollback.
 
     Called at the start of the write paths (`agent ingest`, `ingest`), never from
     a read-only command.
@@ -375,7 +395,19 @@ def recover_pending() -> list[str]:
     for document in pending_journals():
         journal_path = Path(document["journal_path"])
         operation = document.get("operation", "?")
-        backup_dir = Path(document.get("backup_dir", ""))
+        backup_dir = _removable_backup_dir(document.get("backup_dir"))
+
+        try:
+            version = int(document.get("version", 0))
+        except (TypeError, ValueError):
+            version = 0
+        if version > JOURNAL_VERSION:
+            notes.append(
+                f"journal for {operation} uses schema v{version}, newer than this "
+                f"release understands (v{JOURNAL_VERSION}) — left in place at "
+                f"{journal_path}"
+            )
+            continue
 
         if document.get("status") == _COMMITTED:
             _clean_up(journal_path, backup_dir)
@@ -409,4 +441,17 @@ def recover_pending() -> list[str]:
         notes.append(
             f"rolled back interrupted {operation} ({len(entries)} path(s) restored)"
         )
+
+    # A backup directory with no `.json` beside it is the residue of a snapshot
+    # that died mid-copy (or of a journal cleaned by hand). Nothing will ever
+    # reference it again, but deleting it here could race a snapshot being taken
+    # by a concurrent process right now — so it is reported, not removed.
+    root = mutation_dir()
+    if root.is_dir():
+        for entry in sorted(root.iterdir()):
+            if entry.is_dir() and not (root / f"{entry.name}.json").exists():
+                notes.append(
+                    f"orphaned backup directory {entry} has no journal — left by an "
+                    f"interrupted snapshot; safe to delete by hand"
+                )
     return notes

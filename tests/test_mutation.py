@@ -253,6 +253,78 @@ def test_missing_backup_leaves_the_target_alone(root):
     assert page.read_text(encoding="utf-8") == "modified"
 
 
+def test_a_journal_with_no_backup_dir_never_deletes_the_cwd(root, monkeypatch):
+    """The regression this pins was catastrophic: `document.get("backup_dir", "")`
+    fell back to `Path("")` — which is `.` — and `_clean_up` then rmtree'd the
+    entire working directory, wiki and papers included, silently
+    (`ignore_errors=True`). One stray or truncated `.json` under `.mutation/`
+    was the whole trigger, and `recover_pending` auto-runs at ingest start."""
+    monkeypatch.chdir(root)
+    canary = _write(root / "canary.txt", "still here")
+    _write(root / "wiki" / "a.md", "wiki content")
+    mdir = root / ".mutation"
+    mdir.mkdir(parents=True, exist_ok=True)
+    (mdir / "stray.json").write_text(
+        json.dumps({"version": 1, "operation": "promote", "status": "committed"}),
+        encoding="utf-8")
+
+    notes = mut.recover_pending()
+
+    assert canary.read_text(encoding="utf-8") == "still here"
+    assert (root / "wiki" / "a.md").exists()
+    assert not (mdir / "stray.json").exists(), "the journal itself is still drained"
+    assert any("discarded" in n for n in notes)
+
+
+def test_recovery_refuses_a_backup_dir_outside_mutation_dir(root):
+    """Only the bulk delete is gated: the journal is drained, but a
+    `backup_dir` pointing anywhere outside `.mutation/` is never rmtree'd."""
+    precious = _write(root / "wiki" / "precious.md", "irreplaceable")
+    mdir = root / ".mutation"
+    mdir.mkdir(parents=True, exist_ok=True)
+    (mdir / "hostile.json").write_text(json.dumps({
+        "version": 1, "operation": "promote", "status": "committed",
+        "backup_dir": str(root / "wiki"),
+    }), encoding="utf-8")
+
+    mut.recover_pending()
+
+    assert precious.read_text(encoding="utf-8") == "irreplaceable"
+    assert not (mdir / "hostile.json").exists()
+
+
+def test_recovery_leaves_a_newer_schema_journal_in_place(root):
+    """Old code draining a journal it cannot fully read could lose its
+    rollback; report it and step aside instead."""
+    page = _write(root / "wiki" / "a.md", "current")
+    mdir = root / ".mutation"
+    mdir.mkdir(parents=True, exist_ok=True)
+    journal = mdir / "future.json"
+    journal.write_text(json.dumps({
+        "version": mut.JOURNAL_VERSION + 1, "operation": "promote",
+        "status": "active", "backup_dir": str(mdir / "future"),
+        "entries": [{"target": str(page), "backup": None}],
+    }), encoding="utf-8")
+
+    notes = mut.recover_pending()
+
+    assert journal.exists()
+    assert page.exists(), "a v-newer journal's entries must not be replayed"
+    assert any("newer" in n for n in notes)
+
+
+def test_recovery_reports_an_orphan_backup_dir_without_deleting_it(root):
+    """A backup dir with no `.json` beside it is residue of a snapshot that died
+    mid-copy. Deleting it could race a concurrent snapshot, so: report only."""
+    orphan = root / ".mutation" / "20260814T000000-cafef00d"
+    _write(orphan / "000-page.md", "backup bytes")
+
+    notes = mut.recover_pending()
+
+    assert orphan.exists()
+    assert any("orphaned backup directory" in n for n in notes)
+
+
 # ---------- snapshot mechanics ----------
 
 def test_duplicate_paths_are_collapsed(root):
@@ -289,6 +361,7 @@ def test_disabled_by_env_is_a_passthrough(root, monkeypatch):
 
     assert page.read_text(encoding="utf-8") == "not rolled back"
     assert not (root / ".mutation").exists()
+
 
 
 @pytest.mark.parametrize("value,expected", [
