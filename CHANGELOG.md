@@ -14,7 +14,51 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Changed
+
+- **Extraction-noise repair moved to `researchwiki/pdf/repair.py`** (`repair_text`,
+  formerly `text._repair_ligatures`). `pdf/text.py` is about getting bytes out of
+  a PDF; how those bytes come out wrong is a separate subject with its own
+  judgement calls, and the one most likely to need arguing with.
+
 ### Fixed
+
+- **Ligature repair rewrote scientific prose into plausible nonsense.** Mode B
+  infers damage from a failed dictionary lookup alone, and over a 20-paper
+  sample 166 of its 187 insertions landed on an acronym or a hyphenated term:
+  `p-values` → `ftp-values` (21×), `UNG` → `flUNG`, `OOD` → `flOOD`,
+  `HLA-U` → `HLA-flU`, `re-produced` → `fire-produced`. Every one was legal
+  under the old rule, which accepted a hyphenated candidate whenever each part
+  was a word (`ftp` + `values`) and matched acronyms case-insensitively — and
+  this text is what the author phase writes pages from and what the claim
+  grader scores against.
+
+  Frequency cannot separate them (`ftp` and `floor` are common words), so the
+  new guards are structural, and repair is judged per hyphen-part rather than
+  per token. Loading the wordlist as `{word: rank}` also fixes two failures in
+  the other direction: `ne-grained` stayed damaged because `neff` made `fine`
+  look ambiguous, and `rst` → `first` never fired because the list contains
+  `rst`. Mode A (C1-byte repair) is untouched — a control byte is hard evidence
+  of damage, and these guards would reject cases it handles correctly.
+
+- **A genuine hyphen falling at a line break was welded away.** The control byte
+  stands for two different hyphens, and eliding both destroyed 221 of 2,367 in
+  the sample — `off-target` → `offtarget` in a corpus where that term is
+  central, after which the chunk index holds a token no reader's query matches.
+  The wordlist now decides, with the rule order load-bearing: a repairable
+  welded form wins before the both-halves-are-words test, so `dif-cult` becomes
+  `difficult` and `therefore` does not sprout a hyphen.
+
+- **`_load_dictionary` caught only `FileNotFoundError`**, so an unreadable
+  wordlist broke every extraction instead of degrading to no-repair; the empty
+  result is now cached rather than re-attempted per word.
+
+- **`page_for_offset` promised `None` when out of range** but only guarded the
+  low end. It takes an optional `total_len` and the chunker passes it.
+
+- **`figures.page_texts` returned raw control bytes**, so a soft-hyphenated
+  `Fig\x02ure 3 | …` missed the caption pattern and printed the byte to the
+  terminal when it matched.
 
 - **Journal recovery could delete the working directory.** A journal document
   with no `backup_dir` key fell back to `Path("")` — which is `.` — and cleanup
