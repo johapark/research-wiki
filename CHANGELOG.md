@@ -14,6 +14,23 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- **`lint`: `missing_author_model`** — paper pages that carry `ingested_at:` but
+  no `author_model:`. That field is the only one naming which LLM wrote a page's
+  prose, and `okfexport._actor_for` reads it alone: absent it, an OKF export
+  omits the page's whole `generated` block rather than inventing an actor, so
+  the page ships with no provenance for its own text and nothing said so.
+
+  Scoped to pages the pipeline wrote, which is the point rather than a
+  limitation. The field is optional by contract and 31 of this corpus's 120
+  pages predate it, so an unscoped check would bury the 11 real gaps under
+  legacy noise and train the reader to skip the section. `ingested_at:` is the
+  scope test because `promote._build_frontmatter` emits both fields in the same
+  call. No autofix, for the same reason the OKF exporter omits the block:
+  nothing on disk records the model after the fact, and guessing would assert an
+  author nobody knows.
+
 ### Changed
 
 - **The module-size gate counts code, not lines** — `MAX_CODE_LINES = 500`,

@@ -35,6 +35,7 @@ from researchwiki.tasks.lint.walk import all_pages
 from researchwiki.tasks.lint.yaml_checks import (
     HOOK_MAX_CHARS,
     find_hook_too_long,
+    find_missing_author_model,
     find_missing_hook,
 )
 from researchwiki.wiki import read_page
@@ -366,3 +367,56 @@ def test_the_whole_frontmatter_block_parses_with_a_colon_venue():
     parsed = yaml.safe_load(page.split("---", 2)[1])
     assert parsed["doi"] == "10.1234/test.2022.0001"
     assert parsed["type"] == "paper"
+
+
+# --- author_model: provenance for the page's own prose -----------------------
+#
+# Scoped deliberately to pages the pipeline wrote (`ingested_at:` present).
+# The field is optional by contract and 31 of 120 corpus pages predate it, so an
+# unscoped check would bury 11 real gaps under legacy noise. These tests pin the
+# scope, because widening it is the tempting and wrong change.
+
+def test_missing_author_model_flags_an_ingested_page_without_one(tmp_wiki):
+    _mkpage(tmp_wiki, "genomics/a-2026-x",
+            'type: paper\ntitle: A\ningested_at: 2026-06-16T23:32:46')
+    assert find_missing_author_model(*_walk(tmp_wiki)) == ["genomics/a-2026-x"]
+
+
+def test_an_ingested_page_carrying_the_field_is_clean(tmp_wiki):
+    _mkpage(tmp_wiki, "genomics/a-2026-x",
+            'type: paper\ntitle: A\ningested_at: 2026-06-16T23:32:46\n'
+            'author_model: "claude-opus-4-7"')
+    assert find_missing_author_model(*_walk(tmp_wiki)) == []
+
+
+def test_a_page_predating_the_pipeline_is_out_of_scope(tmp_wiki):
+    """No `ingested_at:` means no ingest run wrote this page, so nothing was
+    ever in a position to record the model. `park-2023` in the real corpus is
+    exactly this shape — flagging it would be noise, not a finding."""
+    _mkpage(tmp_wiki, "genomics/legacy-2019-z", "type: paper\ntitle: Legacy")
+    assert find_missing_author_model(*_walk(tmp_wiki)) == []
+
+
+@pytest.mark.parametrize("ptype", ["synthesis", "idea", "concept", "whitepaper", "guidance"])
+def test_only_paper_pages_are_in_scope(tmp_wiki, ptype):
+    """Reference docs take the field on the manual path where it is genuinely
+    optional, and the synthesis/idea scaffolds emit `author_model: "TODO"` for a
+    human to fill rather than guaranteeing a value."""
+    _mkpage(tmp_wiki, f"genomics/p-2026-{ptype}",
+            f"type: {ptype}\ntitle: P\ningested_at: 2026-06-16T23:32:46")
+    assert find_missing_author_model(*_walk(tmp_wiki)) == []
+
+
+def test_an_empty_author_model_counts_as_missing(tmp_wiki):
+    """An empty or whitespace value carries no more provenance than no key —
+    and `promote` writes the key unconditionally when it has a model, so a blank
+    one means the value was lost, not that the field was never wanted."""
+    _mkpage(tmp_wiki, "genomics/a-2026-x",
+            'type: paper\ntitle: A\ningested_at: 2026-06-16T23:32:46\nauthor_model: "  "')
+    assert find_missing_author_model(*_walk(tmp_wiki)) == ["genomics/a-2026-x"]
+
+
+def test_root_bookkeeping_is_skipped(tmp_wiki):
+    (tmp_wiki / "index.md").write_text(
+        "---\ntype: meta\ningested_at: 2026-06-16T23:32:46\n---\n\n# Index\n")
+    assert find_missing_author_model(*_walk(tmp_wiki)) == []

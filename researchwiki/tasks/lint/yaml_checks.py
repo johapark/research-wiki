@@ -9,6 +9,7 @@ flags a structural mismatch.
   - missing_keywords: paper page with fewer than MIN_KEYWORDS keywords
   - missing_hook: catalog page with no `hook:` gloss
   - hook_too_long: `hook:` past its page type's advisory ceiling
+  - missing_author_model: agent-ingested paper page with no `author_model:`
 """
 
 from __future__ import annotations
@@ -458,4 +459,51 @@ def find_venue_suspect(
         if metadata_sanity.is_venue_furniture(venue):
             out.append({"page": page_key(md), "venue": venue})
     out.sort(key=lambda d: d["page"])
+    return out
+
+
+def find_missing_author_model(
+    pages: list[Path], pages_fm: dict[Path, dict],
+) -> list[str]:
+    """Agent-ingested paper pages with no `author_model:`.
+
+    `author_model` names the LLM that wrote a page's prose, and it is the *only*
+    field that does: `okfexport._actor_for` reads it alone to build OKF's
+    `generated.by`, and omits the whole `generated` block when it is absent
+    rather than inventing an actor. A page missing it therefore ships with no
+    provenance for its own text.
+
+    **Scoped to pages that should have it, which is the entire point.** The
+    field is documented as optional, and 31 of this corpus's 120 pages predate
+    it or came from another framework — flagging those would bury the signal
+    under legacy noise and train the reader to ignore this check. The scope is
+    therefore pages that carry `ingested_at:`, i.e. pages some version of the
+    ingest pipeline wrote. `promote._build_frontmatter` emits both fields in the
+    same call, so on an agent-written page they either both appear or the run
+    predates `author_model` — and in the second case the page is old enough that
+    `ingested_at` is usually absent too.
+
+    Restricted to `type: paper` for the same reason: reference docs take the
+    field on the manual whitepaper path where it is genuinely optional, and
+    synthesis/idea/concept pages are authored conversationally, where the
+    scaffolds emit `author_model: "TODO"` for a human to fill rather than
+    guaranteeing a value.
+
+    Not auto-fixable: nothing on disk records which model wrote prose after the
+    fact, and guessing would assert an author we do not know — the same reason
+    the OKF exporter omits the block instead of fabricating one.
+    """
+    out: list[str] = []
+    for md in pages:
+        if _is_root_bookkeeping(md):
+            continue
+        fm = pages_fm.get(md, {})
+        ptype = str(fm.get("type") or "paper").strip().strip("\"'")
+        if ptype != "paper":
+            continue
+        if not str(fm.get("ingested_at") or "").strip():
+            continue        # predates the pipeline; not this check's business
+        if not str(fm.get("author_model") or "").strip():
+            out.append(page_key(md))
+    out.sort()
     return out

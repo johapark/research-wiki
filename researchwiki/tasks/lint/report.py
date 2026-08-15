@@ -66,6 +66,7 @@ def _emit_json(**kw) -> int:
             {"page": key, "n_keywords": n} for key, n in kw["missing_keywords"]
         ],
         "missing_hook": kw["missing_hook"],
+        "missing_author_model": kw["missing_author_model"],
         "hook_too_long": [
             {"page": key, "chars": n, "ceiling": cap}
             for key, n, cap in kw["hook_too_long"]
@@ -335,6 +336,22 @@ def _emit_prose(**kw) -> int:
     else:
         print("_every catalog page carries a hook._")
     print()
+
+    missing_author_model = kw["missing_author_model"]
+    if missing_author_model:
+        print(f"## Ingested pages missing `author_model:` ({len(missing_author_model)})")
+        print("Paper pages carrying `ingested_at:` but no `author_model:` — the "
+              "only field naming which LLM wrote the prose. Without it an OKF "
+              "export omits the page's whole `generated` block rather than "
+              "inventing an actor, so the page ships with no provenance for its "
+              "own text. Pages predating the pipeline are out of scope and not "
+              "counted here. No autofix: nothing on disk records the model after "
+              "the fact, and guessing would assert an author nobody knows.")
+        for key in missing_author_model[:20]:
+            print(f"- {key}")
+        if len(missing_author_model) > 20:
+            print(f"- ... and {len(missing_author_model) - 20} more")
+        print()
 
     hook_too_long = kw["hook_too_long"]
     print(f"## Hooks over the advisory ceiling ({len(hook_too_long)})")

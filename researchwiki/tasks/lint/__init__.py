@@ -78,6 +78,7 @@ from .yaml_checks import (
     find_invalid_frontmatter,
     find_hook_too_long,
     find_missing_doi,
+    find_missing_author_model,
     find_missing_hook,
     find_missing_keywords,
     find_missing_type,
@@ -111,7 +112,7 @@ def main(argv: list[str]) -> int:
                              "missing_type, page_type_mismatches, category_yaml_drift, stale_synthesis, stale_by_content, "
                              "stale_by_audit_count, p2_entries_with_anchor_hits, "
                              "stale_evolution_proposals, missing_keywords, "
-                             "missing_hook, hook_too_long, "
+                             "missing_hook, hook_too_long, missing_author_model, "
                              "venue_suspect, none_placeholders, thin_index_text, "
                              "ungraded_papers, zero_claim_papers, "
                              "stems_missing_claim_overlap, "
@@ -165,6 +166,7 @@ def main(argv: list[str]) -> int:
     missing_keywords = find_missing_keywords(pages, pages_fm)
     missing_hook = find_missing_hook(pages, pages_fm)
     hook_too_long = find_hook_too_long(pages, pages_fm)
+    missing_author_model = find_missing_author_model(pages, pages_fm)
     unquoted_wikilinks = find_unquoted_wikilink_lists(pages)
     venue_suspect = find_venue_suspect(pages, pages_fm)
     thin_index_text = find_thin_index_text(
@@ -219,6 +221,7 @@ def main(argv: list[str]) -> int:
             p2_anchor_hits=p2_anchor_hits, stale_proposals=stale_proposals,
             missing_keywords=missing_keywords, missing_doi=missing_doi,
             missing_hook=missing_hook, hook_too_long=hook_too_long,
+            missing_author_model=missing_author_model,
             stem_year_drift=stem_year_drift, unquoted_wikilinks=unquoted_wikilinks,
             venue_suspect=venue_suspect, none_placeholders=none_placeholders,
             thin_index_text=thin_index_text,
@@ -246,6 +249,7 @@ def main(argv: list[str]) -> int:
         p2_anchor_hits=p2_anchor_hits, stale_proposals=stale_proposals,
         missing_keywords=missing_keywords, missing_doi=missing_doi,
         missing_hook=missing_hook, hook_too_long=hook_too_long,
+        missing_author_model=missing_author_model,
         stem_year_drift=stem_year_drift, unquoted_wikilinks=unquoted_wikilinks,
         venue_suspect=venue_suspect, none_placeholders=none_placeholders,
         thin_index_text=thin_index_text,
