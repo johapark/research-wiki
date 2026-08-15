@@ -343,10 +343,10 @@ def _emit_prose(**kw) -> int:
         print("Paper pages carrying `ingested_at:` but no `author_model:` — the "
               "only field naming which LLM wrote the prose. Without it an OKF "
               "export omits the page's whole `generated` block rather than "
-              "inventing an actor, so the page ships with no provenance for its "
-              "own text. Pages predating the pipeline are out of scope and not "
-              "counted here. No autofix: nothing on disk records the model after "
-              "the fact, and guessing would assert an author nobody knows.")
+              "inventing an actor, so the page ships with no provenance. Pages "
+              "predating the pipeline are out of scope. `lint --fix` recovers "
+              "these from the ingest log; a page the log never saw (migrated or "
+              "hand-written) has nothing to recover and is left alone.")
         for key in missing_author_model[:20]:
             print(f"- {key}")
         if len(missing_author_model) > 20:

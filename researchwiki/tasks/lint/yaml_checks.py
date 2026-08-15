@@ -489,9 +489,12 @@ def find_missing_author_model(
     scaffolds emit `author_model: "TODO"` for a human to fill rather than
     guaranteeing a value.
 
-    Not auto-fixable: nothing on disk records which model wrote prose after the
-    fact, and guessing would assert an author we do not know — the same reason
-    the OKF exporter omits the block instead of fabricating one.
+    Repaired by `lint --fix`, which recovers the value from the `ingest_iterations`
+    telemetry log rather than deriving it — see `lint.provenance`. That is the
+    only honest source: nothing else on disk records which model wrote prose, so
+    a page the log never saw (migrated or hand-written) stays listed here and is
+    left alone, for the same reason the OKF exporter omits the `generated` block
+    instead of fabricating one.
     """
     out: list[str] = []
     for md in pages:
