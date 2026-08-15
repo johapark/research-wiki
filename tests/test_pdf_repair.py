@@ -11,52 +11,52 @@ The repair pass corrects two failure modes in pypdfium2 output:
 Tests use synthetic damage strings — no PDF I/O — so they're hermetic.
 """
 
-from researchwiki.pdf.text import _repair_ligatures
+from researchwiki.pdf.repair import repair_text
 
 
 # --- Mode A: C1 byte repairs --------------------------------------------------
 
 def test_c1_ff_in_effective():
-    assert _repair_ligatures("e\x82ective") == "effective"
+    assert repair_text("e\x82ective") == "effective"
 
 
 def test_c1_ffi_via_short_suffix():
     # Suffix `cient` (no leading `i`) means the ligature ate three characters.
-    assert _repair_ligatures("e\x81cient") == "efficient"
+    assert repair_text("e\x81cient") == "efficient"
 
 
 def test_c1_ff_via_long_suffix():
     # Suffix `icient` keeps the `i` — only `ff` was dropped.
-    assert _repair_ligatures("e\x82icient") == "efficient"
+    assert repair_text("e\x82icient") == "efficient"
 
 
 def test_c1_ffi_in_official():
-    assert _repair_ligatures("o\x81cial") == "official"
+    assert repair_text("o\x81cial") == "official"
 
 
 def test_c1_fi_in_modified():
-    assert _repair_ligatures("Modi\x92ed") == "Modified"
+    assert repair_text("Modi\x92ed") == "Modified"
 
 
 def test_c1_in_hyphenated_off_target():
     # `off-target` is hyphenated and not a single dictionary entry; the
     # hyphen-split fallback in `_is_known_word` accepts it because both
     # `off` and `target` are dictionary words.
-    assert _repair_ligatures("o\x97-target") == "off-target"
+    assert repair_text("o\x97-target") == "off-target"
 
 
 def test_c1_fi_word_start():
     # Word-start C1 byte representing `fi` ligature.
-    assert _repair_ligatures("signi\x80cant") == "significant"
+    assert repair_text("signi\x80cant") == "significant"
 
 
 def test_c1_in_url():
-    assert _repair_ligatures("h\x8aps://example.com") == "https://example.com"
+    assert repair_text("h\x8aps://example.com") == "https://example.com"
 
 
 def test_c1_word_end():
     # Cutoff: C1 at the end of the word; pattern still matches the word.
-    assert "cutoff" in _repair_ligatures("cuto\x82.")
+    assert "cutoff" in repair_text("cuto\x82.")
 
 
 def test_c1_unrepairable_left_alone():
@@ -65,17 +65,17 @@ def test_c1_unrepairable_left_alone():
     # English wordlist, so the dictionary check rightly leaves it alone
     # rather than guessing wrong. Damage stays — the LLM downstream handles
     # this better than a confidently-wrong repair would.
-    assert "\x8a" in _repair_ligatures("Kha\x8aab")
+    assert "\x8a" in repair_text("Kha\x8aab")
 
 
 # --- Mode B: whole-word ligature drops (no replacement byte) ------------------
 
 def test_modeb_finally():
-    assert _repair_ligatures("nally we") == "finally we"
+    assert repair_text("nally we") == "finally we"
 
 
 def test_modeb_findings():
-    assert _repair_ligatures("ndings") == "findings"
+    assert repair_text("ndings") == "findings"
 
 
 # --- Hyphenated Mode B has too much ambiguity in 30K dict so we accept the leakage. ---
@@ -86,17 +86,17 @@ def test_modeb_findings():
 def test_soft_hyphen_stx_between_letters():
     # `\x02` is a common PDF soft-hyphen marker. Strip when it sits between
     # letters; line-break-hyphenated words rejoin to their canonical form.
-    assert _repair_ligatures("orthogo\x02nal") == "orthogonal"
+    assert repair_text("orthogo\x02nal") == "orthogonal"
 
 
 def test_soft_hyphen_unit_separator():
-    assert _repair_ligatures("inter\x1fnal") == "internal"
+    assert repair_text("inter\x1fnal") == "internal"
 
 
 def test_soft_hyphen_does_not_join_across_whitespace():
     # The control char must be flanked by letters on both sides; otherwise
     # leave it alone (it might be intentional structure).
-    out = _repair_ligatures("foo \x02 bar")
+    out = repair_text("foo \x02 bar")
     assert "\x02" in out
 
 
@@ -104,7 +104,7 @@ def test_soft_hyphen_does_not_join_across_whitespace():
 
 def test_clean_text_unchanged():
     text = "The quick brown fox jumps over the lazy dog."
-    assert _repair_ligatures(text) == text
+    assert repair_text(text) == text
 
 
 def test_author_surnames_unchanged():
@@ -112,10 +112,10 @@ def test_author_surnames_unchanged():
     # damage (start with consonant clusters that COULD be missing `fi`).
     # The dictionary rejects them, so Mode B leaves them alone.
     for name in ["Gurevych", "Diercks", "Khattab"]:
-        assert _repair_ligatures(name) == name
+        assert repair_text(name) == name
 
 
 def test_short_words_left_alone():
     # Words shorter than 3 chars don't get probed (false-positive risk
     # outweighs catch rate). `is`, `or`, `it` stay as-is.
-    assert _repair_ligatures("is or it") == "is or it"
+    assert repair_text("is or it") == "is or it"
