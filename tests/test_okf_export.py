@@ -342,6 +342,18 @@ def test_cli_refuses_a_non_bundle_directory(wiki, monkeypatch, tmp_path):
     assert (victim / "important.txt").read_text(encoding="utf-8") == "do not clobber"
 
 
+def test_cli_treats_a_file_at_out_as_an_environment_failure(wiki, monkeypatch, tmp_path):
+    """Exit 2 per the docstring's contract — an unwritable output path is an
+    environment problem, not a malformed argument."""
+    from researchwiki.errors import EnvironmentFailure
+    from researchwiki.tasks import export as cli
+    monkeypatch.chdir(wiki)
+    blocker = tmp_path / "bundle"
+    blocker.write_text("a file, not a directory", encoding="utf-8")
+    with pytest.raises(EnvironmentFailure, match="not a directory"):
+        cli.main(["--format", "okf", "--out", str(blocker)])
+
+
 def test_cli_writes_a_bundle_and_reports(wiki, monkeypatch, tmp_path, capsys):
     from researchwiki.tasks import export as cli
     monkeypatch.chdir(wiki)

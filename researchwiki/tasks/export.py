@@ -135,9 +135,11 @@ def _run_okf(args) -> int:
 
     out = Path(args.out)
     if out.exists() and not out.is_dir():
-        print(f"researchwiki export: --out {out} exists and is not a directory.",
-              file=sys.stderr)
-        return 1
+        # An unwritable output path is an environment problem (exit 2, per the
+        # docstring's contract), not a malformed argument.
+        raise EnvironmentFailure(
+            f"--out {out} exists and is not a directory; a bundle is a directory tree."
+        )
     if out.is_dir() and any(out.iterdir()) and not looks_like_okf_bundle(out):
         raise EnvironmentFailure(
             f"refusing to write into {out}: it is not empty and carries no bundle-root "
