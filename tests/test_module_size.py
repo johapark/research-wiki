@@ -15,9 +15,12 @@ passed comfortably at 603 lines while holding 549 — more code than four of the
 pinned modules. The gate flagged the documented file and waved through the dense
 one. It also fired on `pdf/text.py` at 868 lines when 284 of them were code.
 
-**Why not just raise the ceiling.** A higher physical-line number moves the
-threshold without fixing the ordering: `llm.py` is still debt at 1000. The
-ordering is what a budget is *for*, so the metric had to change instead.
+**Why the metric mattered more than the number.** Raising the old physical-line
+ceiling would have moved the threshold without fixing the ordering — `llm.py` is
+still debt at 1000 physical lines despite being 39% prose. Ordering is what a
+budget is *for*, so the metric changed first; the ceiling was then free to move,
+and did (500 -> 800), because a correct metric with a permissive bound still
+ranks modules honestly while a wrong one does not at any bound.
 
 The old rationale — "small enough for an agent to hold in context" — no longer
 carries the argument either. The largest module here is ~13,500 tokens against a
@@ -52,11 +55,23 @@ import pytest
 
 import researchwiki
 
-#: Code lines, so this is a much smaller number than the 800 physical lines it
-#: replaced — roughly its equivalent at this package's 57% code density, chosen
-#: to keep the flagged set the same size (9 modules against the previous 8)
-#: while correcting which modules are in it.
-MAX_CODE_LINES = 500
+#: Code lines — docstrings, comments and blanks excluded, so this is not
+#: comparable to a `wc -l` figure.
+#:
+#: Raised 500 -> 800 deliberately, and it is a real loosening rather than a
+#: recalibration: 500 was set to keep the flagged set at the size the
+#: physical-line gate had, and at 800 only `agents/runner.py` trips. The bet is
+#: that the *metric* was doing the work — counting logic instead of prose is what
+#: made the gate rank modules correctly — and that the ceiling can sit where it
+#: only catches a module nobody would defend, leaving ordinary judgement about
+#: cohesion to review rather than to a number.
+#:
+#: What that costs is the per-module ratchet on everything now under it: the
+#: eight modules pinned at 502-661 were deleted from `_DEBT` when this changed
+#: (the dead-entry check requires it), so each is free to grow to 799 with
+#: nothing objecting. That is ~1,700 code lines of licence, and it is the thing
+#: to reconsider first if this file starts letting real sprawl through.
+MAX_CODE_LINES = 800
 
 # Locate the package through the import system rather than by walking up from
 # `__file__`. If this test is ever moved, path arithmetic would silently point at
@@ -75,40 +90,11 @@ _REPO = _PACKAGE.parent
 _DEBT: dict[str, int] = {
     # Agent-ingest orchestrator: phase sequencing, the retry/DEBUG loop, and
     # sandbox-vs-promote routing. Splits along the phase boundary.
+    #
+    # The last entry standing after the ceiling moved to 800. The other eight
+    # (502-661 code lines) were deleted because the dead-entry check requires it,
+    # not because their debt was paid — see MAX_CODE_LINES on what that gave up.
     "researchwiki/agents/runner.py": 817,
-    # Metadata reconcile: PDF-side extraction against provider records, plus the
-    # sanity gate. The gate is the separable half.
-    "researchwiki/agents/phases/reconcile.py": 661,
-    # Concept candidates: term mining, scoring, triage labelling. Mining and
-    # labelling do not need to share a module.
-    "researchwiki/concepts/candidates.py": 653,
-    # Retrieval benchmark: fixture loading, scoring and reporting in one file.
-    "researchwiki/benchmark/retrieval.py": 644,
-    # Backfill targets (hook / keywords / doi) share only a work-list idiom.
-    "researchwiki/tasks/backfill.py": 606,
-    # Lint's two emitters (human text, `--json`). Entered the list on the metric
-    # switch: at 603 physical lines it passed the old gate comfortably while
-    # carrying more code than four modules that did not.
-    #
-    # Raised 549 -> 565 for the `missing_author_model` emitter. Deliberate: this
-    # file's one job is rendering findings, it already holds ~20 blocks of
-    # exactly this shape, and splitting it per check would scatter one job
-    # across files to satisfy a number. The pin still bites on the next addition.
-    "researchwiki/tasks/lint/report.py": 565,
-    # Benchmark fixtures: YAML loading, scoring, and the report. Same story —
-    # dense code, little prose, invisible to a physical-line budget.
-    "researchwiki/tasks/benchmark_fixture.py": 525,
-    # Memory evolution: candidate selection, proposal drafting, emit.
-    "researchwiki/agents/phases/evolution.py": 524,
-    # Transactional promote: five journalled steps and their rollback. Each step
-    # could stand alone under a thin coordinator.
-    "researchwiki/agents/promote.py": 502,
-    # `researchwiki/agents/llm.py` left this list on the metric switch: 902
-    # physical lines but 470 of code, 39% prose. It was pinned for being well
-    # explained, which is the failure mode the switch exists to end.
-    #
-    # `researchwiki/tasks/lint/__init__.py` left it earlier, by being split — its
-    # two emitters moved to `lint/report.py`. This list is current debt, not a log.
 }
 
 
@@ -238,7 +224,7 @@ def test_a_module_sitting_exactly_on_the_ceiling_fails():
     # The docstring promises modules stay *under* the budget, so landing on it is
     # already too big. Asserted because `>=` versus `>` is a one-character slip
     # that widens the budget without anyone noticing.
-    assert MAX_CODE_LINES == 500
+    assert MAX_CODE_LINES == 800
 
 
 def test_the_ceiling_is_inclusive(tmp_path):

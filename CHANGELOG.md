@@ -55,9 +55,9 @@ the reasoning behind any line below.
 
 ### Changed
 
-- **The module-size gate counts code, not lines** — `MAX_CODE_LINES = 500`,
-  excluding docstrings, comment-only lines and blanks, replacing the 800
-  physical-line cap. This package is ~57% code and ~29% prose, so the old metric
+- **The module-size gate counts code, not lines** — `MAX_CODE_LINES = 800`,
+  excluding docstrings, comment-only lines and blanks, replacing a same-numbered
+  cap on *physical* lines (a far tighter bound, since this package is ~29% prose). This package is ~57% code and ~29% prose, so the old metric
   taxed documentation, and it had its own ranking inverted: `agents/llm.py` was
   pinned as debt at 902 lines while holding 470 lines of code (39% prose — well
   explained, not complex), while `tasks/lint/report.py` passed comfortably at 603
@@ -69,12 +69,12 @@ the reasoning behind any line below.
   What a size cap buys is cohesion, and that scales with code, not with how well
   the code is described.
 
-  `_DEBT` is re-pinned in the new units (numbers dropped by roughly a third and
-  are not comparable to the old ones). `agents/llm.py` and `agents/promote.py`
-  leave the physical-line reading behind; `tasks/lint/report.py` and
-  `tasks/benchmark_fixture.py` enter, having been dense code that a physical-line
-  budget could not see. A string bound to a name still counts as code, so the
-  rule can't be dodged by moving text into a triple-quoted constant.
+  The ceiling is permissive by design — only `agents/runner.py` (817 code lines)
+  exceeds it, and it stays pinned in `_DEBT` at its current size. The trade is
+  that modules between ~500 and 800 code lines no longer carry a per-module
+  ratchet; lowering the ceiling is the lever if that starts letting sprawl
+  through. A string bound to a name still counts as code, so the rule can't be
+  dodged by moving text into a triple-quoted constant.
 
 - **Extraction-noise repair moved to `researchwiki/pdf/repair.py`** (`repair_text`,
   formerly `text._repair_ligatures`). `pdf/text.py` is about getting bytes out of

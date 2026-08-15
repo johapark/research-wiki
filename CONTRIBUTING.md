@@ -80,7 +80,7 @@ help, and point the operator at the remediation command.
 `2` environment error (missing index, provider unreachable), `3` internal bug.
 Prefer a `--json` mode on anything an agent might parse.
 
-**Keep modules under 500 lines of code.** Past some volume of logic a module is
+**Keep modules under 800 lines of code.** Past some volume of logic a module is
 doing more than one job, so this is a cohesion budget rather than a style
 preference — `tests/test_module_size.py` fails the build when a new file crosses
 it.
@@ -94,13 +94,20 @@ explanation as the decision deserves; the budget only counts what you have to
 hold in your head. A multi-line string bound to a name still counts, so the rule
 can't be dodged by moving code-adjacent text into a constant.
 
-Nine modules predate the budget and are pinned **at their current size** in that
-test's `_DEBT` dict, so a listed file may shrink freely but cannot grow; a bare
-exemption list is how `agents/runner.py` reached 817 code lines with nothing
-objecting. Split cohesive groups into focused siblings rather than adding an
-entry — the list is for existing debt, not an escape hatch for new code. When a
-module drops back under the limit, delete its entry (a test insists, because a
-stale exemption is indistinguishable from a passing gate).
+The ceiling is permissive on purpose: the metric is what makes the gate rank
+modules honestly, so the bound only has to catch a module nobody would defend.
+One module exceeds it — `agents/runner.py` at 817 — and it is pinned **at its
+current size** in that test's `_DEBT` dict, so it may shrink freely but cannot
+grow; a bare exemption list is how it reached 817 with nothing objecting. Split
+cohesive groups into focused siblings rather than adding an entry — the list is
+for existing debt, not an escape hatch for new code. When a module drops back
+under the limit, delete its entry (a test insists, because a stale exemption is
+indistinguishable from a passing gate).
+
+Note the trade this bound accepts: everything between roughly 500 and 800 code
+lines now grows unchecked, where a tighter ceiling ratcheted each such module at
+its current size. If sprawl starts landing, lowering the ceiling is the first
+lever, not weakening the metric.
 
 ## Content vs framework
 
