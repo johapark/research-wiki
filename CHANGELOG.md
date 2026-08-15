@@ -16,6 +16,28 @@ the reasoning behind any line below.
 
 ### Added
 
+- **`lint --fix` recovers `ingested_at` / `author_model` from the ingest log.**
+  Both are recorded facts — every run writes `ingest_iterations` rows carrying the
+  model it used and when it committed — so this reconstructs rather than infers,
+  and the recovered values are marked `# recovered from ingest_iterations` in the
+  YAML so a reader can tell them from stamped ones. On this corpus it reaches 35
+  pages, which is what makes `wiki/views.md` sortable by real ingest order.
+
+  Deliberately not a new subcommand: it is a one-shot cleanup for pages that
+  predate the fields, so it lives where the gap is already reported. The rule is
+  the last committed attempt **that used a real model** — `agents.llm` records
+  `stub:{model}` for placeholder runs, and `asai-2023`'s two newest commits are
+  both stubs while its prose came from a real attempt eleven days earlier.
+
+  A migrated wiki gets nothing and is told so. `migrate` never writes
+  `ingest_iterations`, and there is no honest fallback — a file timestamp is not
+  an ingest date, since back-link splicing resets both mtime and birthtime. Pages
+  the log has never seen are counted in the report rather than skipped silently,
+  so a part-migrated wiki shows how much is out of reach. Existing values are
+  never overwritten: a stem can have many committed attempts (`cui-2024-scgpt`
+  has 14), so the newest is a sound basis for filling a blank and a poor one for
+  correcting an assertion.
+
 - **`lint`: `missing_author_model`** — paper pages that carry `ingested_at:` but
   no `author_model:`. That field is the only one naming which LLM wrote a page's
   prose, and `okfexport._actor_for` reads it alone: absent it, an OKF export

@@ -199,6 +199,14 @@ def main(argv: list[str]) -> int:
     fix_written: dict[str, int] = {}
     if args.fix and missing_back:
         fix_written = apply_backlink_fixes(missing_back, pages_prose)
+    # Provenance recovery reads this pipeline's own telemetry rather than
+    # inferring anything, which is why it is a `--fix` repair and not a review
+    # queue: `provenance.apply_provenance_fixes` fills a blank field with the
+    # value the ingest run recorded, and fills nothing at all where no run did.
+    if args.fix and missing_author_model:
+        from .provenance import apply_provenance_fixes
+        filled = set(apply_provenance_fixes()["author_model_keys"])
+        missing_author_model = [k for k in missing_author_model if k not in filled]
     db_drift, db_drift_fixed = db_drift_check_and_fix(apply_fix=args.fix)
 
     # --- opt-in cross-paper contradiction lint (LLM-call-heavy)
