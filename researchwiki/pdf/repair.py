@@ -46,7 +46,17 @@ from pathlib import Path
 #    ends; some encodings preserve the soft hyphen as a C0 control char
 #    (most commonly U+0002 STX, also U+0012, U+001E, U+001F). The corpus
 #    shows 7,500+ occurrences of these between letter clusters — by far the
-#    largest class of noise. Stripped unconditionally between two letters.
+#    largest class of noise.
+#
+#    The byte is a hyphen, but two kinds of one, and they need opposite
+#    treatment: the invisible hyphen that broke `context` across two lines has
+#    to vanish, while the real hyphen in `off-target` — which merely happened
+#    to fall at a line end — has to survive. Stripping unconditionally, as this
+#    did until 2026-08-14, welded the second kind: 221 of 2,367 elisions over a
+#    20-paper sample destroyed a genuine hyphen, `off-target` → `offtarget` ten
+#    times over in a corpus where that term is central, and the chunk index
+#    then stops matching a reader's query for it. `_resolve_soft_hyphens`
+#    decides between the two.
 #
 # The dictionary is loaded lazily on first repair call and cached in a
 # module-global, so paths that don't extract PDFs (`status`, `search`,
@@ -99,6 +109,13 @@ _COMMON_RANK = 15000
 #: taken. `fine` (1043) beats `neff` (23911) by far more than this; two
 #: plausible repairs of similar frequency stay unrepaired, as before.
 _RANK_MARGIN = 4
+
+#: The tail of the frequency list, where truncated abbreviations and scanning
+#: artifacts sit alongside genuine rare words. A word from here is too weak an
+#: authority to prove that a line-break hyphen was really a compound's own:
+#: `technol` (26462) is why `Bio-technol.` must weld, while `modal` (18595)
+#: stays above the bound so `multi-modal` keeps its hyphen.
+_TAIL_RANK = 25000
 
 #: Hyphen parts that are ordinary English affixes rather than damage. Each one
 #: here is a real observed corruption: `re-produced` → `fire-produced`,
@@ -201,6 +218,13 @@ def _repair_c1_word(word: str, dictionary: frozenset[str]) -> str:
     return word
 
 
+def _is_ordinary_word(word: str, dictionary: Mapping[str, int]) -> bool:
+    """A known word solid enough to carry an argument — i.e. not from the
+    list's tail, where truncated abbreviations sit. See `_TAIL_RANK`."""
+    rank = _word_rank(word, dictionary)
+    return rank is not None and rank <= _TAIL_RANK
+
+
 def _repair_part(part: str, dictionary: Mapping[str, int], *, siblings_known: bool) -> str:
     """Repair one hyphen-free fragment, or return it untouched.
 
@@ -284,28 +308,91 @@ def _repair_bare_word(word: str, dictionary: Mapping[str, int]) -> str:
     return "-".join(repaired)
 
 
+def _resolve_soft_hyphens(text: str, dictionary: Mapping[str, int]) -> str:
+    """Resolve each interior control byte to either nothing or a real hyphen.
+
+    The byte stands for a hyphen, but two different ones: the invisible hyphen
+    a typesetter inserted to break a word across lines (`con\\x02text`), which
+    must vanish, and a genuine hyphen in a compound that happened to fall at a
+    line end (`off\\x02target`), which must survive. Eliding unconditionally —
+    what this did until now — welded the second kind: measured over 20 corpus
+    papers, 221 of 2367 elisions destroyed a real hyphen, `off-target` →
+    `offtarget` ten times in a corpus where that is a central term. The damage
+    is quiet but not harmless: the chunk index then holds `offtarget`, which no
+    longer matches a reader's `off-target` query.
+
+    The wordlist decides, in this order:
+
+      1. the welded form is a word → it was a line break (`context`);
+      2. the welded form is *repairable* into one → it was a line break that
+         also dropped a ligature, so the halves must be joined for Mode B to
+         see the damage at all (`dif` + `cult` → `difcult` → `difficult`);
+      3. otherwise both halves are ordinary words → it was a real hyphen
+         (`off` + `target`);
+      4. otherwise elide, which is the old behaviour and the safe default for
+         two fragments that mean nothing on their own (`unin` + `tentionally`).
+
+    Order matters twice over: `there` and `fore` are both words, so testing the
+    halves first would hyphenate `therefore`; and `cult` is a word, so testing
+    them before the repair would strand `dif-cult`.
+
+    Rule 3 additionally ignores halves from the tail of the frequency list,
+    where truncated abbreviations live: `technol` (rank 26462) is "a word" only
+    in the sense that the list contains it, and `Bio-technol.` in a reference is
+    a line break rather than a compound. `modal` (18595) sits comfortably above
+    the bound, so `multi-modal` still keeps its hyphen.
+    """
+    out: list[str] = []
+    prev = 0
+    for m in _INTERIOR_CTRL_RE.finditer(text):
+        i = m.start()
+        left_start = i
+        while left_start > 0 and text[left_start - 1].isascii() and text[left_start - 1].isalpha():
+            left_start -= 1
+        right_end = i + 1
+        while right_end < len(text) and text[right_end].isascii() and text[right_end].isalpha():
+            right_end += 1
+        left, right = text[left_start:i], text[i + 1:right_end]
+
+        out.append(text[prev:i])
+        welded = left + right
+        if _is_known_word(welded, dictionary):
+            pass                                     # line-break hyphenation
+        elif _repair_bare_word(welded, dictionary) != welded:
+            pass                                     # line break *and* a dropped ligature
+        elif _is_ordinary_word(left, dictionary) and _is_ordinary_word(right, dictionary):
+            out.append("-")                          # a real hyphen, kept
+        prev = i + 1
+    out.append(text[prev:])
+    return "".join(out)
+
+
 def repair_text(text: str) -> str:
     """Repair PDF-extraction noise: soft-hyphen joins and ligature dropouts.
 
-    Two passes: (1) elide soft-hyphen control bytes between letters, then
-    (2) for each word containing a C1 byte, try the ligature substitutions
-    against the bundled English wordlist and accept the unique fix.
+    Three passes: (1) resolve soft-hyphen control bytes, eliding a line break
+    but keeping a genuine hyphen (`_resolve_soft_hyphens`); (2) for each word
+    containing a C1 byte, try the ligature substitutions against the bundled
+    English wordlist and accept the unique fix; (3) the same for words whose
+    ligature was dropped with no byte left behind.
 
-    Mode-B repair (whole-word drops with no C1 byte) is bounded — we only
-    probe lowercase words 3-11 letters long that fail dictionary lookup,
-    which keeps the work proportional to actual damage. Ambiguous matches
-    (two ligatures both yield valid words) are left alone rather than
-    guessed at; the LLM downstream of extraction tolerates a few damaged
-    words better than it tolerates a confidently-wrong repair.
+    Mode-B repair (whole-word drops with no C1 byte) infers damage from a
+    failed lookup alone, so it is fenced by the structural guards in
+    `_repair_part` — without them it rewrites acronyms and hyphenated terms
+    into plausible nonsense. Ambiguous matches are still left alone rather
+    than guessed at, except where the frequency-sorted wordlist makes one
+    candidate overwhelmingly likelier; the LLM downstream of extraction
+    tolerates a few damaged words better than a confidently-wrong repair.
     """
-    text = _INTERIOR_CTRL_RE.sub("", text)
-
     dictionary = _load_dictionary()
     if not dictionary:
-        return text  # graceful degradation: no wordlist, no repair
+        # Graceful degradation: with no wordlist nothing can be judged, so fall
+        # back to the unconditional elision this function has always done.
+        return _INTERIOR_CTRL_RE.sub("", text)
 
+    text = _resolve_soft_hyphens(text, dictionary)
     # Mode A: words containing C1 bytes
     text = _C1_WORD_RE.sub(lambda m: _repair_c1_word(m.group(), dictionary), text)
-    # Mode B: bare lowercase words that fail dictionary lookup
+    # Mode B: words with no C1 byte that fail dictionary lookup
     text = _BARE_WORD_RE.sub(lambda m: _repair_bare_word(m.group(), dictionary), text)
     return text

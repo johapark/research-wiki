@@ -6,7 +6,9 @@ The repair pass corrects two failure modes in pypdfium2 output:
      fonts; we repair by trying each candidate ligature and accepting the
      unique substitution that yields a dictionary word.
   2. Soft-hyphen / line-break artifacts emerge as low C0 control bytes
-     between letter clusters. Always elidable.
+     between letter clusters. These stand for two different hyphens — the
+     invisible one that broke a word across lines, and a compound's own that
+     happened to land there — and the wordlist decides which.
 
 The guards matter as much as the repairs: Mode B infers damage from a failed
 dictionary lookup alone, so without them it rewrites `p-values` into
@@ -96,7 +98,7 @@ def test_modeb_repairs_a_fragment_the_wordlist_happens_to_contain():
     assert repair_text("nal") == "final"
 
 
-# --- Soft-hyphen elision ---------------------------------------------------
+# --- Soft-hyphen resolution ---------------------------------------------------
 
 def test_soft_hyphen_stx_between_letters():
     # `\x02` is a common PDF soft-hyphen marker. Strip when it sits between
@@ -113,6 +115,45 @@ def test_soft_hyphen_does_not_join_across_whitespace():
     # leave it alone (it might be intentional structure).
     out = repair_text("foo \x02 bar")
     assert "\x02" in out
+
+
+@pytest.mark.parametrize("damaged,expected", [
+    ("off\x02target", "off-target"),
+    ("high\x02throughput", "high-throughput"),
+    ("multi\x02modal", "multi-modal"),
+    ("hyper\x02parameters", "hyper-parameters"),
+    ("next\x02generation", "next-generation"),
+])
+def test_a_real_hyphen_at_a_line_break_survives(damaged, expected):
+    """The byte stands for a hyphen the compound genuinely has, so eliding it
+    welds two words. `off-target` → `offtarget` fired nine times in a 12-paper
+    sample, in a corpus where that term is central: the chunk index then holds
+    a token no reader's query matches."""
+    assert repair_text(damaged) == expected
+
+
+@pytest.mark.parametrize("damaged,expected", [
+    ("con\x02text", "context"),
+    ("there\x02fore", "therefore"),
+    ("perfor\x02mance", "performance"),
+    ("revolution\x02ized", "revolutionized"),
+])
+def test_a_line_break_hyphen_still_vanishes(damaged, expected):
+    """The other half of the same decision — and `there`/`fore` are both words,
+    so this is what pins the rule order."""
+    assert repair_text(damaged) == expected
+
+
+def test_a_line_break_that_also_dropped_a_ligature_welds_then_repairs():
+    """`dif` + `cult` are both words, so the halves-are-words rule would strand
+    `dif-cult`; the fragments have to be joined for Mode B to see `difcult`."""
+    assert repair_text("dif\x02cult") == "difficult"
+
+
+def test_a_truncated_abbreviation_does_not_earn_a_hyphen():
+    """`technol` is in the wordlist only as list junk (rank 26462), which is
+    too weak to prove `Bio-technol.` is a compound rather than a line break."""
+    assert repair_text("Bio\x02technol.") == "Biotechnol."
 
 
 # --- False-positive guards ----------------------------------------------------
