@@ -178,6 +178,28 @@ def test_parallel_claim_pairs_collapse_to_one_edge_with_a_count(wiki):
     assert claims[0]["confidence"] == pytest.approx(0.7)   # strongest wins
 
 
+def test_the_strongest_live_status_wins_when_edges_collapse(wiki):
+    """`promoted` outranks `confirmed` outranks `candidate`. The first version
+    only special-cased `confirmed`, so a promoted edge collapsed with a
+    candidate displayed as candidate."""
+    _seed_claims(wiki, [
+        _edge(src_stem="smith-2024-a-paper-about-things", src_slug="kc-1",
+              tgt_stem="jones-2025-another-paper", tgt_slug="kc-t1",
+              relation="builds_on", status="promoted"),
+        _edge(src_stem="smith-2024-a-paper-about-things", src_slug="kc-2",
+              tgt_stem="jones-2025-another-paper", tgt_slug="kc-t2",
+              relation="builds_on", status="candidate"),
+        _edge(src_stem="smith-2024-a-paper-about-things", src_slug="kc-3",
+              tgt_stem="jones-2025-another-paper", tgt_slug="kc-t3",
+              relation="builds_on", status="confirmed"),
+    ])
+    g = visualize.build_graph()
+    claims = [e for e in g.edges if e["kind"] == "claim"]
+    assert len(claims) == 1
+    assert claims[0]["status"] == "promoted"
+    assert claims[0]["n"] == 3
+
+
 def test_no_claim_db_is_not_an_error_and_creates_nothing(wiki):
     g = visualize.build_graph()
     assert g.meta["n_claim_edges"] == 0

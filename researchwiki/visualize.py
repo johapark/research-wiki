@@ -44,6 +44,11 @@ from .wiki import Page, read_pages
 # so the edge is an assertion nobody currently stands behind.
 LIVE_CLAIM_STATUSES: tuple[str, ...] = ("candidate", "confirmed", "promoted")
 
+# Display strength when parallel claim edges collapse onto one page pair: the
+# collapsed edge shows the strongest status among its members. Anything not
+# listed (e.g. `stale`, drawn only via `--claim-status stale`) ranks lowest.
+_STATUS_RANK: dict[str, int] = {"candidate": 1, "confirmed": 2, "promoted": 3}
+
 # `instantiates` edges are written by the concepts detector with this literal in
 # `tgt_stem` and the concept slug in `tgt_slug`, so the target page is
 # `concepts/<tgt_slug>` rather than a paper stem. Resolving it as a stem finds
@@ -194,9 +199,10 @@ def _claim_edges(
                     if conf and (cur["confidence"] is None or conf > cur["confidence"]):
                         cur["confidence"] = round(conf, 3)
                         cur["rationale"] = (e.rationale or "")[:240]
-                    # A confirmed edge outranks a candidate for display.
-                    if e.status == "confirmed" or cur["status"] == "confirmed":
-                        cur["status"] = "confirmed"
+                    # The strongest live status wins for display: promoted >
+                    # confirmed > candidate.
+                    if _STATUS_RANK.get(e.status, 0) > _STATUS_RANK.get(cur["status"], 0):
+                        cur["status"] = e.status
     finally:
         conn.close()
 
@@ -264,6 +270,7 @@ def render_html(graph: Graph) -> str:
 
 
 def write_html(graph: Graph, out: Path) -> Path:
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render_html(graph), encoding="utf-8")
+    from .fsatomic import write_text_atomic
+
+    write_text_atomic(out, render_html(graph))
     return out
