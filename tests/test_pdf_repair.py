@@ -8,8 +8,14 @@ The repair pass corrects two failure modes in pypdfium2 output:
   2. Soft-hyphen / line-break artifacts emerge as low C0 control bytes
      between letter clusters. Always elidable.
 
+The guards matter as much as the repairs: Mode B infers damage from a failed
+dictionary lookup alone, so without them it rewrites `p-values` into
+`ftp-values`. Both directions are asserted here.
+
 Tests use synthetic damage strings — no PDF I/O — so they're hermetic.
 """
+
+import pytest
 
 from researchwiki.pdf.repair import repair_text
 
@@ -78,10 +84,19 @@ def test_modeb_findings():
     assert repair_text("ndings") == "findings"
 
 
-# --- Hyphenated Mode B has too much ambiguity in 30K dict so we accept the leakage. ---
+def test_modeb_repairs_only_the_damaged_hyphen_part():
+    # Each fragment is judged on its own: `ne` is damage, `grained` is not.
+    assert repair_text("ne-grained") == "fine-grained"
 
 
-# --- Soft-hyphen elision ------------------------------------------------------
+def test_modeb_repairs_a_fragment_the_wordlist_happens_to_contain():
+    # `rst` IS in the 30K list (rank 19463), so membership alone says "leave
+    # it"; `first` at rank 56 is what identifies it as damage.
+    assert repair_text("rst") == "first"
+    assert repair_text("nal") == "final"
+
+
+# --- Soft-hyphen elision ---------------------------------------------------
 
 def test_soft_hyphen_stx_between_letters():
     # `\x02` is a common PDF soft-hyphen marker. Strip when it sits between
@@ -119,3 +134,69 @@ def test_short_words_left_alone():
     # Words shorter than 3 chars don't get probed (false-positive risk
     # outweighs catch rate). `is`, `or`, `it` stay as-is.
     assert repair_text("is or it") == "is or it"
+
+
+# --- Mode-B structural guards -------------------------------------------------
+#
+# Every case below is a real corruption measured over a 20-paper corpus sample
+# before the guards existed: 166 of 187 Mode-B insertions landed on an acronym
+# or a hyphenated term. Frequency cannot separate these — `ftp` (rank 3871) and
+# `floor` (1446) are common words — so the guards are structural, and these
+# tests are what pin them. The suite previously asserted only that repair FIRES,
+# which is why none of this was caught.
+
+@pytest.mark.parametrize("text", [
+    "We report p-values below 0.05",     # -> ftp-values, 21x in the sample
+    "P-values were adjusted",            # -> ftP-values
+    "the p-arms of each chromosome",     # -> ftp-arms
+])
+def test_a_one_letter_hyphen_part_is_never_repaired(text):
+    """`p` is a variable name. `ftp` and `values` both being words is what let
+    the old whole-token rule rewrite the statistics out of a results section."""
+    assert repair_text(text) == text
+
+
+@pytest.mark.parametrize("text", [
+    "The UNG gene encodes uracil-DNA glycosylase",   # -> flUNG
+    "Cells on the OOR panel were excluded",          # -> flOOR, 44x in the sample
+    "OOD detection on held-out data",                # -> flOOD
+    "de-enrichment of HLA-U alleles",                # -> HLA-flU
+    "an OS-inspired design",                         # -> OffS-inspired
+    "kNN overlap was computed",
+])
+def test_an_acronym_is_never_repaired(text):
+    """A dropped ligature removes a glyph; it does not change the case of the
+    letters around it. An interior capital therefore means acronym or proper
+    noun, not damage."""
+    assert repair_text(text) == text
+
+
+@pytest.mark.parametrize("text", [
+    "results were re-produced independently",   # -> fire-produced
+    "de-enrichment was observed",               # -> fide-enrichment
+    "the “Ex-boyfriend” example",               # -> flEx-boyfriend
+])
+def test_an_english_affix_is_never_repaired(text):
+    """A short leading particle is ordinary hyphenation, never a ligature."""
+    assert repair_text(text) == text
+
+
+def test_a_token_whose_other_parts_are_not_words_is_left_alone():
+    """`Tz-TCO` is a reagent. A repair only makes sense when the rest of the
+    token is already English — otherwise `fiTz-TCO` is as good a guess as any,
+    which is exactly the problem."""
+    assert repair_text("Tz-TCO ligation") == "Tz-TCO ligation"
+
+
+def test_a_rare_capitalised_word_is_treated_as_a_name():
+    """`Neff` is a surname and sits in the list's tail; the rare-word repair
+    path must not rewrite it into `Ne` + a commoner reading."""
+    assert repair_text("Neff et al.") == "Neff et al."
+
+
+def test_scientific_vocabulary_survives_a_full_sentence():
+    text = ("Chen et al. reported that SpCas9 and AsCas12a differ in PAM "
+            "preference; kmers from Nanopore HiFi contigs were aligned with "
+            "Bowtie and GATK, and p-values are reported for each ATAC-seq run.")
+    assert repair_text(text) == text
+

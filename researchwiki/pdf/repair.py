@@ -2,17 +2,18 @@
 
 Split out of `pdf/text.py`, which is about getting bytes out of a PDF; this
 module is about the two ways those bytes come out wrong. The split is not
-cosmetic — the repair rules carry this code's real judgement, and they are what
+cosmetic — the repair rules carry the module's real judgement, and they are what
 a reader needs to be able to find and argue with.
 
 `repair_text` is the whole public surface. Everything else is the reasoning
-behind it: which fragment counts as damage, and which "fix" would be a
-fabrication.
+behind it: which fragment counts as damage, which "fix" would be a fabrication,
+and which of the two kinds of hyphen a control byte stands for.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 # --- PDF-extraction noise repair ---------------------------------------------
@@ -73,31 +74,86 @@ _BARE_WORD_RE = re.compile(r"(?<![\x80-\x9f])\b[A-Za-z][A-Za-z'-]{2,14}\b(?![\x8
 # ambiguity is rare in practice).
 _LIGATURES = ("fi", "ff", "ffi", "fl", "ffl", "ft", "tt")
 
+# --- Mode-B guards ------------------------------------------------------------
+# Mode B has no C1 byte to prove damage occurred — it infers damage from a
+# failed dictionary lookup alone, so without structural guards it "repairs"
+# ordinary scientific text into nonsense. Measured over 20 corpus papers before
+# these existed: 166 of 187 insertions landed on an acronym or a hyphenated
+# term, including `p-values` → `ftp-values` (21x), `UNG` → `flUNG`,
+# `OOD` → `flOOD`, `HLA-U` → `HLA-flU` and `re-produced` → `fire-produced`.
+#
+# Frequency alone cannot separate those: `ftp` (rank 3871) and `floor` (1446)
+# are *common* words. What separates them is structure — an interior capital
+# means acronym, a one-letter hyphen part is a variable name, a two-letter one
+# is usually an affix — so the guards below are structural and the rank is used
+# only to break ties between two structurally-valid candidates.
+
+#: Rank below which a word counts as unambiguously common. Calibrated against
+#: the real repair targets, whose rarest member is `coefficient` (10380), and
+#: against the false positives it must exclude (`fide` 21168, `neff` 23911,
+#: `flung` 28455, `fitz` 29552).
+_COMMON_RANK = 15000
+
+#: How much better-ranked the winning candidate must be than its runner-up (or
+#: than the rare word it would replace) before an otherwise-ambiguous repair is
+#: taken. `fine` (1043) beats `neff` (23911) by far more than this; two
+#: plausible repairs of similar frequency stay unrepaired, as before.
+_RANK_MARGIN = 4
+
+#: Hyphen parts that are ordinary English affixes rather than damage. Each one
+#: here is a real observed corruption: `re-produced` → `fire-produced`,
+#: `de-enrichment` → `fide-enrichment`, `Ex-boyfriend` → `flEx-boyfriend`.
+_HYPHEN_PARTICLES = frozenset({
+    "re", "de", "pre", "post", "non", "anti", "co", "un", "in", "sub", "super",
+    "inter", "intra", "trans", "multi", "semi", "bi", "tri", "uni", "mono",
+    "ex", "self", "well", "over", "under", "mid", "cross", "meta", "micro",
+    "macro", "pseudo", "quasi", "ultra", "auto", "up", "down", "off", "on",
+    "one", "two", "three", "long", "short", "high", "low", "large", "small",
+})
+
 # Soft-hyphen / line-break artifacts: any C0 control char (except \t\n\r)
 # sitting between two letters is treated as an elidable soft hyphen.
 _INTERIOR_CTRL_RE = re.compile(
     r"(?<=[A-Za-z])[\x00-\x08\x0b\x0c\x0e-\x1f](?=[A-Za-z])"
 )
 
-_DICTIONARY: frozenset[str] | None = None
+#: `{word: rank}` over the bundled list, which is **frequency-sorted** — rank 0
+#: is the commonest word. Membership answers "is this a word"; the rank is what
+#: separates a plausible repair from a technically-valid one, and Mode B needs
+#: both: `fine` (1043) and `neff` (23911) are equally "words", and only the rank
+#: says which one `ne-grained` meant.
+_DICTIONARY: dict[str, int] | None = None
 _DICTIONARY_PATH = Path(__file__).resolve().parent / "data" / "english_words.txt"
 
 
-def _load_dictionary() -> frozenset[str]:
-    """Lazy-load the bundled wordlist. Returns empty set if missing (graceful
-    degradation: ligature repair becomes a no-op rather than crashing on a
-    fresh checkout that hasn't built the wordlist yet)."""
+def _load_dictionary() -> dict[str, int]:
+    """Lazy-load the bundled wordlist as `{word: frequency rank}`.
+
+    Returns an empty mapping when the file is missing (graceful degradation:
+    ligature repair becomes a no-op rather than crashing on a fresh checkout
+    that hasn't built the wordlist yet).
+    """
     global _DICTIONARY
     if _DICTIONARY is None:
         try:
             words = _DICTIONARY_PATH.read_text(encoding="utf-8").split()
-            _DICTIONARY = frozenset(w.lower() for w in words if w)
+            # First occurrence wins, so a duplicate later in the file cannot
+            # overwrite a word's true (better) rank.
+            ranked: dict[str, int] = {}
+            for i, w in enumerate(words):
+                ranked.setdefault(w.lower(), i)
+            _DICTIONARY = ranked
         except FileNotFoundError:
-            _DICTIONARY = frozenset()
+            _DICTIONARY = {}
     return _DICTIONARY
 
 
-def _is_known_word(candidate: str, dictionary: frozenset[str]) -> bool:
+def _word_rank(word: str, dictionary: Mapping[str, int]) -> int | None:
+    """Frequency rank of `word` (0 = commonest), or None when it isn't one."""
+    return dictionary.get(word.lower())
+
+
+def _is_known_word(candidate: str, dictionary: Mapping[str, int]) -> bool:
     """Whole-word lookup with hyphen-split fallback.
 
     The bundled list is unigrams (no hyphenated entries), so for hyphenated
@@ -145,21 +201,87 @@ def _repair_c1_word(word: str, dictionary: frozenset[str]) -> str:
     return word
 
 
-def _repair_bare_word(word: str, dictionary: frozenset[str]) -> str:
-    """For a word *without* C1 bytes that's missing from the dictionary, try
-    inserting each ligature at each gap. Accept only if exactly one
-    insertion produces a dictionary word — otherwise leave alone."""
-    if _is_known_word(word, dictionary):
-        return word
-    matches: list[str] = []
-    for i in range(len(word) + 1):
+def _repair_part(part: str, dictionary: Mapping[str, int], *, siblings_known: bool) -> str:
+    """Repair one hyphen-free fragment, or return it untouched.
+
+    The guards, in the order they cheaply reject:
+
+      - **Too short.** A one-letter fragment carries no evidence of damage, and
+        it is how variables are written: `p-values` used to become
+        `ftp-values` because `ftp` and `values` are both words.
+      - **Siblings unknown.** A repair is only meaningful when the rest of the
+        token is already English. `Tz-TCO` is a reagent, not a damaged word.
+      - **Interior capital.** Ligature dropout removes a glyph; it does not
+        change the case of the letters around it, so an interior capital means
+        acronym or proper noun (`UNG`, `OOD`, `kNN`, `HLA-U`).
+      - **Affix.** A short leading particle is ordinary hyphenation
+        (`re-produced`, `de-enrichment`), never a dropped ligature.
+
+    Past the guards, a fragment is repaired when it is unknown, or known but
+    rare enough that a far commoner word explains it better (`rst` at 19463
+    against `first` at 56 — the fragment being *in* the wordlist is why this
+    case needed the rank rather than mere membership).
+    """
+    if len(part) < 2 or not siblings_known:
+        return part
+    if any(c.isupper() for c in part[1:]):
+        return part
+    if part.lower() in _HYPHEN_PARTICLES:
+        return part
+
+    own_rank = _word_rank(part, dictionary)
+    if own_rank is not None:
+        if own_rank <= _COMMON_RANK:
+            return part          # an ordinary word: nothing to repair
+        if not part.islower():
+            return part          # rare *and* capitalised — a surname, not damage
+
+    # Distinct candidates, best-ranked first. Deduplicated because inserting a
+    # ligature at two positions can yield the same word.
+    seen: dict[str, int] = {}
+    for i in range(len(part) + 1):
         for lig in _LIGATURES:
-            candidate = word[:i] + lig + word[i:]
-            if _is_known_word(candidate, dictionary):
-                matches.append(candidate)
-                if len(matches) > 1:
-                    return word  # ambiguous, bail
-    return matches[0] if len(matches) == 1 else word
+            candidate = part[:i] + lig + part[i:]
+            rank = _word_rank(candidate, dictionary)
+            if rank is not None:
+                seen.setdefault(candidate, rank)
+    if not seen:
+        return part
+    ranked = sorted(seen.items(), key=lambda kv: kv[1])
+    best, best_rank = ranked[0]
+
+    if best_rank > _COMMON_RANK:
+        return part                      # the "fix" is rarer than the damage
+    if own_rank is not None and best_rank * _RANK_MARGIN > own_rank:
+        return part                      # not clearly better than the word itself
+    if len(ranked) > 1 and best_rank * _RANK_MARGIN > ranked[1][1]:
+        return part                      # genuinely ambiguous — leave it alone
+    return best
+
+
+def _repair_bare_word(word: str, dictionary: Mapping[str, int]) -> str:
+    """Repair a word carrying no C1 byte — the ligature was dropped outright.
+
+    Each hyphen-separated fragment is judged on its own, because a token's
+    parts are independent: in `ne-grained` only `ne` is damaged, and repairing
+    the token as a whole is what let a fix land in the wrong part (`p-values`
+    → `ftp-values`). A fragment is repaired only when every *other* fragment
+    is already a known word, which is what keeps the pass out of reagent and
+    identifier names.
+    """
+    parts = word.split("-")
+    if len(parts) == 1:
+        return _repair_part(word, dictionary, siblings_known=True)
+
+    known = [_word_rank(p, dictionary) is not None for p in parts]
+    repaired = [
+        _repair_part(
+            part, dictionary,
+            siblings_known=all(k for j, k in enumerate(known) if j != i),
+        )
+        for i, part in enumerate(parts)
+    ]
+    return "-".join(repaired)
 
 
 def repair_text(text: str) -> str:
