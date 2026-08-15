@@ -412,6 +412,21 @@ def test_disabled_by_env_is_a_passthrough(root, monkeypatch):
     assert not (root / ".mutation").exists()
 
 
+def test_disabled_mode_commit_is_a_noop(root, monkeypatch):
+    """The passthrough snapshot's `journal_path` is `/dev/null`; the first
+    version still persisted on `mark_committed()`, so the escape hatch died on
+    `PermissionError: /dev/null.tmp` — *after* the caller's work had landed,
+    reporting failure for a mutation that succeeded."""
+    monkeypatch.setenv("RW_MUTATION_JOURNAL", "0")
+    page = _write(root / "wiki" / "a.md", "original")
+
+    with mut.mutation([page], operation="promote") as snap:
+        page.write_text("landed", encoding="utf-8")
+        snap.mark_committed()
+
+    assert page.read_text(encoding="utf-8") == "landed"
+    assert not (root / ".mutation").exists()
+
 
 @pytest.mark.parametrize("value,expected", [
     ("0", False), ("1", True), ("", True), ("yes", True),

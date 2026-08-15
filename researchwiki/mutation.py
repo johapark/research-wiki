@@ -181,6 +181,12 @@ class Snapshot:
     entries: list[BackedUpPath] = field(default_factory=list)
     attempts: int = 0
     committed: bool = False
+    #: False only for the `RW_MUTATION_JOURNAL=0` passthrough. A disabled
+    #: snapshot has no journal file and no backup dir, so persisting or cleaning
+    #: up must be a no-op — the first version wrote its "journal" to
+    #: `os.devnull`, and `mark_committed()` then died trying to create
+    #: `/dev/null.tmp` *after* the caller's work had already landed.
+    enabled: bool = True
     # In-process only and never serialized — see the module docstring for why
     # crash recovery is unable to replay these.
     _undo_hooks: list[Callable[[], None]] = field(default_factory=list, repr=False)
@@ -211,6 +217,8 @@ class Snapshot:
         }
 
     def _persist(self, status: str) -> None:
+        if not self.enabled:
+            return
         write_json_atomic(self.journal_path, self._journal_document(status))
 
     def mark_committed(self) -> None:
@@ -227,6 +235,8 @@ class Snapshot:
         leaves some bytes in `.mutation/` — untidy, never incorrect, and never a
         reason to undo work that already landed.
         """
+        if not self.enabled:
+            return
         try:
             shutil.rmtree(self.backup_dir, ignore_errors=True)
             self.journal_path.unlink(missing_ok=True)
@@ -343,6 +353,7 @@ def mutation(
             journal_path=Path(os.devnull),
             backup_dir=Path(os.devnull),
             details=dict(details or {}),
+            enabled=False,
         )
         return
 
