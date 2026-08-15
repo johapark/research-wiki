@@ -16,6 +16,27 @@ the reasoning behind any line below.
 
 ### Changed
 
+- **The module-size gate counts code, not lines** — `MAX_CODE_LINES = 500`,
+  excluding docstrings, comment-only lines and blanks, replacing the 800
+  physical-line cap. This package is ~57% code and ~29% prose, so the old metric
+  taxed documentation, and it had its own ranking inverted: `agents/llm.py` was
+  pinned as debt at 902 lines while holding 470 lines of code (39% prose — well
+  explained, not complex), while `tasks/lint/report.py` passed comfortably at 603
+  lines while holding 549, more code than four pinned modules. Raising the
+  ceiling would not have fixed that ordering, which is what a budget is for.
+
+  The old rationale — "small enough for an agent to hold in context" — no longer
+  carried it either: the largest module is ~13,500 tokens against a 200k window.
+  What a size cap buys is cohesion, and that scales with code, not with how well
+  the code is described.
+
+  `_DEBT` is re-pinned in the new units (numbers dropped by roughly a third and
+  are not comparable to the old ones). `agents/llm.py` and `agents/promote.py`
+  leave the physical-line reading behind; `tasks/lint/report.py` and
+  `tasks/benchmark_fixture.py` enter, having been dense code that a physical-line
+  budget could not see. A string bound to a name still counts as code, so the
+  rule can't be dodged by moving text into a triple-quoted constant.
+
 - **Extraction-noise repair moved to `researchwiki/pdf/repair.py`** (`repair_text`,
   formerly `text._repair_ligatures`). `pdf/text.py` is about getting bytes out of
   a PDF; how those bytes come out wrong is a separate subject with its own

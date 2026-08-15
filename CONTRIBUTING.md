@@ -80,15 +80,26 @@ help, and point the operator at the remediation command.
 `2` environment error (missing index, provider unreachable), `3` internal bug.
 Prefer a `--json` mode on anything an agent might parse.
 
-**Keep modules under 800 lines.** A module an agent can't hold in context is one
-an agent edits blind, so this is a legibility budget rather than a style
+**Keep modules under 500 lines of code.** Past some volume of logic a module is
+doing more than one job, so this is a cohesion budget rather than a style
 preference — `tests/test_module_size.py` fails the build when a new file crosses
-it. Nine modules predate the gate and are exempted **at their current size** in
-that test's `_GRANDFATHERED` dict, so a listed file may shrink freely but cannot
-grow; a bare exemption list is how `agents/runner.py` reached 1214 lines with
-nothing objecting. Split cohesive groups into focused siblings rather than adding
-an entry — the list is for existing debt, not an escape hatch for new code. When
-a module drops back under the limit, delete its entry (a test insists, because a
+it.
+
+**Code, not lines**: docstrings, comment-only lines and blanks don't count, and
+that is the point rather than a technicality. This package is ~57% code and ~29%
+prose, so a physical-line budget taxes documentation, and it did: `agents/llm.py`
+was flagged at 902 lines while holding 470 of code (well explained, not complex)
+while `tasks/lint/report.py` passed at 603 lines holding 549. Write as much
+explanation as the decision deserves; the budget only counts what you have to
+hold in your head. A multi-line string bound to a name still counts, so the rule
+can't be dodged by moving code-adjacent text into a constant.
+
+Nine modules predate the budget and are pinned **at their current size** in that
+test's `_DEBT` dict, so a listed file may shrink freely but cannot grow; a bare
+exemption list is how `agents/runner.py` reached 817 code lines with nothing
+objecting. Split cohesive groups into focused siblings rather than adding an
+entry — the list is for existing debt, not an escape hatch for new code. When a
+module drops back under the limit, delete its entry (a test insists, because a
 stale exemption is indistinguishable from a passing gate).
 
 ## Content vs framework

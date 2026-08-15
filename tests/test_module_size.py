@@ -1,16 +1,40 @@
-"""Keep every module small enough for an agent to hold in context.
+"""Cap how much *code* one module carries, so it stays legible to read and edit.
 
-A file that does not fit in a context window is a file that gets edited blind, so
-the ceiling is a legibility budget rather than a matter of taste. It lives in the
-test suite because that is the only place a budget actually holds: a convention in
-a style guide is advisory, and a `lint` finding is something you can run past.
+The budget lives in the test suite because that is the only place a budget
+actually holds: a convention in a style guide is advisory, and a `lint` finding is
+something you can run past.
+
+**It counts code, not lines.** Docstrings, comment-only lines and blanks are
+excluded, and that distinction is the whole point rather than a refinement. This
+package is 57% code and 29% prose, and the prose is the house style — so a
+physical-line budget is a tax on documentation, levied hardest on the
+best-explained files. Measured when this gate counted physical lines, it had the
+ranking inverted: `agents/llm.py` was pinned as debt at 902 lines while holding
+only 470 lines of code (39% prose, i.e. well explained), and `tasks/lint/report.py`
+passed comfortably at 603 lines while holding 549 — more code than four of the
+pinned modules. The gate flagged the documented file and waved through the dense
+one. It also fired on `pdf/text.py` at 868 lines when 284 of them were code.
+
+**Why not just raise the ceiling.** A higher physical-line number moves the
+threshold without fixing the ordering: `llm.py` is still debt at 1000. The
+ordering is what a budget is *for*, so the metric had to change instead.
+
+The old rationale — "small enough for an agent to hold in context" — no longer
+carries the argument either. The largest module here is ~13,500 tokens against a
+200k window, which it fits fourteen times over. What a size cap actually buys is
+cohesion: past some volume of logic a module is doing more than one job, and
+that threshold scales with code, not with how well the code is described.
+
+**A multi-line string assigned to a name still counts as code.** It is content
+the module carries, and the alternative is a rule you can slip past by moving
+text into a triple-quoted constant.
 
 **Existing debt is pinned, not pardoned.** `_DEBT` maps a module to the size it
-was when this gate landed, so a listed file may shrink as much as you like and
+was when the pin was set, so a listed file may shrink as much as you like and
 cannot gain a single line. The obvious alternative — a plain set of exempt paths —
-grants a permanent licence to grow, which is how `agents/runner.py` got to 1214
-lines with no test ever objecting. Pinning the number means the next fifty lines
-have to justify themselves in review.
+grants a permanent licence to grow, which is how `agents/runner.py` got to 817
+code lines with no test ever objecting. Pinning the number means the next fifty
+lines have to justify themselves in review.
 
 `test_debt_list_has_no_dead_entries` is the other half of the ratchet: a module
 that has been split back under the ceiling looks *identical to a passing gate*, so
@@ -20,6 +44,7 @@ finished.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from typing import Iterator, NamedTuple
 
@@ -27,7 +52,11 @@ import pytest
 
 import researchwiki
 
-MAX_LINES = 800
+#: Code lines, so this is a much smaller number than the 800 physical lines it
+#: replaced — roughly its equivalent at this package's 57% code density, chosen
+#: to keep the flagged set the same size (9 modules against the previous 8)
+#: while correcting which modules are in it.
+MAX_CODE_LINES = 500
 
 # Locate the package through the import system rather than by walking up from
 # `__file__`. If this test is ever moved, path arithmetic would silently point at
@@ -35,36 +64,46 @@ MAX_LINES = 800
 _PACKAGE = Path(researchwiki.__file__).resolve().parent
 _REPO = _PACKAGE.parent
 
-# Module (repo-relative, posix) -> pinned ceiling, set 2026-08-14.
+# Module (repo-relative, posix) -> pinned ceiling in CODE lines, re-pinned
+# 2026-08-14 when the gate stopped counting physical lines. The numbers dropped
+# by roughly a third in the switch and mean something different now; they are not
+# comparable to the physical-line pins this list carried before.
 #
 # Every entry is an admission that a file is too long and was not split that day.
 # Editing a number upward is the same admission again, so do it in a commit that
-# says why. When a module drops under MAX_LINES, delete its line.
+# says why. When a module drops under MAX_CODE_LINES, delete its line.
 _DEBT: dict[str, int] = {
     # Agent-ingest orchestrator: phase sequencing, the retry/DEBUG loop, and
     # sandbox-vs-promote routing. Splits along the phase boundary.
-    "researchwiki/agents/runner.py": 1214,
+    "researchwiki/agents/runner.py": 817,
     # Metadata reconcile: PDF-side extraction against provider records, plus the
     # sanity gate. The gate is the separable half.
-    "researchwiki/agents/phases/reconcile.py": 1131,
+    "researchwiki/agents/phases/reconcile.py": 661,
     # Concept candidates: term mining, scoring, triage labelling. Mining and
     # labelling do not need to share a module.
-    "researchwiki/concepts/candidates.py": 1074,
+    "researchwiki/concepts/candidates.py": 653,
+    # Retrieval benchmark: fixture loading, scoring and reporting in one file.
+    "researchwiki/benchmark/retrieval.py": 644,
+    # Backfill targets (hook / keywords / doi) share only a work-list idiom.
+    "researchwiki/tasks/backfill.py": 606,
+    # Lint's two emitters (human text, `--json`). Entered the list on the metric
+    # switch: at 603 physical lines it passed the old gate comfortably while
+    # carrying more code than four modules that did not.
+    "researchwiki/tasks/lint/report.py": 549,
+    # Benchmark fixtures: YAML loading, scoring, and the report. Same story —
+    # dense code, little prose, invisible to a physical-line budget.
+    "researchwiki/tasks/benchmark_fixture.py": 525,
+    # Memory evolution: candidate selection, proposal drafting, emit.
+    "researchwiki/agents/phases/evolution.py": 524,
     # Transactional promote: five journalled steps and their rollback. Each step
     # could stand alone under a thin coordinator.
-    "researchwiki/agents/promote.py": 920,
-    # Retrieval benchmark: fixture loading, scoring and reporting in one file.
-    "researchwiki/benchmark/retrieval.py": 909,
-    # Provider client: request shaping, cache_control placement, retry, and the
-    # per-provider quirks. Splits per provider family.
-    "researchwiki/agents/llm.py": 902,
-    # Backfill targets (hook / keywords / doi) share only a work-list idiom.
-    "researchwiki/tasks/backfill.py": 854,
-    # Memory evolution: candidate selection, proposal drafting, emit.
-    "researchwiki/agents/phases/evolution.py": 843,
-    # `researchwiki/tasks/lint/__init__.py` sat here at 831 until its two emitters
-    # moved to `lint/report.py`; at 265 lines it no longer needs an entry, and the
-    # entry is gone rather than commented out. This list is current debt, not a log.
+    "researchwiki/agents/promote.py": 502,
+    # `researchwiki/agents/llm.py` left this list on the metric switch: 902
+    # physical lines but 470 of code, 39% prose. It was pinned for being well
+    # explained, which is the failure mode the switch exists to end.
+    #
+    # `researchwiki/tasks/lint/__init__.py` left it earlier, by being split — its
+    # two emitters moved to `lint/report.py`. This list is current debt, not a log.
 }
 
 
@@ -80,21 +119,69 @@ class Oversize(NamedTuple):
         return self.ceiling is not None
 
     def describe(self) -> str:
+        # "code lines", spelled out: the number is smaller than `wc -l` and a
+        # reader who assumes otherwise will go looking for lines that aren't there.
         if self.ceiling is None:
-            return f"{self.path}: {self.lines} lines"
-        return (f"{self.path}: {self.lines} lines, pinned at {self.ceiling} "
+            return f"{self.path}: {self.lines} code lines"
+        return (f"{self.path}: {self.lines} code lines, pinned at {self.ceiling} "
                 f"(+{self.lines - self.ceiling})")
 
 
-def count_lines(module: Path) -> int:
-    """Physical lines in `module`.
+def _physical_lines(source: str) -> int:
+    """Every line, however it ends.
 
-    Counted from bytes via `splitlines()`, which treats `\\n`, `\\r\\n` and a lone
-    `\\r` as breaks alike — a file saved with classic-Mac endings would otherwise
-    read as one enormous line and sail through. Bytes also mean a stray non-UTF-8
-    character fails that file's own decode rather than crashing the whole gate.
+    `splitlines()` treats `\\n`, `\\r\\n` and a lone `\\r` as breaks alike — a file
+    saved with classic-Mac endings would otherwise read as one enormous line and
+    sail through.
     """
-    return len(module.read_bytes().splitlines())
+    return len(source.splitlines())
+
+
+def _docstring_line_numbers(tree: ast.Module) -> set[int]:
+    """1-based line numbers occupied by module/class/function docstrings.
+
+    Only a *docstring* — the first statement of a body — is prose by this rule. A
+    string expression floating elsewhere in a module is not, and neither is one
+    bound to a name; see the module docstring on why that asymmetry is deliberate.
+    """
+    prose: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.FunctionDef,
+                                 ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if ast.get_docstring(node, clean=False) is None or not node.body:
+            continue
+        first = node.body[0]
+        prose.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
+    return prose
+
+
+def count_code_lines(module: Path) -> int:
+    """Lines of `module` that carry code: not blank, not a comment, not a docstring.
+
+    Read as bytes and decoded permissively, so a stray non-UTF-8 character costs
+    that file its own accuracy rather than crashing the whole gate.
+
+    A line whose code is followed by a trailing comment still counts — the code is
+    there. Only a line that is *nothing but* a comment is prose.
+
+    An unparseable module falls back to its physical line count. That direction is
+    the safe one: a syntax error must not be a way to score zero and slip under the
+    budget, and a broken module is already failing louder tests than this one.
+    """
+    source = module.read_bytes().decode("utf-8", errors="replace")
+    lines = source.splitlines()
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return _physical_lines(source)
+
+    prose = _docstring_line_numbers(tree)
+    prose.update(
+        number for number, line in enumerate(lines, start=1)
+        if not (stripped := line.strip()) or stripped.startswith("#")
+    )
+    return len(lines) - len(prose)
 
 
 def python_modules(root: Path) -> Iterator[Path]:
@@ -110,7 +197,7 @@ def scan(
     failures: list[Oversize] = []
     for module in python_modules(package):
         rel = module.relative_to(repo).as_posix()
-        lines = count_lines(module)
+        lines = count_code_lines(module)
         pinned = debt.get(rel)
         if pinned is not None:
             if lines > pinned:
@@ -146,7 +233,7 @@ def test_a_module_sitting_exactly_on_the_ceiling_fails():
     # The docstring promises modules stay *under* the budget, so landing on it is
     # already too big. Asserted because `>=` versus `>` is a one-character slip
     # that widens the budget without anyone noticing.
-    assert MAX_LINES == 800
+    assert MAX_CODE_LINES == 500
 
 
 def test_the_ceiling_is_inclusive(tmp_path):
@@ -165,13 +252,94 @@ def test_generated_directories_are_not_scanned(tmp_path):
 def test_every_line_ending_counts(tmp_path, ending):
     target = tmp_path / "endings.py"
     target.write_bytes(b"value = 0" + ending + (b"value = 1" + ending) * 6)
-    assert count_lines(target) == 7
+    assert count_code_lines(target) == 7
 
 
 def test_a_bad_byte_fails_its_own_file_not_the_gate(tmp_path):
     target = tmp_path / "latin.py"
     target.write_bytes(b"label = '\xff'\n" * 3)
-    assert count_lines(target) == 3
+    assert count_code_lines(target) == 3
+
+
+# --------------------------------------------------------------------------
+# What counts as code. This is the part the budget rests on: the gate used to
+# count physical lines, which taxed the docstrings that are this repo's house
+# style and inverted its own ranking (see the module docstring).
+# --------------------------------------------------------------------------
+
+
+def _module(directory: Path, source: str) -> Path:
+    target = directory / "sample.py"
+    target.write_text(source, encoding="utf-8")
+    return target
+
+
+def test_docstrings_do_not_count(tmp_path):
+    module = _module(tmp_path, '''"""Module docstring.
+
+    Several lines of it, as this package writes them.
+    """
+
+
+def documented():
+    """One-line docstring."""
+    return 1
+''')
+    assert count_code_lines(module) == 2      # `def` and `return`
+
+
+def test_comment_only_lines_do_not_count(tmp_path):
+    module = _module(tmp_path, "# a note\n#: another\nvalue = 1\n")
+    assert count_code_lines(module) == 1
+
+
+def test_a_trailing_comment_still_counts_as_code(tmp_path):
+    # The code is on that line; only a line that is *nothing but* comment is prose.
+    module = _module(tmp_path, "value = 1  # why this value\n")
+    assert count_code_lines(module) == 1
+
+
+def test_blank_lines_do_not_count(tmp_path):
+    module = _module(tmp_path, "value = 1\n\n\n   \n\nvalue = 2\n")
+    assert count_code_lines(module) == 2
+
+
+def test_a_string_bound_to_a_name_counts_as_code(tmp_path):
+    """A prompt template is content the module carries. Excluding it would make
+    the budget dodgeable by moving text into a triple-quoted constant."""
+    module = _module(tmp_path, 'PROMPT = """\nline one\nline two\n"""\n')
+    assert count_code_lines(module) == 4
+
+
+def test_an_unparseable_module_falls_back_to_its_physical_size(tmp_path):
+    """The safe direction: a syntax error must not be a way to score zero and
+    slip under the budget."""
+    module = _module(tmp_path, '"""Doc."""\ndef broken(:\n    pass\n')
+    assert count_code_lines(module) == 3
+
+
+def test_a_prose_heavy_module_is_judged_on_its_code(tmp_path):
+    """The regression that motivated the switch, in miniature. This module is
+    typical of the package's shape — mostly explanation — and the old rule
+    counted it at nearly four times the code it holds."""
+    module = _module(tmp_path, '''"""What this module is for.
+
+    Why it exists, what it decided against, and the measurement behind it.
+    Several paragraphs of this is the house style, not an outlier.
+    """
+
+# A section banner, of the kind that separates concerns in the long files.
+
+
+def contribute():
+    """One job, explained."""
+    return 1
+
+
+value = contribute()
+''')
+    assert len(module.read_bytes().splitlines()) == 15
+    assert count_code_lines(module) == 3      # `def`, `return`, `value =`
 
 
 def test_pinned_module_within_its_size_passes(tmp_path):
@@ -209,7 +377,7 @@ def test_no_module_is_too_long():
     modules = list(python_modules(_PACKAGE))
     assert modules, f"scanned {_PACKAGE} and found no modules — the gate is inert"
 
-    failures = scan(package=_PACKAGE, repo=_REPO, ceiling=MAX_LINES, debt=_DEBT)
+    failures = scan(package=_PACKAGE, repo=_REPO, ceiling=MAX_CODE_LINES, debt=_DEBT)
     if not failures:
         return
 
@@ -218,7 +386,7 @@ def test_no_module_is_too_long():
     grown = [f for f in failures if f.is_debt_growth]
     if fresh:
         complaints.append(
-            f"Over the {MAX_LINES}-line budget:\n"
+            f"Over the {MAX_CODE_LINES}-code-line budget:\n"
             + "\n".join(f"  - {f.describe()}" for f in fresh)
             + "\n  Fix: lift a cohesive group into its own module. Pinning a new "
               "file in _DEBT is not the intended way out — that list is for debt "
@@ -247,9 +415,9 @@ def test_debt_list_has_no_dead_entries():
         module = _REPO / rel
         if not module.exists():
             dead.append(f"  - {rel}: gone (renamed or deleted)")
-        elif (lines := count_lines(module)) < MAX_LINES:
-            dead.append(f"  - {rel}: down to {lines} lines, inside the "
-                        f"{MAX_LINES} budget (pinned at {pinned})")
+        elif (lines := count_code_lines(module)) < MAX_CODE_LINES:
+            dead.append(f"  - {rel}: down to {lines} code lines, inside the "
+                        f"{MAX_CODE_LINES}-code-line budget (pinned at {pinned})")
     if dead:
         raise AssertionError(
             "Dead entries in _DEBT:\n" + "\n".join(dead)
