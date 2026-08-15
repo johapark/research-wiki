@@ -225,6 +225,35 @@ def test_json_mode_reports_the_plan(wiki, capsys):
     assert any("a-field-map" in r["path"] for r in payload["prose_refs"])
 
 
+# ---------- directory traces (.supp/, caches) ----------
+
+def test_apply_removes_a_paper_with_supplementary_files(wiki):
+    """Directories in the snapshot set used to kill the removal outright:
+    `shutil.copy2` on `papers/{stem}.supp/` raised IsADirectoryError before
+    anything was removed."""
+    supp = wiki / "papers" / f"{STEM}.supp"
+    supp.mkdir()
+    (supp / "tableS1.csv").write_text("supp,data\n", encoding="utf-8")
+
+    assert cli.main([STEM, "--apply"]) == 0
+    assert not supp.exists()
+    assert not (wiki / "wiki" / "compbio" / f"{STEM}.md").exists()
+    assert mut.pending_journals() == []
+
+
+def test_a_failure_mid_removal_restores_the_supp_directory(wiki, monkeypatch):
+    supp = wiki / "papers" / f"{STEM}.supp"
+    supp.mkdir()
+    (supp / "tableS1.csv").write_text("supp,data\n", encoding="utf-8")
+
+    monkeypatch.setattr(removal, "_strip_index_bullet",
+                        lambda stem: (_ for _ in ()).throw(OSError("disk full")))
+
+    assert cli.main([STEM, "--apply"]) == 2
+    assert (supp / "tableS1.csv").read_text(encoding="utf-8") == "supp,data\n"
+    assert (wiki / "papers" / f"{STEM}.pdf").exists()
+
+
 # ---------- rollback ----------
 
 def test_a_failure_mid_removal_restores_everything(wiki, monkeypatch):

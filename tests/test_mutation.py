@@ -325,6 +325,55 @@ def test_recovery_reports_an_orphan_backup_dir_without_deleting_it(root):
     assert any("orphaned backup directory" in n for n in notes)
 
 
+# ---------- directory targets ----------
+#
+# `remove` declares a paper's `.supp/` and cache *directories* in its snapshot
+# set before rmtree-ing them. `shutil.copy2` on a directory raises, which used
+# to kill the whole removal before it wrote anything.
+
+def test_rollback_restores_a_deleted_directory(root):
+    import shutil
+
+    supp = root / "papers" / "stem.supp"
+    _write(supp / "tableS1.csv", "supp,data\n1,2\n")
+    _write(supp / "nested" / "figS1.txt", "figure bytes")
+
+    with pytest.raises(RuntimeError):
+        with mut.mutation([supp], operation="remove"):
+            shutil.rmtree(supp)
+            raise RuntimeError("boom after the rmtree")
+
+    assert (supp / "tableS1.csv").read_text(encoding="utf-8") == "supp,data\n1,2\n"
+    assert (supp / "nested" / "figS1.txt").read_text(encoding="utf-8") == "figure bytes"
+
+
+def test_rollback_removes_a_directory_the_mutation_created(root):
+    created = root / ".figures-cache" / "stem"
+
+    with pytest.raises(RuntimeError):
+        with mut.mutation([created], operation="remove"):
+            _write(created / "p1@144.png", "png bytes")
+            raise RuntimeError("boom")
+
+    assert not created.exists()
+
+
+def test_snapshot_failure_leaves_no_orphan_backup_dir(root, monkeypatch):
+    """A copy failure mid-snapshot used to strand a backup dir with no journal
+    beside it — invisible forever, since recovery drains `*.json` only."""
+    page = _write(root / "wiki" / "a.md", "x")
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(mut.shutil, "copy2", boom)
+    with pytest.raises(OSError):
+        mut.snapshot([page], operation="promote")
+
+    leftovers = [p for p in (root / ".mutation").iterdir()]
+    assert leftovers == []
+
+
 # ---------- snapshot mechanics ----------
 
 def test_duplicate_paths_are_collapsed(root):

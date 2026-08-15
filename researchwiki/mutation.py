@@ -109,7 +109,10 @@ class BackedUpPath:
     def _uncreate(self) -> None:
         """The mutation brought this path into being, so undoing means removing it."""
         try:
-            self.target.unlink(missing_ok=True)
+            if self.target.is_dir() and not self.target.is_symlink():
+                shutil.rmtree(self.target)
+            else:
+                self.target.unlink(missing_ok=True)
         except OSError as exc:
             raise RuntimeError(f"rollback could not remove {self.target}: {exc}") from exc
 
@@ -125,10 +128,25 @@ class BackedUpPath:
             return
         try:
             self.target.parent.mkdir(parents=True, exist_ok=True)
-            staged = self.target.with_suffix(self.target.suffix + ".rollback-tmp")
-            shutil.copy2(source, staged)
-            os.replace(staged, self.target)
-        except OSError as exc:
+            if source.is_dir():
+                # Directory targets (a paper's `.supp/`, a figures cache) stage
+                # a full copy beside the target, then swap — same
+                # old-or-new-never-half guarantee the file path gets from
+                # `os.replace`, at directory granularity.
+                staged = self.target.parent / (self.target.name + ".rollback-tmp")
+                if staged.exists():
+                    shutil.rmtree(staged, ignore_errors=True)
+                shutil.copytree(source, staged, symlinks=True)
+                if self.target.is_dir() and not self.target.is_symlink():
+                    shutil.rmtree(self.target)
+                else:
+                    self.target.unlink(missing_ok=True)
+                os.replace(staged, self.target)
+            else:
+                staged = self.target.with_suffix(self.target.suffix + ".rollback-tmp")
+                shutil.copy2(source, staged)
+                os.replace(staged, self.target)
+        except (OSError, shutil.Error) as exc:
             raise RuntimeError(f"rollback could not restore {self.target}: {exc}") from exc
 
     def as_journal_record(self) -> dict:
@@ -260,19 +278,33 @@ def snapshot(
 
     entries: list[BackedUpPath] = []
     claimed: set[Path] = set()
-    for raw in paths:
-        if raw is None:
-            continue
-        target = Path(raw).resolve()
-        if target in claimed:
-            continue
-        claimed.add(target)
-        if target.exists():
-            backup = backup_dir / f"{len(entries):03d}-{target.name}"
-            shutil.copy2(target, backup)
-            entries.append(BackedUpPath(target=target, backup=backup))
-        else:
-            entries.append(BackedUpPath(target=target, backup=None))
+    try:
+        for raw in paths:
+            if raw is None:
+                continue
+            target = Path(raw).resolve()
+            if target in claimed:
+                continue
+            claimed.add(target)
+            if target.is_dir():
+                # Directories are real declared targets here — `remove` snapshots
+                # a paper's `.supp/` and cache dirs before rmtree-ing them.
+                # `copy2` on one raises, which used to kill the whole mutation.
+                backup = backup_dir / f"{len(entries):03d}-{target.name}"
+                shutil.copytree(target, backup, symlinks=True)
+                entries.append(BackedUpPath(target=target, backup=backup))
+            elif target.exists():
+                backup = backup_dir / f"{len(entries):03d}-{target.name}"
+                shutil.copy2(target, backup)
+                entries.append(BackedUpPath(target=target, backup=backup))
+            else:
+                entries.append(BackedUpPath(target=target, backup=None))
+    except BaseException:
+        # The journal is only written below, so a copy failure here would
+        # otherwise strand a backup directory with no journal beside it —
+        # invisible to `recover_pending`, which drains `*.json` only.
+        shutil.rmtree(backup_dir, ignore_errors=True)
+        raise
 
     snap = Snapshot(
         operation=operation,
