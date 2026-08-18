@@ -202,6 +202,19 @@ the reasoning behind any line below.
   telling authors to use `[^id]` footnotes, which require a `## References`
   section to define.
 
+- **The dashboard ranked recently *touched* files as recent additions.** `views.md`'s
+  Dataview blocks fell back to `file.ctime` / `file.mtime` when a page carried no
+  `ingested_at` / `generated_at`. Back-link splicing resets birthtime and mtime moves
+  on any edit, so ingesting one paper — which spliced 12 reciprocal back-links — stamped
+  the 7 unstamped targets with the ingest second and sorted them *above* the paper just
+  ingested: *Recent papers* was headed by foldseek, MMseqs2, geNomad, AlphaFold 3 and
+  Boltz-2, none of it recently added. The blocks now require the stamp and sort on it,
+  excluding undated pages rather than mis-ranking them — the rule `lint`'s staleness
+  checks and provenance recovery already follow. Two dead `length(referenced_papers)`
+  columns go with it (neither synthesis nor idea pages carry that field; it is real only
+  on concept pages), and the `researchwiki init` wizard template carried every one of
+  these defects, so it would have regenerated them for the next fresh wiki.
+
 ## [0.4.0] - 2026-08-14
 
 ### Added
