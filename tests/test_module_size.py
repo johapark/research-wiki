@@ -114,8 +114,12 @@ _DEBT: dict[str, int] = {
     # Backfill targets (hook / keywords / doi) share only a work-list idiom.
     "researchwiki/tasks/backfill.py": 606,
     # Lint's two emitters (human text, `--json`). Grows by one block per new
-    # check, which is exactly the drift a ratchet is for.
-    "researchwiki/tasks/lint/report.py": 565,
+    # check, which is exactly the drift a ratchet is for. Raised 565 -> 588 for
+    # the `idea_contract_violations` emitter, on the same reasoning as the
+    # 549 -> 565 raise before it: rendering findings is this file's one job, and
+    # splitting per check would scatter that job across modules to satisfy a
+    # number.
+    "researchwiki/tasks/lint/report.py": 588,
     # Benchmark fixtures: YAML loading, scoring, and the report.
     "researchwiki/tasks/benchmark_fixture.py": 525,
     # Memory evolution: candidate selection, proposal drafting, emit.

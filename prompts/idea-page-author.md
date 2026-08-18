@@ -12,7 +12,11 @@ Every idea page has five H2 sections in this order (CLAUDE.md §4):
 4. **Plans — how to actually build this.** Staged implementation path with stop-go checkpoints per phase.
 5. **Caveats — where the optimistic case could break.** Source-supported pessimism. What would invalidate the design, what would change the conclusion.
 
-Sub-headings inside any section use H3, never H2. The five-section names are matched by the linter (`grounding.py`'s `_PERMISSIVE_IDEA_SECTION_RE`); H3 sub-sections inherit their parent section's sourcing rules.
+Sub-headings inside any section use H3, never H2 — with one exception: a `## References` H2 at the end, required whenever the page uses `[^id]` footnotes (step 2 below), since that's where they're defined. `## Related Papers` is a *paper*-page section and does not belong on an idea page; some existing idea pages carry it as an empty trailing stub, which is a defect to clean up rather than a pattern to copy.
+
+**Neither page gate enforces this contract** — both parse *units* (paragraphs and bullets) and never read a heading, so a page whose Verdict prose sits above the first H2 with no `## Verdict` heading passes both green. `researchwiki/grade/grounding.py`'s `_PERMISSIVE_IDEA_SECTION_RE` matches only `^(opportunities|plans)\b`; its job is to locate the model-prior-eligible ranges, not to validate the five section names. The check that *does* see headings is `researchwiki lint` → `idea_contract_violations` (`researchwiki/tasks/lint/idea_contract.py`): heading presence, order, unexpected H2s, `verdict:`-vs-label agreement, and footnote/`## References` hygiene. It's **advisory** — reported, never exit-code-flipping — so read it rather than relying on lint's exit status.
+
+Because those permissive ranges run from each H2 to the next, H3 sub-sections inherit their parent section's sourcing rules.
 
 ### Verdict labels
 
@@ -60,7 +64,7 @@ Three citation/exemption mechanisms exist. They cover disjoint cases — pick by
 
 ## Don't duplicate CLAUDE.md content on the page
 
-The four-section contract, the `status:` lifecycle (open / scoping / validated / superseded / abandoned), the validated/superseded transition rules — all of those live in CLAUDE.md §4 and load every turn. **Don't restate them on the page.** A reader who needs them has CLAUDE.md; an LLM authoring/editing the page already has CLAUDE.md in its context. Repeating them creates page-meta that the linter doesn't know what to do with and obscures the page-specific framing.
+The five-section contract, the `status:` lifecycle (open / scoping / validated / superseded / abandoned), the validated/superseded transition rules — all of those live in CLAUDE.md §4 and load every turn. **Don't restate them on the page.** A reader who needs them has CLAUDE.md; an LLM authoring/editing the page already has CLAUDE.md in its context. Repeating them creates page-meta that the linter doesn't know what to do with and obscures the page-specific framing.
 
 What stays on the page:
 
@@ -129,6 +133,14 @@ Both grading gates are **mandatory before the page is done** and they're orthogo
 - **Fidelity** (`grade synthesis`) must hit 0 `misattributed`. Each claim that *cites* a paper is graded against that paper's PDF; a `misattributed` verdict means a number in the claim appears in **none** of the cited papers — fix the number or the citation (you cited the wrong paper). Catches a *present-but-wrong* citation that structural passes green. `*(model prior)*` clauses carry no citation, so fidelity skips them (`uncited`); `weak`/`composite` are advisory and never fail the run.
 - **Strict mode** (structural-only) will flag every model-prior clause as ungrounded — that's by design (strict surfaces every spot the page leans on training knowledge). The strict report is a *map of model-prior contributions*, not a failure list. Use it to audit: are these really LLM-contributable claims, or has an empirical claim drifted into Opportunities without a citation?
 - **Recall** (`check-coverage`) is an advisory third surface, run after both gates pass. It re-ranks paper pages against the page's `topic_seed` and surfaces top-N hits the page doesn't cite. Treat each one as a deliberate scoping decision — cite it, narrow the `topic_seed` so it stops landing in the top-N, or leave it as a known exclusion. Exit 1 doesn't fail the page; an *unreviewed* exit 1 does.
+
+**Neither gate reads headings.** Both parse *units* (paragraphs and bullets), so a missing or misordered H2 — including a missing `## Verdict` — is invisible to them. Add a third command for the structure:
+
+```bash
+researchwiki lint --json | jq '.idea_contract_violations[] | select(.page | endswith("<slug>"))'
+```
+
+Advisory, so it won't fail lint — read the findings. It covers heading presence and order, unexpected H2s, YAML `verdict:`-vs-section-label agreement, and footnote/`## References` hygiene.
 
 If the structural pass flags an ungrounded unit, the fix is one of:
 - Add a `[[wikilink]]` (the claim is supportable by an existing wiki paper).

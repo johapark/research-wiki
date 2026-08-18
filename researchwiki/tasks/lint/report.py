@@ -88,6 +88,10 @@ def _emit_json(**kw) -> int:
             {"page": page_key(v["page"]), "kind": v["kind"], "detail": v["detail"]}
             for v in kw["concept_contract"]
         ],
+        "idea_contract_violations": [
+            {"page": page_key(v["page"]), "kind": v["kind"], "detail": v["detail"]}
+            for v in kw["idea_contract"]
+        ],
         "ungraded_papers": kw["ungraded_papers"],
         "venue_suspect": kw["venue_suspect"],
         "none_placeholders": kw["none_placeholders"],
@@ -425,6 +429,26 @@ def _emit_prose(**kw) -> int:
                 print(f"    - `{kind}` — {detail}")
         if len(by_page) > 20:
             print(f"_... +{len(by_page) - 20} more hubs_")
+        print()
+
+    idea_contract = kw["idea_contract"]
+    if idea_contract:
+        print(f"## Idea-page contract violations ({len(idea_contract)}, advisory)")
+        print("Idea pages whose headings or verdict mirror drift from CLAUDE.md §4. "
+              "Warn-only — these don't fail lint. Neither page gate reads headings "
+              "(both parse paragraphs), so this is the only check that sees them. "
+              "Required order is Verdict → Background → Opportunities → Plans → "
+              "Caveats, because sourcing policy differs per section; `verdict:` in "
+              "YAML must mirror the label written in the Verdict section.")
+        by_page: dict[str, list[tuple[str, str]]] = {}
+        for v in idea_contract:
+            by_page.setdefault(page_key(v["page"]), []).append((v["kind"], v["detail"]))
+        for pk, entries in sorted(by_page.items())[:20]:
+            print(f"- **{pk}**")
+            for kind, detail in entries:
+                print(f"    - `{kind}` — {detail}")
+        if len(by_page) > 20:
+            print(f"_... +{len(by_page) - 20} more pages_")
         print()
 
     dangling_anchors = kw["dangling_anchors"]
