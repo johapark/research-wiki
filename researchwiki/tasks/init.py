@@ -84,7 +84,7 @@ tags: [dashboard, dataview]
 
 Live views of recent additions across the wiki. Rendered by the [Dataview](https://blacksmithgu.github.io/obsidian-dataview/) community plugin — **install and enable Dataview in Obsidian** for the tables below to render. On GitHub (or without the plugin) they show as inert code blocks.
 
-Sort keys fall back to the file's creation/modification time when a page predates the `ingested_at` / `generated_at` stamp, so every page ranks even if it was ingested before those fields existed.
+Sort keys are the YAML stamps (`ingested_at` / `generated_at`) only, and a page without one is excluded rather than ranked by a filesystem time. Birthtime is reset by back-link splicing and mtime moves on any edit, so either fallback ranks *recently touched* pages as *recently added* ones — one ingest splicing 12 reciprocal links would send 12 unrelated papers to the top. `researchwiki lint --fix` recovers real stamps from the ingest log where a run exists.
 
 ## Recent papers (top 15)
 
@@ -93,9 +93,10 @@ TABLE WITHOUT ID
   link(file.link, default(short_name, title)) AS "Paper",
   join(category, ", ") AS "Category",
   year AS "Year",
-  dateformat(default(ingested_at, file.ctime), "yyyy-MM-dd") AS "Added"
-WHERE type = "paper"
-SORT default(ingested_at, file.ctime) DESC
+  dateformat(ingested_at, "yyyy-MM-dd") AS "Added"
+FROM ""
+WHERE type = "paper" AND ingested_at
+SORT ingested_at DESC
 LIMIT 15
 ```
 
@@ -104,10 +105,11 @@ LIMIT 15
 ```dataview
 TABLE WITHOUT ID
   file.link AS "Synthesis",
-  length(referenced_papers) AS "Papers",
-  dateformat(default(generated_at, file.mtime), "yyyy-MM-dd") AS "Updated"
-WHERE type = "synthesis"
-SORT default(generated_at, file.mtime) DESC
+  topic_seed AS "Topic seed",
+  dateformat(generated_at, "yyyy-MM-dd") AS "Updated"
+FROM ""
+WHERE type = "synthesis" AND generated_at
+SORT generated_at DESC
 LIMIT 10
 ```
 
@@ -118,10 +120,10 @@ TABLE WITHOUT ID
   file.link AS "Idea",
   verdict AS "Verdict",
   status AS "Status",
-  length(referenced_papers) AS "Papers",
-  dateformat(default(generated_at, file.mtime), "yyyy-MM-dd") AS "Filed"
-WHERE type = "idea"
-SORT default(generated_at, file.mtime) DESC
+  dateformat(generated_at, "yyyy-MM-dd") AS "Filed"
+FROM ""
+WHERE type = "idea" AND generated_at
+SORT generated_at DESC
 LIMIT 5
 ```
 """
