@@ -325,7 +325,7 @@ def process_one(src_pdf: Path, category_hint: str | None, no_move: bool,
         verdict = classify_pdf_collision(doi, stem_hit)
         if verdict == "journal-upgrade":
             target = papers_dir() / f"{stem}.pdf"
-            import shutil, uuid
+            import uuid
             from ..wiki import _doi_from_existing_page
             from ..db.iterations import write_iteration
             old_doi = _doi_from_existing_page(stem_hit)
