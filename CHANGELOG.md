@@ -53,6 +53,33 @@ the reasoning behind any line below.
   nothing on disk records the model after the fact, and guessing would assert an
   author nobody knows.
 
+- **`lint` → `idea_contract_violations`** — the idea-page analogue of
+  `concept_contract_violations`, and the only check in the toolchain that reads an
+  idea page's headings. Both mandatory page gates parse *units* — paragraphs and
+  bullets — so a page whose Verdict prose sits above the first H2 with no
+  `## Verdict` heading passes `check-grounding` and `grade synthesis` green. That
+  is not cosmetic: CLAUDE.md §4 fixes the five-section order precisely because
+  grounding policy differs per section (Verdict/Background/Caveats strict,
+  Opportunities/Plans admit `*(model prior)*`), so a displaced section puts prose
+  under a policy that wasn't written for it.
+  `grounding.py`'s `_PERMISSIVE_IDEA_SECTION_RE` was mistaken for this check
+  before — it matches only `^(opportunities|plans)\b`, because its job is to
+  locate the model-prior-eligible ranges, not to validate the contract.
+  Checks: missing section, wrong order, unexpected H2 (`## Related Papers` is a
+  paper-page section three idea pages carried as an empty stub), missing YAML
+  `verdict:`, `verdict:`-vs-section-label disagreement, unparseable label, and
+  footnote hygiene. Advisory — reported, never exit-code-flipping — matching
+  `concept_contract`'s staging.
+  The label parser is anchored on the opening `**` so a parenthetical qualifier
+  cannot hijack the match: `**Strength: incremental (with strong upside…)**`
+  reads as `incremental`, which a substring search gets wrong. Footnotes are
+  split into two findings rather than one, because definitions that merely sit
+  outside a `## References` H2 still resolve in Obsidian — only a ref with no
+  definition anywhere is a broken citation, and conflating them cries wolf on a
+  page carrying 25 working footnotes.
+  First run over the corpus surfaced 8 real findings across 5 of 8 idea pages,
+  four of them a missing `verdict:` field that no other check could see.
+
 ### Changed
 
 - **The module-size gate counts code, not lines** — `MAX_CODE_LINES = 800`,
@@ -167,6 +194,13 @@ the reasoning behind any line below.
 - **`export --format okf` with a file at `--out` now exits 2, not 1** — an
   unwritable output path is an environment failure per the documented contract,
   not a malformed argument.
+
+- `prompts/idea-page-author.md` claimed the five section names were "matched by
+  the linter", naming a regex that matches two of them, and still called the
+  contract "four-section" a dozen lines after listing five — a leftover from
+  before Verdict existed. It also presented the five H2s as exhaustive while
+  telling authors to use `[^id]` footnotes, which require a `## References`
+  section to define.
 
 ## [0.4.0] - 2026-08-14
 
