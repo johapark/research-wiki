@@ -113,6 +113,20 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- **`researchwiki ingest` crashed on every PDF it was supposed to move.** The
+  `journal-upgrade` branch of `process_one` carried a function-local
+  `import shutil`, which makes `shutil` local to the *whole* function — so the
+  final `shutil.move(src_pdf, pdf_dest)` raised
+  `UnboundLocalError: cannot access local variable 'shutil'` on precisely the
+  common path, where no stem collision sends control through that branch and the
+  name therefore never gets bound. The module already imports `shutil` at the
+  top; the shadowing local is now just `import uuid`.
+
+  Worth noting how this hid: the failure needed the branch *not* to be taken, so
+  a stem-collision test exercising `journal-upgrade` binds the local and passes,
+  and the digest path is the documented fallback for recovery and unextractable
+  PDFs rather than routine use. `--no-move` also skips the call entirely.
+
 - **Ligature repair rewrote scientific prose into plausible nonsense.** Mode B
   infers damage from a failed dictionary lookup alone, and over a 20-paper
   sample 166 of its 187 insertions landed on an acronym or a hyphenated term:
