@@ -113,6 +113,36 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- **Four statements in `CLAUDE.md`/`prompts/` described behavior the code does not
+  have.** All four would mislead an agent that trusted them, and none was
+  detectable by the reachability check `lint` already runs:
+
+  - **`agent ingest` was documented as accepting `--category`.** It defines no
+    such argument and uses a strict `parse_args`, so the suggested invocation is
+    a usage error. `--category` belongs to the digest-path `researchwiki ingest`.
+  - **The ingest section still claimed pages are tagged `ingested-via-agent`,**
+    contradicting the Page Types rule three sections above it and
+    `promote._build_frontmatter`, which writes no `tags:` on paper pages and
+    carries a comment saying why.
+  - **The commentary guard's rule was stale on `Editorial`,** listing it as a
+    weak label needing structural corroboration. It was promoted to the strong
+    tier precisely because the case that motivated it — a 2-page editorial
+    depositing 9 references — can never be corroborated structurally, so the
+    documented rule predicted that PDF was *not* caught. The `10.1038/d…`
+    news-DOI tier and the `Books & Arts` / `In this issue` weak labels were
+    missing outright.
+  - **`prompts/ask-system.md` mandated `claim_id:NNN` citations,** which the
+    claims-DB corollary forbids by name (row ids are reassigned on
+    `db rebuild`), and named five tools against `mcp-serve`'s actual three —
+    two of which, `wiki_get_page` and `db_query`, have no MCP exposure at all.
+    Rewritten against `search` / `claims` / `check_grounding` and the
+    `[[stem#claim_slug]]` form.
+
+  Also corrected: `eval.pointers` and its test asserted every `-system` prompt is
+  loaded through `prompt_lib`. `ask-system` is not — it is the system prompt an
+  MCP *client* runs, so nothing in this package loads it. The orphan exemption is
+  still right, but for a different reason than the comment gave.
+
 - **`researchwiki ingest` crashed on every PDF it was supposed to move.** The
   `journal-upgrade` branch of `process_one` carried a function-local
   `import shutil`, which makes `shutil` local to the *whole* function — so the
