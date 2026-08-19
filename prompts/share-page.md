@@ -2,7 +2,7 @@
 
 **Trigger:** user asks to "share", "make shareable", or "send" a synthesis/idea page to someone outside this repo. Output goes to `output/share/<slug>.md` (gitignored).
 
-**Not this file:** `researchwiki export` emits the *corpus* as a bibliography (BibTeX/RIS/CSL-JSON) for a reference manager — see [`prompts/export-bibliography.md`](./export-bibliography.md). The word "export" belongs to that command; this one produces a document for a human reader, which is why it is "share".
+**Not this file:** `researchwiki export` emits the *corpus* — as a bibliography (BibTeX/RIS/CSL-JSON) for a reference manager, or as an OKF bundle — see [`prompts/export-bibliography.md`](./export-bibliography.md). The word "export" belongs to that command; this one produces a document for a human reader, which is why it is "share".
 
 The wiki's `[[category/stem]]` wikilinks, framework-specific YAML fields (`type`, `category`, `referenced_papers`, `topic_seed`, `author_model`), and self-referential phrasings ("in the wiki", "this synthesis page") are private context. A shareable strips all of it and replaces wikilinks with full academic citations — the result should render correctly in any standard markdown viewer (GitHub, Obsidian, pandoc) with no internal dependencies.
 
@@ -10,7 +10,7 @@ The wiki's `[[category/stem]]` wikilinks, framework-specific YAML fields (`type`
 
 1. **Read the source page**: `wiki/synthesis/<slug>.md` or `wiki/ideas/<slug>.md`.
 
-2. **Pull citation metadata** for every wikilink in the body and in `referenced_papers:`. For each `[[<cat>/<stem>]]`:
+2. **Pull citation metadata** for every wikilink in the body — inline `[[wikilink]]`s and the `## References` footnote definitions, which are the whole citation set on a synthesis or idea page (neither carries `referenced_papers:`; a concept page does). For each `[[<cat>/<stem>]]`:
    ```bash
    awk '/^---$/{n++; if(n==2)exit} n==1' "wiki/<cat>/<stem>.md" | grep -E "^(title|authors|year|doi|venue):"
    ```

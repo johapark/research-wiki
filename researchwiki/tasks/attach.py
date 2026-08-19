@@ -3,7 +3,7 @@
 Use this for retroactive adds — when you have a published paper page in
 the wiki and want to drop the methods PDF, an extended-data supplement,
 or a benchmarks spreadsheet alongside it. New ingests get the same
-behavior via the `--supplementary` flag (S3, not yet shipped).
+behavior via `agent ingest --supplementary` (single-PDF invocations only).
 
 The file is copied into `papers/{stem}.supp/{normalized-name}` and the
 target page's YAML is updated to declare it under `supplementary:`. The
