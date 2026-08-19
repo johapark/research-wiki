@@ -65,7 +65,8 @@ def load_author_system(
       1. `override_path` if explicitly given (eval A/B path).
       2. `prompts/author-system-{paper_type}.md` if it exists. Lets new
          paper-types ship just by adding a file — no code edit required.
-         Active types in this repo: review, clinical-trial. Future:
+         Shipped in this repo: `review` only — every other paper_type
+         reconcile can emit falls through to step 3. Future: clinical-trial,
          dataset, position, theory.
       3. `prompts/author-system-research.md` as the default fallback.
 

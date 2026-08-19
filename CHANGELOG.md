@@ -82,6 +82,53 @@ the reasoning behind any line below.
 
 ### Changed
 
+- **`CLAUDE.md` and `prompts/` now describe eight things the code already did.**
+  Each was a silent gap rather than a wrong statement — an agent working from the
+  contract alone would not have known the behavior existed:
+
+  - `lint --json`'s published key list was missing `orphan_prompts` and
+    `broken_prompt_pointers`. Both are emitted, and the release policy calls a
+    removed `--json` key breaking, so the list has to be complete to mean anything.
+  - `concept_thesis:` is required — `tasks/concepts` refuses to scaffold without it
+    and exits 1 non-interactively — but the concept-page YAML enumeration omitted it
+    and the worked command was the bare form that fails. Every `researchwiki concepts`
+    example now carries `--thesis`.
+  - Idea pages take `## References` (and `## What would update this page`) alongside
+    the five required sections; `idea_contract` allows both. The closed-list rationale
+    read as forbidding them, while the same section mandates footnote citation.
+  - `meta` / `dashboard` were missing from the page-type enumeration, and `wiki/views.md`
+    — which `init` scaffolds and three modules recognize — appeared in neither the
+    repository tree nor the meta-pages list.
+  - `ungraded_papers` had no remedy anywhere outside `prompts/migration-backfill.md`,
+    behind a bulk-import trigger. It now names `grade regression --missing-only` where
+    the finding is reported.
+  - `neighbors` calls the Semantic Scholar Graph API and was absent from Rule 1's
+    whitelist table, which is meant to be the authoritative allowlist. It and `attach`
+    are now documented — `attach` beside the supplementary layout it creates, which
+    CLAUDE.md described without ever saying what produces it.
+  - `candidates concepts --triage` spends LLM calls and auto-writes to the decline
+    list, and was documented nowhere despite being the scalable answer to the
+    candidate noise the same bullet describes.
+  - `prompts/export-bibliography.md` covered three of the four `--format` values.
+    OKF has a different scope (every page type, not just published ones), a different
+    `--json` contract, and a mandatory `--out`, and the prompt asserted a
+    bibliography-only exclusion as though it were universal.
+
+- **`prompts/ingest-digest.md`'s page contract was missing five fields the agent path
+  always writes** — `type:`, `hook:`, `ingested_at:`, `venue:`, `short_name:`. A page
+  built from that template lands on `lint`'s `missing_type` and `missing_hook` by
+  construction, and `missing_type` is the finding CLAUDE.md itself calls invisible to
+  every other check. The template also now states that the four graded H2 names are
+  matched exactly, since the digest path is where a renamed heading actually happens.
+
+- Smaller corrections in the same sweep: `share-page` told the author to read
+  `referenced_papers:` off pages that don't carry it; `prompt_lib`'s docstring listed
+  a `clinical-trial` author prompt that was never added; `attach`'s docstring still
+  called `--supplementary` unshipped; the repository tree omitted `prompts/` and
+  `config/`; and the synthesis "the middle is yours" guidance now notes that renaming
+  the middle section drops it from the semantic index, which `thin_index_text` will
+  not catch when the required sections still match.
+
 - **The module-size gate counts code, not lines** — `MAX_CODE_LINES = 800`,
   excluding docstrings, comment-only lines and blanks, replacing a same-numbered
   cap on *physical* lines (a far tighter bound, since this package is ~29% prose). This package is ~57% code and ~29% prose, so the old metric

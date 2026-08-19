@@ -1,6 +1,6 @@
-# Export the corpus as a bibliography
+# Export the corpus — as a bibliography, or as an OKF bundle
 
-**Trigger:** the user wants their wiki library in a reference manager, or a `.bib` for a manuscript in progress. Signals: *"can I get a bib file"*, *"export my library"*, *"put this in Zotero"*, *"I'm writing a paper and want the references"*.
+**Trigger:** the user wants their wiki library in a reference manager, or a `.bib` for a manuscript in progress. Signals: *"can I get a bib file"*, *"export my library"*, *"put this in Zotero"*, *"I'm writing a paper and want the references"*. Also *"export as OKF"* / *"make a portable bundle"* — a different output with a different scope, covered in its own section below.
 
 **Not this file:**
 - [`share-page.md`](./share-page.md) — one synthesis/idea page → a document for a human reader.
@@ -15,6 +15,7 @@ Zero tokens, no network, deterministic. Nothing is written unless you pass `--ou
 | LaTeX manuscript | `researchwiki export --format bibtex --out refs.bib` |
 | Zotero / Mendeley / EndNote | `researchwiki export --format ris --out library.ris` |
 | Anything CSL-aware, or further processing | `researchwiki export --format csl-json --out library.json` |
+| A portable bundle of the whole wiki, analysis included | `researchwiki export --format okf --out bundle/` |
 
 Filters: `--category`, `--year YYYY|YYYY-YYYY`, `--stem` (all repeatable except `--year`). Without `--out` the bibliography goes to stdout and the summary to stderr, so `researchwiki export --category cgt > cgt.bib` gives a clean file.
 
@@ -24,15 +25,53 @@ The citekey **is** the page stem — `\cite{bae-2014-cas-offinder-a-fast-and-ver
 
 ## What is not in there, and why
 
-Synthesis, idea and concept pages are **excluded and there is no flag to include them.** They are the user's own unpublished analysis: no DOI, no venue, no year of record. An entry for one would assert, once pasted into a manuscript, a publication that does not exist — a citation-integrity problem rather than a formatting one. If the user wants to share their analysis, that is `share-page.md`.
+*(This section is about the bibliography formats. OKF's scope is different — see below.)*
+
+Synthesis, idea and concept pages are **excluded from the bibliography and there is no flag to include them.** They are the user's own unpublished analysis: no DOI, no venue, no year of record. An entry for one would assert, once pasted into a manuscript, a publication that does not exist — a citation-integrity problem rather than a formatting one. If the user wants to share their analysis, that is `share-page.md`.
 
 Commentary pages *are* included. They are real publications a reference manager should hold — but remember CLAUDE.md's rule that a commentary is not citable evidence: cite the primary paper it discusses.
 
 No `volume`, `issue`, `pages`, `publisher`, `issn` or `abstract` is emitted, because no page carries them. Getting them would mean a Crossref/S2 lookup, which would make the command non-deterministic and network-dependent.
 
+## `--format okf` — the other output
+
+Open Knowledge Format is a portable bundle, not a bibliography, and its unit is a
+*concept* — explicitly including abstract ideas with nothing published behind them.
+So it carries **every** page type, synthesis / idea / concept included, and simply
+omits `resource` where there is no publication. A page absent from the `.bib` and
+present in the bundle is correct in both; don't try to align them.
+
+```bash
+researchwiki export --format okf --out bundle/          # --out is mandatory
+researchwiki export --format okf --out bundle/ --json   # the report as well
+```
+
+- **`--out <dir>` is required** — a bundle is a directory tree whose file paths
+  *are* the concept identities, so there is no stdout form. A non-empty directory
+  that isn't already one of its bundles is refused, exit 2.
+- **`--json` returns a different shape** from the bibliography's report:
+  `{format, okf_version, concepts, by_type, links_rewritten, links_unresolved,
+  sources_emitted, verified_emitted, verified_absent_no_gate_record,
+  generated_missing_actor, description_missing, skipped, stale_files}`. Dispatch on
+  `format` rather than assuming the bibliography keys.
+- **`verified` is emitted only for graded paper pages.** `check-grounding` and
+  `grade synthesis` persist nothing, so a synthesis page has no gate record to point
+  at and gets no trust claim — asserting one would be exactly the falsehood those
+  gates exist to prevent. `verified_absent_no_gate_record` counts them.
+- `links_unresolved` and `description_missing` are page-defect lists like the
+  bibliography's, not statistics: an unresolved link is a `[[wikilink]]` with no page
+  behind it, and a missing description is a page with no `hook:`.
+
+Field mapping worth knowing: `hook:` → `description`, `doi:` → `resource`,
+`tags:` ∪ `keywords:` → `tags`, `author_model:` + `ingested_at:` → `generated`,
+footnote `[^id]:` / `referenced_papers:` → `sources[]` (the footnote label *is* OKF's
+`sources[].id`, so per-claim attribution survives), idea `status:` → `draft|stable|deprecated`
+with the native value kept in `x_researchwiki_status`. Unmapped frontmatter is preserved
+under `x_researchwiki_*` rather than dropped.
+
 ## Read the report, then go fix the pages
 
-`--json` prints the report instead of the bibliography (combine with `--out` to get both). Each key is a to-do list, not just a statistic:
+`--json` prints the report instead of the bibliography (combine with `--out` to get both). These are the *bibliography* report's keys — OKF's are above. Each is a to-do list, not just a statistic:
 
 | Key | What it means | What to do |
 |---|---|---|
