@@ -31,12 +31,17 @@ _HEADING_RE = re.compile(r"^#{2,4}\s+\S")
 # trim any particular one.
 MAX_SECTION_CHARS = 1200
 
-# Prompts whose name carries `-system` are LLM *system prompts* loaded by code
-# through `agents.prompt_lib.load_prompt` — `ask-system`, `concept-triage-system`,
-# `suggest-splits-system`, and the `author-system-research` / `author-system-review`
-# pair. They are not trigger-gated procedures and are correctly absent from
-# CLAUDE.md, so counting them as orphans would report seven permanent false
-# positives and make the check worthless.
+# Prompts whose name carries `-system` are LLM *system prompts*, not procedures
+# an agent reads. Most are loaded by code — `concept-triage-system` by
+# `concepts.triage`, `suggest-splits-system` / `suggest-category-splits-system` by
+# `tasks.suggest_splits`, `bootstrap-categories-system` by
+# `tasks.bootstrap_categories`, and the `author-system-research` /
+# `author-system-review` pair through `agents.prompt_lib.load_prompt`. `ask-system`
+# is the exception: it is the system prompt an MCP *client* runs against
+# `researchwiki mcp-serve`, so this package never loads it either. None of the
+# seven is a trigger-gated procedure, and all are correctly absent from CLAUDE.md
+# — counting them as orphans would report seven permanent false positives and
+# make the check worthless.
 #
 # Substring, not suffix: two of the seven carry a variant suffix after it
 # (`author-system-research`), which a `.endswith()` rule missed.

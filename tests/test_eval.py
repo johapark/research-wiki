@@ -80,8 +80,9 @@ def test_a_pointer_to_a_missing_file_is_skipped(tmp_path, monkeypatch):
 
 
 def test_system_prompts_are_not_orphans(repo):
-    """`ask-system` and `author-system-research` are loaded by code through
-    `prompt_lib`, so their absence from CLAUDE.md is correct. Counting them
+    """`-system` prompts are system prompts, not trigger-gated procedures:
+    `author-system-research` is loaded by code through `prompt_lib`, `ask-system`
+    by an MCP client. Their absence from CLAUDE.md is correct — counting them
     would be seven permanent false positives in the real repo."""
     assert ptr.orphans() == ["unlinked"]
 
