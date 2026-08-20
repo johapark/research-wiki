@@ -80,6 +80,19 @@ _NO_CLAIMS = (
 _COUNT_WORDS = frozenset(
     "one two three four five six seven eight nine ten".split())
 
+# Class nouns that head a multiword term without distinguishing it. These are
+# the half of a bigram an alias must NOT be built around: "positional
+# embeddings" and "elmo embeddings" are not aliases for "frozen embeddings".
+# Rarity is not the discriminator — "mechanism" is rarer than "attention" in
+# this corpus, yet "attention" is the word that carries the concept.
+_GENERIC_HEADS = frozenset("""
+model models embedding embeddings mechanism mechanisms method methods
+approach approaches framework frameworks network networks architecture
+architectures analysis prediction predictions learning design designs
+algorithm algorithms task tasks pipeline pipelines strategy strategies
+technique techniques system systems tool tools
+""".split())
+
 # Words that never make a useful alias qualifier on their own.
 _ALIAS_STOPWORDS = frozenset("""
 a an the of for with and or in on at to from by as this that these those its it
@@ -106,17 +119,25 @@ class SemanticCandidate:
 
 
 def _head_token(term: str) -> str:
-    """Longest word in `term` — the token that distinguishes the concept.
+    """The word in `term` that distinguishes the concept, not its class noun.
 
     Not the grammatical head: "mixture model" -> "model" and "attention
-    mechanism" -> "mechanism" are the useless halves. Length is a crude proxy
-    for specificity, and it picks the right word in the cases that matter
-    ("mixture", "attention", "accessibility").
+    mechanism" -> "mechanism" are the useless halves. Class nouns are dropped
+    first (`_GENERIC_HEADS`), then length decides among what remains — a crude
+    proxy for specificity that picks the right word once the class noun is out
+    of the running ("mixture", "attention", "accessibility", "frozen").
+
+    Length alone is not enough: "embeddings" is longer than "frozen", so
+    `frozen embeddings` used to mine aliases off the class noun and propose
+    `positional embeddings`. When every word is generic there is nothing to
+    prefer, so fall back to length over the full list rather than returning ""
+    and silently disabling alias mining.
     """
     words = re.findall(r"[A-Za-z][A-Za-z0-9-]*", term)
     if not words:
         return ""
-    return max(words, key=len)
+    distinguishing = [w for w in words if w.lower() not in _GENERIC_HEADS]
+    return max(distinguishing or words, key=len)
 
 
 def _suggest_alias(term: str, text: str, known: set[str]) -> str | None:

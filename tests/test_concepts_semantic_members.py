@@ -43,6 +43,30 @@ def test_head_token_empty_on_punctuation_only_term():
     assert _head_token("") == ""
 
 
+def test_head_token_ignores_a_generic_class_noun_even_when_it_is_longest():
+    """Length alone picked the wrong half of `frozen embeddings`.
+
+    Building the parameter-efficient-fine-tuning hub, the suggester proposed
+    `positional embeddings`, `elmo embeddings`, `lstm embeddings` and two more —
+    every one matched on "embeddings", the class noun, so following the printed
+    `--aliases` line would have filled the hub with ALiBi and ELMo papers.
+    "embeddings" is longer than "frozen", which is why the length proxy failed
+    here and not on `mixture model`, where the longer word happens to be the
+    distinguishing one.
+    """
+    assert _head_token("frozen embeddings") == "frozen"
+    assert _head_token("frozen embedding") == "frozen"
+    # A rarity rule was rejected instead of this one: measured over the corpus's
+    # contribution claims "mechanism" (df 50) is rarer than "attention" (df 155),
+    # so ranking by rarity breaks the assertion above.
+    assert _head_token("attention mechanism") == "attention"
+
+
+def test_head_token_falls_back_to_length_when_every_word_is_generic():
+    # Nothing distinguishing to prefer, so don't return "" and disable aliasing.
+    assert _head_token("model architecture") == "architecture"
+
+
 # ---------- alias mining: the real corpus cases ----------
 
 def test_mines_parenthesized_acronym_when_expansion_mentions_the_concept():
