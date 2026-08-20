@@ -52,6 +52,17 @@ the reasoning behind any line below.
   passed. Deliberately a diagnostic and not a cap — this tier's rule is
   propose-never-decide, and a ceiling would block legitimately broad hubs.
 
+  **Alias qualifiers filter the whole closed class of function words.** The
+  filter carried determiners and the common prepositions but not relative
+  pronouns, the remaining prepositions, quantifiers or auxiliaries, so real
+  claim text proposed `whose mixture`, `over expression` and `without
+  supervision` — 27 distinct function words leaked across the live corpus, and
+  `mixture model`, the calibration case, was itself proposing `whose mixture`.
+  `single`, `multiple` and `few` are deliberately still absent: they read as
+  generic and are not (single-cell, multiple sequence alignment, few-shot), and
+  filtering a word that carries a domain concept costs a real alias, which is
+  worse than an obviously wrong one a reviewer ignores.
+
   **`--dry-run` no longer demands a `--thesis`.** The thesis test asks *why is
   this a concept and not glossary*, which depends on the member list a dry run
   exists to show — so requiring it in order to look was circular, and the value

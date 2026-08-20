@@ -93,11 +93,28 @@ algorithm algorithms task tasks pipeline pipelines strategy strategies
 technique techniques system systems tool tools
 """.split())
 
-# Words that never make a useful alias qualifier on their own.
+# Words that never make a useful alias qualifier on their own — the closed
+# classes, authored as classes rather than mined from one corpus. Determiners
+# and the common prepositions were here; relative pronouns, the remaining
+# prepositions, quantifiers and auxiliaries were not, so real claim text
+# proposed `whose mixture`, `over expression` and `without supervision` (27
+# distinct function words leaked across the live corpus).
+#
+# Deliberately absent: `single`, `multiple` and `few`. They read as generic and
+# are not — single-cell, multiple sequence alignment, few-shot. Filtering a word
+# that carries a domain concept costs a real alias, which is worse than letting
+# an obviously wrong one through for a reviewer to ignore.
 _ALIAS_STOPWORDS = frozenset("""
 a an the of for with and or in on at to from by as this that these those its it
 is are was were be been being using used use uses via than then when where which
 each per both all any some new novel our we they he she them their his her
+who whom whose what whether while
+over under across within without between through into onto upon about above below
+during after before since until toward towards along among besides despite
+such same other another own every either neither
+only also not more most less least much
+me him us you your my mine hers theirs ours myself itself themselves
+do does did doing done having
 """.split())
 
 

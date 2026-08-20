@@ -92,6 +92,29 @@ def test_mines_qualifier_bigram():
     assert _suggest_alias("mixture model", text, {"mixture model"}) == "normal mixture"
 
 
+def test_no_alias_from_a_function_word_qualifier():
+    """`whose mixture` is not a name for anything.
+
+    The qualifier filter carried determiners and prepositions but not relative
+    pronouns, auxiliaries, or the rest of the closed class, so real claim text
+    produced proposals like `whose mixture`, `over expression`, `without
+    supervision`. Observed across the live corpus for 27 distinct function
+    words. Domain qualifiers that merely look generic are deliberately NOT
+    filtered — `multiple` stays, because multiple sequence alignment is a real
+    concept, as do `single` and `few` (single-cell, few-shot).
+    """
+    for junk in ("whose", "over", "across", "without", "other", "every",
+                 "while", "does", "not", "only"):
+        text = f"The model fits a {junk} mixture of two components."
+        assert _suggest_alias("mixture model", text, {"mixture model"}) is None, junk
+
+
+def test_domain_qualifiers_that_look_generic_are_still_mined():
+    # `multiple sequence alignment` is the case that makes over-filtering unsafe.
+    text = "We compute a multiple alignment across 40 genomes."
+    assert _suggest_alias("alignment method", text, {"alignment method"}) == "multiple alignment"
+
+
 def test_never_suggests_an_alias_the_caller_already_has():
     text = "A two-Gaussian mixture model on log-transformed counts."
     known = {"mixture model", "gaussian mixture"}
