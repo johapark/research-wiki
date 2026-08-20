@@ -41,6 +41,13 @@ def _discover_tasks() -> dict[str, str]:
 
     Sorted alphabetically so help output is stable. Modules whose name starts
     with `_` are skipped (private helpers, not CLI entry points).
+
+    Note this cannot be the only filter, and deliberately does not import
+    anything: `main()`'s fast path imports exactly one module, and importing all
+    41 to inspect them would be paid on every invocation. The complementary
+    check — does the module actually expose `main()` — lives at the two places
+    the module object already exists (`_build_parser`, and `main()` itself), via
+    `_is_entry_point`.
     """
     out: dict[str, str] = {}
     for info in pkgutil.iter_modules(_tasks.__path__):
@@ -49,6 +56,37 @@ def _discover_tasks() -> dict[str, str]:
         cli_name = info.name.replace("_", "-")
         out[cli_name] = info.name
     return dict(sorted(out.items()))
+
+
+def _is_entry_point(module) -> bool:
+    """Whether a task module is actually a CLI command.
+
+    `_discover_tasks` registers every non-underscore module under
+    `researchwiki.tasks`, which silently swept up two library modules —
+    `claim_discover` (whose `discover_pairs()` backs `candidates pairs`) and
+    `pair_dismissals` (the dismissal store behind `--decline`). Both were
+    advertised in `--help` and both crashed on dispatch with an AttributeError
+    reported as exit 3, "internal bug" — which it was, just not the kind a caller
+    could act on.
+
+    The leading-underscore convention is the intended signal and stays valid;
+    this is the invariant behind it, checked rather than trusted, so a future
+    helper dropped into `tasks/` cannot become a broken command by accident.
+    """
+    return callable(getattr(module, "main", None))
+
+
+def _entry_point_names(tasks: dict[str, str]) -> list[str]:
+    """Command names that actually dispatch — for error messages and tests."""
+    out = []
+    for cli_name, module_name in tasks.items():
+        try:
+            module = importlib.import_module(f"researchwiki.tasks.{module_name}")
+        except ImportError:
+            continue
+        if _is_entry_point(module):
+            out.append(cli_name)
+    return out
 
 
 def _build_parser(tasks: dict[str, str]) -> argparse.ArgumentParser:
@@ -66,6 +104,8 @@ def _build_parser(tasks: dict[str, str]) -> argparse.ArgumentParser:
         except ImportError as e:
             print(f"Warning: could not load task '{cli_name}': {e}", file=sys.stderr)
             continue
+        if not _is_entry_point(module):
+            continue        # library module under tasks/, not a command
         help_text = (module.__doc__ or "").strip().split("\n", 1)[0]
         subs.add_parser(cli_name, help=help_text, add_help=False)
     return parser
@@ -124,6 +164,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"researchwiki {command}: cannot load task module — {e}",
               file=sys.stderr)
         return 2
+    if not _is_entry_point(module):
+        # Reachable because `_discover_tasks` names modules without importing
+        # them. A library module under tasks/ is not a command, so this is a bad
+        # command line (1), not an internal bug (3).
+        print(f"researchwiki: unknown command '{command}'. "
+              f"Available: {', '.join(_entry_point_names(tasks))}", file=sys.stderr)
+        return 1
     try:
         return int(module.main(argv[1:]) or 0)
     except SystemExit as e:

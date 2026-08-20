@@ -313,3 +313,46 @@ def test_import_verify_returns_0_even_when_nothing_landed(tmp_path, capsys):
 def test_import_verify_on_a_missing_manifest_returns_1(tmp_path, capsys):
     assert _import_task().main(["verify", "--run", str(tmp_path / "nope")]) == 1
     capsys.readouterr()
+
+
+def test_every_advertised_command_can_actually_dispatch():
+    """`--help` must not advertise a command that crashes on dispatch.
+
+    `_discover_tasks` registers every non-underscore module under
+    `researchwiki.tasks` without importing it, which swept up two library
+    modules — `claim_discover` (whose `discover_pairs()` backs `candidates
+    pairs`) and `pair_dismissals` (the store behind `--decline`). Both appeared
+    in `--help` and both died with an AttributeError surfaced as exit 3,
+    "internal bug": true, but not a bug the caller could act on.
+
+    Pins the invariant rather than the two names, so a helper dropped into
+    `tasks/` tomorrow cannot become a broken command by accident.
+    """
+    from researchwiki.__main__ import (
+        _build_parser, _discover_tasks, _entry_point_names, _is_entry_point,
+    )
+    import importlib
+
+    tasks = _discover_tasks()
+    advertised = set(_entry_point_names(tasks))
+    assert advertised, "no commands resolved at all"
+
+    for cli_name in advertised:
+        module = importlib.import_module(f"researchwiki.tasks.{tasks[cli_name]}")
+        assert _is_entry_point(module), f"{cli_name} is advertised but has no main()"
+
+    # And the parser agrees with the dispatcher about what exists.
+    parser = _build_parser(tasks)
+    choices = set(parser._subparsers._group_actions[0].choices)
+    assert choices == advertised, (
+        f"parser and dispatcher disagree: "
+        f"parser-only={sorted(choices - advertised)}, "
+        f"dispatch-only={sorted(advertised - choices)}"
+    )
+
+
+def test_a_library_module_under_tasks_is_a_user_error_not_an_internal_bug():
+    """Naming one is a bad command line (1), not a crash (3)."""
+    from researchwiki.__main__ import main
+    for name in ("claim-discover", "pair-dismissals"):
+        assert main([name]) == 1
