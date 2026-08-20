@@ -211,10 +211,40 @@ def main(argv: list[str]) -> int:
               f"→ would write wiki/concepts/{result['slug']}.md")
         for k in result["members"]:
             print(f"  · [[{k}]]")
+        _print_semantic_candidates(result, args.term)
         return 0
 
     print(f"wrote {result['path']}  ({n} members, span {span}, "
           f"{len(result['linked'])} reciprocal link(s) added)")
+    _print_semantic_candidates(result, args.term)
     print("Next: fill Definition + spoke one-liners, then "
           f"`researchwiki check-grounding {result['path']}` + `grade synthesis`.")
     return 0
+
+
+def _print_semantic_candidates(result: dict, term: str) -> None:
+    """Report papers the semantic pass proposes that lexical matching missed.
+
+    Printed, never applied. Each line carries the score, the claim that matched
+    (the evidence a reviewer judges), and the alias mined from that claim —
+    attributed to its own paper, so a suggestion inherited from a paper the
+    reviewer rejects is visibly traceable rather than anonymous in a list.
+    """
+    cands = result.get("semantic_candidates") or []
+    if not cands:
+        return
+    gain = result.get("semantic_span_gain") or 0
+    span_note = f", +{gain} categor{'y' if gain == 1 else 'ies'}" if gain else ""
+    print()
+    print(f"  {len(cands)} semantic candidate(s) not matched lexically{span_note} "
+          f"— review, do not assume:")
+    for c in cands:
+        alias = f"  alias→ \"{c['suggested_alias']}\"" if c["suggested_alias"] else ""
+        print(f"    {c['score']:.3f} [{c['category']}] {c['stem']}{alias}")
+        print(f"          › {c['text'][:110]}")
+    suggested = result.get("suggested_aliases") or []
+    if suggested:
+        print()
+        print(f"  If those name the same concept, re-run with:")
+        print(f"    researchwiki concepts \"{term}\" --force "
+              f"--aliases \"{','.join(suggested)}\"")

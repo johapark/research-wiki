@@ -29,6 +29,7 @@ from ..fsatomic import update_locked, write_text_atomic
 from ..wiki import commit_page, find_stem_collision, read_page, read_pages, strip_non_prose
 # Reuse the synthesis scaffolder's slug + dominant-category helpers.
 from ..tasks.synthesize import _dominant_category, _slugify
+from .semantic_members import semantic_member_candidates, suggested_alias_set
 from .term_claims import (
     _matching_claims,
     _page_mentions,
@@ -257,10 +258,44 @@ def run(
         "dry_run": dry_run, "linked": [], "path": None,
     }
 
+    # Semantic recall tier: report the members lexical matching missed. Never
+    # added to `members` — see semantic_members.__doc__ for why cosine cannot
+    # carry membership. The author converts a candidate by re-running with the
+    # suggested alias, which routes it through `find_members` unchanged.
+    member_stems = {k.split("/")[-1] for k, _, _ in members}
+    candidates = semantic_member_candidates(
+        term, aliases=aliases_clean, exclude_stems=member_stems,
+    )
+    result["semantic_candidates"] = [
+        {
+            "stem": c.stem, "category": c.category, "score": round(c.score, 3),
+            "claim_slug": c.claim_slug, "section": c.section,
+            "text": c.text, "suggested_alias": c.suggested_alias,
+        }
+        for c in candidates
+    ]
+    result["suggested_aliases"] = suggested_alias_set(candidates)
+    result["semantic_span_gain"] = len(
+        {c.category for c in candidates} - {c for _, c, _ in members}
+    )
+
     if len(members) < min_members:
+        hint = ""
+        suggested = result.get("suggested_aliases") or []
+        n_cand = len(result.get("semantic_candidates") or [])
+        if suggested:
+            # The common cause of a thin member list is vocabulary, not
+            # absence: the corpus names the concept differently elsewhere.
+            hint = (
+                f" {n_cand} paper(s) match semantically but not lexically; "
+                f"retry with --aliases \"{','.join(suggested)}\" if those are "
+                f"the same concept."
+            )
+        elif n_cand:
+            hint = f" {n_cand} paper(s) match semantically but not lexically."
         raise ValueError(
             f"`{term}` appears in {len(members)} paper(s) (<{min_members}). "
-            f"Not concept-worthy — lower --min-members to override."
+            f"Not concept-worthy — lower --min-members to override.{hint}"
         )
 
     out = wiki_dir() / "concepts" / f"{slug}.md"
