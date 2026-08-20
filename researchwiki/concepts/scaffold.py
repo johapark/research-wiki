@@ -43,9 +43,15 @@ _NOTE = "instantiates this concept (auto-added; concept-link)"
 
 def find_members(
     term: str, aliases: list[str] | None = None,
-) -> list[tuple[str, str, str | None]]:
-    """Return [(key, category, best_slug)] of paper pages that instantiate
-    `term` as a contribution.
+) -> list[tuple[str, str, str | None, str | None]]:
+    """Return [(key, category, best_slug, matched_term)] of paper pages that
+    instantiate `term` as a contribution.
+
+    `matched_term` is which of `term`/`aliases` actually found the paper, or
+    None for a keyword-only member. Aliases widen membership without saying
+    what they cost — five of them once took a hub from 5 members to 17 — so
+    the caller aggregates this into `alias_hits` for the author to read. It is
+    not part of the `--json` contract: `result["members"]` stays a list of keys.
 
     Three signals feed the member set:
 
@@ -90,17 +96,19 @@ def find_members(
     search_terms: list[str] = [term, *alias_list]
     keyword_hits = _papers_where_keywords_match(term, aliases=alias_list)
 
-    members: list[tuple[str, str, str | None]] = []
+    members: list[tuple[str, str, str | None, str | None]] = []
     for p in read_pages():
         if p.page_type != "paper":
             continue
 
         # Step 1: direct claim-substring match on the term OR any alias.
         best_slug: str | None = None
+        matched_term: str | None = None
         for t in search_terms:
             hits = _matching_claims(p.stem, t)
             if hits:
                 best_slug = hits[0]["claim_slug"]
+                matched_term = t
                 break
 
         # Step 2: keyword-hit paper without a direct claim match — widen
@@ -112,6 +120,7 @@ def find_members(
                 alias_hits = _matching_claims(p.stem, alias)
                 if alias_hits:
                     best_slug = alias_hits[0]["claim_slug"]
+                    matched_term = alias
                     break
 
         # Not a member if no signal fired.
@@ -126,17 +135,17 @@ def find_members(
         # parameter-efficient fine-tuning. Bare is the form CLAUDE.md prescribes
         # for citing a paper as a whole, it announces itself to the author, and
         # `concepts --upgrade-spokes` fills it in once a matching claim exists.
-        members.append((p.key, p.category, best_slug))
+        members.append((p.key, p.category, best_slug, matched_term))
     members.sort(key=lambda kc: (kc[1], kc[0]))
     return members
 
 def _template(
     title: str, slug: str, term: str,
-    members: list[tuple[str, str, str | None]], span: int,
+    members: list[tuple[str, str, str | None, str | None]], span: int,
     thesis: str, aliases: list[str] | None = None,
 ) -> str:
     today = date.today().isoformat()
-    category = _dominant_category([k for k, _, _ in members])
+    category = _dominant_category([k for k, _, _, _ in members])
     cat_line = (
         "category: [TODO]  # dominant content field of the member papers; set "
         "to a valid content category (type is carried by type:/the concepts/ dir)"
@@ -144,7 +153,7 @@ def _template(
     )
     # Quote each wikilink so Obsidian types the list as links (unquoted
     # `- [[..]]` parses as a nested list → "?" in the Properties panel).
-    ref_lines = "\n".join(f'  - "[[{k}]]"' for k, _, _ in members)
+    ref_lines = "\n".join(f'  - "[[{k}]]"' for k, _, _, _ in members)
 
     # concept_thesis: the one-sentence discriminator between concept vs
     # glossary/synthesis, collected at scaffold time. Rendered as a blockquote
@@ -186,7 +195,7 @@ def _template(
     # the frontmatter stays bare — that field enumerates whole-paper members,
     # not per-claim anchors.
     by_cat: dict[str, list[tuple[str, str | None]]] = defaultdict(list)
-    for k, c, best_slug in members:
+    for k, c, best_slug, _matched in members:
         by_cat[c].append((k, best_slug))
     spoke_lines: list[str] = []
     for cat in sorted(by_cat):
@@ -265,10 +274,17 @@ def run(
     aliases_clean = [a.strip() for a in (aliases or []) if a and a.strip()]
 
     members = find_members(term, aliases=aliases_clean)
-    span = len({c for _, c, _ in members})
+    span = len({c for _, c, _, _ in members})
+    # Which search term found each member. Keyword-only members are attributed
+    # to "(keywords)" so the counts always sum to len(members).
+    alias_hits: dict[str, int] = {}
+    for _, _, _, matched in members:
+        key = matched or "(keywords)"
+        alias_hits[key] = alias_hits.get(key, 0) + 1
     result = {
         "term": term, "slug": slug, "title": title,
-        "members": [k for k, _, _ in members], "span": span,
+        "members": [k for k, _, _, _ in members], "span": span,
+        "alias_hits": alias_hits,
         "thesis": thesis.strip(), "aliases": aliases_clean,
         "dry_run": dry_run, "linked": [], "path": None,
     }
@@ -277,7 +293,7 @@ def run(
     # added to `members` — see semantic_members.__doc__ for why cosine cannot
     # carry membership. The author converts a candidate by re-running with the
     # suggested alias, which routes it through `find_members` unchanged.
-    member_stems = {k.split("/")[-1] for k, _, _ in members}
+    member_stems = {k.split("/")[-1] for k, _, _, _ in members}
     candidates = semantic_member_candidates(
         term, aliases=aliases_clean, exclude_stems=member_stems,
     )
@@ -291,7 +307,7 @@ def run(
     ]
     result["suggested_aliases"] = suggested_alias_set(candidates)
     result["semantic_span_gain"] = len(
-        {c.category for c in candidates} - {c for _, c, _ in members}
+        {c.category for c in candidates} - {c for _, c, _, _ in members}
     )
 
     if len(members) < min_members:
@@ -332,7 +348,7 @@ def run(
     # already linking the concept is a no-op.
     concept_key = f"concepts/{slug}"
     pages = {p.key: p for p in read_pages()}
-    for k, _, _ in members:
+    for k, _, _, _ in members:
         page = pages.get(k)
         if page and append_related_paper(page.path, concept_key, note=_NOTE):
             result["linked"].append(k)
@@ -348,7 +364,7 @@ def run(
     append_log_md(
         "concept",
         f"concept: {title} (span {span}) → wiki/concepts/{slug}.md",
-        f"Members: {', '.join(k.split('/', 1)[-1] for k, _, _ in members)}. "
+        f"Members: {', '.join(k.split('/', 1)[-1] for k, _, _, _ in members)}. "
         f"Reciprocal links added: {len(result['linked'])}/{len(members)}. "
         + (f"instantiates edges promoted: {promoted}." if promoted else ""),
     )

@@ -212,15 +212,36 @@ def main(argv: list[str]) -> int:
               f"→ would write wiki/concepts/{result['slug']}.md")
         for k in result["members"]:
             print(f"  · [[{k}]]")
+        _print_alias_attribution(result)
         _print_semantic_candidates(result, args.term, written=False)
         return 0
 
     print(f"wrote {result['path']}  ({n} members, span {span}, "
           f"{len(result['linked'])} reciprocal link(s) added)")
+    _print_alias_attribution(result)
     _print_semantic_candidates(result, args.term, written=True)
     print("Next: fill Definition + spoke one-liners, then "
           f"`researchwiki check-grounding {result['path']}` + `grade synthesis`.")
     return 0
+
+
+def _print_alias_attribution(result: dict) -> None:
+    """Say which search term found each member, when aliases were supplied.
+
+    Aliases widen membership through a substring match, so a plausible-looking
+    list can quietly multiply the hub: five of them once took a hub from 5
+    members to 17 across 4 categories, admitting a Bayesian-optimization paper
+    on "low-rank". Silent because nothing attributed a member to the alias that
+    pulled it in. Diagnostic only — the tier's rule is propose-never-decide, and
+    a cap would block legitimately broad hubs.
+    """
+    hits = result.get("alias_hits") or {}
+    if not result.get("aliases"):
+        return
+    print()
+    print(f"  members by matching term ({len(result['members'])} total):")
+    for name, count in sorted(hits.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"    {name:<40} {count}")
 
 
 def _print_semantic_candidates(result: dict, term: str, *, written: bool) -> None:

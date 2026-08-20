@@ -114,8 +114,8 @@ def test_find_members_uses_claim_substrate_not_body_prose(tmp_wiki, monkeypatch)
     })
 
     members = find_members("RAPTOR")
-    keys = [k for k, _, _ in members]
-    slugs = [s for _, _, s in members]
+    keys = [k for k, _, _, _ in members]
+    slugs = [s for _, _, s, _ in members]
 
     assert keys == ["ai/a-2024-x"]
     assert slugs == ["kc-aaaa1111"]
@@ -177,8 +177,11 @@ def test_find_members_expands_via_caller_aliases(tmp_wiki, monkeypatch):
     # With aliases: both papers become members.
     members = find_members("deep mutational scanning",
                             aliases=["DMS", "MAVE"])
-    stems = {k for k, _, _ in members}
+    stems = {k for k, _, _, _ in members}
     assert stems == {"cgt/one", "cgt/two"}
+    # The alias that found each one is recorded, which is what `alias_hits`
+    # aggregates for the author.
+    assert {k: m for k, _, _, m in members} == {"cgt/one": "DMS", "cgt/two": "MAVE"}
 
 
 def test_matching_claims_respects_word_boundaries(monkeypatch, tmp_path):
@@ -223,6 +226,32 @@ def test_find_members_returns_best_slug_per_paper(tmp_wiki, monkeypatch):
     })
     members = find_members("X")
     assert members[0][2] == "kc-first0000"  # first row = top pick
+
+
+def test_alias_hits_attribute_each_member_to_the_term_that_found_it(
+    tmp_wiki, monkeypatch,
+):
+    """Aliases widen membership silently; `alias_hits` makes the cost visible.
+
+    Five plausible aliases took the parameter-efficient-fine-tuning hub from 5
+    members to 17 across 4 categories, admitting a Bayesian-optimization paper
+    and Feynman's restaurant problem via substring hits on "low-rank" and
+    "adapter". Nothing said which alias did it. This is a diagnostic, not a cap:
+    the governing decision for this tier is propose-never-decide, and a cap
+    would block legitimately broad hubs.
+    """
+    _page(tmp_wiki, "ai/a-2024-x", "body")
+    _page(tmp_wiki, "compbio/b-2024-y", "body")
+    _page(tmp_wiki, "single-cell/c-2024-z", "body")
+    _stub_matching_claims(monkeypatch, {
+        ("a-2024-x", "peft"): [{"claim_slug": "kc-1", "text": "uses PEFT"}],
+        ("b-2024-y", "lora"): [{"claim_slug": "kc-2", "text": "uses LoRA"}],
+        ("c-2024-z", "lora"): [{"claim_slug": "kc-3", "text": "uses LoRA"}],
+    })
+    _stub_keyword_hits(monkeypatch, {})
+
+    res = concepts_mod.run("PEFT", aliases=["LoRA"], thesis="", dry_run=True)
+    assert res["alias_hits"] == {"PEFT": 1, "LoRA": 2}
 
 
 def test_find_members_leaves_the_anchor_bare_when_no_claim_matches(
@@ -282,8 +311,8 @@ def test_term_claim_hint_is_case_insensitive_like_the_anchor(tmp_wiki, monkeypat
 
 def test_template_bridge_shape():
     members = [
-        ("ai/a-2024-x", "ai", "kc-abcd1234"),
-        ("single-cell/b-2024-y", "single-cell", None),
+        ("ai/a-2024-x", "ai", "kc-abcd1234", "RAPTOR"),
+        ("single-cell/b-2024-y", "single-cell", None, None),
     ]
     out = _template("RAPTOR", "raptor", "RAPTOR", members, span=2,
                     thesis="Same tool, different epistemic role across ai and single-cell.")
@@ -306,7 +335,8 @@ def test_template_bridge_shape():
 
 
 def test_template_single_category_is_flat():
-    members = [("ai/a", "ai", "kc-11111111"), ("ai/b", "ai", None), ("ai/c", "ai", "res-22222222")]
+    members = [("ai/a", "ai", "kc-11111111", "X"), ("ai/b", "ai", None, None),
+               ("ai/c", "ai", "res-22222222", "X")]
     out = _template("X", "x", "X", members, span=1,
                     thesis="One direction of dependency in ai — X as design substrate.")
     assert "## Cross-domain connections" not in out
