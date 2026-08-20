@@ -211,6 +211,10 @@ def _count_db_rows(stem: str) -> dict[str, int]:
             ("claims", "paper_stem"),
             ("ingest_iterations", "paper_stem"),
             ("claim_overlap_runs", "paper_stem"),
+            # Keyed on claim slugs, so a removed paper's pairs sit under either
+            # endpoint column — both need clearing.
+            ("cross_paper_judgements", "src_stem"),
+            ("cross_paper_judgements", "tgt_stem"),
         ):
             try:
                 n = conn.execute(
@@ -368,6 +372,8 @@ def _delete_db_rows(stem: str) -> dict[str, int]:
         with conn:
             for table, column in (
                 ("claim_overlap_runs", "paper_stem"),
+                ("cross_paper_judgements", "src_stem"),
+                ("cross_paper_judgements", "tgt_stem"),
                 ("ingest_iterations", "paper_stem"),
                 # `papers` last: claims CASCADE off it, so deleting it first
                 # would make the claims count unobservable.

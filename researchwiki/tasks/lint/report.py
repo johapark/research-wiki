@@ -104,6 +104,10 @@ def _emit_json(**kw) -> int:
         "duplicate_claim_sets": kw["duplicate_claim_sets"],
         "db_drift": kw["db_drift"],
         "cross_paper_contradictions": kw.get("cross_paper", []),
+        # null = the opt-in check didn't run; an object means it did. Carries the
+        # pool size even when max_pairs=0 judged nothing, so sizing a sweep costs
+        # no LLM calls. Same null-means-skipped convention as duplicate_claim_sets.
+        "cross_paper_stats": kw.get("cross_paper_stats"),
         "fix_applied": {
             "backlinks_added": sum(kw["fix_written"].values()),
             "pages_updated": kw["fix_written"],
@@ -607,22 +611,8 @@ def _emit_prose(**kw) -> int:
                       "or `researchwiki db rebuild` for a full walk._")
                 print()
 
-    cross_paper = kw.get("cross_paper") or []
-    if cross_paper:
-        print(f"## Cross-paper contradictions ({len(cross_paper)})")
-        for c in cross_paper[:10]:
-            a, b = c["pair"]
-            print(f"- **{c['verdict']}** (sim={c['similarity']:.2f})")
-            print(f"    A: [[{a['paper_stem']}]] ({a['section']}#{a['position']}) — {a['text']}")
-            print(f"    B: [[{b['paper_stem']}]] ({b['section']}#{b['position']}) — {b['text']}")
-            if c.get("rationale"):
-                print(f"    Judge: {c['rationale']}")
-        if len(cross_paper) > 10:
-            print(f"- ... ({len(cross_paper) - 10} more)")
-        print()
-        print("_Cross-paper lint is opt-in (`--cross-paper`); the LLM judge classified each pair_")
-        print("_as `disagree_numeric` or `disagree_direction`. Verify against the source PDFs before correcting._")
-        print()
+    from .report_cross_paper import print_cross_paper_section
+    print_cross_paper_section(kw.get("cross_paper") or [], kw.get("cross_paper_stats"))
 
     fix_written = kw["fix_written"]
     if kw["fix_applied"] and fix_written:

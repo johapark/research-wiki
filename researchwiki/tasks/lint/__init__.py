@@ -106,7 +106,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--cross-paper-threshold", type=float, default=0.85,
                         help="Cosine threshold for the cross-paper candidate pool (default: 0.85).")
     parser.add_argument("--cross-paper-max-pairs", type=int, default=50,
-                        help="Cap on judged pairs to bound LLM-call cost (default: 50).")
+                        help="Cap on judged pairs to bound LLM-call cost (default: 50). "
+                             "0 sizes the pool without judging anything, which is the "
+                             "zero-cost way to see what a sweep would cost.")
+    parser.add_argument("--cross-paper-rejudge", action="store_true",
+                        help="Re-judge pairs already recorded in cross_paper_judgements. "
+                             "By default a repeat run judges only pairs the previous one "
+                             "never reached, so resuming an interrupted sweep is cheap.")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Emit a structured JSON object instead of the prose report. "
                              "Keys: pages_scanned, orphans, broken_wikilinks, missing_backlinks, "
@@ -214,11 +220,17 @@ def main(argv: list[str]) -> int:
 
     # --- opt-in cross-paper contradiction lint (LLM-call-heavy)
     cross_paper: list[dict] = []
+    # None (not {}) when the check didn't run, matching the `duplicate_claim_sets`
+    # convention: null means skipped, a populated object means it ran.
+    cross_paper_stats: dict | None = None
     if args.cross_paper:
         from .cross_paper import find_cross_paper_contradictions
+        cross_paper_stats = {}
         cross_paper = find_cross_paper_contradictions(
             sim_threshold=args.cross_paper_threshold,
             max_pairs=args.cross_paper_max_pairs,
+            rejudge=args.cross_paper_rejudge,
+            stats=cross_paper_stats,
         )
 
     if args.as_json:
@@ -248,6 +260,7 @@ def main(argv: list[str]) -> int:
             broken_prompt_pointers=broken_pointers,
             db_drift=db_drift, db_drift_fixed=db_drift_fixed,
             cross_paper=cross_paper,
+            cross_paper_stats=cross_paper_stats,
             fix_applied=args.fix, fix_written=fix_written,
         )
 
@@ -277,6 +290,7 @@ def main(argv: list[str]) -> int:
         broken_prompt_pointers=broken_pointers,
         db_drift=db_drift, db_drift_fixed=db_drift_fixed,
         cross_paper=cross_paper,
+        cross_paper_stats=cross_paper_stats,
         fix_applied=args.fix, fix_written=fix_written,
     )
 

@@ -22,6 +22,54 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- **Cross-paper contradiction scan: a 611 MB allocation and a corpus re-embed, on
+  every ingest.** `find_cross_paper_contradictions` called `embed_texts` over every
+  graded claim per invocation — that function has no cache of its own, so it was
+  ~29 s at 12.4k claims — then built a full N×N similarity matrix (611 MB, measured)
+  and walked its upper triangle in pure Python (78 M iterations, ~11 s). None of
+  that was confined to the opt-in `lint --cross-paper` surface:
+  `alert_after_ingest` is unconditional in the agent path, and it applied its
+  `only_stem` filter *after* the scan, so every ingest paid the whole corpus cost
+  and discarded 99.8% of the result.
+
+  Three changes. Vectors now come from a new append-only claim-cache path, so a run
+  embeds only what is genuinely new. The scan is blocked at `_BLOCK = 512`, the same
+  fix `tasks/claim_discover` already carries for the identical cliff. And
+  `only_stem` is pushed *into* the scan rather than applied after it, which is the
+  one that matters for ingest: the pairs that survive are one paper's claims against
+  everything else, so the work scales with the new paper instead of the corpus.
+  **Ingest path: ~40 s and 611 MB → 0.07 s and 13 MB.** A full corpus sweep peaks at
+  62 MB. Output is unchanged — pinned by a parametrized equivalence test against a
+  brute-force reference at four block sizes, a cosine-ordering test (the transplanted
+  loop ranks by IDF mass and needed the sort re-added, which would otherwise have
+  silently changed *which* pairs get judged), and a pushdown-equivalence test.
+
+- **The claim-embedding cache could be evicted by any caller with a narrow row set.**
+  `get_claim_embeddings` ends in a persist that rewrites the cache to *exactly* the
+  rows it was handed, so a caller asking about one section dropped every other claim
+  — the bug that silently evicted 489 limitations claims (3,027 → 2,538) during the
+  semantic-member calibration. New `warm_claim_embeddings` persists the union
+  instead, so a narrow caller cannot shrink the cache, and short-circuits the
+  SentenceTransformer construction (~3 s) entirely when every row is a hit. Both
+  properties are pinned by tests, because both failures are silent: the cache is a
+  derived artifact that rebuilds on demand, so corruption shows up as wrong numbers
+  rather than an error. `claim-overlap` still uses the old writer; migrating the
+  cache's only current writer forces a compaction question and is left alone.
+
+  Side effect worth knowing: the first run filled the 143 claims the cache had been
+  missing, so it is now 100% covered. Every cache-only consumer
+  (`candidates pairs`, `semantic_members`, `check-coverage`) had been scanning 98.9%
+  of the corpus and reporting the result as complete.
+
+- **Test suite had no isolation for the claim-embedding cache or `edges.db`.** Both
+  resolve from the working directory, so a test reaching a write path lands in the
+  developer's real data. Latent only by accident — the cross-paper tests seeded a
+  NULL `claim_slug` and the edge writer returns early without one — and the first
+  test to seed slugs would have written fake 2-dimensional vectors over the real
+  19 MB claim cache and planted `candidate` edges that `claim-graph --tensions` and
+  `visualize` present as real findings about the corpus. Two autouse fixtures now sit
+  beside `_isolate_state_db`, which is the same trap for the third and fourth time.
+
 - **Concept-hub discovery: five defects found by using it.** The discovery tier
   (`PLAN-bottom-up-synthesis.md`) was exercised end to end for the first time,
   authoring `wiki/concepts/parameter-efficient-fine-tuning.md` — the first hub
@@ -81,6 +129,30 @@ the reasoning behind any line below.
   anchor's query, so hint and anchor cannot disagree. `attach_after_ingest`
   keeps its fallback: there the anchor doubles as the membership test, so
   removing it changes what auto-attaches at ingest — a separate question.
+
+### Added
+
+- **`cross_paper_judgements` — the contradiction judge now records what it cleared.**
+  Its only trace was a `contradicts` edge, written for the two disagreement verdicts
+  alone, so `agree` and `different_topic` — the overwhelming majority — left nothing
+  behind. A re-run therefore re-paid for every pair it had already dismissed, and
+  "has this pool been judged?" had no answer; deciding whether the 0.85 pool was
+  worth a judged sweep had to be inferred from a pairs-per-paper distribution
+  because no record could answer it. Every verdict is now recorded, so a repeat run
+  judges only what the last one never reached (`lint --cross-paper-rejudge`
+  overrides). Keyed on the two claim slugs and nothing else: slugs are
+  content-addressed, so editing a claim gives it a new slug and its pairs stop
+  matching — self-invalidating on exactly the change that should invalidate it, the
+  same property `pair_dismissals` relies on.
+
+- **`lint --json` gains `cross_paper_stats`** — `null` unless `--cross-paper` ran,
+  then `{pool, judged, skipped_already_judged, disagreements, sim_threshold}`. `pool`
+  is filled before the `max_pairs` slice, which makes
+  `--cross-paper-max-pairs 0` a zero-cost way to size a sweep before paying for one.
+  Additive; no existing key renamed or removed. The prose report also prints a zero
+  section when the check ran and found nothing, because silence there was
+  indistinguishable from never having run — the ambiguity the new table exists to
+  remove.
 
 ### Changed
 

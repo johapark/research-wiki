@@ -168,3 +168,43 @@ CREATE TABLE IF NOT EXISTS claim_overlap_runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_co_runs_ran_at ON claim_overlap_runs(ran_at);
+
+-- ---------------------------------------------------------------------------
+-- cross_paper_judgements — one row per claim pair the contradiction judge has
+-- seen, whatever it decided.
+--
+-- Exists because the judge's only trace today is a `contradicts` edge, which is
+-- written for the two *disagreement* verdicts alone. `agree` and
+-- `different_topic` — together the overwhelming majority — leave nothing behind,
+-- so "has this pair been judged?" is unanswerable and every run re-pays for
+-- every pair it already cleared. The cost of that gap was concrete: deciding
+-- whether the 0.85 pool was worth a full judged sweep had to be inferred from a
+-- pairs-per-paper distribution, because no record could answer it directly.
+--
+-- Keyed on the two claim slugs, which is enough on its own: slugs are
+-- content-addressed (blake2s over the normalized claim text), so editing a claim
+-- gives it a new slug and its pairs simply stop matching. That makes the table
+-- self-invalidating on exactly the change that should invalidate it, with no
+-- separate fingerprint column — the same property `pair_dismissals` relies on.
+--
+-- `similarity` and `sim_threshold` are both recorded: a pair judged under a
+-- looser floor is not comparable to one judged under a tighter one, and the
+-- threshold in force is not recoverable from the pair itself.
+CREATE TABLE IF NOT EXISTS cross_paper_judgements (
+    src_stem      TEXT NOT NULL,
+    src_slug      TEXT NOT NULL,
+    tgt_stem      TEXT NOT NULL,
+    tgt_slug      TEXT NOT NULL,
+    -- All four verdicts, not just the disagreements: recording the clears is
+    -- the entire point of the table.
+    verdict       TEXT NOT NULL,
+    similarity    REAL NOT NULL,
+    sim_threshold REAL NOT NULL,
+    judged_at     INTEGER NOT NULL,   -- epoch seconds
+    judge_phase   TEXT NOT NULL DEFAULT 'cross_paper_judge',
+    PRIMARY KEY (src_slug, tgt_slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cpj_judged_at ON cross_paper_judgements(judged_at);
+CREATE INDEX IF NOT EXISTS idx_cpj_src_stem  ON cross_paper_judgements(src_stem);
+CREATE INDEX IF NOT EXISTS idx_cpj_tgt_stem  ON cross_paper_judgements(tgt_stem);

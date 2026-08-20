@@ -336,6 +336,46 @@ register, IDF overlap measures subject.
 This is the same hybrid the framework already trusts in `search` (Tantivy BM25
 fused with semantic via RRF) — applied to claim pairs rather than queries.
 
+### E8 — (3)'s blocker was never edge density; it is verdict vocabulary
+
+Measured 2026-08-20, against a 419-paper / 12,504-claim corpus.
+
+**The ~50-edge gate is met**: 51 live typed edges (13,495 `instantiates` excluded —
+13,493 of those are `stale`).
+
+**But (2) cannot produce more.** `claim_overlap_runs` holds 423 stems against 419
+papers with claims: the judged path has already run corpus-wide. 51 is
+claim-overlap's *saturated* yield, not a waypoint, so "wait for (2)" had no
+remaining upside.
+
+**And claim-overlap structurally cannot emit `contradicts`.** Its verdict enum is
+`corroborates | measures_same | refines | builds_on | none`
+(`tasks/claim_overlap.py`). The sole producer of `contradicts` is `lint
+--cross-paper` → `_persist_contradicts_edge`, which has nothing to do with (2).
+The half of (3) that carries the most value was never gated on (2) at all.
+
+**Judging more pairs at 0.85 would yield almost nothing.** The pool is 1,106
+cross-paper claim pairs (643 paper pairs); per paper that is median 4 / p90 17 /
+max 44, and only **19 of 305 papers exceed `alert_after_ingest`'s `max_pairs=20`**.
+So ≤171 pairs ever escaped that cap — **≥85% of the pool has already reached the
+judge**, for exactly 1 disagreement. Roughly 1-in-900. Even assuming the 215
+papers ingested in 2026-06 never ran the alert, it is ~1-in-475.
+
+**The actual blocker.** The cross-paper judge keeps only `disagree_numeric` and
+`disagree_direction`, and routes anything with a different cohort/dataset/run to
+`different_topic`. That is the right design for finding **errors** — one of the two
+papers must be wrong, and the one edge it did find is real (232 vs 47 phased
+diploid assemblies for the same HPRC assembly). It cannot find **arguments**.
+E4's own motivating relation — Parks 2018 vs van Iterson 2017 on whether a mixture
+can serve as an empirical null — is a methodological disagreement, so this judge
+would score it `different_topic`; and per E5 it peaks at cosine 0.743, below the
+0.85 pool. Invisible twice over.
+
+So (3) needs a verdict vocabulary that can say *"these two papers disagree about
+how to do X"*, evaluated in a lower cosine band — where E6 already establishes
+that IDF-weighted rare-term overlap, not cosine, is the ranker to use. That is a
+design question, not a waiting game.
+
 ### (3) Edge-driven candidate generation — `[ ]` not started
 
 **Problem:** E4. Highest conceptual value, largest unknown.
@@ -344,12 +384,14 @@ A generator that clusters on typed claim edges — especially `contradicts` and
 `refines` — and proposes pages because there is an *argument*, not because
 vocabulary overlaps.
 
-- [ ] Wait for edge density to justify it (10 edges today; revisit past ~50)
-- [ ] Prototype: cluster `contradicts`/`refines` edges, emit proposal stubs like `candidates synthesis` does
+- [x] Wait for edge density to justify it — **met, and it was the wrong gate.** See E8.
+- [ ] Establish a verdict vocabulary that can express a methodological disagreement (E8)
+- [ ] Prototype: cluster those edges, emit proposal stubs like `candidates synthesis` does
 - [ ] Decide surface: new `candidates tensions`, or a mode on the existing commands
 
-**Blocked on (2)** — needs more edges than the corpus currently has, and (2) is
-what produces them.
+**No longer blocked on (2).** That was wrong twice over — (2)'s queue is drained
+and saturated, and (2) never produced the edge type this item needs. What actually
+blocks it is the verdict vocabulary. See **E8**.
 
 ### (4) Alias suggestion at scaffold time — `[x]` folded into (1)
 
@@ -367,7 +409,7 @@ attachment already covers the common case, and (5) catches omissions on the
 pages that carry citations. Revisit if hubs grow past a handful and spokes start
 going stale between scaffolds.
 
-- [ ] Needs the append-only claim-embedding cache path from E7 (~30 lines, no LLM) — which would also let `claim-overlap` warm incrementally instead of rewriting
+- [x] Needs the append-only claim-embedding cache path from E7 (~30 lines, no LLM) — **delivered 2026-08-20** as `index.claim_embeddings.warm_claim_embeddings`, built for the cross-paper scan (E8 follow-up). Persists the union rather than overwriting, so a narrow caller can no longer evict; `claim-overlap` could now warm incrementally instead of rewriting, though it has not been migrated. Item (6) is unblocked, still unscheduled.
 
 ---
 
@@ -378,13 +420,57 @@ going stale between scaffolds.
  └─ (4) alias suggestion        ← free byproduct
  └─ (5) claim evidence in check-coverage   ← same machinery, second surface
  └─ (6) concepts --rescan       ← parked; what (E7) ruled the ingest hook out in favour of
-(2) hybrid discovery tier       ← done; produces the edges (3) needs
- └─ (3) edge-driven candidates  ← blocked until edge density supports it
+                                  its one prerequisite now exists (E8)
+(2) hybrid discovery tier       ← done; drained and saturated (423 stems / 419 papers)
+(3) edge-driven candidates      ← NOT downstream of (2) (E8). Blocked on a verdict
+                                  vocabulary for methodological disagreement,
+                                  in a lower cosine band than 0.85.
 ```
 
 ---
 
 ## Decisions log
+
+- **2026-08-20** — **(3)'s recorded blocker was wrong, and my first fix for it was
+  also wrong.** Measurement, in order. The ~50-edge gate is met (51 live typed
+  edges), but (2) is drained and saturated (423 stems / 419 papers) so waiting on
+  it had no upside, and claim-overlap's verdict enum cannot emit `contradicts` at
+  all — that comes from `lint --cross-paper`, unrelated to (2). Full figures in E8.
+
+  **The over-promise, recorded because it is the more useful lesson.** The first
+  plan projected 11–22 new `contradicts` edges from a ~$3 judged sweep of the
+  1,106-pair pool, extrapolating a 1–2% rate from a single existing edge. Checking
+  the per-paper distribution — free, with machinery already loaded — killed it:
+  median 4 / p90 17 / max 44 pool pairs per paper, and only 19 of 305 papers exceed
+  `alert_after_ingest`'s `max_pairs=20`, so ≥85% of the pool has already been judged
+  for that one disagreement. The real rate is ~1-in-900 and the honest projection
+  is 1–3 edges. **An n=1 extrapolation should not have reached a plan.**
+
+  What actually blocks (3) is that no producer has a verdict for *"these two papers
+  disagree about how to do X"*. The cross-paper judge is built to find errors, and
+  routes methodological disagreement to `different_topic` by design — so it would
+  score E4's own founding example (Parks 2018 vs van Iterson 2017) as a non-event,
+  and that pair sits at cosine 0.743 anyway, below the 0.85 pool.
+
+  **Shipped instead**, because it stands on its own: the scan was re-embedding all
+  12.4k claims per call (~29 s, `embed_texts` has no cache) and allocating a 611 MB
+  similarity matrix — on **every ingest**, via an unconditional
+  `alert_after_ingest` that then discarded 99.8% of the result by filtering
+  `only_stem` after the fact. Now a warm-cache read plus a blocked scan with the
+  stem filter pushed into it: **0.07 s and 13 MB on the ingest path**, 62 MB for a
+  full corpus sweep. Plus `cross_paper_judgements`, which records *every* verdict
+  including the clears, so a repeat run judges only what the last one missed and
+  "has this pool been judged?" is finally answerable from a record rather than
+  inferred from a distribution.
+
+  Two incidental fixes worth knowing. The warm path filled the 143 claims the
+  cache had been missing, so the claim-embedding cache is now 100% covered — every
+  cache-only consumer (`candidates pairs`, `semantic_members`, `check-coverage`)
+  had been silently scanning 98.9% of the corpus, which is why the pool measured
+  1,104 before and 1,106 after. And the suite had no isolation for the claim cache
+  or `edges.db`: it was one slug-bearing fixture away from writing fake 2-dim
+  vectors over the real 19 MB cache and planting `candidate` edges in the real
+  graph. Both now have autouse fixtures beside `_isolate_state_db`.
 
 - **2026-08-20** — **Five defects fixed, found by using the tier.** Authoring
   `wiki/concepts/parameter-efficient-fine-tuning.md` — the first hub the corpus
