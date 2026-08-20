@@ -651,6 +651,113 @@ wiki page didn't quote.
 
 ---
 
+## Bottom-up discovery — when the wiki proposes the page
+
+Everything above is top-down: you ask, the wiki answers. This is the inverse —
+the corpus surfacing a cluster nobody went looking for. Four tiers, none of which
+writes prose, all of which are proposals a human accepts or declines.
+
+| Tier | Command | Cost | What it ranks |
+|---|---|---|---|
+| Concept hubs | `candidates concepts [--bridges]` | local, sub-second | recurring terms in ≥3 papers' contribution claims with no hub yet |
+| Claim pairs | `candidates pairs [--cross-category]` | local, sub-second | cross-paper claim pairs *below* the auto-link threshold |
+| Paper clusters | `candidates synthesis` | local | dense clusters no synthesis page covers |
+| Typed relations | `claim-graph [--tensions]` | local (edges already judged) | how papers relate, not merely that they overlap |
+
+`status` auto-surfaces the first two once they cross a threshold (bridge terms;
+15 unreviewed cross-category pairs, 14-day decay). The third is noisier and is
+run deliberately. Accept a pair by running the judged path on it,
+`claim-overlap <stem>`; decline one permanently with
+`candidates pairs --decline A B --reason "…"`.
+
+### Why the thresholds are what they are
+
+These numbers are the reason the tiers are shaped this way, and every one of them
+cost a measurement. Two provenance notes before trusting them:
+
+- **The 2026-08-19 figures come from a different corpus** — 117 papers / 3,027
+  claims, on another machine. The specific papers they cite
+  (`van-iterson-2017`, `sarthi-2024`, `rose-1998`, `parks-2018`) and the
+  `mixture-model` hub they were measured on **are not in this wiki**, so those
+  cases are not reproducible here. The *mechanisms* transfer; the absolute
+  numbers describe that corpus, not this one.
+- **The 2026-08-20 figures are this corpus** — 419 papers, 12,504 claims, 10,527
+  of them in contribution sections.
+
+**Literal member search loses exactly the bridges it exists to find.**
+`find_members("mixture model")` returned 4 spokes spanning 2 categories; the
+finished hub had 7 spanning 4. All three misses were vocabulary, not absence —
+"Gaussian Mixture Models (GMMs)", "three-component *normal* mixture",
+"normal-mixture mean estimation". This is systematic rather than unlucky: a term
+is a *bridge* precisely when fields name the same thing differently, so literal
+matching fails hardest on the highest-value candidates, and fails silently. Hence
+the semantic recall tier in `concepts`, and its alias suggestions.
+
+**But cosine cannot decide membership, only propose it.** Ranking every
+contribution claim against the embedded term put all 7 true members above the
+first false positive — by a margin of **0.003**. No threshold survives that
+across terms. Candidate volume at a 0.70 floor says the same thing from the other
+side: 5 papers for `off-target activity`, 17 for `mixture model`, 31 for
+`ATAC-seq`. Auto-adding at any usable floor turns a 7-spoke entry note into a
+category listing. **The semantic pass proposes; the human decides.** That rule is
+why membership still flows through the lexical path, via `--aliases`.
+
+**Lowering the cosine threshold is not how you find more.** Measured across
+thresholds, the share of *all possible* paper pairs that qualify:
+
+| threshold | paper pairs | % of all possible |
+|---|---|---|
+| 0.83 (auto-link) | 99 | 1.5% |
+| 0.78 | 989 | 15% |
+| 0.75 | 2,487 | 37% |
+| 0.72 | 4,372 | 64% |
+| 0.70 | 5,415 | **80%** |
+
+At any floor low enough to be interesting, most of the corpus is "related to"
+most of the corpus. The decisive test: the single most valuable relation on that
+hub — two papers disagreeing about whether a mixture can serve as an empirical
+null — peaks at cosine **0.743**, so reaching it by threshold means accepting
+~2,400 paper pairs to find it.
+
+**Rare-term overlap is the signal cosine is missing.** Ranking the same band by
+IDF-weighted shared-term mass instead put that relation at **#210 of 54,792 —
+top 0.4%**, with genuinely related pairs above it. A 384-dim embedding compresses
+away exactly the rare vocabulary that marks two claims as being about the same
+specific thing: two claims sit at 0.73 because both are methods prose, while two
+claims sharing "empirical null" and "null distribution" are about one topic.
+**Cosine measures register, rare-term overlap measures subject** — the same
+hybrid `search` already trusts via RRF, applied to claim pairs instead of
+queries. This is what `candidates pairs` ranks by, inside a 0.72–0.83 band whose
+ceiling is the auto-link threshold, so the tier never re-surfaces a judged pair.
+
+**Semantic proposals at ingest time would return nothing.** Not on cost — it is
+zero tokens and the encoder is already loaded during grading — but because the
+pass reads the claim-embedding cache and the cache's only writer is
+`claim-overlap`, which is off by default at ingest. For a newly promoted paper,
+coverage was **0 of 25 claims**: the pass would silently return nothing for
+exactly the paper it was asked about. Hence proposals happen at scaffold time and
+in `check-coverage`, where a reviewer is present, rather than in an automatic
+hook whose output goes to a batch worker's log file.
+
+**Contradiction density is not the gate it looks like.** The cross-paper judge's
+pool at its 0.85 floor is 1,106 claim pairs across 643 paper pairs, and per paper
+that is median 4 / p90 17 / max 44 — so only 19 of 305 papers exceed
+`alert_after_ingest`'s `max_pairs=20`, and **≥85% of that pool has already been
+judged** across the corpus's ingests, for exactly one disagreement (~1-in-900).
+More judging at 0.85 buys almost nothing.
+
+What that judge is *for* matters more than its volume: it keeps only
+`disagree_numeric` and `disagree_direction`, routing anything with a different
+cohort, dataset or run to `different_topic`. That finds **errors** — one of the
+two papers must be wrong, and the one edge it found is real (232 vs 47 phased
+diploid assemblies for the same assembly). It does not find **arguments**. Two
+papers taking incompatible methodological positions score `different_topic`,
+correctly by its own definition. A tier that proposes pages because there is an
+*argument* therefore needs its own verdict vocabulary, evaluated in a lower
+cosine band — not more calls to this one.
+
+---
+
 ## Maintaining the wiki
 
 Three commands cover the maintenance loop:
@@ -717,7 +824,11 @@ Where things live in the package:
 researchwiki/
 ├── index/                  # Indexing primitives
 │   ├── embeddings.py       #   Bi-encoder model singleton (BAAI/bge-small)
-│   ├── claim_embeddings.py #   Cached bi-encoder embeddings for claims
+│   ├── claim_embeddings.py #   Cached bi-encoder embeddings for claims. Three readers,
+│   │                       #     two writers: `get_claim_embeddings` rewrites the cache
+│   │                       #     to its own row set (so a narrow caller evicts the rest),
+│   │                       #     `warm_claim_embeddings` persists the union instead, and
+│   │                       #     `load_cached_*` never loads the model at all.
 │   ├── pdf_chunks.py       #   Per-PDF Tantivy chunk index + chunk embeddings
 │   ├── pages_bm25.py       #   Wiki-page BM25 index (Tantivy)
 │   ├── pages_semantic.py   #   Wiki-page dense embedding store
@@ -789,13 +900,19 @@ researchwiki/
 │       └── evolve_ledger.py#     Judged-pair idempotency cache for memory_evolve
 ├── providers/              # External-API wrappers (S2, Crossref, PubMed, bioRxiv, ORCID)
 ├── db/                     # State DB (sqlite) — derived from wiki/, rebuildable
-├── tasks/                  # CLI subcommands — one module per command, auto-discovered
+├── tasks/                  # CLI subcommands, auto-discovered from module names.
+│                           #   Not every module here is a command: `claim_discover.py`
+│                           #   and `pair_dismissals.py` are libraries behind
+│                           #   `candidates pairs`. A command is a module exposing
+│                           #   `main()`; the leading `_` convention is the hint and
+│                           #   `__main__._is_entry_point` is the enforced invariant.
 │   ├── ingest.py           #   Digest-only path (manual page authoring)
 │   ├── agent.py            #   Full agent path (auto-authoring)
 │   ├── grade.py            #   Per-paper fidelity + salience report
 │   ├── _grade_synthesis.py #   Synthesis/idea fidelity (misattribution check)
 │   ├── lint/               #   One module per check family (link, yaml, staleness,
-│   │                       #     claim_anchors, concept_contract, db_checks, …);
+│   │                       #     claim_anchors, concept_contract, db_checks,
+│   │                       #     cross_paper — the one LLM-costing check — …);
 │   │                       #     `__init__` is the dispatcher and decides nothing,
 │   │                       #     `report.py` owns the --json contract + prose report
 │   ├── visualize.py        #   Thin CLI over visualize.py → output/graph.html
@@ -1311,11 +1428,11 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `import <preflight\|inspect\|apply\|verify>` | Bulk-import a reference-manager library from its BibTeX/RIS/CSL-JSON export, which supplies each paper's DOI/title/authors/year instead of rediscovering them. Only `apply` spends tokens or writes pages; `<pdf-root>` is optional, and a metadata-only run still returns a fetch list of DOIs. Stage it with `--limit N`. See `prompts/import-reference-manager.md`. |
 | `export [--format bibtex\|ris\|csl-json]` | The inverse: emit the corpus as a bibliography for a reference manager or a manuscript. Zero tokens, no network, byte-identical across runs. Citekey is the page stem. Only page types describing someone else's publication are emitted — a synthesis page would assert a publication that does not exist. `--json` gives the report, which doubles as a page-defect to-do list. See `prompts/export-bibliography.md`. |
 | `synthesize --title [...] [--papers]` | Scaffold `wiki/synthesis/{slug}.md`. Idea/reference pages are manual. |
-| `candidates <concepts\|synthesis>` | Surface opportunity signals: un-scaffolded concept hubs (concepts) or uncovered paper clusters warranting a synthesis page (synthesis). |
+| `candidates <concepts\|synthesis\|pairs>` | Surface opportunity signals: un-scaffolded concept hubs (concepts), uncovered paper clusters warranting a synthesis page (synthesis), or cross-paper claim pairs sitting below the auto-link threshold (pairs). All local, sub-second, zero tokens; nothing is written. `--decline A B --reason` suppresses a pair permanently. See *Bottom-up discovery* above. |
 | `reindex [--no-semantic]` | Rebuild Tantivy + semantic index from `wiki/`. |
 | `search "<query>" [--mode ...]` or `--like <stem>` | Hybrid retrieval (RRF over BM25 + semantic) by default. |
 | `status` | Dashboard: counts, density, orphans, backlog, index health, pending proposals, 7-day cost. |
-| `lint [--fix]` | Orphans, broken/missing wikilinks (auto-fixable), stale syntheses, missing keywords/DOIs, year drift, stale proposals. |
+| `lint [--fix] [--cross-paper]` | Orphans, broken/missing wikilinks (auto-fixable), stale syntheses, missing keywords/DOIs, year drift, stale proposals. All local except `--cross-paper`, which opts into the LLM contradiction judge over high-cosine claim pairs; `--cross-paper-max-pairs 0` sizes that pool for zero calls, and every verdict is recorded so a repeat run only judges what the last one missed. |
 | `audit` | Citation-graph audit vs Semantic Scholar: wikilinks without a real citation, and vice versa. |
 | `retraction-check`, `preprint-check`, `orcid-lookup` | Structured PubMed / bioRxiv / ORCID queries. |
 | `claims "<query>" [--k N]` | Grounded-citation search over the pre-graded claims table (atomic bullets + `[[stem#slug]]` citation anchors + support scores). |
@@ -1334,6 +1451,9 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `benchmark-fixture <stem> [--repeat N] [--llm]` | Score page authoring against a hand-curated `benchmark-fixtures/` fixture. `--repeat` keeps drafts in memory; for a single authored page use `agent ingest … --force-sandbox`, never a bare `agent ingest` (it would promote a fixture paper into your corpus). |
 | `claim-overlap <stem> [--sim N] [--top N] [--dry-run] [--json]` | Proactively cross-link a newly-ingested paper: finds existing papers with near-paraphrase claims, LLM-judges each as a real relationship vs coincidence, and auto-adds reciprocal Related-Papers `[[wikilinks]]` for confirmed matches. Run after `db rebuild`. |
 | `db papers [--year/--category/--page-type/--no-doi/--venue/--author/--status] [--count] [--json]` | Structured lookups over the frontmatter mirror — counts/filters ("cgt papers from 2024", "papers missing a DOI") without re-reading markdown. `db query "SELECT…"` for ad-hoc read-only SQL. |
+| `remove <stem> [--apply] [--keep-pdf]` | Retract a paper: page, PDF, caches, back-link bullets, `index.md` entry, concept spokes and DB rows. Dry run by default, runs inside the mutation journal. Reports but never edits authored `[[stem#slug]]` citations on synthesis/idea/concept pages — that list is the to-do queue. See `prompts/remove-paper.md`. |
+| `visualize [--open] [--json]` | Self-contained interactive graph of the corpus to `output/graph.html` — `[[wikilinks]]` plus typed claim edges, `contradicts` drawn loud. Zero tokens, no network. Shows structure, not claims. |
+| `figures <stem> [--figure N]` | List a paper's figure captions, or render one page to `.figures-cache/` to read when the evidence is in the figure rather than the prose. Captions are free; render one page at a time — a PNG costs context in proportion to its pixel area. |
 | `insights [--days N] [--json]` | Analytics over the ingest telemetry log: draft quality + cost by model, section difficulty, token spend by role, draft decisions. Read-only, no LLM. |
 
 Every operation appends a parseable entry to `wiki/log.md` (inside `wiki/`
@@ -1365,6 +1485,12 @@ so an Obsidian vault opened there can browse it).
 | Want to verify a synthesis page's claims trace to cited papers | `researchwiki grade synthesis <page>` |
 | Want to check that every claim has a citation | `researchwiki check-grounding <page>` |
 | Want to benchmark page authoring against a curated fixture | `researchwiki benchmark-fixture <stem>` |
+| Want the wiki to propose a page instead of answering one | `researchwiki candidates concepts --bridges`, then `candidates pairs --cross-category` (see *Bottom-up discovery*) |
+| `status` printed a bridge-term or claim-pair count | That line is the trigger — `researchwiki candidates <concepts --bridges\|pairs --cross-category>` |
+| Want to act on a proposed claim pair | `researchwiki claim-overlap <stem>` (the judged path); `candidates pairs --decline A B --reason "…"` to reject it for good |
+| Want to see which papers disagree | `researchwiki claim-graph --tensions`; `researchwiki visualize --open` to see whether tensions cluster on one paper |
+| Want to retract a paper | `researchwiki remove <stem>` (dry run), then `--apply` (see `prompts/remove-paper.md`) |
+| The evidence is in a figure, not the prose | `researchwiki figures <stem>` for captions; `--figure N` to render just that page |
 
 ---
 

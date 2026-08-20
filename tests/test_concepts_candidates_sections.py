@@ -19,7 +19,7 @@ phrasing-sensitive (`The X matches y` does not yield `X` where `A X is z` does),
 and varying the wording per row silently drops rows and makes these tests pass
 for the wrong reason.
 
-See PLAN-bottom-up-synthesis.md and researchwiki/concepts/term_claims.py.
+See WORKFLOW.md ("Bottom-up discovery") and researchwiki/concepts/term_claims.py.
 """
 
 from __future__ import annotations

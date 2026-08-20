@@ -7,7 +7,8 @@ them admits 31 distinct papers for a term like "ATAC-seq". So the pass
 contributes a reviewed candidate list plus alias suggestions mined from the
 matching claim text, and `find_members` stays untouched.
 
-See researchwiki/concepts/semantic_members.py and PLAN-bottom-up-synthesis.md
+See researchwiki/concepts/semantic_members.py and WORKFLOW.md
+("Bottom-up discovery" — the 0.003 membership margin, and why the pass proposes)
 (evidence item E1/E2) for the failure this exists to fix.
 """
 

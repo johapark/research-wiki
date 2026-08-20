@@ -22,6 +22,32 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- **Two library modules were advertised as CLI commands and crashed when run.**
+  `_discover_tasks` registers every non-underscore module under
+  `researchwiki.tasks` — by name, without importing — so `claim_discover.py`
+  (whose `discover_pairs()` backs `candidates pairs`) and `pair_dismissals.py`
+  (the store behind `--decline`) both appeared in `researchwiki --help` and both
+  died on dispatch with an `AttributeError: no attribute 'main'`, surfaced as exit
+  3, "internal bug". Accurate, and useless to a caller: nothing about their command
+  line was fixable.
+
+  The leading-underscore convention was the intended signal and stays valid; what
+  was missing is the invariant behind it, so `__main__._is_entry_point` now checks
+  it at the two points the module object already exists. No extra imports on the
+  hot path — `main()` imports exactly one module and checks that one. Naming a
+  library module is now a user error (1) listing the real commands, not a crash,
+  and neither appears in `--help`. A test pins the invariant rather than the two
+  names, so a helper dropped into `tasks/` tomorrow cannot become a broken command
+  by accident.
+
+- **`WORKFLOW.md` documented neither the discovery tier nor five real commands.**
+  It had zero occurrences of "discovery" or "bottom-up" — the entire
+  proposal-generating half of the framework — and its all-commands table was
+  missing `remove`, `visualize` and `figures` while listing `candidates` as
+  `<concepts|synthesis>`, with no `pairs`. The `lint` row did not mention
+  `--cross-paper`, its one LLM-costing surface. All 39 real commands are now
+  present and the table is checked against the CLI rather than eyeballed.
+
 - **Cross-paper contradiction scan: a 611 MB allocation and a corpus re-embed, on
   every ingest.** `find_cross_paper_contradictions` called `embed_texts` over every
   graded claim per invocation — that function has no cache of its own, so it was
@@ -71,7 +97,9 @@ the reasoning behind any line below.
   beside `_isolate_state_db`, which is the same trap for the third and fourth time.
 
 - **Concept-hub discovery: five defects found by using it.** The discovery tier
-  (`PLAN-bottom-up-synthesis.md`) was exercised end to end for the first time,
+  (tracked at the time in `PLAN-bottom-up-synthesis.md`; the calibration figures
+  now live in WORKFLOW.md under *Bottom-up discovery*) was exercised end to end
+  for the first time,
   authoring `wiki/concepts/parameter-efficient-fine-tuning.md` — the first hub
   proposed by the corpus rather than by a question put to it. Recall worked: the
   semantic pass recovered scArches' "architectural surgery" as
@@ -131,6 +159,25 @@ the reasoning behind any line below.
   removing it changes what auto-attaches at ingest — a separate question.
 
 ### Added
+
+- **`WORKFLOW.md` gains *Bottom-up discovery — when the wiki proposes the page*.**
+  Documents the four proposal tiers and, more importantly, carries the calibration
+  evidence behind their thresholds: why literal member search fails hardest on
+  bridge terms, why the true/false membership margin of 0.003 forces
+  propose-never-decide, why lowering a cosine floor makes 80% of all paper pairs
+  "related" at 0.70, why IDF-weighted rare-term overlap beats cosine in the band
+  (cosine measures register, rare-term overlap measures subject), why semantic
+  proposals at ingest time would return nothing, and why ≥85% of the 0.85
+  contradiction pool is already judged at ~1-in-900.
+
+  These numbers previously existed only in a tracking doc that is being retired.
+  Two provenance facts are stated with them, because they are not all measured on
+  the same corpus: the 2026-08-19 figures come from a 117-paper / 3,027-claim
+  corpus on another machine, and the papers they cite — including the
+  `mixture-model` hub the whole workstream opened around — **are not in this
+  wiki**, so those cases are not reproducible here even though the mechanisms
+  transfer. The 2026-08-20 figures are this corpus. Test docstrings and the
+  module map now point here instead of at the retiring doc.
 
 - **`cross_paper_judgements` — the contradiction judge now records what it cleared.**
   Its only trace was a `contradicts` edge, written for the two disagreement verdicts

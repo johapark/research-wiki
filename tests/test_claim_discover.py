@@ -6,7 +6,9 @@ because lowering the auto-link threshold does not work — at cosine 0.70, 80% o
 all possible paper pairs qualify, and the relation that motivated the module
 (Parks 2018 vs van Iterson 2017 on empirical nulls) peaks at 0.743.
 
-See researchwiki/tasks/claim_discover.py and PLAN-bottom-up-synthesis.md
+See researchwiki/tasks/claim_discover.py and WORKFLOW.md
+("Bottom-up discovery" — why the band is 0.72-0.83 and why cosine alone is not
+the ranker)
 (evidence items E5/E6).
 """
 
