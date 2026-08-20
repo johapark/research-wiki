@@ -71,8 +71,16 @@ def find_members(
       - a claim whose text contains `term` (or any alias) verbatim;
       - a claim whose text contains one of the paper's own matching
         keywords (LLM-normalized alias);
-      - the paper's first key_contributions claim slug (last-resort anchor
-        for keyword-hit papers whose claim text uses yet another synonym).
+      - `None` when a keyword-only member has no claim matching any of them.
+        `format_claim_ref` renders that as a bare `[[stem]]`. There is
+        deliberately no last-resort anchor: falling back to the paper's first
+        key_contributions claim produced spokes citing a claim about something
+        else (seqLens cited as "Introduced seqLens, a DeBERTa-v2 based gLM
+        family…" on a parameter-efficient-fine-tuning hub), and an unrelated
+        anchor is invisible where a bare one asks the author to fix it.
+        `attach_after_ingest` still has that fallback, because there the anchor
+        doubles as the membership test — separating them is a change to what
+        auto-attaches at ingest, not to how a spoke is cited.
 
     Papers that mention the term only in body prose (intro / limitations /
     discussion) do NOT become members — a mention isn't an instantiation.
@@ -110,11 +118,14 @@ def find_members(
         if best_slug is None and p.stem not in keyword_hits:
             continue
 
-        # Step 3: keyword hit but every alias also misses in claim text —
-        # anchor to the paper's top key_contribution as a coarse citation.
-        if best_slug is None:
-            best_slug = _top_kc_claim_slug(p.stem)
-
+        # A keyword-only member keeps `best_slug is None` on purpose, which
+        # `format_claim_ref` renders as a bare `[[stem]]`. Anchoring to the
+        # paper's top key_contribution instead used to produce spokes citing a
+        # claim about something else entirely — seqLens cited as "Introduced
+        # seqLens, a DeBERTa-v2 based gLM family…" on a hub about
+        # parameter-efficient fine-tuning. Bare is the form CLAUDE.md prescribes
+        # for citing a paper as a whole, it announces itself to the author, and
+        # `concepts --upgrade-spokes` fills it in once a matching claim exists.
         members.append((p.key, p.category, best_slug))
     members.sort(key=lambda kc: (kc[1], kc[0]))
     return members
@@ -183,7 +194,7 @@ def _template(
             spoke_lines.append(f"### {cat}")
         for k, best_slug in by_cat[cat]:
             stem = k.split("/", 1)[1] if "/" in k else k
-            hint = _term_claim_hint(stem, term)
+            hint = _term_claim_hint(stem, term, aliases)
             hint_c = f' — <!-- how this paper uses {term}. hint: "{hint}" -->' if hint \
                 else f" — <!-- how this paper uses {term} -->"
             cite = format_claim_ref({"paper_stem": k, "claim_slug": best_slug})

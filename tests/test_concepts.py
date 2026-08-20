@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from researchwiki.concepts import scaffold as concepts_mod
+from researchwiki.concepts import term_claims as term_claims_mod
 from researchwiki.concepts.term_claims import _page_mentions
 from researchwiki.concepts.scaffold import _template, find_members
 
@@ -78,6 +79,9 @@ def _stub_matching_claims(monkeypatch, per_stem_hits):
             return specific
         return per_stem_hits.get(stem, [])
     monkeypatch.setattr(concepts_mod, "_matching_claims", fake)
+    # The spoke hint resolves the same function inside term_claims (that is the
+    # point of routing both through one query), so stub both call sites.
+    monkeypatch.setattr(term_claims_mod, "_matching_claims", fake)
 
 
 def _stub_keyword_hits(monkeypatch, per_stem_kws: dict[str, list[str]]):
@@ -219,6 +223,59 @@ def test_find_members_returns_best_slug_per_paper(tmp_wiki, monkeypatch):
     })
     members = find_members("X")
     assert members[0][2] == "kc-first0000"  # first row = top pick
+
+
+def test_find_members_leaves_the_anchor_bare_when_no_claim_matches(
+    tmp_wiki, monkeypatch,
+):
+    """A keyword-only member gets no anchor rather than an unrelated one.
+
+    The seqLens case: the paper joined the parameter-efficient-fine-tuning hub
+    on keywords, no claim matched the term, and the spoke was anchored to the
+    paper's *first* key_contributions claim — "Introduced seqLens, a DeBERTa-v2
+    based gLM family…", which says nothing about the concept. Nucleotide
+    Transformer got its model list the same way. A bare `[[stem]]` is the
+    citation form CLAUDE.md prescribes for referring to a paper as a whole, and
+    `concepts --upgrade-spokes` backfills it once a matching claim exists.
+    """
+    _page(tmp_wiki, "compbio/seqlens-2025-x", "body")
+    # Keyword signal fires; neither the term nor the paper's own keyword hits
+    # any claim text.
+    _stub_keyword_hits(monkeypatch, {"seqlens-2025-x": ["genomic language model"]})
+    _stub_matching_claims(monkeypatch, {})
+    # Make the discarded fallback loudly available: if find_members still calls
+    # it, the assertion below fails with this slug rather than passing because a
+    # tmp DB happened to be empty.
+    monkeypatch.setattr(concepts_mod, "_top_kc_claim_slug",
+                        lambda stem: "kc-unrelated0")
+
+    members = find_members("parameter-efficient fine-tuning")
+    assert len(members) == 1                       # still a member
+    assert members[0][0] == "compbio/seqlens-2025-x"
+    assert members[0][2] is None                   # but NOT a fabricated anchor
+
+
+# ---------- _term_claim_hint (shares one query with the anchor) ----------
+
+def test_term_claim_hint_is_case_insensitive_like_the_anchor(tmp_wiki, monkeypatch):
+    """Hint and anchor must come from one query or they disagree.
+
+    The hint used its own scan — case-*sensitive*, no section filter, no
+    word-boundary check — so a spoke could carry a valid `#claim_slug` from
+    `find_members` and an empty hint, or a hint drawn from a `limitations`
+    claim the anchor would never cite. Sentence-initial capitals alone were
+    enough to break it.
+    """
+    from researchwiki.concepts.term_claims import _term_claim_hint
+
+    _stub_matching_claims(monkeypatch, {
+        "a-2024-x": [{"section": "key_contributions", "position": 0,
+                      "claim_slug": "kc-aaaa1111",
+                      "text": "Prime editing installs substitutions up to 50 bp.",
+                      "semantic_score": 0.9}],
+    })
+    # Term is lowercase; the claim starts the sentence with a capital.
+    assert "Prime editing installs" in _term_claim_hint("a-2024-x", "prime editing")
 
 
 # ---------- _template (pure; passes 3-tuple members) ----------

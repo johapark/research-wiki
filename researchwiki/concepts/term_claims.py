@@ -127,27 +127,23 @@ def _matching_claims(stem: str, term: str) -> list[dict]:
         for r in rows if pat.search(r["text"])
     ]
 
-def _term_claim_hint(stem: str, term: str) -> str:
+def _term_claim_hint(stem: str, term: str, aliases: list[str] | None = None) -> str:
     """A `stem` claim that actually mentions `term`, truncated — an authoring
     hint inlined as an HTML comment (no `claim_id`, per CLAUDE.md).
 
-    Prefers a claim whose text contains the term (that's the one describing how
-    the paper *uses* the concept); among those, the highest-scoring. Falls back
-    to '' when no claim mentions the term — better an empty hint the author
-    fills than a top-scoring claim about something unrelated. '' on any miss.
+    Routes through `_matching_claims`, the same query the spoke's `#claim_slug`
+    anchor comes from, so hint and anchor cannot disagree. It previously ran its
+    own scan — case-*sensitive*, no section filter, no word-boundary check — and
+    a sentence-initial capital was enough to make it miss a claim the anchor had
+    already cited. Returns '' when nothing matches: better an empty hint the
+    author fills than a claim about something unrelated.
     """
-    try:
-        from ..search import claims_by_stem
-        rows = claims_by_stem(stem)
-    except Exception:
-        return ""
-    hits = [r for r in rows if term in (r.get("text") or "")]
-    if not hits:
-        return ""
-    graded = [r for r in hits if r.get("semantic_score") is not None]
-    pick = max(graded, key=lambda r: r["semantic_score"]) if graded else hits[0]
-    text = (pick.get("text") or "").strip().replace("-->", "--")
-    return text[:160].rstrip() + ("…" if len(text) > 160 else "")
+    for t in [term, *(aliases or [])]:
+        hits = _matching_claims(stem, t)
+        if hits:
+            text = (hits[0].get("text") or "").strip().replace("-->", "--")
+            return text[:160].rstrip() + ("…" if len(text) > 160 else "")
+    return ""
 
 def _best_claim_slug(stem: str, term: str) -> str | None:
     """Highest-priority contribution-section claim slug for `term` in `stem`.
