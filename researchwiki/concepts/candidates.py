@@ -425,10 +425,21 @@ def find_candidates_from_claims(
 
     out: list[dict] = []
     for term, by_stem in per_term.items():
-        pages = len(by_stem)
+        # Membership counts only contribution sections, the same set
+        # `find_members` matches over: a term in a paper's limitations is a
+        # mention, not an instantiation. Counting them made the bridge tier
+        # advertise terms the scaffolder then refused (`direction of effect`:
+        # 2 contribution hits + 2 limitations, published as "4 paper pages").
+        # `weighted` and `sections` below still see every section.
+        # Deferred: term_claims imports from this module, so a top-level
+        # import would close the cycle.
+        from .term_claims import _CONTRIBUTION_SECTIONS
+        member_stems = [st for st, secs in by_stem.items()
+                        if any(sec in _CONTRIBUTION_SECTIONS for sec in secs)]
+        pages = len(member_stems)
         if pages < 3:
             continue
-        categories = len({category_by_stem.get(s, "") for s in by_stem if category_by_stem.get(s)})
+        categories = len({category_by_stem.get(s, "") for s in member_stems if category_by_stem.get(s)})
         # Weighted score: sum over (paper, section) of SECTION_WEIGHTS[section];
         # multiple claims from the same paper in the same section count once.
         weighted = 0.0

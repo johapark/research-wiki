@@ -154,10 +154,15 @@ def test_fixture_off_target_effects_surfaces():
     # declarative bullets, not narrative sentences, so this is the shape
     # the detector is tuned for. Head-noun-anchored regexes are bounded,
     # not general — same-position ambiguity is unresolved.
+    # Three papers must carry the term in a *contribution* section to clear the
+    # floor — membership counts the sections `find_members` matches over, so the
+    # limitations row is evidence the term recurs but is not a member. p4 is what
+    # makes this a 3-page candidate.
     rows = [
         _mk("p1", "results", "off-target effects were minimal in liver", "cgt", "a1"),
         _mk("p2", "results", "off-target effects at three sites", "cgt", "b2"),
         _mk("p3", "limitations", "off-target effects remain uncharacterised", "compbio", "c3"),
+        _mk("p4", "key_contributions", "off-target effects quantified genome-wide", "compbio", "d4"),
     ]
     got = find_candidates_from_claims(rows, existing_slugs=set())
     slugs = {r["slug"] for r in got}

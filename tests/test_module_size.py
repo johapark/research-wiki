@@ -107,8 +107,13 @@ _DEBT: dict[str, int] = {
     # sanity gate. The gate is the separable half.
     "researchwiki/agents/phases/reconcile.py": 661,
     # Concept candidates: term mining, scoring, triage labelling. Mining and
-    # labelling do not need to share a module.
-    "researchwiki/concepts/candidates.py": 653,
+    # labelling do not need to share a module. Raised 653 -> 656 to count hub
+    # membership over contribution sections only, which is what the scaffolder
+    # matches over — the detector was advertising `limitations` mentions as
+    # members and publishing bridge candidates that could not be scaffolded.
+    # Three lines: a deferred import (term_claims imports from here, so a
+    # top-level one closes the cycle) and the two-line member filter.
+    "researchwiki/concepts/candidates.py": 656,
     # Retrieval benchmark: fixture loading, scoring and reporting in one file.
     "researchwiki/benchmark/retrieval.py": 644,
     # Backfill targets (hook / keywords / doi) share only a work-list idiom.
