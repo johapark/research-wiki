@@ -355,6 +355,31 @@ def test_run_refuses_without_thesis(tmp_wiki, monkeypatch):
         concepts.run("some-term", thesis="   ")
 
 
+def test_dry_run_inspects_without_a_thesis(tmp_wiki, monkeypatch):
+    """A dry run must not demand the sentence it exists to help you write.
+
+    The thesis test asks *why is this a concept and not glossary* — a judgement
+    you can only make once you have seen the member list, so requiring it to
+    look was circular. Building the parameter-efficient-fine-tuning hub needed
+    three inspections, each passing `--thesis "provisional"` to get past a gate
+    that then discarded the value. The write path keeps the gate.
+    """
+    _page(tmp_wiki, "ai/a-2024-x", "body")
+    _page(tmp_wiki, "compbio/b-2024-y", "body")
+    _page(tmp_wiki, "single-cell/c-2024-z", "body")
+    _stub_matching_claims(monkeypatch, {
+        "a-2024-x": [{"claim_slug": "kc-1", "text": "uses X"}],
+        "b-2024-y": [{"claim_slug": "kc-2", "text": "uses X"}],
+        "c-2024-z": [{"claim_slug": "kc-3", "text": "uses X"}],
+    })
+    _stub_keyword_hits(monkeypatch, {})
+
+    res = concepts_mod.run("X", thesis="", dry_run=True)
+    assert res["dry_run"] is True
+    assert len(res["members"]) == 3
+    assert res["path"] is None            # nothing written
+
+
 def _concept_wiki_with_aliases(tmp_path, monkeypatch):
     """Same shape as `_concept_wiki` but the hub declares `topic_seed_aliases`.
 

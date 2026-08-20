@@ -171,7 +171,8 @@ def main(argv: list[str]) -> int:
               "`researchwiki candidates concepts`.", file=sys.stderr)
         return 1
 
-    thesis = _resolve_thesis(args.term, args.thesis)
+    thesis = _resolve_thesis(args.term, args.thesis) if not args.dry_run else (
+        args.thesis or "")
     if thesis is None:
         # Empty answer or non-interactive without `--thesis`. `run()` would
         # raise the same error, but we surface it here with the actionable

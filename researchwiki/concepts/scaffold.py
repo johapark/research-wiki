@@ -235,7 +235,11 @@ def run(
     slug, empty thesis, too few members, target exists without force) so
     `main` can map them to exit 1 with a message.
     """
-    if not thesis or not thesis.strip():
+    if not dry_run and (not thesis or not thesis.strip()):
+        # Dry runs are exempt: the thesis test asks *why is this a concept and
+        # not glossary*, which you can only answer once you have seen the member
+        # list, so demanding it in order to look was circular. Nothing is
+        # written and `_template` never runs, so there is no field to fill.
         raise ValueError(
             f"a `concept_thesis` is required to scaffold a hub. Provide one "
             f"sentence answering *why {term!r} is a concept* (an idea the corpus "
