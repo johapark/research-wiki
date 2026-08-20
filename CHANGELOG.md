@@ -16,6 +16,84 @@ the reasoning behind any line below.
 
 ### Added
 
+- **`candidates pairs` — a zero-token discovery tier below the auto-link
+  threshold.** `claim-overlap` judges claim pairs above cosine 0.83 and writes
+  reciprocal bullets; that precision is right for *writing* and wrong for
+  *finding*, where a missed connection is invisible and permanent.
+
+  Lowering the threshold does not fix it, and the measurement is the point: on a
+  117-paper corpus, cosine ≥ 0.70 admits **5,415 of 6,786 possible paper pairs —
+  80%**. Meanwhile the relation that motivated this work (Parks 2018 vs van
+  Iterson 2017 disagreeing over whether a mixture model can serve as an empirical
+  null) peaks at **0.743**, so reaching it by threshold costs ~2,400 pairs.
+
+  So this ranks a cosine *band* (0.72–0.83, ceiling = the auto-link threshold, so
+  it never re-surfaces judged pairs) by **IDF-weighted shared-term mass**. A
+  384-dimension embedding compresses away the rare vocabulary marking two claims
+  as being about the same specific thing: cosine measures register, rare-term
+  overlap measures subject. Same hybrid `search` already trusts, applied to claim
+  pairs. That puts the motivating pair at rank 74 of 400 and surfaces, at rank 4,
+  a paper discussing the NTLA-2001 interim report alongside the trial it reports
+  on — same six patients, same transient D-dimer elevations, previously unlinked.
+
+  Judges nothing, writes nothing, costs no tokens: 0.22 s over 3,027 claims.
+  `--cross-category` narrows to pairs no other structure in the wiki connects.
+  `--json` emits `{cos_lo, cos_hi, cross_category_only, pairs[]}`. It sits beside
+  `candidates concepts`/`synthesis` rather than on `claim-overlap`, whose job is
+  cross-linking one paper — corpus-wide discovery is a different question.
+
+- **`candidates pairs --decline A B --reason "…"`** (plus `--undecline`,
+  `--list-declined` — the same vocabulary `candidates concepts` already uses). The discovery queue is stateless and would re-propose a
+  rejected pair at the same rank forever. Order-independent, stored in
+  `.pair-dismissals.json`, mirroring `.concept-declines.json`. Permanent rather
+  than decay-stamped: two papers do not become related because time passed.
+
+  Each entry is fingerprinted on the **evidence it was judged against** — a hash
+  of both papers' contribution-claim slugs. Those slugs are already
+  content-addressed (`blake2s(normalize(text))`), which gives exactly the right
+  sensitivity for free: stable across `db rebuild`, changed by a rewritten,
+  added or removed claim. When the fingerprint no longer matches, the pair
+  returns to the list and the entry is marked `[STALE]` in `--list-declined`.
+  Entries predating the field — and any pair whose fingerprint cannot be
+  computed — stay valid, since suppression is the safe failure mode for a list
+  of human decisions.
+
+- **`check-coverage` reports the claim behind each hit.** The gate ranked whole
+  pages against `topic_seed`, so its score said nothing about *why* a paper was
+  retrieved: on the mixture-model hub it put `van-iterson-2017` at rank 2 among
+  hits scoring 4.47 and 4.24, and learning that it was the page's most valuable
+  omission meant querying its claims by hand.
+
+  Each hit whose contribution claims also match the seed is now annotated with
+  that claim and sorted first. Replaying the pre-alias page surfaces both
+  previously-missed papers at the top with their evidence, while two
+  higher-scoring "foundation **model**" hits fall below them for having no claim
+  match. The pass only annotates rows the page-level ranking already produced —
+  it never adds one — so it cannot introduce a false positive, and the `--json`
+  contract is unchanged apart from the optional per-hit `claim_*` fields.
+
+- **`status` surfaces the discovery queue** once ≥15 cross-category pairs are
+  unreviewed, on a 14-day decay stamp — a higher bar and slower cadence than the
+  claim-overlap backlog nudge, because a coverage gap means something is wrong
+  and an opportunity queue does not.
+
+- **Semantic recall tier on concept-hub member discovery.** `find_members`
+  matches claim text lexically, which fails hardest on exactly the terms worth
+  hub-building: a term is a *bridge* when fields name the same thing
+  differently. Scaffolding `mixture model` returned 4 members / span 2; the
+  finished hub has 7 / span 4, and all three missed members were alias-only
+  ("Gaussian Mixture Models", "three-component normal mixture", "normal-mixture
+  mean estimation").
+
+  The scaffolder now reports papers whose contribution claims are semantically
+  near the term but lexically invisible, with the alias mined from the wording
+  that matched — so the author converts a candidate by re-running with
+  `--aliases`, through the already-trusted lexical path. **Proposes, never
+  adds**: on the calibration case every true member outranked the first false
+  positive by 0.003, and a usable floor admits 31 papers for a term like
+  "ATAC-seq". Also surfaced in the `min_members` failure, where a thin hub is
+  usually a vocabulary problem rather than an absence. `--no-semantic` opts out.
+
 - **`lint --fix` recovers `ingested_at` / `author_model` from the ingest log.**
   Both are recorded facts — every run writes `ingest_iterations` rows carrying the
   model it used and when it committed — so this reconstructs rather than infers,
