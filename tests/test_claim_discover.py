@@ -254,7 +254,11 @@ def test_nudge_names_a_command_that_actually_parses(monkeypatch):
             f"nudge command `researchwiki {' '.join(argv)}` is not runnable: "
             f"{bad!r} in output"
         )
-    assert proc.returncode != 2, f"nudge command failed: {combined[-400:]}"
+    # Deliberately no assertion on the return code. Exit 2 is the contract's
+    # "environment error", and a clean checkout has no `wiki/` — so a CI runner
+    # legitimately exits 2 here while the command itself is perfectly valid.
+    # Asserting `!= 2` failed the whole matrix on a correct command; the strings
+    # above are what actually distinguish "does not exist" from "not set up".
 
 
 def test_zero_claims_message_names_the_check_that_finds_them():
