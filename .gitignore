@@ -48,11 +48,11 @@ share/
 .concept-declines.json
 
 # Companion stamp for the claim-pair discovery nudge (status uses it to
-# suppress `claim-overlap --discover` reminders for the decay window).
+# suppress `candidates pairs` reminders for the decay window).
 .claim-discovery-stamp
 
 # Per-user "these two papers aren't related" denylist for the claim-pair
-# discovery queue. Written by `claim-overlap --dismiss`; read by
+# discovery queue. Written by `candidates pairs --decline`; read by
 # `discover_pairs` so a reviewed-and-rejected pair stops re-proposing.
 # Curatorial state, same bucket as `.concept-declines.json` above.
 .pair-dismissals.json

@@ -333,7 +333,7 @@ def discovery_warning(*, touch: bool = True) -> str | None:
         write_discovery_stamp()
     return (
         f"Claim-pair discovery: {n}+ unreviewed cross-category pair(s)\n"
-        f"  → researchwiki claim-overlap --discover --cross-category"
+        f"  → researchwiki candidates pairs --cross-category"
     )
 
 

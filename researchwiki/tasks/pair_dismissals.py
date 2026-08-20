@@ -1,6 +1,6 @@
 """Permanent suppression list for discovery pairs judged not-a-relation.
 
-`claim-overlap --discover` is stateless: it re-derives its ranked queue from
+`candidates pairs` is stateless: it re-derives its ranked queue from
 claim embeddings and term statistics on every call. A pair you looked at and
 rejected — two papers whose claims share distinctive vocabulary without either
 engaging the other — therefore resurfaces at the same rank on the next run, and

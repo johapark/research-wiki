@@ -216,6 +216,47 @@ def test_zero_claims_logs_the_cause_instead_of_returning_quietly(monkeypatch, ca
     assert "zero_claim_papers" in err
 
 
+def test_nudge_names_a_command_that_actually_parses(monkeypatch):
+    """The nudge is the only thing that surfaces this feature — if it names a
+    command that doesn't exist, the feature is undiscoverable.
+
+    This shipped broken once: the discovery tier moved from
+    `claim-overlap --discover` to `candidates pairs`, docs were updated, the
+    nudge string was not, and `status` spent a release telling people to run
+    `researchwiki claim-overlap --discover --cross-category`, which argparse
+    rejects.
+    """
+    import re
+    import researchwiki.tasks.claim_discover as cd_mod
+
+    monkeypatch.setattr(cd_mod, "discover_pairs",
+                        lambda **kw: [object()] * (DISCOVERY_THRESHOLD + 1))
+    monkeypatch.setattr(cd_mod, "discovery_stamp_age_days", lambda: None)
+    msg = cd_mod.discovery_warning(touch=False)
+    assert msg
+
+    m = re.search(r"researchwiki ([^\n]+)", msg)
+    assert m, f"no runnable command in nudge: {msg!r}"
+    argv = m.group(1).strip().split()
+
+    # Actually run it. `--help` cannot be used to probe this: argparse fires the
+    # help action the moment it scans that flag and exits 0, *before* reporting
+    # unrecognized ones — so a `--help` probe passes on a command line the CLI
+    # would reject. The command is read-only and sub-second, so run it for real.
+    import subprocess
+    import sys
+    proc = subprocess.run([sys.executable, "-m", "researchwiki", *argv],
+                          capture_output=True, text=True, timeout=180)
+    combined = proc.stdout + proc.stderr
+    for bad in ("unrecognized arguments", "invalid choice", "unknown target",
+                "No such command"):
+        assert bad not in combined, (
+            f"nudge command `researchwiki {' '.join(argv)}` is not runnable: "
+            f"{bad!r} in output"
+        )
+    assert proc.returncode != 2, f"nudge command failed: {combined[-400:]}"
+
+
 def test_zero_claims_message_names_the_check_that_finds_them():
     from researchwiki.tasks.claim_discover import NO_CLAIMS
     # Both halves matter: what to run first, and where to look if it persists.
