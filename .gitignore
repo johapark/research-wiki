@@ -114,9 +114,12 @@ dist/
 .venv/
 venv/
 
-# Per-user LLM backend credentials and routing config.
-# Template: copy from config/models.*.yaml comments, fill in key + URL.
+# Per-user LLM backend credentials and routing config, including named profiles
+# such as `.env.litellm`. Template: copy from config/models.*.yaml comments,
+# fill in key + URL.
 .env
+.env.*
+!.env.template
 .acceptance/
 .evaluate-output/
 .eval-output/
