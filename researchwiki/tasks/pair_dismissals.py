@@ -104,11 +104,57 @@ def claims_fingerprint(stem_a: str, stem_b: str) -> str | None:
                            digest_size=8).hexdigest()
 
 
-def is_stale(entry: dict) -> bool:
+def _slugs_for_stems(stems: set[str]) -> dict[str, list[str]]:
+    """stem -> its contribution-claim slugs, in ONE query.
+
+    The batched half of `claims_fingerprint`. `dismissed_pairs` is called from
+    `discover_pairs`, which `status` runs every invocation — computing each
+    entry's fingerprint through its own connection made that O(dismissals)
+    SQLite connections per status run.
+    """
+    if not stems:
+        return {}
+    try:
+        from ..db.connection import get_connection
+        conn = get_connection()
+    except Exception:
+        return {}
+    try:
+        placeholders = ",".join("?" * len(stems))
+        rows = conn.execute(
+            f"SELECT paper_stem, claim_slug FROM claims "
+            f" WHERE paper_stem IN ({placeholders}) "
+            f"   AND section IN (?, ?, ?) "
+            f"   AND claim_slug IS NOT NULL AND is_cross_ref = 0",
+            (*stems, *_CONTRIBUTION_SECTIONS),
+        ).fetchall()
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+    out: dict[str, list[str]] = {}
+    for stem, slug in rows:
+        out.setdefault(stem, []).append(slug)
+    return out
+
+
+def _hash_slugs(slugs: list[str]) -> str | None:
+    """Fingerprint from an already-fetched slug list. None when empty."""
+    if not slugs:
+        return None
+    return hashlib.blake2s("\n".join(sorted(slugs)).encode("utf-8"),
+                           digest_size=8).hexdigest()
+
+
+def is_stale(entry: dict, *, slugs_by_stem: dict[str, list[str]] | None = None) -> bool:
     """True when the claims a dismissal was judged against have changed.
 
     False for entries with no recorded fingerprint (written before the field
     existed) and whenever the current fingerprint can't be computed.
+
+    `slugs_by_stem` lets a caller checking many entries pre-fetch the slug table
+    once (see `_slugs_for_stems`); omitted, it falls back to a per-pair query,
+    which is fine for the one-shot CLI listing.
     """
     recorded = entry.get("claims_fingerprint")
     if not recorded:
@@ -116,7 +162,11 @@ def is_stale(entry: dict) -> bool:
     stems = entry.get("stems")
     if not (isinstance(stems, list) and len(stems) == 2):
         return False
-    current = claims_fingerprint(stems[0], stems[1])
+    if slugs_by_stem is None:
+        current = claims_fingerprint(stems[0], stems[1])
+    else:
+        current = _hash_slugs(slugs_by_stem.get(stems[0], [])
+                              + slugs_by_stem.get(stems[1], []))
     if current is None:
         return False
     return current != recorded
@@ -129,14 +179,23 @@ def dismissed_pairs(*, honor_fingerprints: bool = True) -> set[tuple[str, str]]:
     queue for a fresh judgment. `honor_fingerprints=False` returns every recorded
     pair regardless — for listing and management, not for filtering.
     """
+    entries = [e for e in load_dismissals().values()
+               if isinstance(e.get("stems"), list) and len(e["stems"]) == 2]
+    if not entries:
+        return set()
+
+    # One query for every stem involved, rather than one per entry: this runs
+    # inside `discover_pairs`, which `status` calls on every invocation.
+    slugs_by_stem = {}
+    if honor_fingerprints and any(e.get("claims_fingerprint") for e in entries):
+        slugs_by_stem = _slugs_for_stems(
+            {s for e in entries for s in e["stems"]})
+
     out: set[tuple[str, str]] = set()
-    for entry in load_dismissals().values():
-        stems = entry.get("stems")
-        if not (isinstance(stems, list) and len(stems) == 2):
+    for entry in entries:
+        if honor_fingerprints and is_stale(entry, slugs_by_stem=slugs_by_stem):
             continue
-        if honor_fingerprints and is_stale(entry):
-            continue
-        out.add(tuple(sorted(stems)))  # type: ignore[arg-type]
+        out.add(tuple(sorted(entry["stems"])))  # type: ignore[arg-type]
     return out
 
 

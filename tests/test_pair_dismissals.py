@@ -169,13 +169,21 @@ def test_malformed_stems_are_not_stale(monkeypatch):
     assert is_stale({"claims_fingerprint": "old"}) is False
 
 
+def _fake_slugs(slug: str):
+    """Patch the batched seam `dismissed_pairs` actually reads."""
+    return lambda stems: {s: [slug] for s in stems}
+
+
 def test_stale_entries_drop_out_of_the_filter_set(wiki, monkeypatch):
     monkeypatch.setattr(pd, "claims_fingerprint", lambda a, b: "hash-at-dismiss")
     add_dismissal(A, B, "judged on the evidence of the day")
+    # Same evidence → still suppressed.
+    monkeypatch.setattr(pd, "_hash_slugs", lambda slugs: "hash-at-dismiss")
+    monkeypatch.setattr(pd, "_slugs_for_stems", _fake_slugs("kc-0000"))
     assert dismissed_pairs() == {tuple(sorted((A, B)))}
 
     # The claims changed underneath it → the pair returns to the queue.
-    monkeypatch.setattr(pd, "claims_fingerprint", lambda a, b: "hash-after-regrade")
+    monkeypatch.setattr(pd, "_hash_slugs", lambda slugs: "hash-after-regrade")
     assert dismissed_pairs() == set()
     # ...but the record itself survives, for listing and re-judgment.
     assert len(load_dismissals()) == 1
@@ -184,7 +192,8 @@ def test_stale_entries_drop_out_of_the_filter_set(wiki, monkeypatch):
 def test_honor_fingerprints_false_returns_stale_entries_too(wiki, monkeypatch):
     monkeypatch.setattr(pd, "claims_fingerprint", lambda a, b: "one")
     add_dismissal(A, B, "reason")
-    monkeypatch.setattr(pd, "claims_fingerprint", lambda a, b: "two")
+    monkeypatch.setattr(pd, "_slugs_for_stems", _fake_slugs("kc-0000"))
+    monkeypatch.setattr(pd, "_hash_slugs", lambda slugs: "two")
     assert dismissed_pairs() == set()
     assert dismissed_pairs(honor_fingerprints=False) == {tuple(sorted((A, B)))}
 
@@ -199,3 +208,30 @@ def test_fingerprint_key_is_omitted_when_uncomputable(wiki, monkeypatch):
     monkeypatch.setattr(pd, "claims_fingerprint", lambda a, b: None)
     add_dismissal(A, B, "reason")
     assert "claims_fingerprint" not in next(iter(load_dismissals().values()))
+
+
+def test_filtering_many_entries_hits_the_db_once(wiki, monkeypatch):
+    # `dismissed_pairs` runs inside `discover_pairs`, which `status` calls every
+    # invocation. Checking each entry through its own connection made that
+    # O(dismissals) SQLite connections per status run.
+    monkeypatch.setattr(pd, "claims_fingerprint", lambda a, b: "fp")
+    add_dismissals([(f"a-{i}", f"b-{i}", "r") for i in range(20)])
+
+    calls = {"n": 0}
+
+    def counting(stems):
+        calls["n"] += 1
+        return {s: ["kc-0000dead"] for s in stems}
+
+    monkeypatch.setattr(pd, "_slugs_for_stems", counting)
+    pd.dismissed_pairs()
+    assert calls["n"] == 1
+
+
+def test_batched_and_unbatched_staleness_agree(monkeypatch):
+    entry = {"stems": [A, B], "claims_fingerprint": "recorded"}
+    slugs = {A: ["kc-1111"], B: ["res-2222"]}
+    batched = pd.is_stale(entry, slugs_by_stem=slugs)
+    monkeypatch.setattr(pd, "claims_fingerprint",
+                        lambda a, b: pd._hash_slugs(slugs[a] + slugs[b]))
+    assert pd.is_stale(entry) == batched
