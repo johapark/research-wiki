@@ -320,9 +320,11 @@ Per-million-token rates for Anthropic + OpenAI models, carrying an **`as_of:` da
 
 **Default path: `researchwiki agent ingest`.** Handles pypdfium2 extraction, DOI detection, S2 lookup, LLM-reconcile, stem derivation, `mv` to `papers/`, page authoring, atomic back-link apply, and `researchwiki evolve`. Logs `ingest_iterations` to the state DB; writes no `tags:` (see Page Types).
 
-**Step 0** — drop PDF into `inbox/`.
+**Step 0** — drop PDF into `inbox/`. **Read the inbox with `researchwiki status`, not `ls inbox/`** — same answer plus the aggregate signals (stale index / DB, orphans, cost rollup, the three decay-stamped nudges) that the every-~5-ingests cadence under *Lint* would otherwise be the only thing surfacing.
 
 **Step 1** — run agent ingest. **For ≥2 PDFs pass them all to a single `agent ingest` invocation** — it auto-enters crash-safe batch mode (4 workers by default, atomic `.ingest/batch-<ts>/checkpoint.json` per completion, `--resume <batch-dir>` picks up after a crash). Do NOT fan out one background Bash per file: it bypasses the checkpoint, uncaps concurrency, and multiplies `state.db` write contention. `agent ingest` takes **no `--category`** — the classifier picks one per paper and abstains to `other`. (`--category` is the digest path's flag, on `researchwiki ingest`.)
+
+**Run it backgrounded** — one invocation, backgrounded, whether it's 1 PDF or 20, so the conversation continues; this is not the banned per-file fan-out, and it needs no subagent (a subagent spends a whole context waiting on stdout you have to read yourself anyway). While it runs the wiki is **read-only**: no `reindex` / `db rebuild` / `lint` / `grade` until the completion notification lands, or they contend with promote's writes to `state.db`, `wiki/`, `index.md` and `log.md` — and a `reindex` that wins the race indexes a half-landed tree.
 
 ```bash
 researchwiki agent ingest inbox/<raw-filename>.pdf              # single PDF
