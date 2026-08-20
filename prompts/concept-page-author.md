@@ -65,7 +65,9 @@ tags: [concept, rag]
 - `referenced_papers:` lists the member papers — the same set the body links to. Keep it in sync with the body's spokes (used by the `views.md` dashboard and as the coverage baseline).
 - `concept_span:` is provenance from the extractor — how many categories the term bridges. Bridges (span ≥ 2) are the reason the page exists; record it.
 - `concept_thesis:` is **required** — the scaffolder refuses without one. See *The thesis test* below.
-- `topic_seed_aliases:` is optional and emitted only when non-empty. `find_members` (on refresh) and `attach_after_ingest` expand their term search across every alias, so a concept the corpus names three ways still collects all its spokes.
+- `topic_seed_aliases:` is optional and emitted only when non-empty. `find_members` (on refresh) and `attach_after_ingest` expand their term search across every alias, so a concept the corpus names three ways still collects all its spokes. **Aliases are substring matches and widen membership fast** — five plausible ones took the parameter-efficient-fine-tuning hub from 5 members to 17 across 4 categories, admitting a Bayesian-optimization paper on `low-rank`. The scaffolder prints a `members by matching term` breakdown whenever you pass `--aliases`: read it, and keep the aliases that earn their members. Hubs should stay sparse.
+- **Inspect before you commit to a thesis.** `researchwiki concepts "<term>" --dry-run` needs no `--thesis` — you cannot judge concept-vs-glossary before seeing the member list. The gate still applies to the write.
+- **A spoke with no matching claim is cited bare.** When a member joined on keywords and no claim mentions the term or any alias, the spoke is `[[stem]]` rather than `[[stem#slug]]`. That is honest, not missing: pick the right claim by hand, or leave it for `concepts --upgrade-spokes` once one lands.
 
 ## Section contract
 

@@ -386,6 +386,40 @@ going stale between scaffolds.
 
 ## Decisions log
 
+- **2026-08-20** — **Five defects fixed, found by using the tier.** Authoring
+  `wiki/concepts/parameter-efficient-fine-tuning.md` — the first hub the corpus
+  proposed rather than a user question — exercised items (1), (2) and (5)
+  together. Recall was the part that worked: the semantic pass recovered
+  scArches' "architectural surgery" (0.777) as PEFT in `single-cell`, which one
+  alias converted into a real member through the lexical path, span 2 -> 3.
+  Exactly the E1 mechanism, on a term the calibration case never covered.
+
+  What broke was the advice around it. `_head_token` picked the *longest* word,
+  so `frozen embeddings` mined aliases off "embeddings" and recommended five
+  `X embeddings` variants — the calibration case `mixture model` passed only
+  because there the longer word is also the distinguishing one. **A rarity rule
+  is not the fix**: over 10,501 contribution claims "mechanism" (df 50) is rarer
+  than "attention" (df 155), so IDF inverts `attention mechanism`. The
+  discriminator is generic *class nouns*, so this needs no corpus statistics and
+  no dependency on `claim_discover`'s IDF machinery. Alias expansion also had no
+  visible cost (5 aliases: 5 members -> 17 across 4 categories, admitting a
+  Bayesian-optimization paper on "low-rank"), and `find_members`' last-resort
+  anchor cited claims that never mentioned the term.
+
+  **Two deliberate non-fixes.** No alias cap — this tier's governing rule is
+  propose-never-decide, and a member ceiling would block legitimately broad hubs;
+  the defect was that the cost was invisible, so `alias_hits` reports it instead.
+  And no reordered/fuzzy keyword matching: `_keyword_matches_term` cannot match
+  huang-2023's `genetic effect direction` against `direction of effect`, which is
+  the *second* reason that term's counts diverged, but token-reordering is a
+  false-positive risk far larger than the bug it fixes.
+
+  **One follow-up left open.** `attach_after_ingest` keeps the fabricating
+  fallback, because there `best_slug is None` also decides membership — removing
+  it changes what auto-attaches at ingest, which runs straight into the
+  unresolved hub-sparseness question below rather than being a citation fix.
+
+
 - **2026-08-20** — **Simplification pass.** Three things cut on the grounds that
   they were surface without yield: the `claim_only` section in `check-coverage`
   (0 results across all six authored pages, including its own acceptance case —

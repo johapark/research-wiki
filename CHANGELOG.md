@@ -20,6 +20,79 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Concept-hub discovery: five defects found by using it.** The discovery tier
+  (`PLAN-bottom-up-synthesis.md`) was exercised end to end for the first time,
+  authoring `wiki/concepts/parameter-efficient-fine-tuning.md` — the first hub
+  proposed by the corpus rather than by a question put to it. Recall worked: the
+  semantic pass recovered scArches' "architectural surgery" as
+  parameter-efficient fine-tuning in `single-cell`, vocabulary no lexical search
+  reaches, lifting the hub from span 2 to span 3. Every defect below is in the
+  advice *around* that recall, and two of them actively misled the author.
+
+  **Aliases are mined from the distinguishing word, not the class noun.**
+  `_head_token` returned the longest word, so `frozen embeddings` mined off
+  "embeddings" and printed a paste-ready `--aliases "positional
+  embeddings,format-specific embeddings,fm embeddings,projected
+  embeddings,elmo embeddings"` — following it would have filled the hub with
+  ALiBi and ELMo papers. Class nouns are dropped first, then length decides. A
+  rarity rule was measured and rejected: over 10,501 contribution claims
+  "mechanism" (df 50) is rarer than "attention" (df 155), which inverts
+  `attention mechanism` and breaks the case that has pinned this since the pass
+  shipped. No corpus statistics needed.
+
+  **Hub membership is attributed to the alias that found it.** Five plausible
+  aliases took that hub from 5 members to 17 across 4 categories, admitting a
+  spherical-Bayesian-optimization paper and Feynman's restaurant problem on
+  substring hits inside "low-rank" and "adapter", with nothing saying which
+  alias did it. `find_members` already knew and discarded the answer; it now
+  reports it, `run` aggregates it into a new additive `alias_hits` `--json` key,
+  and the CLI prints a `members by matching term` table when `--aliases` is
+  passed. Deliberately a diagnostic and not a cap — this tier's rule is
+  propose-never-decide, and a ceiling would block legitimately broad hubs.
+
+  **`--dry-run` no longer demands a `--thesis`.** The thesis test asks *why is
+  this a concept and not glossary*, which depends on the member list a dry run
+  exists to show — so requiring it in order to look was circular, and the value
+  was discarded immediately after. Three inspections during the hub build passed
+  `--thesis "provisional"` to get past it. The write path is unchanged.
+
+  **Spokes are no longer anchored to a claim that never mentioned the term.**
+  `find_members` fell back to the paper's *first* key_contributions claim for
+  keyword-only members, citing seqLens as "Introduced seqLens, a DeBERTa-v2
+  based gLM family…" on a hub about parameter-efficient fine-tuning, and
+  indistinguishably from a real match. `best_slug` now stays `None`, rendered as
+  a bare `[[stem]]` — the form CLAUDE.md prescribes for citing a paper as a
+  whole, and what `concepts --upgrade-spokes` exists to fill in. An unrelated
+  anchor is invisible; a bare one asks to be fixed. `_term_claim_hint` also
+  stopped running its own case-sensitive, unfiltered scan and now shares the
+  anchor's query, so hint and anchor cannot disagree. `attach_after_ingest`
+  keeps its fallback: there the anchor doubles as the membership test, so
+  removing it changes what auto-attaches at ingest — a separate question.
+
+### Changed
+
+- **`candidates concepts` counts membership over contribution sections only.**
+  It advertised `direction of effect` as "4 paper pages, 3 categories —
+  concept-ready (bridge)"; the scaffolder then found 2 and refused it. Both read
+  claims; the detector applied no section filter while `find_members` restricts
+  to `key_contributions`/`results`/`methodology`, on the stated ground that a
+  term in a paper's limitations is a mention and not an instantiation. Two of
+  that term's four "paper pages" were limitations, and the bridge tier is
+  exactly the list a reviewer is told to act on. `weighted` and the `sections`
+  key still see every section, so the 0.5 `SECTION_WEIGHTS` signal survives and
+  the author can still see why a term looks bigger than its member count.
+
+  Four of thirty candidates drop below the `>= 3` floor — `direction of effect`,
+  `attention mechanism`, `target profiling`, `AMP`, two of them previously
+  labelled concept-ready (bridge) — and `status`'s bridge count falls 10 -> 8.
+  Every remaining bridge candidate was checked to return `>= 3` members when
+  scaffolded. The detector can still under-count relative to the scaffolder,
+  which also has a keyword signal (`foundation models`: 5 advertised, 20
+  members); that direction is harmless, since the advertised number becomes a
+  floor rather than an over-promise.
+
 ## [0.4.1] - 2026-08-20
 
 ### Added
