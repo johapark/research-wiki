@@ -51,3 +51,59 @@ def _isolate_state_db(tmp_path, monkeypatch):
     unwinds in LIFO order, so this fixture doesn't fight them.
     """
     monkeypatch.setenv("RESEARCHWIKI_DB_PATH", str(tmp_path / "_state" / "state.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_claim_embedding_cache(tmp_path, monkeypatch):
+    """Point the claim-embedding cache at a per-test temp dir.
+
+    Third instance of the `_isolate_state_db` trap, and it became reachable the
+    moment a *writer* did. Until `warm_claim_embeddings` landed, the only
+    cache-touching call in a test's reach was `load_cached_claim_embeddings`,
+    which is read-only — so nothing needed isolating. `cross_paper` now warms the
+    cache, and its tests feed the embedder fake 2-dimensional vectors, so an
+    unisolated run would rewrite the developer's real 384-dim claim cache (~19 MB,
+    12.4k rows) with a handful of 2-dim fakes. Every later `claim-overlap`,
+    `candidates pairs` and `check-coverage` run would then be scoring against
+    garbage, and nothing would report an error — the cache is a derived artifact
+    that silently rebuilds, so the only symptom is wrong numbers.
+
+    Patched on the *bound* name in `claim_embeddings` rather than on
+    `researchwiki.paths.semantic_cache_dir`, because that module does a
+    module-level `from ..paths import semantic_cache_dir` — patching the origin
+    would leave the already-bound reference untouched. `_paths()` calls it per
+    invocation, so a per-test value takes effect immediately.
+
+    Deliberately not `monkeypatch.chdir(tmp_path)`, which would isolate every
+    `wiki_root()`-derived path at once: too broad as an autouse default, since
+    tests legitimately read `prompts/`, `config/` and fixtures relative to the
+    repo root.
+    """
+    from researchwiki.index import claim_embeddings
+    cache = tmp_path / "_semantic-cache"
+    monkeypatch.setattr(claim_embeddings, "semantic_cache_dir", lambda: cache)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_edges_db(tmp_path, monkeypatch):
+    """Point the claim-graph edge cache at a per-test temp dir.
+
+    Fourth instance of the `_isolate_state_db` trap. `edges.db` holds LLM-judged
+    relations *and* human decisions (`status='rejected'` is a person saying "not a
+    relation"), so a test that reaches a write path does not just add noise — it
+    can plant a `candidate` edge that `claim-graph`, `claim-graph --tensions` and
+    `visualize` will then present as a real finding about the corpus.
+
+    Latent until now only by accident: the cross-paper tests seeded claims with a
+    NULL `claim_slug`, and `_persist_contradicts_edge` returns early when either
+    slug is missing, so the writer was never actually reached. The moment a test
+    seeds slugs — which the resumability tests must, since the coverage table is
+    slug-keyed — that early return stops shielding the real database.
+
+    Patched on the bound name in `claim_graph.edges` (module-level
+    `from ..paths import claim_graph_dir`), for the same reason as the claim-cache
+    fixture above.
+    """
+    from researchwiki.claim_graph import edges
+    graph_dir = tmp_path / "_claim-graph"
+    monkeypatch.setattr(edges, "claim_graph_dir", lambda: graph_dir)
