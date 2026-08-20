@@ -63,6 +63,12 @@ DEFAULT_LIMIT = 40
 # N × N, which is what keeps `status` viable as the corpus grows.
 _BLOCK = 512
 
+# Minimum share of claims the embedding cache must cover before the ranking is
+# trusted. Same value and reasoning as `semantic_members.MIN_CACHE_COVERAGE`:
+# below this the scan sees an arbitrary subset, and a short list reads as
+# "nothing found" rather than "not checked".
+MIN_CACHE_COVERAGE = 0.5
+
 # Same reasoning as `semantic_members._NO_CLAIMS`: an empty substrate has to say
 # so, or a migrated corpus reads its own absence as "no candidates found".
 # Public so the CLI can print it instead of guessing at the cause.
@@ -193,6 +199,19 @@ def discover_pairs(
             "(warm it with any `claim-overlap` run)", tag="discover")
         return []
     vecs, row_indices = loaded
+
+    # Partial coverage is the dangerous case, not the cold one. A re-ingest or
+    # regrade changes claim text, `load_cached_claim_embeddings` drops those
+    # rows on its text-hash check, and the scan then runs over a subset while
+    # the CLI reports "the band is genuinely empty". `semantic_members` guards
+    # this with the same constant; this module was missing it.
+    coverage = len(row_indices) / len(rows)
+    if coverage < MIN_CACHE_COVERAGE:
+        log(f"claim discovery skipped: embedding cache covers only "
+            f"{coverage:.0%} of claims — re-run `researchwiki claim-overlap "
+            f"<stem>` to re-embed the changed ones", tag="discover")
+        return []
+
     rows = [rows[i] for i in row_indices]
 
     docs = [_tokens(r["text"]) for r in rows]
@@ -318,6 +337,17 @@ def discovery_warning(*, touch: bool = True) -> str | None:
 
     `touch=False` peeks without advancing decay state.
     """
+    # Decay check FIRST — it is a single stat() and the scan below is the most
+    # expensive thing `status` can do (blocked matmul over every claim pair, a
+    # full-corpus page read for `_linked_pairs`, then a Python loop over the
+    # in-band pairs). Running it before the stamp check meant `status` paid that
+    # every invocation for the 14 days the stamp suppresses the output, then
+    # discarded the result. `claim_overlap.backlog_warning` has the same shape
+    # but its first step is one SQL query, so the ordering was free there and
+    # copying it here was not.
+    age = discovery_stamp_age_days()
+    if age is not None and age < DISCOVERY_DECAY_DAYS:
+        return None
     try:
         pairs = discover_pairs(limit=DISCOVERY_THRESHOLD * 4,
                                cross_category_only=True)
@@ -325,9 +355,6 @@ def discovery_warning(*, touch: bool = True) -> str | None:
         return None      # advisory surface — never the reason a command fails
     n = len(pairs)
     if n < DISCOVERY_THRESHOLD:
-        return None
-    age = discovery_stamp_age_days()
-    if age is not None and age < DISCOVERY_DECAY_DAYS:
         return None
     if touch:
         write_discovery_stamp()

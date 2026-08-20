@@ -211,18 +211,18 @@ def main(argv: list[str]) -> int:
               f"→ would write wiki/concepts/{result['slug']}.md")
         for k in result["members"]:
             print(f"  · [[{k}]]")
-        _print_semantic_candidates(result, args.term)
+        _print_semantic_candidates(result, args.term, written=False)
         return 0
 
     print(f"wrote {result['path']}  ({n} members, span {span}, "
           f"{len(result['linked'])} reciprocal link(s) added)")
-    _print_semantic_candidates(result, args.term)
+    _print_semantic_candidates(result, args.term, written=True)
     print("Next: fill Definition + spoke one-liners, then "
           f"`researchwiki check-grounding {result['path']}` + `grade synthesis`.")
     return 0
 
 
-def _print_semantic_candidates(result: dict, term: str) -> None:
+def _print_semantic_candidates(result: dict, term: str, *, written: bool) -> None:
     """Report papers the semantic pass proposes that lexical matching missed.
 
     Printed, never applied. Each line carries the score, the claim that matched
@@ -248,3 +248,12 @@ def _print_semantic_candidates(result: dict, term: str) -> None:
         print(f"  If those name the same concept, re-run with:")
         print(f"    researchwiki concepts \"{term}\" --force "
               f"--aliases \"{','.join(suggested)}\"")
+        if written:
+            # The page now exists, and `--force` regenerates it from the stub
+            # template — so following this hint *after* writing the Definition
+            # and spoke one-liners discards them. Say so here rather than
+            # letting the next line ("fill in the Definition") walk the author
+            # into it.
+            print("    ⚠ --force rewrites the page from the stub. Re-run it "
+                  "NOW, before filling in prose — or add the aliases to "
+                  "`topic_seed_aliases:` and the spokes by hand.")

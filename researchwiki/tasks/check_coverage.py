@@ -63,6 +63,11 @@ from ..log import log
 # highest false positive 0.733.
 _CLAIM_FLOOR = 0.74
 
+# How deep to rank claim matches. Only used to annotate rows the page-level pass
+# already produced, so this bounds work, not output — it must comfortably exceed
+# `--top-n` or annotation becomes a function of unrelated papers' scores.
+_CLAIM_RANK_DEPTH = 200
+
 def _read_frontmatter(md: Path) -> dict | None:
     """Mirrors db/rebuild.py:_parse_frontmatter — same forgiving YAML parse."""
     try:
@@ -138,8 +143,13 @@ def main(argv: list[str]) -> int:
     cited_stems = {k.split("/")[-1] for k in linked} | {md.stem}
     try:
         from ..concepts.semantic_members import semantic_member_candidates
+        # Limit generously rather than to top_n. This ranks every paper in
+        # the corpus above the floor, but is only ever used to annotate rows
+        # already in `unreferenced` — so a tight cap doesn't shorten the
+        # report, it just drops the annotation whenever N unrelated papers
+        # happen to outscore a genuine match against the seed.
         claim_hits = semantic_member_candidates(
-            seed, exclude_stems=cited_stems, limit=args.top_n,
+            seed, exclude_stems=cited_stems, limit=_CLAIM_RANK_DEPTH,
             floor=_CLAIM_FLOOR,
         )
     except Exception:

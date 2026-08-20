@@ -23,12 +23,20 @@ confirmation path is the existing, already-trusted one: re-run the scaffold with
 To make that cheap, each candidate carries a suggested alias mined from the
 wording that actually matched — the claim text is what reveals the vocabulary.
 
-Cache-only by construction: reads `load_cached_claim_embeddings` and never
+Cache-only on the *corpus* side: reads `load_cached_claim_embeddings` and never
 `get_claim_embeddings`. The latter rewrites the shared claim cache to whatever
 row set it was handed, so calling it with a filtered set (contribution sections
 only) silently evicts the rest and makes the next `claim-overlap` run re-embed
 them. A cold or thin cache therefore degrades to "no candidates reported" rather
-than to a surprise model load or a clobbered cache.
+than to a clobbered cache.
+
+The *query* side is not free, and callers should know it: embedding the term
+itself goes through `embeddings.embed_texts`, which constructs the
+SentenceTransformer (~3 s on first use in a process, plus a model download on a
+machine that has never run the embedder). That cost lands on every
+`researchwiki concepts` invocation, `--dry-run` included, and before the
+`min_members` rejection — the candidate list is worth more at exactly the moment
+a hub looks too thin to build.
 """
 
 from __future__ import annotations
@@ -65,6 +73,13 @@ _NO_CLAIMS = (
     "headings don't match the extractor produces no claims)"
 )
 
+# Number words that make a hyphenated qualifier a count rather than a name.
+# Cardinals only, deliberately: "single-", "multi-", "bi-" and "double-" are
+# domain compounds at least as often as counts ("single-cell", "multi-omics"),
+# and dropping those is the failure this list exists to avoid.
+_COUNT_WORDS = frozenset(
+    "one two three four five six seven eight nine ten".split())
+
 # Words that never make a useful alias qualifier on their own.
 _ALIAS_STOPWORDS = frozenset("""
 a an the of for with and or in on at to from by as this that these those its it
@@ -91,12 +106,12 @@ class SemanticCandidate:
 
 
 def _head_token(term: str) -> str:
-    """Last alphanumeric word of `term` — the noun the concept hangs on.
+    """Longest word in `term` — the token that distinguishes the concept.
 
-    "mixture model" -> "model" is useless; the *distinguishing* token is
-    "mixture". Prefer the longest word instead, which picks the specific one
-    over the generic head in the cases that matter ("mixture model",
-    "attention mechanism", "chromatin accessibility").
+    Not the grammatical head: "mixture model" -> "model" and "attention
+    mechanism" -> "mechanism" are the useless halves. Length is a crude proxy
+    for specificity, and it picks the right word in the cases that matter
+    ("mixture", "attention", "accessibility").
     """
     words = re.findall(r"[A-Za-z][A-Za-z0-9-]*", term)
     if not words:
@@ -139,9 +154,13 @@ def _suggest_alias(term: str, text: str, known: set[str]) -> str | None:
         qualifier = m.group(1)
         if qualifier.lower() in _ALIAS_STOPWORDS:
             continue
-        # A qualifier ending in a digit-hyphen ("three-component") is a count,
-        # not vocabulary — the useful variant is the word after it.
-        if re.fullmatch(r"[A-Za-z]+-[A-Za-z]+", qualifier) and "-" in qualifier:
+        # A hyphenated qualifier led by a number word is a *count*, not
+        # vocabulary: "two-Gaussian mixture" and "three-component mixture"
+        # describe one paper's parameter choice, not a name the corpus uses.
+        # Hyphenation alone is not the signal — "single-cell" and "long-read"
+        # are exactly the compound variants this function exists to find, and
+        # an earlier version dropped them by rejecting every hyphenated bigram.
+        if qualifier.split("-", 1)[0].lower() in _COUNT_WORDS:
             continue
         candidate = f"{qualifier} {head}".lower()
         if candidate not in known and candidate != term.lower():

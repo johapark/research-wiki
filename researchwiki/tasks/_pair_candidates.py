@@ -55,24 +55,38 @@ def _manage(args, parser) -> int:
     )
 
     if args.list_declined:
-        entries = load_dismissals()
+        # `.pair-dismissals.json` is hand-editable and `load_dismissals` only
+        # validates the top level, so a malformed entry must not traceback the
+        # management command — `dismissed_pairs` already skips these silently.
+        # Report the count rather than hiding it: a dropped entry is a decision
+        # that has stopped taking effect.
+        raw = load_dismissals()
+        entries = {k: e for k, e in raw.items()
+                   if isinstance(e, dict)
+                   and isinstance(e.get("stems"), list) and len(e["stems"]) == 2}
+        malformed = len(raw) - len(entries)
+
         if args.json:
-            print(json.dumps({k: {**v, "stale": is_stale(v)}
-                              for k, v in entries.items()},
+            print(json.dumps({k: {**e, "stale": is_stale(e)}
+                              for k, e in entries.items()},
                              ensure_ascii=False, indent=2))
             return 0
         if not entries:
-            print("No declined pairs.")
+            print("No declined pairs."
+                  + (f" ({malformed} malformed entr(y/ies) skipped)" if malformed else ""))
             return 0
         n_stale = sum(1 for e in entries.values() if is_stale(e))
         suffix = f" ({n_stale} stale — evidence changed, back in the list)" if n_stale else ""
         print(f"{len(entries)} declined pair(s){suffix}:")
         for entry in sorted(entries.values(), key=lambda e: e.get("dismissed_at", "")):
-            a, b = entry.get("stems", ["?", "?"])
+            a, b = entry["stems"]
             mark = "  [STALE]" if is_stale(entry) else ""
             print(f"  {a}\n  {b}{mark}")
             print(f"    {entry.get('dismissed_at', '?')} "
                   f"[{entry.get('source', 'manual')}] {entry.get('reason', '')}")
+        if malformed:
+            print(f"\n  {malformed} malformed entr(y/ies) in "
+                  f".pair-dismissals.json were skipped and suppress nothing.")
         return 0
 
     if args.undecline:
@@ -80,16 +94,23 @@ def _manage(args, parser) -> int:
         if remove_dismissal(a, b):
             print(f"restored: {a} ↔ {b}")
             return 0
-        print(f"researchwiki candidates pairs: no decline recorded for {a} ↔ {b}",
-              file=sys.stderr)
-        return 1
+        # 0, matching `candidates concepts --undecline`: "it wasn't on the
+        # list" is a no-op the caller asked for, not a failure.
+        print(f"`{a} ↔ {b}` was not on the declined list.")
+        return 0
 
     a, b = args.decline
+    # Printed + `return 1` rather than `parser.error`, matching how
+    # `candidates concepts --decline` reports the same omission.
     if not (args.reason or "").strip():
-        parser.error("--decline requires --reason: record why the pair is not a "
-                     "relation, or the list becomes unreviewable")
+        print("researchwiki candidates pairs --decline: --reason is required "
+              "(one sentence — why these two papers are not related).",
+              file=sys.stderr)
+        return 1
     if a.strip() == b.strip():
-        parser.error("--decline needs two different stems")
+        print("researchwiki candidates pairs --decline: needs two different stems.",
+              file=sys.stderr)
+        return 1
     add_dismissal(a, b, args.reason.strip())
     print(f"declined: {a} ↔ {b}")
     return 0
