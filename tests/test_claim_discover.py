@@ -198,3 +198,26 @@ def test_warning_is_silent_on_an_empty_corpus(monkeypatch, tmp_path):
     # Advisory surface: no DB, no claims, no crash, no output.
     monkeypatch.chdir(tmp_path)
     assert discovery_warning(touch=False) is None
+
+
+# ---------- an empty substrate must announce itself ----------
+#
+# The migration failure mode: claim extraction matches H2 headings verbatim, so
+# a corpus imported from another generator can yield zero claims. Returning []
+# quietly makes "this wiki has no claims" indistinguishable from "nothing
+# matched", and the user warms a cache that was never the problem.
+
+def test_zero_claims_logs_the_cause_instead_of_returning_quietly(monkeypatch, capsys):
+    import researchwiki.tasks.claim_discover as cd_mod
+    monkeypatch.setattr(cd_mod, "_load_claims", lambda: [])
+    assert cd_mod.discover_pairs(limit=5) == []
+    err = capsys.readouterr().err
+    assert "no claims in the corpus" in err
+    assert "zero_claim_papers" in err
+
+
+def test_zero_claims_message_names_the_check_that_finds_them():
+    from researchwiki.tasks.claim_discover import NO_CLAIMS
+    # Both halves matter: what to run first, and where to look if it persists.
+    assert "db rebuild" in NO_CLAIMS
+    assert "zero_claim_papers" in NO_CLAIMS

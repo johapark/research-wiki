@@ -63,6 +63,16 @@ DEFAULT_LIMIT = 40
 # N × N, which is what keeps `status` viable as the corpus grows.
 _BLOCK = 512
 
+# Same reasoning as `semantic_members._NO_CLAIMS`: an empty substrate has to say
+# so, or a migrated corpus reads its own absence as "no candidates found".
+# Public so the CLI can print it instead of guessing at the cause.
+NO_CLAIMS = (
+    "no claims in the corpus — nothing to rank. Run `researchwiki db rebuild`; "
+    "if it stays empty, check `researchwiki lint --json` -> zero_claim_papers "
+    "(a migrated wiki whose H2 headings don't match the extractor produces no "
+    "claims, which makes every discovery surface silently empty)"
+)
+
 # Content words only: 4+ letters, so "the"/"and"/"with" never carry IDF mass.
 _TOKEN_RE = re.compile(r"[a-z][a-z-]{3,}")
 
@@ -173,6 +183,7 @@ def discover_pairs(
 
     rows = _load_claims()
     if not rows:
+        log(NO_CLAIMS, tag="discover")
         return []
 
     from ..index.claim_embeddings import load_cached_claim_embeddings

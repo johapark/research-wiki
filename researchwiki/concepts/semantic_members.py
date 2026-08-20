@@ -54,6 +54,17 @@ DEFAULT_LIMIT = 10
 # short candidate list would read as "nothing found" rather than "not checked".
 MIN_CACHE_COVERAGE = 0.5
 
+# An empty claim substrate must announce itself. Returning [] silently makes
+# "this corpus has no claims" indistinguishable from "nothing matched" — the
+# exact confusion a migrated wiki lands in, since claim extraction matches H2
+# headings verbatim and a page titled differently yields none.
+_NO_CLAIMS = (
+    "no contribution claims in the corpus — nothing to match against. "
+    "Run `researchwiki db rebuild`; if it stays empty, check "
+    "`researchwiki lint --json` -> zero_claim_papers (a migrated wiki whose H2 "
+    "headings don't match the extractor produces no claims)"
+)
+
 # Words that never make a useful alias qualifier on their own.
 _ALIAS_STOPWORDS = frozenset("""
 a an the of for with and or in on at to from by as this that these those its it
@@ -186,6 +197,7 @@ def semantic_member_candidates(
 
     rows = _contribution_claims()
     if not rows:
+        log(_NO_CLAIMS, tag="concepts")
         return []
 
     from ..index import embeddings as semantic

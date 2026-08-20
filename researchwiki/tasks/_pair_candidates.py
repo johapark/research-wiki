@@ -121,9 +121,12 @@ def _report(args) -> int:
         return 0
 
     if not pairs:
-        print(f"No pair candidates (cosine {DEFAULT_COS_LO}–{DEFAULT_COS_HI}). "
-              "A cold claim-embedding cache also reads as zero — warm it with "
-              "any `claim-overlap` run.")
+        # Don't assert a cause. Zero here has three very different meanings —
+        # no claims, a cold cache, or a genuinely quiet band — and the first two
+        # are logged by `discover_pairs` itself as they happen.
+        print(f"No pair candidates (cosine {DEFAULT_COS_LO}–{DEFAULT_COS_HI}).")
+        print("  If a reason was logged above, fix that first; otherwise the "
+              "band is genuinely empty.")
         return 0
 
     n_cross = sum(1 for p in pairs if p.cross_category)

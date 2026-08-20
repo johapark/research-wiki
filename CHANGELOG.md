@@ -77,6 +77,21 @@ the reasoning behind any line below.
   claim-overlap backlog nudge, because a coverage gap means something is wrong
   and an opportunity queue does not.
 
+- **Both discovery surfaces now report an empty claim substrate instead of an
+  empty result.** Claim extraction matches H2 headings verbatim, so a corpus
+  imported from an older release or another generator can yield zero claims —
+  at which point every discovery surface returns nothing, and "this wiki has no
+  claims" is indistinguishable from "nothing matched". Measured: a cold
+  embedding cache already logged its cause and its fix; zero claims logged
+  nothing. Both now name the cause and point at `lint`'s `zero_claim_papers`.
+  `candidates pairs` also stopped asserting the cold-cache explanation on an
+  empty result, since that is only one of three reasons it can be empty.
+
+  Worth knowing for a migrated corpus: discovery needs `db rebuild` (free, and
+  it assigns the `claim_slug` the queries filter on) plus one `claim-overlap`
+  run to warm the cache — that call embeds the whole corpus, not just its own
+  stem. It does **not** need grading; neither query reads `last_graded_at`.
+
 - **Semantic recall tier on concept-hub member discovery.** `find_members`
   matches claim text lexically, which fails hardest on exactly the terms worth
   hub-building: a term is a *bridge* when fields name the same thing

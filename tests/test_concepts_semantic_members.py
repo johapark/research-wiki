@@ -108,3 +108,16 @@ def test_alias_set_is_capped_so_tail_noise_stays_out_of_the_paste_line():
 def test_alias_set_empty_when_nothing_mined():
     assert suggested_alias_set([_cand("a-2020", 0.75, None)]) == []
     assert suggested_alias_set([]) == []
+
+
+# ---------- an empty substrate must announce itself ----------
+
+def test_zero_claims_logs_the_cause_instead_of_returning_quietly(monkeypatch, capsys):
+    # A migrated corpus whose H2 headings don't match the extractor has no
+    # claims at all; silence would read as "no candidates found".
+    import researchwiki.concepts.semantic_members as sm
+    monkeypatch.setattr(sm, "_contribution_claims", lambda: [])
+    assert sm.semantic_member_candidates("mixture model") == []
+    err = capsys.readouterr().err
+    assert "no contribution claims" in err
+    assert "zero_claim_papers" in err
