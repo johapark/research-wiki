@@ -477,6 +477,16 @@ def main(argv: list[str]) -> int:
         print(co_msg)
         print()
 
+    # Claim-pair discovery queue. Opportunity signal rather than a coverage
+    # gap, so it sits on a higher bar and a longer decay than the backlog above
+    # — nothing is wrong when the queue has entries. Cross-category only: those
+    # are the pairs no other structure in the wiki connects.
+    from .claim_discover import discovery_warning
+    disc_msg = discovery_warning()
+    if disc_msg:
+        print(disc_msg)
+        print()
+
     # Within-category divergence nudge. Structural-only (no LLM) and
     # decay-stamped like the `other` warning — fires when a populated category
     # has grown a sub-cluster distinct enough to consider splitting out. See

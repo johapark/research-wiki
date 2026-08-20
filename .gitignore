@@ -47,6 +47,16 @@ share/
 # bucket as `wiki/*` and the stamps above.
 .concept-declines.json
 
+# Companion stamp for the claim-pair discovery nudge (status uses it to
+# suppress `claim-overlap --discover` reminders for the decay window).
+.claim-discovery-stamp
+
+# Per-user "these two papers aren't related" denylist for the claim-pair
+# discovery queue. Written by `claim-overlap --dismiss`; read by
+# `discover_pairs` so a reviewed-and-rejected pair stops re-proposing.
+# Curatorial state, same bucket as `.concept-declines.json` above.
+.pair-dismissals.json
+
 # Active LLM model config — per-user, mutable. Every `config/models.*.yaml`
 # template IS tracked (chatgpt — the default, mirrored by the zero-config
 # hardcoded fallback — plus anthropic, gemini*, glm, gemma, lmstudio,

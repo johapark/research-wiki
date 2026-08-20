@@ -1,17 +1,23 @@
-"""Surface opportunity signals — un-scaffolded concept hubs and un-covered synthesis clusters.
+"""Surface opportunity signals — un-scaffolded concept hubs, un-covered synthesis
+clusters, and unreviewed claim pairs.
 
 ✅ Use when: `status` prints a nonzero `Concept-hub candidates: N bridge term(s)`
    line (concepts target), OR you want to ask "what synthesis pages are we
-   missing?" after a batch of ingests (synthesis target).
-❌ Don't use: as a substitute for human curation. Both surfaces are advisory.
+   missing?" after a batch of ingests (synthesis target), OR `status` prints a
+   nonzero `Claim-pair discovery: N unreviewed cross-category pair(s)` line
+   (pairs target).
+❌ Don't use: as a substitute for human curation. All three are advisory.
 
-Two targets:
+Three targets:
 
   researchwiki candidates concepts   [--bridges] [--persist-edges] [--json]
                                       [--decline TERM --reason TEXT]
                                       [--undecline TERM] [--list-declined]
                                       [--triage [--dry-run]]
   researchwiki candidates synthesis  [--min-cluster N] [--threshold F] ...
+  researchwiki candidates pairs      [--cross-category] [--limit N] [--json]
+                                      [--decline A B --reason TEXT]
+                                      [--undecline A B] [--list-declined]
 
 **concepts** — recurring vocabulary terms mentioned by ≥3 wiki papers with no
 `wiki/concepts/{slug}.md` yet. Cheap (local, sub-second), no LLM. Bridge tier
@@ -40,11 +46,18 @@ synthesis page. Higher noise rate than concepts, so **not** auto-surfaced by
 run, or when a cross-paper question lands in unfamiliar territory. LLM-judged
 by default (--no-judge to skip); ~30s + a few Anthropic calls per run.
 
-Exit code: 0 always. Both targets are read-only opportunity signals; the only
-output that mutates state is the synthesis-target's proposal files under
-`.ingest/synthesis-candidates/` (skipped with --dry-run), and the concepts
-target's `.concept-declines.json` (touched by --decline/--undecline, and by
---triage unless --dry-run).
+**pairs** — cross-paper claim pairs sitting *below* `claim-overlap`'s auto-link
+threshold, ranked by shared rare-term mass inside a cosine band. Local,
+sub-second, no LLM. Lowering `claim-overlap --sim` is not the alternative: at
+0.70, 80% of all possible paper pairs qualify. `--cross-category` narrows to the
+pairs no other structure in the wiki connects. Act on one with `researchwiki
+claim-overlap <stem>`, which judges it on the normal path.
+
+Exit code: 0 always. All three targets are read-only opportunity signals; the
+only output that mutates state is the synthesis-target's proposal files under
+`.ingest/synthesis-candidates/` (skipped with --dry-run), the concepts target's
+`.concept-declines.json` (touched by --decline/--undecline, and by --triage
+unless --dry-run), and the pairs target's `.pair-dismissals.json`.
 """
 
 from __future__ import annotations
@@ -221,7 +234,10 @@ def main(argv: list[str]) -> int:
         return _run_concepts(rest)
     if target == "synthesis":
         return _run_synthesis(rest)
+    if target == "pairs":
+        from . import _pair_candidates
+        return _pair_candidates.main(rest)
 
     print(f"researchwiki candidates: unknown target '{target}'. "
-          f"Available: concepts, synthesis", file=sys.stderr)
+          f"Available: concepts, synthesis, pairs", file=sys.stderr)
     return 1
