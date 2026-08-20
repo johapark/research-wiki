@@ -1,7 +1,13 @@
 # Changelog
 
-Notable changes per release. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
-versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Notable changes per release. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+Versioning aims at [Semantic Versioning](https://semver.org/spec/v2.0.0.html) but is
+not governed by it yet: SemVer's PATCH/MINOR/MAJOR clauses are each guarded `| x > 0`,
+so at `0.y.z` only clause 4 applies ("anything MAY change at any time"). While 0.x this
+project shifts the whole line down a slot — **breaking → MINOR, additive → PATCH** —
+which is what `^0.4.0` and `~=0.4.0` already assume. See
+[`CONTRIBUTING.md` § Releasing](./CONTRIBUTING.md#releasing).
 
 **What counts as a breaking change here** is not a Python API — it's the CLI surface,
 the exit-code contract, the `--json` key contracts, the page frontmatter contract, and
@@ -13,6 +19,8 @@ rationale, and a subject-line dump would throw exactly that away. Read `git log`
 the reasoning behind any line below.
 
 ## [Unreleased]
+
+## [0.4.1] - 2026-08-20
 
 ### Added
 
@@ -1354,6 +1362,7 @@ the reasoning behind any line below.
 Initial tagged release.
 
 [Unreleased]: https://github.com/johapark/research-wiki/compare/v0.4.0...HEAD
+[0.4.1]: https://github.com/johapark/research-wiki/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/johapark/research-wiki/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/johapark/research-wiki/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/johapark/research-wiki/compare/v0.2.1...v0.3.0

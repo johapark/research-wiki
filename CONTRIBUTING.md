@@ -181,33 +181,51 @@ internal, and renaming a function is a PATCH. What consumers actually depend on:
 | Page frontmatter | Removing or repurposing a field the CLAUDE.md contract specifies |
 | Phase-role strings | `db/iterations.VALID_ROLES` and the `phase=`/`role=` keys — never rename these at all; `ingest_iterations` is the one table `db rebuild` can't regenerate |
 
-While on `0.x`, a breaking change takes the **MINOR** slot (0.2.0 → 0.3.0) and says
-so at the top of its changelog entry.
+### Which slot, while on 0.x
 
-**The same table decides additions.** SemVer's MINOR clause is about new
-functionality introduced to *the public API*, so what earns a MINOR here is a change
-that **adds** to a surface above: a new command or flag, a new `--json` key, a new
-frontmatter field, a new page type. A change that only alters behaviour behind an
-existing surface is a PATCH however its commit was labelled — new diagnostics,
-warnings, better error messages, prompt edits, heuristic changes. Nothing a consumer
-parses gained a member, so nothing they pin can break.
+**SemVer does not govern this project yet, and saying otherwise caused a bug in
+this section.** Clauses 6, 7 and 8 of SemVer 2.0.0 — the PATCH, MINOR and MAJOR
+rules — are each guarded `| x > 0`. At `0.y.z` the only clause that applies is 4:
+*"Anything MAY change at any time."* What follows is therefore a house convention
+filling a gap the spec leaves open on purpose, not a reading of the spec.
 
-This replaces "any `feat` → MINOR", borrowed from Conventional Commits. That rule
-keyed the version to a label chosen per commit, before anyone knew what the release
-would contain, and it over-fired on precisely the shape it couldn't see: the `feat`
-in the 0.3.1 range added 96 lines to one internal module, two stderr warnings, and no
-public surface whatsoever, while 0.3.0 — two new commands — occupied the same slot.
-Deciding from the table keeps the choice mechanical, with one arbiter and no
-per-release argument about whether a feature was big enough, while measuring the
-thing SemVer actually names.
+The convention is the usual 0.x one: **the whole line shifts down a slot.**
+
+| Change | 0.x slot | at 1.0+ |
+|---|---|---|
+| Breaking (removes/renames a surface in the table above) | **MINOR** — 0.4.x → 0.5.0 | MAJOR |
+| Additive (new command, flag, `--json` key, frontmatter field, page type) | **PATCH** — 0.4.0 → 0.4.1 | MINOR |
+| Everything else (diagnostics, warnings, error messages, prompt edits, heuristics, internal refactors) | **PATCH** | PATCH |
+
+A breaking change says so at the top of its changelog entry.
+
+**Shift the whole line or none of it.** An earlier version of this section moved
+breaking changes to MINOR but left additions there too, so MINOR carried both
+meanings and `0.4.0 → 0.5.0` could no longer tell a consumer whether something
+broke or something was added — which is the one signal the shift exists to
+preserve. It also fought the packaging tools: `^0.4.0` (npm, cargo) and `~=0.4.0`
+(pip) both mean *0.4.z only*, so a purely additive release under the old rule
+broke every caret pin for nothing.
+
+What has not changed is that the **table decides**, not the commit label. A `feat`
+that adds no listed surface is a PATCH; so is a `fix` that adds none. Check what
+the diff exposed, not what the subject line called it.
+
+Both rules here replace "any `feat` → MINOR", borrowed from Conventional Commits.
+That keyed the version to a label chosen per commit, before anyone knew what the
+release would contain, and it over-fired on precisely the shape it couldn't see:
+the `feat` in the 0.3.1 range added 96 lines to one internal module, two stderr
+warnings, and no public surface whatsoever. Deciding from the table keeps the
+choice mechanical, with one arbiter and no per-release argument about whether a
+feature was big enough.
 
 ### Cutting a release
 
 1. **Pick the number** from the commits since the last tag —
-   `git log v<prev>..HEAD --format='%s'`, read against the table above. Breaking
-   change → MINOR (while 0.x); anything that *adds* a listed surface → MINOR;
-   otherwise PATCH. Commit types are evidence, not the rule: check what the diff
-   added, not whether the subject said `feat`.
+   `git log v<prev>..HEAD --format='%s'`, read against the table above. While 0.x:
+   breaking → MINOR, everything else (additions included) → PATCH. Commit types are
+   evidence, not the rule: check what the diff added, not whether the subject said
+   `feat`.
 2. **Promote the changelog.** Rename `## [Unreleased]` to
    `## [x.y.z] - YYYY-MM-DD`, open a fresh empty `## [Unreleased]` above it, and add
    the compare link at the bottom. Entries are curated prose, not generated subject
