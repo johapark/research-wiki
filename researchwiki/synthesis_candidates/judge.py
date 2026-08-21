@@ -61,6 +61,20 @@ _JUDGMENT_SCHEMA = {
     },
 }
 
+_TOPIC_SCHEMA = {
+    "type": "object",
+    "required": ["topic"],
+    "properties": {"topic": {"type": "string"}},
+}
+
+_TOPIC_SYSTEM = """\
+You are naming one proposed research-wiki synthesis from a compact list of all
+papers in its graph cluster. Propose one specific 4–8 word topic that can be
+used as the fixed scope for subsequent per-paper membership review. Do not
+silently select a topic that describes only the first or largest sub-group.
+Output strict JSON only: {"topic": "<4-8 word topic title>"}.
+"""
+
 
 _EXTEND_JUDGE_SYSTEM = """\
 You are a wiki editor reviewing whether proposed papers fit an existing
@@ -177,6 +191,25 @@ def _build_new_judge_prompt(c: Candidate, member_blurbs: list[str]) -> str:
     ])
 
 
+def _build_topic_prompt(c: Candidate, member_pairs: list[tuple[str, str]]) -> str:
+    """Compact whole-cluster view used before a multi-batch membership pass."""
+    lines = [
+        "# Whole cluster",
+        f"density: {c.density:.2f}",
+        f"common keywords: {', '.join(c.common_keywords[:10]) or '(none)'}",
+        "members:",
+    ]
+    for key, blurb in member_pairs:
+        title = ""
+        for line in blurb.splitlines():
+            if line.startswith("Title: "):
+                title = line.removeprefix("Title: ").strip()
+                break
+        lines.append(f"- [[{key}]] — {title[:200]}")
+    lines.append("\nOutput JSON only.")
+    return "\n".join(lines)
+
+
 def _parse_judgment_response(text: str) -> dict | None:
     """Tolerate fenced code, leading prose, or stray quotes around the JSON."""
     raw = text.strip()
@@ -263,9 +296,33 @@ def judge_candidate(
 
     all_verdicts: list[MemberVerdict] = []
     input_tokens = output_tokens = 0
-    topics: list[str] = []
     batches = [member_pairs[i:i + MAX_MEMBERS_PER_JUDGE]
                for i in range(0, len(member_pairs), MAX_MEMBERS_PER_JUDGE)]
+    fixed_topic = ""
+    if c.verdict == "new" and len(batches) > 1:
+        # Membership batches see only their own blurbs. Establish one scope
+        # from a compact view of the entire cluster before judging subsets.
+        try:
+            c.judge_batches += 1
+            topic_resp = llm.call(
+                phase="synthesis_judge",
+                prompt=_build_topic_prompt(c, member_pairs),
+                system=_TOPIC_SYSTEM,
+                schema=_TOPIC_SCHEMA,
+            )
+        except Exception as e:
+            log(f"LLM topic call failed for {c.slug}: {e}", tag="judge")
+            return
+        input_tokens += topic_resp.input_tokens
+        output_tokens += topic_resp.output_tokens
+        parsed_topic = _parse_judgment_response(topic_resp.text)
+        fixed_topic = ((parsed_topic or {}).get("topic") or "").strip()[:120]
+        if not fixed_topic:
+            log(f"missing topic for {c.slug} multi-batch judgment", tag="judge")
+            c.judge_input_tokens = input_tokens
+            c.judge_output_tokens = output_tokens
+            return
+
     for batch_no, batch in enumerate(batches, 1):
         keys = [key for key, _ in batch]
         blurbs = [blurb for _, blurb in batch]
@@ -273,6 +330,10 @@ def judge_candidate(
             prompt = _build_extend_judge_prompt(target_title, target_body, blurbs)
         else:
             prompt = _build_new_judge_prompt(c, blurbs)
+            if fixed_topic:
+                prompt += (f"\n\n# Fixed synthesis topic\n{fixed_topic}\n"
+                           "Judge every member against exactly this topic; do not "
+                           "choose a different scope for this batch.")
         if len(batches) > 1:
             prompt += (f"\n\nThis is batch {batch_no} of {len(batches)}. "
                        "Return verdicts for this batch only.")
@@ -307,14 +368,12 @@ def judge_candidate(
             c.judge_output_tokens = output_tokens
             return
         all_verdicts.extend(verdicts)
-        if c.verdict == "new":
-            topic = (parsed.get("topic") or "").strip()[:120]
-            if topic:
-                topics.append(topic)
+        if c.verdict == "new" and not fixed_topic:
+            fixed_topic = (parsed.get("topic") or "").strip()[:120]
 
     c.member_verdicts = all_verdicts
-    if c.verdict == "new" and topics:
-        c.judge_topic = topics[0]
+    if c.verdict == "new" and fixed_topic:
+        c.judge_topic = fixed_topic
     c.judge_input_tokens = input_tokens
     c.judge_output_tokens = output_tokens
     c.judged = True

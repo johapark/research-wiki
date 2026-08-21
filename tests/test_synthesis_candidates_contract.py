@@ -7,7 +7,7 @@ import shlex
 from pathlib import Path
 from types import SimpleNamespace
 
-from researchwiki.synthesis_candidates.detect import Candidate
+from researchwiki.synthesis_candidates.detect import Candidate, _check_synthesis_coverage
 from researchwiki.synthesis_candidates.judge import MAX_MEMBERS_PER_JUDGE, judge_candidate
 from researchwiki.synthesis_candidates.render import render_proposal
 from researchwiki.wiki import Page
@@ -89,6 +89,22 @@ def test_extend_proposal_never_instructs_synthesis_referenced_papers_edits():
     assert "`## References`" in rendered
 
 
+def test_claim_anchor_citations_count_toward_existing_synthesis_coverage():
+    synthesis = Page(
+        path=Path("wiki/synthesis/existing.md"),
+        stem="existing",
+        category="synthesis",
+        fm={"type": "synthesis"},
+        body="## Evidence\n\nSupported claim. [[a-2026-x#kc-1234abcd]]\n",
+    )
+    nearest, coverage, refs = _check_synthesis_coverage(
+        ["ai/a-2026-x", "ai/b-2025-y"], [synthesis]
+    )
+    assert nearest == "synthesis/existing"
+    assert coverage == 0.5
+    assert refs == {"ai/a-2026-x"}
+
+
 def test_judge_batches_every_member_and_requires_complete_responses(monkeypatch):
     members = [f"ai/p{i}" for i in range(MAX_MEMBERS_PER_JUDGE + 2)]
     candidate = _candidate(members=members, judged=False)
@@ -99,6 +115,11 @@ def test_judge_batches_every_member_and_requires_complete_responses(monkeypatch)
 
     def fake_call(**kwargs):
         calls.append(kwargs["prompt"])
+        if kwargs["schema"].get("required") == ["topic"]:
+            return SimpleNamespace(
+                text=json.dumps({"topic": "Bounded topic"}),
+                input_tokens=10, output_tokens=20,
+            )
         keys = [line[6:-2] for line in kwargs["prompt"].splitlines()
                 if line.startswith("### [[") and line.endswith("]]")]
         payload = {"topic": "Bounded topic", "verdicts": [
@@ -109,12 +130,15 @@ def test_judge_batches_every_member_and_requires_complete_responses(monkeypatch)
     monkeypatch.setattr(llm, "call", fake_call)
     judge_candidate(candidate, [], pages)
 
-    assert len(calls) == 2
+    assert len(calls) == 3
+    assert "# Whole cluster" in calls[0]
+    assert all("# Fixed synthesis topic\nBounded topic" in prompt for prompt in calls[1:])
     assert candidate.judged is True
-    assert candidate.judge_batches == 2
+    assert candidate.judge_batches == 3
+    assert candidate.judge_topic == "Bounded topic"
     assert {v.key for v in candidate.member_verdicts} == set(members)
-    assert candidate.judge_input_tokens == 20
-    assert candidate.judge_output_tokens == 40
+    assert candidate.judge_input_tokens == 30
+    assert candidate.judge_output_tokens == 60
 
 
 def test_judge_rejects_a_truncated_batch_instead_of_filtering_members(monkeypatch):
@@ -154,3 +178,11 @@ def test_synthesis_cli_defaults_to_local_preview(monkeypatch, capsys):
     assert cli.main([]) == 0
     assert seen["judge"] is False
     assert "No actionable synthesis candidates" in capsys.readouterr().out
+
+
+def test_synthesis_cli_returns_two_when_semantic_index_is_missing(monkeypatch, capsys):
+    from researchwiki.tasks import _synthesis_candidates as cli
+
+    monkeypatch.setattr(cli, "find_candidates", lambda **_: ([], {"error": "missing"}))
+    assert cli.main([]) == 2
+    assert "error: missing" in capsys.readouterr().err

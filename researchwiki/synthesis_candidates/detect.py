@@ -279,6 +279,15 @@ def _check_synthesis_coverage(
     "extend" verdict). Returns (None, 0.0, set()) if no synthesis exists.
     """
     cluster_set = set(cluster)
+    # Claim citations deliberately use the durable bare-stem form
+    # ``[[stem#claim_slug]]``, while detector clusters use ``category/stem``
+    # page keys. Canonicalize references against this cluster before taking
+    # the intersection; otherwise a synthesis made entirely of claim-level
+    # citations appears to cover none of its papers.
+    cluster_keys_by_stem: dict[str, set[str]] = {}
+    for key in cluster_set:
+        cluster_keys_by_stem.setdefault(key.rsplit("/", 1)[-1], set()).add(key)
+
     best_key, best_cov, best_refs = None, 0.0, set()
     for s in syntheses:
         refs = _parse_referenced_papers(s.body)
@@ -286,9 +295,15 @@ def _check_synthesis_coverage(
         # frontmatter read only for older pages created before that field was
         # removed, so migration does not suddenly surface duplicate proposals.
         refs |= _fm_referenced_papers(s.fm.get("referenced_papers"))
-        cov = _coverage(cluster_set, refs)
+        canonical_refs: set[str] = set()
+        for ref in refs:
+            if "/" in ref:
+                canonical_refs.add(ref)
+            else:
+                canonical_refs.update(cluster_keys_by_stem.get(ref, set()))
+        cov = _coverage(cluster_set, canonical_refs)
         if cov > best_cov:
-            best_key, best_cov, best_refs = s.key, cov, refs
+            best_key, best_cov, best_refs = s.key, cov, canonical_refs
     return best_key, best_cov, best_refs
 
 
