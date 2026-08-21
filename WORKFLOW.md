@@ -756,6 +756,34 @@ correctly by its own definition. A tier that proposes pages because there is an
 *argument* therefore needs its own verdict vocabulary, evaluated in a lower
 cosine band — not more calls to this one.
 
+### Decided not to build: a tension-hunting tier
+
+There is no fifth tier that proposes a page because two papers *argue*, and this
+is a decision rather than a gap.
+
+The contradiction judge finds errors at roughly 1 in 900 (above). Softening the
+target to "these two papers pull in opposite directions" raises the rate to about
+1 in 15 — measured by hand-classifying the top 60 cross-category pairs, zero
+tokens. But the four survivors were then read and rejected: in none of them did
+one paper say the other was wrong. They leaned different ways and both were true.
+Two of the four dissolved entirely once the scope was checked — one paper supplied
+exactly the evidence the other had called for, and another compared different
+methods for a different purpose. Three of the four near-misses turned out to be
+papers *agreeing*, with their critical remarks aimed at some third method neither
+of them used.
+
+Genuine disagreement between papers is simply rare. A tier built to find it would
+spend a judge call per pair to surface mostly shared vocabulary and polite
+non-overlap, and the reviewer would carry the cost of telling those apart. The
+existing tiers propose pages from what the corpus *has* — recurring terms and
+shared rare vocabulary — which is abundant. That is the right thing to lean on.
+
+If this is ever revisited, the two leads worth keeping are that critique lives in
+`limitations` sections while the thing critiqued lives in contribution sections
+(no tier pairs those two directions), and that the relation being sought is not
+`contradicts` at all. Neither changes the rarity finding, which is the reason not
+to.
+
 ---
 
 ## Maintaining the wiki

@@ -203,6 +203,24 @@ the reasoning behind any line below.
 
 ### Changed
 
+- **Dropped the planned tension-hunting discovery tier.** The last open item in
+  the discovery workstream was a generator that proposes a page because two papers
+  argue with each other. Measured before building: the existing contradiction judge
+  confirms real errors at ~1 in 900, and softening the target to "papers pulling in
+  opposite directions" reaches ~1 in 15 across the top 60 cross-category pairs
+  (hand-classified, zero tokens). All four survivors were then rejected on
+  inspection — none had one paper saying the other was wrong, two dissolved once
+  scope was checked (one paper supplied the very evidence the other asked for), and
+  three of the near-misses were papers *agreeing* while criticizing some third
+  method neither used.
+
+  Genuine inter-paper disagreement is rare, so the tier would spend a judge call
+  per pair to surface mostly shared vocabulary, with the reviewer absorbing the
+  cost of separating them. The reasoning is recorded in WORKFLOW.md under
+  *Bottom-up discovery → Decided not to build*, including the two leads worth
+  keeping if it is ever revisited, so the question is closed rather than merely
+  unfinished.
+
 - **`candidates concepts` counts membership over contribution sections only.**
   It advertised `direction of effect` as "4 paper pages, 3 categories —
   concept-ready (bridge)"; the scaffolder then found 2 and refused it. Both read
