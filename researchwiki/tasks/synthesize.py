@@ -330,7 +330,7 @@ def main(argv: list[str]) -> int:
     commit_page(out)
     if missing:
         log(f"wrote {out}  ⚠ {len(missing)}/{len(args.papers)} paper(s) missing "
-            f"from referenced_papers (see WARN above)", tag="synthesize")
+            f"from the requested --papers list (see WARN above)", tag="synthesize")
     else:
         log(f"wrote {out}  ({len(resolved)}/{len(args.papers)} paper(s) resolved)",
             tag="synthesize")

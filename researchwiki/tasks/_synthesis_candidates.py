@@ -19,7 +19,10 @@ synthesis page covers.
 ❌ Don't use: as a substitute for human curation — many clusters will be
    topical noise. The point is to surface candidates, not to author syntheses.
 
-Exit code: 0 always (2 if the semantic index isn't built).
+The structural scan is local by default. ``--judge`` opts into configured-model
+calls; ``--write-proposals`` persists the review artifacts under `.ingest/`.
+
+Exit codes: 0 = completed (including no candidates); 2 = semantic index absent.
 """
 
 from __future__ import annotations
@@ -66,15 +69,23 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--extend-threshold", type=float, default=DEFAULT_EXTEND,
                         help=f"Synthesis-overlap above which the verdict is 'extend' rather than "
                              f"'new' (default: {DEFAULT_EXTEND}). Below this → 'new'.")
-    parser.add_argument("--no-judge", dest="no_judge", action="store_true",
-                        help="Skip the LLM editorial-scoping pass. With --no-judge, "
-                             "proposals carry only the structural signals; with judging on (default), "
-                             "each proposed member gets an in_scope / tangential / out_of_scope verdict.")
+    judge_group = parser.add_mutually_exclusive_group()
+    judge_group.add_argument("--judge", action="store_true",
+                             help="Run the configured-model editorial-scoping pass. "
+                                  "Without it the scan is local and structural only.")
+    judge_group.add_argument("--no-judge", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--write-proposals", action="store_true",
+                        help="Write proposal markdown to .ingest/synthesis-candidates/. "
+                             "Without it the command is a non-mutating preview.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print candidates but don't write proposal files.")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Emit a JSON object instead of the prose report.")
     args = parser.parse_args(argv)
+    if args.dry_run and args.write_proposals:
+        parser.error("--dry-run and --write-proposals cannot be combined")
+    if args.as_json and args.write_proposals:
+        parser.error("--json is a report; omit --write-proposals or run the prose mode")
 
     t0 = time.time()
     candidates, stats = find_candidates(
@@ -82,7 +93,7 @@ def main(argv: list[str]) -> int:
         edge_threshold=args.threshold,
         covered_threshold=args.covered_threshold,
         extend_threshold=args.extend_threshold,
-        judge=not args.no_judge,
+        judge=args.judge,
     )
     dt = time.time() - t0
 
@@ -109,6 +120,7 @@ def main(argv: list[str]) -> int:
                     "nearest_synthesis": c.nearest_synthesis,
                     "nearest_synthesis_overlap": round(c.nearest_synthesis_overlap, 2),
                     "judged": c.judged,
+                    "judge_batches": c.judge_batches,
                     "judge_topic": c.judge_topic,
                     "member_verdicts": [
                         {"key": v.key, "verdict": v.verdict, "rationale": v.rationale}
@@ -128,10 +140,11 @@ def main(argv: list[str]) -> int:
     print(f"  already covered:     {stats['n_already_covered']}")
     print(f"  → 'extend' verdicts: {stats.get('n_extend', 0)}")
     print(f"  → 'new' verdicts:    {stats.get('n_new', 0)}")
-    if stats.get("n_judged"):
+    if stats.get("n_judge_batches", 0):
         in_tok = stats.get("judge_input_tokens", 0)
         out_tok = stats.get("judge_output_tokens", 0)
-        print(f"  judged (B4.5):       {stats['n_judged']}  "
+        print(f"  judge (B4.5):         {stats.get('n_judged', 0)} complete, "
+              f"{stats['n_judge_batches']} batch(es) "
               f"(~{in_tok//1000}K in / ~{out_tok//1000}K out)")
     print()
 
@@ -171,8 +184,8 @@ def main(argv: list[str]) -> int:
         print(f"  common keywords: {', '.join(c.common_keywords[:10]) or '(none)'}")
         print()
 
-    if args.dry_run:
-        print("(dry run — no files written. Re-run without --dry-run to commit.)")
+    if not args.write_proposals:
+        print("(preview — no files written. Re-run with --write-proposals to persist review artifacts.)")
         return 0
 
     out_dir = ingest_dir() / "synthesis-candidates"

@@ -1,6 +1,6 @@
 """Tests for the zero-token claim-pair discovery tier.
 
-Behaviour contract: `--discover` ranks cross-paper claim pairs inside a cosine
+Behaviour contract: `candidates pairs` ranks cross-paper claim pairs inside a cosine
 *band* by IDF-weighted shared-term mass, and judges/writes nothing. It exists
 because lowering the auto-link threshold does not work — at cosine 0.70, 80% of
 all possible paper pairs qualify, and the relation that motivated the module
@@ -122,6 +122,14 @@ def test_citations_use_the_durable_slug_anchor_form():
     p = _pair()
     assert p.citation_a() == "[[a-2020-x#kc-1111aaaa]]"
     assert p.citation_b() == "[[b-2021-y#res-2222bbbb]]"
+
+
+def test_review_command_preserves_both_exact_claim_anchors():
+    p = _pair()
+    assert p.review_command() == (
+        "researchwiki claim-overlap --pair "
+        "'a-2020-x#kc-1111aaaa' 'b-2021-y#res-2222bbbb'"
+    )
 
 
 # ---------- blocked upper-triangle scan ----------

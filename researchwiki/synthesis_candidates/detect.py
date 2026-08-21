@@ -105,6 +105,7 @@ class Candidate:
     judge_topic: str = ""           # for "new": LLM-proposed topic title
     judge_input_tokens: int = 0
     judge_output_tokens: int = 0
+    judge_batches: int = 0           # attempted LLM calls (including an incomplete run)
     judged: bool = False
 
     @property
@@ -130,9 +131,12 @@ def _paper_keywords(p: Page) -> set[str]:
 
 
 def _parse_referenced_papers(body: str) -> set[str]:
-    """Extract wikilink targets from a synthesis page's `referenced_papers:`
-    YAML list section. Tolerates the various YAML list shapes Obsidian
-    accepts (block-style with `-` or inline with `[]`)."""
+    """Extract paper wikilinks from a synthesis page body.
+
+    Synthesis pages cite through inline links and ``## References`` footnotes,
+    not a ``referenced_papers:`` frontmatter registry. The historical helper
+    name remains for callers, but the body is the authoritative source.
+    """
     keys: set[str] = set()
     for m in WIKILINK_RE.finditer(body):
         keys.add(m.group(1).strip())
@@ -257,7 +261,7 @@ def _build_edges(
 
 
 def _coverage(cluster: set[str], synthesis_refs: set[str]) -> float:
-    """Fraction of cluster members covered by a synthesis's referenced_papers."""
+    """Fraction of cluster members cited by a synthesis page."""
     if not cluster:
         return 0.0
     return len(cluster & synthesis_refs) / len(cluster)
@@ -278,8 +282,9 @@ def _check_synthesis_coverage(
     best_key, best_cov, best_refs = None, 0.0, set()
     for s in syntheses:
         refs = _parse_referenced_papers(s.body)
-        # Synthesis frontmatter often has `referenced_papers:` YAML; the body
-        # also wikilinks to members. Use both as a coverage signal.
+        # The body is authoritative for synthesis citations. Retain the
+        # frontmatter read only for older pages created before that field was
+        # removed, so migration does not suddenly surface duplicate proposals.
         refs |= _fm_referenced_papers(s.fm.get("referenced_papers"))
         cov = _coverage(cluster_set, refs)
         if cov > best_cov:
@@ -320,7 +325,7 @@ def find_candidates(
     edge_threshold: float = EDGE_THRESHOLD,
     covered_threshold: float = DEFAULT_COVERED,
     extend_threshold: float = DEFAULT_EXTEND,
-    judge: bool = True,
+    judge: bool = False,
 ) -> tuple[list[Candidate], dict]:
     """Top-level entry point.
 
@@ -367,8 +372,8 @@ def find_candidates(
         else:
             n_new += 1
 
-        # For "extend", which cluster members are NOT yet in the nearest
-        # synthesis's referenced_papers? That's the diff the user needs.
+        # For "extend", which cluster members are NOT yet cited by the nearest
+        # synthesis? That's the diff the user needs.
         missing = sorted(set(cluster) - nearest_refs) if verdict == "extend" else []
 
         cluster_edges = [e for e in edges
@@ -411,6 +416,7 @@ def find_candidates(
         "n_new": n_new,
         "n_candidates": len(candidates),
         "n_judged": sum(1 for c in candidates if c.judged),
+        "n_judge_batches": sum(c.judge_batches for c in candidates),
         "judge_input_tokens": sum(c.judge_input_tokens for c in candidates),
         "judge_output_tokens": sum(c.judge_output_tokens for c in candidates),
     }

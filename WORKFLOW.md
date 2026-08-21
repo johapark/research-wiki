@@ -654,20 +654,20 @@ wiki page didn't quote.
 ## Bottom-up discovery — when the wiki proposes the page
 
 Everything above is top-down: you ask, the wiki answers. This is the inverse —
-the corpus surfacing a cluster nobody went looking for. Four tiers, none of which
-writes prose, all of which are proposals a human accepts or declines.
+the corpus surfacing a cluster nobody went looking for. Four tiers propose work
+for a human to accept or decline; none edits authored wiki prose automatically.
 
 | Tier | Command | Cost | What it ranks |
 |---|---|---|---|
 | Concept hubs | `candidates concepts [--bridges]` | local, sub-second | recurring terms in ≥3 papers' contribution claims with no hub yet |
 | Claim pairs | `candidates pairs [--cross-category]` | local, sub-second | cross-paper claim pairs *below* the auto-link threshold |
-| Paper clusters | `candidates synthesis` | local | dense clusters no synthesis page covers |
+| Paper clusters | `candidates synthesis [--judge] [--write-proposals]` | local preview; configured-model calls only with `--judge` | dense clusters no synthesis page covers |
 | Typed relations | `claim-graph [--tensions]` | local (edges already judged) | how papers relate, not merely that they overlap |
 
 `status` auto-surfaces the first two once they cross a threshold (bridge terms;
 15 unreviewed cross-category pairs, 14-day decay). The third is noisier and is
-run deliberately. Accept a pair by running the judged path on it,
-`claim-overlap <stem>`; decline one permanently with
+run deliberately. Each pair row prints the judged exact-claim path,
+`claim-overlap --pair A#slug B#slug`; decline one permanently with
 `candidates pairs --decline A B --reason "…"`.
 
 ### Why the thresholds are what they are
@@ -1456,7 +1456,7 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `import <preflight\|inspect\|apply\|verify>` | Bulk-import a reference-manager library from its BibTeX/RIS/CSL-JSON export, which supplies each paper's DOI/title/authors/year instead of rediscovering them. Only `apply` spends tokens or writes pages; `<pdf-root>` is optional, and a metadata-only run still returns a fetch list of DOIs. Stage it with `--limit N`. See `prompts/import-reference-manager.md`. |
 | `export [--format bibtex\|ris\|csl-json]` | The inverse: emit the corpus as a bibliography for a reference manager or a manuscript. Zero tokens, no network, byte-identical across runs. Citekey is the page stem. Only page types describing someone else's publication are emitted — a synthesis page would assert a publication that does not exist. `--json` gives the report, which doubles as a page-defect to-do list. See `prompts/export-bibliography.md`. |
 | `synthesize --title [...] [--papers]` | Scaffold `wiki/synthesis/{slug}.md`. Idea/reference pages are manual. |
-| `candidates <concepts\|synthesis\|pairs>` | Surface opportunity signals: un-scaffolded concept hubs (concepts), uncovered paper clusters warranting a synthesis page (synthesis), or cross-paper claim pairs sitting below the auto-link threshold (pairs). All local, sub-second, zero tokens; nothing is written. `--decline A B --reason` suppresses a pair permanently. See *Bottom-up discovery* above. |
+| `candidates <concepts\|synthesis\|pairs>` | Surface opportunity signals: un-scaffolded concept hubs (concepts), uncovered paper clusters warranting a synthesis page (synthesis), or cross-paper claim pairs sitting below the auto-link threshold (pairs). Concepts/pairs are local; synthesis is a local preview unless `--judge` opts into configured-model scope checks, and writes artifacts only with `--write-proposals`. Each pair prints an exact `claim-overlap --pair` review command. `--decline A B --reason` suppresses a pair permanently. See *Bottom-up discovery* above. |
 | `reindex [--no-semantic]` | Rebuild Tantivy + semantic index from `wiki/`. |
 | `search "<query>" [--mode ...]` or `--like <stem>` | Hybrid retrieval (RRF over BM25 + semantic) by default. |
 | `status` | Dashboard: counts, density, orphans, backlog, index health, pending proposals, 7-day cost. |
@@ -1477,7 +1477,7 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `mcp-serve` | Read-only MCP server (search / claims / check-grounding) for Claude Desktop and IDE clients. |
 | `eval` | `classifier`: leave-one-out accuracy of the category auto-suggester (free). `triggers`: whether CLAUDE.md's prompt pointers fire (costs tokens). `eval-classifier` is a deprecated alias. |
 | `benchmark-fixture <stem> [--repeat N] [--llm]` | Score page authoring against a hand-curated `benchmark-fixtures/` fixture. `--repeat` keeps drafts in memory; for a single authored page use `agent ingest … --force-sandbox`, never a bare `agent ingest` (it would promote a fixture paper into your corpus). |
-| `claim-overlap <stem> [--sim N] [--top N] [--dry-run] [--json]` | Proactively cross-link a newly-ingested paper: finds existing papers with near-paraphrase claims, LLM-judges each as a real relationship vs coincidence, and auto-adds reciprocal Related-Papers `[[wikilinks]]` for confirmed matches. Run after `db rebuild`. |
+| `claim-overlap <stem> [--sim N] [--top N] [--dry-run] [--json]` | Proactively cross-link a newly-ingested paper: finds existing papers with near-paraphrase claims, LLM-judges each as a real relationship vs coincidence, and auto-adds reciprocal Related-Papers `[[wikilinks]]` for confirmed matches. `--pair A#slug B#slug` instead judges exactly one bottom-up discovery pair, bypassing threshold/top-k retrieval. Run after `db rebuild`. |
 | `db papers [--year/--category/--page-type/--no-doi/--venue/--author/--status] [--count] [--json]` | Structured lookups over the frontmatter mirror — counts/filters ("cgt papers from 2024", "papers missing a DOI") without re-reading markdown. `db query "SELECT…"` for ad-hoc read-only SQL. |
 | `remove <stem> [--apply] [--keep-pdf]` | Retract a paper: page, PDF, caches, back-link bullets, `index.md` entry, concept spokes and DB rows. Dry run by default, runs inside the mutation journal. Reports but never edits authored `[[stem#slug]]` citations on synthesis/idea/concept pages — that list is the to-do queue. See `prompts/remove-paper.md`. |
 | `visualize [--open] [--json]` | Self-contained interactive graph of the corpus to `output/graph.html` — `[[wikilinks]]` plus typed claim edges, `contradicts` drawn loud. Zero tokens, no network. Shows structure, not claims. |
@@ -1515,7 +1515,7 @@ so an Obsidian vault opened there can browse it).
 | Want to benchmark page authoring against a curated fixture | `researchwiki benchmark-fixture <stem>` |
 | Want the wiki to propose a page instead of answering one | `researchwiki candidates concepts --bridges`, then `candidates pairs --cross-category` (see *Bottom-up discovery*) |
 | `status` printed a bridge-term or claim-pair count | That line is the trigger — `researchwiki candidates <concepts --bridges\|pairs --cross-category>` |
-| Want to act on a proposed claim pair | `researchwiki claim-overlap <stem>` (the judged path); `candidates pairs --decline A B --reason "…"` to reject it for good |
+| Want to act on a proposed claim pair | Copy that row's `researchwiki claim-overlap --pair A#slug B#slug` command (the exact judged path); `candidates pairs --decline A B --reason "…"` to reject it for good |
 | Want to see which papers disagree | `researchwiki claim-graph --tensions`; `researchwiki visualize --open` to see whether tensions cluster on one paper |
 | Want to retract a paper | `researchwiki remove <stem>` (dry run), then `--apply` (see `prompts/remove-paper.md`) |
 | The evidence is in a figure, not the prose | `researchwiki figures <stem>` for captions; `--figure N` to render just that page |

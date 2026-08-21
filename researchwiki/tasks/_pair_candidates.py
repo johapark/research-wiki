@@ -132,6 +132,7 @@ def _report(args) -> int:
                     "category_a": p.category_a, "category_b": p.category_b,
                     "cross_category": p.cross_category,
                     "citation_a": p.citation_a(), "citation_b": p.citation_b(),
+                    "review_command": p.review_command(),
                     "cosine": round(p.cosine, 3), "idf_mass": round(p.idf_mass, 1),
                     "shared_terms": p.shared_terms,
                     "text_a": p.text_a, "text_b": p.text_b,
@@ -163,7 +164,7 @@ def _report(args) -> int:
         print(f"       {p.citation_b()}")
         print(f"          › {p.text_b[:104]}")
         print(f"       shared: {', '.join(p.shared_terms[:7])}")
+        print(f"       review: {p.review_command()}")
         print()
-    print("Unjudged. To act on one, run the judged path on either stem:")
-    print(f"    researchwiki claim-overlap {pairs[0].stem_a}")
+    print("Unjudged. Each review command judges exactly the displayed claim pair.")
     return 0

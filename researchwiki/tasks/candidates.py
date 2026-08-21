@@ -14,7 +14,8 @@ Three targets:
                                       [--decline TERM --reason TEXT]
                                       [--undecline TERM] [--list-declined]
                                       [--triage [--dry-run]]
-  researchwiki candidates synthesis  [--min-cluster N] [--threshold F] ...
+  researchwiki candidates synthesis  [--min-cluster N] [--threshold F] [--judge]
+                                      [--write-proposals] [--json]
   researchwiki candidates pairs      [--cross-category] [--limit N] [--json]
                                       [--decline A B --reason TEXT]
                                       [--undecline A B] [--list-declined]
@@ -40,24 +41,25 @@ against the same thesis test and auto-declines the noise verdicts (tagged
 recommends this once the bridge count crosses `TRIAGE_THRESHOLD`.
 
 **synthesis** — dense paper clusters (wikilinks + semantic cosine ≥ 0.65 +
-keyword Jaccard ≥ 0.2, connected components) not covered by any existing
+keyword Jaccard ≥ 0.2, Louvain communities) not covered by any existing
 synthesis page. Higher noise rate than concepts, so **not** auto-surfaced by
 `status` — the run cadence is user-initiated: after ≥5 ingests since the last
-run, or when a cross-paper question lands in unfamiliar territory. LLM-judged
-by default (--no-judge to skip); ~30s + a few Anthropic calls per run.
+run, or when a cross-paper question lands in unfamiliar territory. The default
+is a local, non-mutating structural preview; `--judge` opts into configured-model
+scope verdicts and `--write-proposals` persists review artifacts.
 
 **pairs** — cross-paper claim pairs sitting *below* `claim-overlap`'s auto-link
 threshold, ranked by shared rare-term mass inside a cosine band. Local,
 sub-second, no LLM. Lowering `claim-overlap --sim` is not the alternative: at
 0.70, 80% of all possible paper pairs qualify. `--cross-category` narrows to the
-pairs no other structure in the wiki connects. Act on one with `researchwiki
-claim-overlap <stem>`, which judges it on the normal path.
+pair candidates that no other structure in the wiki connects. Each row prints an exact
+`researchwiki claim-overlap --pair A#slug B#slug` command, which judges those
+two claims without re-running the >=0.83 stem-wide path.
 
-Exit code: 0 always. All three targets are read-only opportunity signals; the
-only output that mutates state is the synthesis-target's proposal files under
-`.ingest/synthesis-candidates/` (skipped with --dry-run), the concepts target's
-`.concept-declines.json` (touched by --decline/--undecline, and by --triage
-unless --dry-run), and the pairs target's `.pair-dismissals.json`.
+Exit code: concepts/pairs return 0 for advisory results; synthesis returns 2
+when its semantic index is absent. Concepts can update `.concept-declines.json`
+and pairs can update `.pair-dismissals.json`; synthesis writes `.ingest/`
+proposal artifacts only with `--write-proposals`.
 """
 
 from __future__ import annotations

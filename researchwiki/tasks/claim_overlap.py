@@ -19,6 +19,7 @@ forbids as a linking basis (see the cross-link corollary in CLAUDE.md).
 Usage:
   researchwiki claim-overlap <stem>              # judge + auto-apply
   researchwiki claim-overlap <stem> --dry-run    # show candidates + verdicts, write nothing
+  researchwiki claim-overlap --pair A#slug B#slug # judge these exact claims
   researchwiki claim-overlap <stem> --json
 
 Exit codes: 0 = ran (including "no candidates"); 1 = unknown stem; 2 = env
@@ -89,6 +90,54 @@ _JUDGE_SCHEMA = {
         "verdict": {
             "type": "string",
             "enum": ["corroborates", "measures_same", "refines", "builds_on", "none"],
+        },
+        "rationale": {"type": "string"},
+    },
+}
+
+# The normal overlap path is directional because it has a newly-ingested paper
+# on one side.  Bottom-up discovery hands us two existing claims in arbitrary
+# row order, so its exact-pair path needs the judge to state direction rather
+# than silently treating the first stem as "new".
+_PAIR_JUDGE_SYSTEM = """\
+You classify the relation between two research-paper claims for a research wiki.
+
+Claim A and Claim B were selected by a human from a discovery queue. Judge only
+the quoted claims; do not infer a relationship from their titles or fields.
+
+Pick ONE verdict:
+  corroborates    Independent papers affirming the same finding.
+  measures_same   Same quantity or benchmark under different conditions.
+  refines         One claim narrows, conditions, or qualifies the other.
+  builds_on       One claim extends or reuses the other.
+  none            They are not a source-supported relationship.
+
+Set direction to:
+  symmetric for corroborates or measures_same;
+  a_to_b / b_to_a for refines or builds_on, where the arrow points from the
+  refining/building claim to the claim it refines/builds on;
+  none for verdict none.
+
+Be conservative. A Related Papers link needs a real source-supported relation,
+not topical adjacency.
+
+Output strict JSON:
+{"verdict": "corroborates" | "measures_same" | "refines" | "builds_on" | "none",
+ "direction": "symmetric" | "a_to_b" | "b_to_a" | "none",
+ "rationale": "one short sentence"}.
+"""
+
+_PAIR_JUDGE_SCHEMA = {
+    "type": "object",
+    "required": ["verdict", "direction", "rationale"],
+    "properties": {
+        "verdict": {
+            "type": "string",
+            "enum": ["corroborates", "measures_same", "refines", "builds_on", "none"],
+        },
+        "direction": {
+            "type": "string",
+            "enum": ["symmetric", "a_to_b", "b_to_a", "none"],
         },
         "rationale": {"type": "string"},
     },
@@ -191,6 +240,181 @@ def _default_judge(prompt: str) -> dict | None:
     return run_llm_judge(
         phase="claim_overlap_judge", system=_JUDGE_SYSTEM, prompt=prompt, schema=_JUDGE_SCHEMA,
     )
+
+
+def _parse_claim_ref(raw: str) -> tuple[str, str]:
+    """Parse ``stem#claim_slug`` or ``[[category/stem#claim_slug]]``.
+
+    Category prefixes are optional because the durable citation form emitted by
+    ``claims`` and ``candidates pairs`` is ``[[stem#slug]]``.  Exact review is
+    deliberately claim-addressed: a paper-level pair would reintroduce the
+    threshold/top-k ambiguity that the discovery queue was built to avoid.
+    """
+    text = raw.strip()
+    if text.startswith("[[") and text.endswith("]]"):
+        text = text[2:-2].split("|", 1)[0].strip()
+    if "#" not in text:
+        raise ValueError(f"claim reference needs #claim_slug: {raw!r}")
+    stem, slug = (part.strip() for part in text.rsplit("#", 1))
+    stem = stem.rsplit("/", 1)[-1]
+    if not stem or not slug:
+        raise ValueError(f"invalid claim reference: {raw!r}")
+    return stem, slug
+
+
+def _exact_claim(ref: str, conn) -> dict:
+    """Resolve a durable claim reference to one current paper-claim row."""
+    stem, slug = _parse_claim_ref(ref)
+    row = conn.execute(
+        "SELECT c.paper_stem, c.claim_slug, c.section, c.position, c.text, p.category "
+        "  FROM claims c JOIN papers p ON p.stem = c.paper_stem "
+        " WHERE c.paper_stem = ? AND c.claim_slug = ? "
+        "   AND c.is_cross_ref = 0 AND p.page_type = 'paper'",
+        (stem, slug),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"no graded paper claim matches {ref!r}")
+    return dict(row)
+
+
+def _exact_pair_cosine(claim_a: dict, claim_b: dict) -> float:
+    """Best-effort cached cosine for the edge record.
+
+    The human selected the pair, so a cache miss must not prevent judging it.
+    Do *not* call ``get_claim_embeddings`` here: that writer rewrites the
+    cache to the supplied row set and an exact two-claim review would evict the
+    corpus-wide cache that discovery relies on. ``0.0`` means unavailable, not
+    unrelated.
+    """
+    try:
+        from ..index.claim_embeddings import load_cached_claim_embeddings
+        loaded = load_cached_claim_embeddings([claim_a, claim_b])
+        if loaded is not None:
+            vecs, indices = loaded
+            if indices == [0, 1] and len(vecs) == 2:
+                return round(float(vecs[0] @ vecs[1]), 4)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _format_exact_pair_prompt(claim_a: dict, claim_b: dict, cosine: float) -> str:
+    return (
+        f"Claim A — paper [[{claim_a['paper_stem']}]] "
+        f"({claim_a['section']}#{claim_a['position']}):\n"
+        f"  {claim_a['text']}\n\n"
+        f"Claim B — paper [[{claim_b['paper_stem']}]] "
+        f"({claim_b['section']}#{claim_b['position']}):\n"
+        f"  {claim_b['text']}\n\n"
+        f"(embedding cosine {cosine:.4f}; selection was by the discovery queue)\n\n"
+        "Output JSON only."
+    )
+
+
+def _default_pair_judge(prompt: str) -> dict | None:
+    from ..agents.judge import run_llm_judge
+    return run_llm_judge(
+        phase="claim_overlap_judge", system=_PAIR_JUDGE_SYSTEM,
+        prompt=prompt, schema=_PAIR_JUDGE_SCHEMA,
+    )
+
+
+def review_pair(
+    ref_a: str,
+    ref_b: str,
+    *,
+    dry_run: bool = False,
+    judge_fn: Callable[[str], dict | None] | None = None,
+    conn=None,
+) -> dict:
+    """Judge the two exact claims emitted by ``candidates pairs``.
+
+    Unlike :func:`run`, this path does no threshold retrieval and cannot be
+    diverted to a higher-cosine paper.  It is intentionally not recorded in
+    ``claim_overlap_runs``: that ledger means a stem-wide >=threshold scan was
+    completed, which this one-pair review does not establish.
+    """
+    close_conn = False
+    if conn is None:
+        conn = _default_conn()
+        close_conn = True
+    try:
+        claim_a = _exact_claim(ref_a, conn)
+        claim_b = _exact_claim(ref_b, conn)
+    finally:
+        if close_conn:
+            conn.close()
+
+    if claim_a["paper_stem"] == claim_b["paper_stem"]:
+        raise ValueError("exact review needs claims from two different papers")
+
+    pages = {p.stem: p for p in read_pages()}
+    page_a = pages.get(claim_a["paper_stem"])
+    page_b = pages.get(claim_b["paper_stem"])
+    if page_a is None or page_b is None:
+        raise ValueError("one or both claim papers are absent from wiki/")
+
+    key_a, key_b = page_a.key, page_b.key
+    body_a = page_a.path.read_text(encoding="utf-8") if page_a.path.exists() else ""
+    body_b = page_b.path.read_text(encoding="utf-8") if page_b.path.exists() else ""
+    cosine = _exact_pair_cosine(claim_a, claim_b)
+    result = {
+        "pair": [f"[[{claim_a['paper_stem']}#{claim_a['claim_slug']}]]",
+                 f"[[{claim_b['paper_stem']}#{claim_b['claim_slug']}]]"],
+        "cosine": cosine,
+        "applied": [], "edge_only": [], "coincidence": [],
+        "skipped": [], "judge_failed": [], "dry_run": dry_run,
+    }
+
+    if f"[[{key_b}" in body_a or f"[[{key_a}" in body_b:
+        result["skipped"].append({"existing": key_b, "reason": "already-linked", "cosine": cosine})
+        return result
+
+    verdict = (judge_fn or _default_pair_judge)(
+        _format_exact_pair_prompt(claim_a, claim_b, cosine)
+    )
+    if verdict is None:
+        result["judge_failed"].append({"existing": key_b, "cosine": cosine})
+        return result
+
+    value = (verdict.get("verdict") or "").strip()
+    direction = (verdict.get("direction") or "").strip()
+    rationale = (verdict.get("rationale") or "").strip()
+    expected_directions = {
+        "corroborates": {"symmetric"},
+        "measures_same": {"symmetric"},
+        "refines": {"a_to_b", "b_to_a"},
+        "builds_on": {"a_to_b", "b_to_a"},
+        "none": {"none"},
+    }
+    if value not in expected_directions or direction not in expected_directions[value]:
+        result["judge_failed"].append({"existing": key_b, "cosine": cosine,
+                                       "reason": "invalid verdict/direction"})
+        return result
+    if value == "none":
+        result["coincidence"].append({"existing": key_b, "cosine": cosine,
+                                      "rationale": rationale, "verdict": value})
+        return result
+
+    relation = _relation_from_verdict(value)
+    record = {"existing": key_b, "cosine": cosine, "rationale": rationale,
+              "relation": relation, "direction": direction}
+    if not dry_run and relation is not None:
+        src_claim, dst_claim = claim_a, claim_b
+        if direction == "b_to_a":
+            src_claim, dst_claim = claim_b, claim_a
+        _persist_typed_edge(
+            src_claim["paper_stem"], src_claim,
+            dst_claim["paper_stem"], dst_claim,
+            relation, rationale, cosine,
+        )
+        if value in _CROSS_LINK_VERDICTS:
+            record["wrote"] = {
+                "a_page": append_related_paper(page_a.path, key_b, note=_NOTE),
+                "b_page": append_related_paper(page_b.path, key_a, note=_NOTE),
+            }
+    (result["applied"] if value in _CROSS_LINK_VERDICTS else result["edge_only"]).append(record)
+    return result
 
 
 def claims_from_page(stem: str, page_path) -> list[dict]:
@@ -648,6 +872,9 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("stem", nargs="?",
                         help="Stem of the newly-ingested paper (e.g. smith-2024-...).")
+    parser.add_argument("--pair", nargs=2, metavar=("CLAIM_A", "CLAIM_B"),
+                        help="Judge exactly these claim references (stem#claim_slug or "
+                             "[[category/stem#claim_slug]]); bypasses threshold retrieval.")
     parser.add_argument("--backlog", action="store_true",
                         help="Process every stem claim-overlap has not covered yet.")
     parser.add_argument("--mark-covered", action="store_true",
@@ -660,6 +887,33 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Show verdicts, write no links.")
     parser.add_argument("--json", action="store_true", help="Emit the decisions as JSON.")
     args = parser.parse_args(argv)
+
+    if args.pair:
+        if args.stem or args.backlog or args.mark_covered:
+            parser.error("--pair does not combine with a stem, --backlog, or --mark-covered")
+        try:
+            result = review_pair(*args.pair, dry_run=args.dry_run)
+        except ValueError as e:
+            print(f"researchwiki claim-overlap --pair: {e}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if result["applied"]:
+            record = result["applied"][0]
+            verb = "would link" if args.dry_run else "linked"
+            print(f"  ✓ {verb} exact pair (cos {record['cosine']}) — {record['rationale']}")
+        elif result["edge_only"]:
+            record = result["edge_only"][0]
+            print(f"  ~ exact pair recorded as {record['relation']} edge only "
+                  f"(cos {record['cosine']}) — {record['rationale']}")
+        elif result["coincidence"]:
+            print("  · exact pair judged unrelated; no link written.")
+        elif result["skipped"]:
+            print("  – exact pair already linked; no judge call made.")
+        elif result["judge_failed"]:
+            print("  ⚠ exact-pair judge returned no valid verdict; no link written.")
+        return 0
 
     if args.mark_covered:
         if args.stem or args.backlog:

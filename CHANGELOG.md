@@ -22,6 +22,27 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- **Bottom-up discovery proposals now lead to an executable, bounded review
+  path.** `candidates pairs` ranked exact claim pairs in the 0.72–0.83 band,
+  then told the user to run `claim-overlap <stem>` — a separate ≥0.83, top-10
+  retrieval path that could not inspect the selected pair. Each row now emits
+  `claim-overlap --pair A#slug B#slug`; that path resolves and judges precisely
+  those two durable claim anchors, records directed/symmetric relations, and
+  never evicts the corpus claim-embedding cache while retrieving its confidence.
+
+  Synthesis candidates no longer generate commands with unsupported `--type` /
+  `--category` flags, an invalid `category: synthesis`, or a dangling final
+  shell continuation. The generated command preserves `category/stem` members,
+  supplies a topic seed, and lets `synthesize` infer the content category.
+  Existing-synthesis proposals now instruct authors to add body citations and
+  footnotes, not the retired `referenced_papers:` field.
+
+  The synthesis judge is now batched at 16 members and validates one verdict
+  per requested member. A truncated, duplicate, or malformed response remains
+  visibly unjudged rather than silently dropping members from the scaffold.
+  Structural synthesis discovery is local and non-mutating by default; `--judge`
+  and `--write-proposals` make model calls and `.ingest/` artifacts explicit.
+
 - **Two library modules were advertised as CLI commands and crashed when run.**
   `_discover_tasks` registers every non-underscore module under
   `researchwiki.tasks` — by name, without importing — so `claim_discover.py`

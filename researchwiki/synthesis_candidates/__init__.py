@@ -2,8 +2,8 @@
 
 The public entry point is `find_candidates` — it builds a weighted paper–paper
 graph (wikilinks + semantic cosine + keyword Jaccard), runs Louvain clustering,
-checks each cluster against existing syntheses' `referenced_papers:`, and
-optionally invokes an LLM judge to score per-member scope-fit. Callers get
+checks each cluster against citations in existing synthesis bodies, and
+optionally invokes a configured-model judge to score per-member scope-fit. Callers get
 back a list of `Candidate` proposals + a stats dict.
 
 The CLI wrapper lives at `researchwiki.tasks._synthesis_candidates` (hidden

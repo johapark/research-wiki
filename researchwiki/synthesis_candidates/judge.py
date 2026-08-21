@@ -26,6 +26,13 @@ from .detect import Candidate, MemberVerdict
 
 VALID_VERDICTS = {"in_scope", "tangential", "out_of_scope"}
 
+# The configured synthesis judge currently has a 1,500-token output cap. A
+# verdict record includes a long wiki key plus a rationale, so sixteen members
+# leaves room for valid JSON without making the model silently truncate the
+# tail. Keep batching here rather than relying on a provider-specific context
+# limit: this module is also used with local and Anthropic-compatible configs.
+MAX_MEMBERS_PER_JUDGE = 16
+
 
 # JSON Schema for the synthesis-judge envelope. Covers both the extend judge
 # (no `topic` field expected) and the new judge (adds `topic`). `topic` is
@@ -184,16 +191,43 @@ def _parse_judgment_response(text: str) -> dict | None:
         return None
 
 
+def _validated_verdicts(parsed: dict, expected_keys: list[str]) -> list[MemberVerdict] | None:
+    """Return a complete, one-to-one verdict set or ``None``.
+
+    A syntactically valid prefix is not a judgment of a cluster. Without this
+    validation a truncated model response set ``judged=True`` and the proposal
+    renderer silently dropped the unmentioned members from its scaffold command.
+    """
+    raw_verdicts = parsed.get("verdicts") or []
+    expected = set(expected_keys)
+    if not isinstance(raw_verdicts, list) or len(raw_verdicts) != len(expected):
+        return None
+    out: list[MemberVerdict] = []
+    seen: set[str] = set()
+    for v in raw_verdicts:
+        if not isinstance(v, dict):
+            return None
+        key = (v.get("key") or "").strip()
+        verdict = (v.get("verdict") or "").strip().lower()
+        if key not in expected or key in seen or verdict not in VALID_VERDICTS:
+            return None
+        seen.add(key)
+        rationale = (v.get("rationale") or "").strip()[:300]
+        out.append(MemberVerdict(key=key, verdict=verdict, rationale=rationale))
+    return out if seen == expected else None
+
+
 def judge_candidate(
     c: Candidate,
     syntheses: list[Page],
     paper_pages: list[Page],
 ) -> None:
-    """One LLM call to judge a candidate's members. Mutates `c` in place.
+    """Batch-judge every proposed member, or leave the candidate unjudged.
 
-    Skipped silently when the LLM module isn't importable (e.g., in stub
-    test harnesses) — c.judged stays False and downstream rendering
-    treats the candidate as un-judged.
+    Each successful batch must cover its requested keys exactly once. Any call
+    failure, malformed response, or truncation leaves ``c.judged`` false; the
+    structural candidate remains useful, but no partial subset is treated as a
+    reviewed recommendation.
     """
     try:
         from ..agents import llm
@@ -204,12 +238,15 @@ def judge_candidate(
     members_to_judge = (
         c.members_missing_from_nearest if c.verdict == "extend" else c.members
     )
-    member_blurbs: list[str] = []
+    member_pairs: list[tuple[str, str]] = []
     for k in members_to_judge:
         p = by_key.get(k)
         if p is not None:
-            member_blurbs.append(_build_member_blurb(p))
-    if not member_blurbs:
+            member_pairs.append((k, _build_member_blurb(p)))
+    if not member_pairs:
+        return
+    if len(member_pairs) != len(members_to_judge):
+        log(f"cannot judge {c.slug}: a proposed member page is missing", tag="judge")
         return
 
     if c.verdict == "extend":
@@ -220,44 +257,64 @@ def judge_candidate(
                 target_body = s.body
                 target_title = s.fm.get("title", target_title)
                 break
-        prompt = _build_extend_judge_prompt(target_title, target_body, member_blurbs)
         system = _EXTEND_JUDGE_SYSTEM
     else:
-        prompt = _build_new_judge_prompt(c, member_blurbs)
         system = _NEW_JUDGE_SYSTEM
 
-    try:
-        resp = llm.call(
-            phase="synthesis_judge",
-            prompt=prompt,
-            system=system,
-            schema=_JUDGMENT_SCHEMA,
-        )
-    except Exception as e:
-        log(f"LLM call failed for {c.slug}: {e}", tag="judge")
-        return
+    all_verdicts: list[MemberVerdict] = []
+    input_tokens = output_tokens = 0
+    topics: list[str] = []
+    batches = [member_pairs[i:i + MAX_MEMBERS_PER_JUDGE]
+               for i in range(0, len(member_pairs), MAX_MEMBERS_PER_JUDGE)]
+    for batch_no, batch in enumerate(batches, 1):
+        keys = [key for key, _ in batch]
+        blurbs = [blurb for _, blurb in batch]
+        if c.verdict == "extend":
+            prompt = _build_extend_judge_prompt(target_title, target_body, blurbs)
+        else:
+            prompt = _build_new_judge_prompt(c, blurbs)
+        if len(batches) > 1:
+            prompt += (f"\n\nThis is batch {batch_no} of {len(batches)}. "
+                       "Return verdicts for this batch only.")
+        try:
+            c.judge_batches += 1
+            resp = llm.call(
+                phase="synthesis_judge",
+                prompt=prompt,
+                system=system,
+                schema=_JUDGMENT_SCHEMA,
+            )
+        except Exception as e:
+            log(f"LLM call failed for {c.slug} batch {batch_no}/{len(batches)}: {e}",
+                tag="judge")
+            c.judge_input_tokens = input_tokens
+            c.judge_output_tokens = output_tokens
+            return
+        input_tokens += resp.input_tokens
+        output_tokens += resp.output_tokens
+        parsed = _parse_judgment_response(resp.text)
+        if parsed is None:
+            log(f"could not parse JSON for {c.slug} batch {batch_no}/{len(batches)}",
+                tag="judge")
+            c.judge_input_tokens = input_tokens
+            c.judge_output_tokens = output_tokens
+            return
+        verdicts = _validated_verdicts(parsed, keys)
+        if verdicts is None:
+            log(f"incomplete verdict set for {c.slug} batch {batch_no}/{len(batches)}",
+                tag="judge")
+            c.judge_input_tokens = input_tokens
+            c.judge_output_tokens = output_tokens
+            return
+        all_verdicts.extend(verdicts)
+        if c.verdict == "new":
+            topic = (parsed.get("topic") or "").strip()[:120]
+            if topic:
+                topics.append(topic)
 
-    parsed = _parse_judgment_response(resp.text)
-    if parsed is None:
-        log(f"could not parse JSON for {c.slug}", tag="judge")
-        return
-
-    raw_verdicts = parsed.get("verdicts") or []
-    member_keys = set(members_to_judge)
-    out: list[MemberVerdict] = []
-    for v in raw_verdicts:
-        if not isinstance(v, dict):
-            continue
-        key = (v.get("key") or "").strip()
-        verdict = (v.get("verdict") or "").strip().lower()
-        rationale = (v.get("rationale") or "").strip()[:300]
-        if key not in member_keys or verdict not in VALID_VERDICTS:
-            continue
-        out.append(MemberVerdict(key=key, verdict=verdict, rationale=rationale))
-
-    c.member_verdicts = out
-    if c.verdict == "new":
-        c.judge_topic = (parsed.get("topic") or "").strip()[:120]
-    c.judge_input_tokens = resp.input_tokens
-    c.judge_output_tokens = resp.output_tokens
+    c.member_verdicts = all_verdicts
+    if c.verdict == "new" and topics:
+        c.judge_topic = topics[0]
+    c.judge_input_tokens = input_tokens
+    c.judge_output_tokens = output_tokens
     c.judged = True

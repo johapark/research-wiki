@@ -15,6 +15,8 @@ The rendered proposal is the artifact a human reviews. Two shapes:
 
 from __future__ import annotations
 
+import shlex
+
 from .detect import Candidate, DEFAULT_EXTEND
 
 
@@ -163,18 +165,22 @@ def _render_new_body(c: Candidate, lines: list[str]) -> None:
     if not accept_members:
         accept_members = c.members  # judge rejected everything; let human decide
 
+    quoted_title = shlex.quote(accept_title)
     lines.extend([
         f"1. Confirm the topic title (LLM proposed: *{accept_title}*).",
         "2. Run:",
         "",
         "   ```",
-        f"   researchwiki synthesize --type synthesis --title \"{accept_title}\" \\",
-        "       --category synthesis \\",
+        "   researchwiki synthesize \\",
+        f"       --title {quoted_title} \\",
+        f"       --topic-seed {quoted_title} \\",
         "       --papers \\",
     ])
-    for k in accept_members:
-        stem = k.split("/", 1)[-1]
-        lines.append(f"           {stem} \\")
+    for i, key in enumerate(accept_members):
+        # Keep the category prefix. It disambiguates duplicate stems and lets
+        # `synthesize` infer the correct content category from the members.
+        continuation = " \\" if i < len(accept_members) - 1 else ""
+        lines.append(f"           {shlex.quote(key)}{continuation}")
     lines.append("   ```")
     lines.append("")
     lines.append("3. Edit the scaffolded synthesis page; reference each member "
@@ -258,7 +264,8 @@ def _render_extend_body(c: Candidate, lines: list[str]) -> None:
         "",
         f"Open `wiki/{c.nearest_synthesis}.md`. For *in_scope* missing members, "
         f"add an entry under the appropriate section with a one-line relationship "
-        f"description, and add the wikilink to the YAML `referenced_papers:` list. "
+        f"description, cite it in the body, and add a matching footnote under "
+        f"`## References` when the page uses footnotes. "
         f"For *tangential* members, add a bullet to the *Tensions* / *Open questions* "
         f"section instead. Skip *out_of_scope* members. Update the page's "
         f"`generated_at:` field once done.",

@@ -33,8 +33,9 @@ subject. This is the hybrid the framework already trusts in `search` (BM25 fused
 with semantic), applied to claim pairs instead of queries.
 
 **Nothing here judges, writes, or costs tokens.** The output is a ranked review
-queue. A pair worth acting on is confirmed by running `claim-overlap <stem>` on
-it, which routes through the existing judged path unchanged.
+queue. A pair worth acting on prints an exact `claim-overlap --pair
+A#slug B#slug` command, which judges those two claims rather than re-running the
+unrelated >=0.83 stem-wide retrieval path.
 """
 
 from __future__ import annotations
@@ -118,6 +119,19 @@ class DiscoveredPair:
 
     def citation_b(self) -> str:
         return f"[[{self.stem_b}#{self.slug_b}]]"
+
+    def review_command(self) -> str:
+        """Exact-pair handoff to the LLM judge.
+
+        Discovery ranks one *claim* pair per paper pair.  Sending only one
+        paper stem to ``claim-overlap`` would re-run that command's unrelated
+        >=0.83/top-10 retrieval path, and could never inspect this below-
+        threshold pair.  Keep the durable claim anchors in the handoff.
+        """
+        return (
+            "researchwiki claim-overlap --pair "
+            f"'{self.stem_a}#{self.slug_a}' '{self.stem_b}#{self.slug_b}'"
+        )
 
 
 def _tokens(text: str) -> set[str]:

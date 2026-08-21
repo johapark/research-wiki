@@ -215,6 +215,66 @@ def test_judge_failure_is_distinct_from_coincidence(wiki_and_db):
     assert "[[ai/old-2020-y]]" not in (tmp_path / "wiki/ai/new-2026-x.md").read_text()
 
 
+def test_exact_pair_reviews_the_selected_below_threshold_claims(wiki_and_db, monkeypatch):
+    """Bottom-up discovery must not fall back to the >=0.83/top-10 scan."""
+    tmp_path, conn = wiki_and_db
+    conn.execute("UPDATE claims SET claim_slug = ? WHERE paper_stem = ?",
+                 ("res-new", "new-2026-x"))
+    conn.execute("UPDATE claims SET claim_slug = ? WHERE paper_stem = ?",
+                 ("res-old", "old-2020-y"))
+    conn.commit()
+    monkeypatch.setattr(cmd, "_exact_pair_cosine", lambda *_: 0.743)
+    prompts = []
+
+    def judge(prompt):
+        prompts.append(prompt)
+        return {"verdict": "builds_on", "direction": "a_to_b",
+                "rationale": "The first claim extends the second."}
+
+    res = cmd.review_pair("new-2026-x#res-new", "old-2020-y#res-old",
+                          dry_run=True, judge_fn=judge, conn=conn)
+    assert len(prompts) == 1
+    assert "Claim A — paper [[new-2026-x]]" in prompts[0]
+    assert "Claim B — paper [[old-2020-y]]" in prompts[0]
+    assert "embedding cosine 0.7430" in prompts[0]
+    assert res["applied"][0]["relation"] == "builds_on"
+    assert res["applied"][0]["direction"] == "a_to_b"
+    assert "[[ai/old-2020-y]]" not in (tmp_path / "wiki/ai/new-2026-x.md").read_text()
+
+
+def test_exact_pair_rejects_invalid_direction_without_writing(wiki_and_db, monkeypatch):
+    tmp_path, conn = wiki_and_db
+    conn.execute("UPDATE claims SET claim_slug = ? WHERE paper_stem = ?",
+                 ("res-new", "new-2026-x"))
+    conn.execute("UPDATE claims SET claim_slug = ? WHERE paper_stem = ?",
+                 ("res-old", "old-2020-y"))
+    conn.commit()
+    monkeypatch.setattr(cmd, "_exact_pair_cosine", lambda *_: 0.743)
+    res = cmd.review_pair(
+        "[[ai/new-2026-x#res-new]]", "[[ai/old-2020-y#res-old]]",
+        judge_fn=lambda _: {"verdict": "builds_on", "direction": "symmetric",
+                            "rationale": "invalid"},
+        conn=conn,
+    )
+    assert len(res["judge_failed"]) == 1
+    assert "[[ai/old-2020-y]]" not in (tmp_path / "wiki/ai/new-2026-x.md").read_text()
+
+
+def test_exact_pair_cli_routes_to_exact_review_without_a_stem(monkeypatch, capsys):
+    seen = {}
+
+    def fake_review(a, b, *, dry_run=False):
+        seen.update(a=a, b=b, dry_run=dry_run)
+        return {"applied": [{"cosine": 0.743, "rationale": "extends"}],
+                "edge_only": [], "coincidence": [], "skipped": [],
+                "judge_failed": []}
+
+    monkeypatch.setattr(cmd, "review_pair", fake_review)
+    assert cmd.main(["--pair", "a#kc-1", "b#res-2", "--dry-run"]) == 0
+    assert seen == {"a": "a#kc-1", "b": "b#res-2", "dry_run": True}
+    assert "would link exact pair" in capsys.readouterr().out
+
+
 # --- typed verdicts + claim-graph edge emission ---------------------------------
 
 
