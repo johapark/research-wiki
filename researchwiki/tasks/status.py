@@ -25,8 +25,7 @@ from ..paths import (
     wiki_dir, wiki_root,
 )
 from ..agents import model_config as _mc
-from ..wiki import read_pages
-from .lint.pdf_checks import find_orphan_pdfs
+from ..wiki import find_orphan_pdfs, read_pages
 
 
 # Model pricing moved to `config/pricing.yaml`, read via `agents.model_config`.
@@ -424,8 +423,10 @@ def main(argv: list[str]) -> int:
     # defect — `remove --keep-pdf` produces it deliberately, and it is the same
     # shape as an `inbox/` file (a PDF sitting somewhere, awaiting an action).
     # `lint --json` keeps the full stem list; here it is a count, matching how
-    # the claim-overlap backlog is split between the two commands.
-    orphan_pdfs = find_orphan_pdfs([pg.path for pg in wiki_pages])
+    # the claim-overlap backlog is split between the two commands. Walks the
+    # tree itself rather than reusing `wiki_pages`, which drops any file with no
+    # `---` fence — that page's PDF is not orphaned, and `lint` would disagree.
+    orphan_pdfs = find_orphan_pdfs()
 
     all_pages = []
     for p in papers:

@@ -16,7 +16,7 @@ from typing import Any
 
 import yaml
 
-from .paths import wiki_dir
+from .paths import papers_dir, wiki_dir
 
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -129,6 +129,44 @@ def read_pages(exclude_synthesis: bool = False) -> list[Page]:
         if p is not None:
             out.append(p)
     return out
+
+
+def find_orphan_pdfs() -> list[str]:
+    """PDF stems in `papers/` with no `wiki/**/{stem}.md`. Sorted.
+
+    `papers/` holds one canonically-named PDF per page, and the stem is the join
+    key — `db rebuild` derives `papers/{stem}.pdf` from it. So a PDF whose stem
+    matches no page is a file nothing in the wiki can reach: not searchable, not
+    citable, not in `index.md`, and invisible to every other check, all of which
+    start from the page corpus and walk outwards. `researchwiki remove` deletes
+    page and PDF together, but a page deleted by hand strands the PDF silently.
+
+    **Not always a defect.** `remove --keep-pdf` produces this state on purpose,
+    so the paper can be re-ingested clean. Two exits: `agent ingest
+    papers/{stem}.pdf`, or delete the file.
+
+    Takes no arguments and walks `wiki_dir()` itself, rather than accepting the
+    caller's page list. Its two consumers had disagreed: `lint` walks every
+    `*.md`, while `status` holds `read_pages()`, which drops any file with no
+    `---` frontmatter fence — so a hand-written page missing its fence would
+    have had its PDF reported as orphaned by one and not the other. Walking
+    here makes them the same answer by construction. It also keeps `status` off
+    the `lint` package, whose `__init__` costs ~20 ms to import for one
+    predicate.
+
+    Non-recursive glob on purpose: `papers/{stem}.supp/*.pdf` is supplementary
+    material, which belongs to its parent page and is `find_supplementary_issues`'
+    business. A recursive walk would report every one of those here as well.
+    """
+    pdir = papers_dir()
+    if not pdir.is_dir():
+        return []
+    root = wiki_dir()
+    page_stems = {md.stem for md in root.rglob("*.md")} if root.is_dir() else set()
+    return sorted(
+        pdf.stem for pdf in pdir.glob("*.pdf")
+        if pdf.is_file() and pdf.stem not in page_stems
+    )
 
 
 def strip_non_prose(text: str) -> str:

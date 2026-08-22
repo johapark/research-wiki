@@ -15,7 +15,10 @@ from ...paths import index_path, wiki_dir
 from ...wiki import strip_non_prose
 from .walk import broken_links, extract_links, page_key
 
-# A bullet line in `index.md`: `- [[category/stem]] — **Name** (*Venue* y): hook.`
+# Any markdown bullet. `index.md`'s catalogue entries are all of the form
+# `- [[category/stem]] — **Name** (*Venue* y): hook.`, but matching the bullet
+# marker alone keeps a hand-edited variant in scope rather than silently
+# skipping it.
 _INDEX_BULLET_RE = re.compile(r"^\s*[-*]\s+")
 
 

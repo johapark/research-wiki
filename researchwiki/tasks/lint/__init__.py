@@ -23,8 +23,10 @@ focused and individually testable:
                     stems_missing_claim_overlap, duplicate_claim_sets,
                     db_drift
   supplementary   — supp YAML ↔ disk consistency
-  pdf_checks      — orphan_pdfs (a PDF in papers/ with no page)
   report_deletions— prose for the two hand-deleted-page checks
+
+`orphan_pdfs` is the one check that does not live here: it is a corpus-level
+fact about `papers/` (`wiki.find_orphan_pdfs`), and `status` reports it too.
 
 The orchestrator below walks pages once, calls each check, then renders
 either the prose report or the JSON object. Public CLI signature
@@ -69,7 +71,6 @@ from .link_checks import (
     find_missing_backlinks,
     find_orphans,
 )
-from .pdf_checks import find_orphan_pdfs
 from .staleness import (
     find_stale_by_audit_count,
     find_stale_by_content,
@@ -77,6 +78,7 @@ from .staleness import (
     find_stale_synthesis,
 )
 from .supplementary import find_supplementary_issues
+from ...wiki import find_orphan_pdfs
 from .walk import all_pages, page_key
 from .yaml_checks import (
     find_category_drift,
@@ -173,7 +175,7 @@ def main(argv: list[str]) -> int:
     # and every other check starts from the page corpus, so a PDF whose page is
     # gone is reachable from nothing at all.
     broken_index_bullets = find_broken_index_bullets(known)
-    orphan_pdfs = find_orphan_pdfs(pages)
+    orphan_pdfs = find_orphan_pdfs()
     missing_back = find_missing_backlinks(out_links)
     none_placeholders = find_none_placeholders(pages_body)
 

@@ -27,7 +27,7 @@ from researchwiki.tasks.lint.link_checks import (
     find_missing_backlinks,
     find_orphans,
 )
-from researchwiki.tasks.lint.pdf_checks import find_orphan_pdfs
+from researchwiki.wiki import find_orphan_pdfs
 from researchwiki.tasks.lint.staleness import (
     find_stale_by_audit_count,
     find_stale_synthesis,
@@ -588,43 +588,60 @@ def test_no_index_file_is_not_an_error(tmp_wiki, tmp_index):
 # ---------- orphan PDFs ----------
 
 @pytest.fixture
-def tmp_papers(tmp_path, monkeypatch):
+def tmp_papers(tmp_wiki, tmp_path, monkeypatch):
+    """`find_orphan_pdfs` walks both trees itself, so both bindings are patched.
+
+    `tmp_wiki` patches `wiki_dir` for `paths` and `lint.walk`; `researchwiki.wiki`
+    holds its own module-level binding, which is the one this function reads.
+    """
     papers = tmp_path / "papers"
     papers.mkdir()
-    monkeypatch.setattr("researchwiki.tasks.lint.pdf_checks.papers_dir", lambda: papers)
+    monkeypatch.setattr("researchwiki.wiki.papers_dir", lambda: papers)
+    monkeypatch.setattr("researchwiki.wiki.wiki_dir", lambda: tmp_wiki)
     return papers
 
 
 def test_a_pdf_with_no_page_is_reported(tmp_wiki, tmp_papers):
-    page = _mkpage(tmp_wiki, "cgt/foo-2024-bar")
+    _mkpage(tmp_wiki, "cgt/foo-2024-bar")
     (tmp_papers / "foo-2024-bar.pdf").write_bytes(b"%PDF-1.4\n")
     (tmp_papers / "gone-2023-deleted-by-hand.pdf").write_bytes(b"%PDF-1.4\n")
-    assert find_orphan_pdfs([page]) == ["gone-2023-deleted-by-hand"]
+    assert find_orphan_pdfs() == ["gone-2023-deleted-by-hand"]
 
 
 def test_supplementary_pdfs_are_not_orphans(tmp_wiki, tmp_papers):
     """They belong to their parent page and are `find_supplementary_issues`'
     business; a recursive walk would report every one of them here."""
-    page = _mkpage(tmp_wiki, "cgt/foo-2024-bar")
+    _mkpage(tmp_wiki, "cgt/foo-2024-bar")
     (tmp_papers / "foo-2024-bar.pdf").write_bytes(b"%PDF-1.4\n")
     supp = tmp_papers / "foo-2024-bar.supp"
     supp.mkdir()
     (supp / "supplementary-tables.pdf").write_bytes(b"%PDF-1.4\n")
-    assert find_orphan_pdfs([page]) == []
+    assert find_orphan_pdfs() == []
 
 
 def test_a_page_in_any_category_claims_its_pdf(tmp_wiki, tmp_papers):
     """The join key is the stem, not the path — a reference doc under
     `references/` claims `papers/{stem}.pdf` exactly as a paper page does."""
-    page = _mkpage(tmp_wiki, "references/fda-2026-a-guidance-about-things")
+    _mkpage(tmp_wiki, "references/fda-2026-a-guidance-about-things")
     (tmp_papers / "fda-2026-a-guidance-about-things.pdf").write_bytes(b"%PDF-1.4\n")
-    assert find_orphan_pdfs([page]) == []
+    assert find_orphan_pdfs() == []
 
 
-def test_no_papers_dir_is_not_an_error(tmp_wiki, tmp_path, monkeypatch):
-    monkeypatch.setattr("researchwiki.tasks.lint.pdf_checks.papers_dir",
+def test_no_papers_dir_is_not_an_error(tmp_papers, tmp_path, monkeypatch):
+    monkeypatch.setattr("researchwiki.wiki.papers_dir",
                         lambda: tmp_path / "nonexistent")
-    assert find_orphan_pdfs([]) == []
+    assert find_orphan_pdfs() == []
+
+
+def test_a_page_with_no_frontmatter_fence_still_claims_its_pdf(tmp_wiki, tmp_papers):
+    """Regression: `status` used to pass `read_pages()`, which returns None for
+    a file with no leading `---` fence and drops it. That page's PDF is not
+    orphaned — and `lint`, which walks every `*.md`, disagreed. The function now
+    walks the tree itself so both callers get the same answer."""
+    (tmp_wiki / "cgt").mkdir(parents=True, exist_ok=True)
+    (tmp_wiki / "cgt" / "foo-2024-bar.md").write_text("# Hand-written, no YAML\n")
+    (tmp_papers / "foo-2024-bar.pdf").write_bytes(b"%PDF-1.4\n")
+    assert find_orphan_pdfs() == []
 
 
 def test_status_reports_orphan_pdfs_in_workflow_state(tmp_path, monkeypatch, capsys):

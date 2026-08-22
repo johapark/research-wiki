@@ -44,7 +44,12 @@ the reasoning behind any line below.
   what a human actually reads. `lint --json` keeps the full stem list for
   agents, the same split `stems_missing_claim_overlap` uses.
   `broken_index_bullets` stays lint-only: a wikilink that does not resolve is
-  a defect in every case, with no legitimate state that produces one.
+  a defect in every case, with no legitimate state that produces one. Because
+  `status` is a first-class consumer, `find_orphan_pdfs` lives in `wiki.py` and
+  walks the tree itself rather than taking the caller's page list — the two
+  callers had disagreed (`lint` walks every `*.md`; `status` holds
+  `read_pages()`, which drops a file with no `---` fence), and it keeps
+  `status` off the ~20 ms `lint` package import for one predicate.
 
 ### Fixed
 

@@ -426,13 +426,11 @@ def test_keep_pdf_lands_the_stem_in_lint_orphan_pdfs(wiki):
     page, and `lint`'s `orphan_pdfs` is where it then shows up as a re-ingest
     queue. Pinned end-to-end because the two features only make sense together
     — before the check existed the kept PDF was simply forgotten."""
-    from researchwiki.tasks.lint.pdf_checks import find_orphan_pdfs
+    from researchwiki.wiki import find_orphan_pdfs
 
-    pages = sorted((wiki / "wiki").rglob("*.md"))
-    assert find_orphan_pdfs(pages) == []
+    assert find_orphan_pdfs() == []
 
     removal.apply(removal.scan(STEM), keep_pdf=True)
 
-    pages = sorted((wiki / "wiki").rglob("*.md"))
     assert (wiki / "papers" / f"{STEM}.pdf").exists()
-    assert find_orphan_pdfs(pages) == [STEM]
+    assert find_orphan_pdfs() == [STEM]
