@@ -20,6 +20,29 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- **Four release invariants that the v0.4.2 cut violated unnoticed.** The
+  existing checks verify that a version has *a* changelog section and *a* link
+  reference — never what is inside the section or where the link points, which
+  is where both defects sat. `[Unreleased]` had grown a second `### Added`
+  block (an entry inserted at the top of the section instead of merged into the
+  block already there, leaving it Added -> Fixed -> Added -> Changed) and would
+  have shipped that way; its compare link still read `v0.4.0...HEAD` a full
+  release after 0.4.1, so every "unreleased" diff a reader followed silently
+  included a shipped release. `tests/test_version.py` now pins one block per
+  type per section, Keep a Changelog's heading order, `[Unreleased]` comparing
+  against the latest release, and each release comparing against its
+  predecessor (the oldest exempt — it links to its tag).
+
+### Fixed
+
+- **Two historical changelog sections were out of Keep a Changelog order**,
+  found by the new test rather than by reading: `[0.2.1]` ran Added -> Fixed ->
+  Changed, and `[0.2.0]` put `Removed` after `Fixed`. Reordered in place — pure
+  block movement, all 130 entries preserved, no prose touched. The GitHub
+  release notes for those tags were extracted at tag time and are unaffected.
+
 ## [0.4.2] - 2026-08-21
 
 ### Added
@@ -1467,6 +1490,24 @@ the reasoning behind any line below.
   unchanged; neither field feeds the op_id hash, because op_id is the cache key
   and folding identity into it would invalidate responses already on disk.
 
+### Changed
+
+- The ingest log's `pdf_claims=N` counter is gone, along with the
+  `extract ⚠ zero PDF-side claims extracted` warning it drove. It counted lines
+  starting with `-`/`*` in the PDF's Methods/Results — markdown bullets, in typeset
+  prose, which essentially never appear: it read 0 for 6 of 8 papers in one session,
+  and the sole nonzero reading was two samtools/pbmm2 command-line flags
+  (`--secondary=no -s 25000 -K 15G`) mistaken for claims. Nothing consumed it
+  (`ctx.claims_count` was assigned and never read), so its only effect was a warning
+  that fired on nearly every ingest and implied the drift check had been weakened
+  when that check reads the full PDF text and was never affected. The warning now
+  fires from the `target_claims` phase, which actually extracts PDF-side claims
+  (18–35 on those same papers). `extract_sections()` returns
+  `(sections, full_text)`; `ctx.claims_count` is removed.
+- CI installs the `mcp` extra, so the MCP server's tests actually run. They had
+  been `importorskip`-ing on every CI run — which is how the breakage above stayed
+  invisible.
+
 ### Fixed
 
 - `researchwiki init --scaffold-only` now creates `wiki/index.md`. It created every
@@ -1556,24 +1597,6 @@ the reasoning behind any line below.
   server couldn't import. Capped to `<2`; the port to the 2.x server API is
   separate work.
 
-### Changed
-
-- The ingest log's `pdf_claims=N` counter is gone, along with the
-  `extract ⚠ zero PDF-side claims extracted` warning it drove. It counted lines
-  starting with `-`/`*` in the PDF's Methods/Results — markdown bullets, in typeset
-  prose, which essentially never appear: it read 0 for 6 of 8 papers in one session,
-  and the sole nonzero reading was two samtools/pbmm2 command-line flags
-  (`--secondary=no -s 25000 -K 15G`) mistaken for claims. Nothing consumed it
-  (`ctx.claims_count` was assigned and never read), so its only effect was a warning
-  that fired on nearly every ingest and implied the drift check had been weakened
-  when that check reads the full PDF text and was never affected. The warning now
-  fires from the `target_claims` phase, which actually extracts PDF-side claims
-  (18–35 on those same papers). `extract_sections()` returns
-  `(sections, full_text)`; `ctx.claims_count` is removed.
-- CI installs the `mcp` extra, so the MCP server's tests actually run. They had
-  been `importorskip`-ing on every CI run — which is how the breakage above stayed
-  invisible.
-
 ## [0.2.0] - 2026-08-07
 
 ### Added
@@ -1620,6 +1643,11 @@ the reasoning behind any line below.
 - Docs consolidated — `docs/` removed, its one file folded into
   `prompts/concept-page-author.md`.
 
+### Removed
+
+- The unused `source_collection` frontmatter field.
+- `gpt-5.4-mini` from model routing.
+
 ### Fixed
 
 - **Cross-link integrity**: back-links no longer assert citations that were never
@@ -1643,11 +1671,6 @@ the reasoning behind any line below.
 - Year is no longer taken from Semantic Scholar when its record is the preprint's.
 - Test-suite hygiene: the suite no longer writes to the real `state.db`, and passes from
   any working directory.
-
-### Removed
-
-- The unused `source_collection` frontmatter field.
-- `gpt-5.4-mini` from model routing.
 
 ## [0.1.0] - 2026-07-18
 

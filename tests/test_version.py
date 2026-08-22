@@ -224,3 +224,99 @@ def test_current_version_section_extracts_cleanly():
     body = module.section_body(CHANGELOG.read_text("utf-8"), researchwiki.__version__)
     assert body
     assert "]: https://" not in body
+
+
+# --- section structure and compare links ----------------------------------
+#
+# Both invariants below were violated in the v0.4.2 range and neither was
+# caught: the checks above verify that a version has *a* section and *a* link
+# reference, never what is inside the section or where the link points.
+#
+# What went wrong. `[Unreleased]` grew a second `### Added` block — a new entry
+# was inserted at the top of the section instead of merged into the existing
+# one — leaving it Added -> Fixed -> Added -> Changed, and it would have shipped
+# that way. Separately, `[Unreleased]`'s compare link still read `v0.4.0...HEAD`
+# one whole release after 0.4.1 shipped, so every "unreleased" diff a reader
+# followed included all of 0.4.1.
+
+# Keep a Changelog's canonical order. `Deprecated` and `Security` are unused
+# here so far; listed because the order is the spec's, not this repo's.
+_KAC_ORDER = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"]
+
+_SECTION_HEADING = re.compile(r"^## \[([^\]]+)\]", re.MULTILINE)
+_TYPE_HEADING = re.compile(r"^### (.+?)\s*$", re.MULTILINE)
+_LINK_REF = re.compile(r"^\[([^\]]+)\]: (\S+)\s*$", re.MULTILINE)
+
+
+def _sections() -> list[tuple[str, str]]:
+    """(label, body) per `## [label]` section. Body stops at the next heading,
+    and the last one stops at the link-reference block so it can't absorb it."""
+    text = CHANGELOG.read_text("utf-8")
+    marks = list(_SECTION_HEADING.finditer(text))
+    assert marks, "CHANGELOG.md has no `## [version]` sections"
+    out = []
+    for i, m in enumerate(marks):
+        end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
+        body = text[m.end():end]
+        cut = _LINK_REF.search(body)
+        out.append((m.group(1), body[:cut.start()] if cut else body))
+    return out
+
+
+def _link_refs() -> dict[str, str]:
+    return dict(_LINK_REF.findall(CHANGELOG.read_text("utf-8")))
+
+
+def test_no_section_repeats_a_type_heading():
+    """One `### Added` per release, not two. A duplicate means an entry was
+    appended at the top of the section rather than merged into the block that
+    was already there — which reads as two unrelated lists of additions."""
+    for label, body in _sections():
+        types = _TYPE_HEADING.findall(body)
+        dupes = [t for t in set(types) if types.count(t) > 1]
+        assert not dupes, (
+            f"CHANGELOG.md section [{label}] repeats {dupes}: {types}. "
+            f"Merge the blocks — one per type per release."
+        )
+
+
+def test_type_headings_follow_keep_a_changelog_order():
+    for label, body in _sections():
+        types = _TYPE_HEADING.findall(body)
+        unknown = [t for t in types if t not in _KAC_ORDER]
+        assert not unknown, (
+            f"CHANGELOG.md section [{label}] has non-standard heading(s) "
+            f"{unknown}; Keep a Changelog defines {_KAC_ORDER}"
+        )
+        ranks = [_KAC_ORDER.index(t) for t in types]
+        assert ranks == sorted(ranks), (
+            f"CHANGELOG.md section [{label}] orders its headings {types}; "
+            f"expected Keep a Changelog order {_KAC_ORDER}"
+        )
+
+
+def test_unreleased_compares_against_the_latest_release():
+    """The one link that goes stale on its own: promoting a section renames the
+    heading but leaves this pointing at the release *before* the one just cut,
+    so every unreleased diff silently includes a shipped release."""
+    latest = max(_released_versions(), key=_sort_key)
+    assert _link_refs()["Unreleased"].endswith(f"/compare/v{latest}...HEAD"), (
+        f"[Unreleased] should compare v{latest}...HEAD, "
+        f"got {_link_refs()['Unreleased']}"
+    )
+
+
+def test_each_release_compares_against_its_predecessor():
+    """Same defect one row down: a compare link spanning the wrong pair shows a
+    reader the wrong diff. The oldest release is exempt — it has no predecessor
+    and links to its tag instead."""
+    refs = _link_refs()
+    ordered = sorted(_released_versions(), key=_sort_key)
+    for prev, version in zip(ordered, ordered[1:]):
+        assert refs[version].endswith(f"/compare/v{prev}...v{version}"), (
+            f"[{version}] should compare v{prev}...v{version}, got {refs[version]}"
+        )
+    assert refs[ordered[0]].endswith(f"/releases/tag/v{ordered[0]}"), (
+        f"the oldest release [{ordered[0]}] should link to its tag, "
+        f"got {refs[ordered[0]]}"
+    )
