@@ -11,8 +11,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ...paths import wiki_dir
+from ...paths import index_path, wiki_dir
+from ...wiki import strip_non_prose
 from .walk import broken_links, extract_links, page_key
+
+# A bullet line in `index.md`: `- [[category/stem]] — **Name** (*Venue* y): hook.`
+_INDEX_BULLET_RE = re.compile(r"^\s*[-*]\s+")
 
 
 def build_link_graph(
@@ -62,6 +66,49 @@ def build_link_graph(
         if bad and "/" in key:
             broken.append((key, bad))
     return out_links, in_links, broken
+
+
+def find_broken_index_bullets(known: set[str]) -> list[dict]:
+    """Bullets in `index.md` whose wikilinks no longer resolve.
+
+    `build_link_graph` deliberately excludes root meta pages from the
+    broken-link scan: `log.md` accumulates historical entries with template
+    fragments (`[[stem]]`, `[[category/…]]`) that were never real links, so its
+    "broken" links are permanent noise. Correct for `log.md` — but it took
+    `index.md` down with it, and `index.md` is the opposite kind of page. Every
+    line in it is a generated catalogue entry pointing at a page that is
+    supposed to exist, so a link that stops resolving is always a defect.
+
+    The failure this exists for: a page deleted by hand leaves its `index.md`
+    bullet behind, and no other check sees it. `db rebuild` drops the row and
+    `broken_wikilinks` reports the citing *pages*, but the catalogue entry is
+    invisible to both, so the wiki keeps advertising a page that is gone.
+    (`researchwiki remove` strips the bullet itself, so a removal never lands
+    here.)
+
+    Scoped to `index.md` and to bullet lines. Prose in the file — a section
+    heading, an intro paragraph — is hand-written and out of scope; `views.md`
+    is Dataview query syntax, not links. Reported, never auto-fixed: the same
+    bullet is produced by a deleted page and by a page temporarily moved
+    mid-recategorize, and only one of those wants the line gone.
+
+    Each line goes through `strip_non_prose` first, the same guard
+    `build_link_graph` applies. A hook may quote link *syntax* in backticks
+    while describing the wiki's own machinery — the first run of this check
+    flagged `` `[[stem#slug]]` `` inside the supervision-and-correction idea's
+    hook, which is documentation, not a link.
+    """
+    idx = index_path()
+    if not idx.exists():
+        return []
+    out: list[dict] = []
+    for i, line in enumerate(idx.read_text(encoding="utf-8").splitlines(), start=1):
+        if not _INDEX_BULLET_RE.match(line):
+            continue
+        bad = broken_links(strip_non_prose(line), known)
+        if bad:
+            out.append({"line": i, "targets": sorted(set(bad))})
+    return out
 
 
 def find_orphans(

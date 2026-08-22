@@ -20,7 +20,51 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- **`lint` reports the two things a hand-deleted page strands.** Deleting
+  `wiki/{cat}/{stem}.md` by hand (an `rm`, an Obsidian delete, a `git`
+  operation) left two traces that no check could see, so they were never
+  cleaned up: the `index.md` bullet, invisible because `build_link_graph`
+  excludes root meta pages from `broken_wikilinks` — correct for `log.md`,
+  whose historical entries carry template fragments like `[[stem]]` that were
+  never links, but it took `index.md` down with it — and the PDF in `papers/`,
+  invisible because every other check starts from the page corpus and walks
+  outwards, so a file no page claims is reachable from nothing. Two new
+  `--json` keys, `broken_index_bullets` (`[{line, targets}]`, `index.md` and
+  bullet lines only, `strip_non_prose`d so a hook quoting `` `[[stem#slug]]` ``
+  in backticks isn't a false positive) and `orphan_pdfs` (a list of stems;
+  `papers/*.supp/*.pdf` excluded, since supplementary material belongs to its
+  parent page). Neither is auto-fixed: an `orphan_pdfs` entry is the intended
+  state right after `remove --keep-pdf`, where it doubles as the re-ingest
+  queue, and a stale bullet looks the same mid-recategorize as after a
+  deletion. `orphan_pdfs` is additionally a `status` line under *Workflow
+  state*, beside the `inbox/` and `.ingest/` counters — that block is where
+  "a file is sitting somewhere awaiting an action" already lives, and it is
+  what a human actually reads. `lint --json` keeps the full stem list for
+  agents, the same split `stems_missing_claim_overlap` uses.
+  `broken_index_bullets` stays lint-only: a wikilink that does not resolve is
+  a defect in every case, with no legitimate state that produces one.
+
 ### Fixed
+
+- **`remove` is documented and tested for every page type, not just papers.**
+  `scan` has always resolved its target by filename stem with no branch on
+  `type:`, so a synthesis, idea, concept or reference page was removable — but
+  the command's docstring, its `--help` (*"Paper stem (basename of
+  papers/{stem}.pdf)"*) and every test in `tests/test_remove.py` used a paper as
+  the target, so the behaviour was incidental rather than contracted and a
+  refactor adding a `type: paper` guard would have passed green. Six tests now
+  pin it (synthesis target, concept hub with reciprocal back-links, reference
+  doc with its PDF, `index.md`/`log.md` never targetable), and the docs state
+  the asymmetry the code has always had: `AUTHORED_TYPES` protects *citing*
+  pages, never the target, so `remove <synthesis-slug> --apply` deletes
+  twice-gated prose with only the dry run as a guard.
+- **The removal summary reports the `index.md` bullet.** The plan printed
+  `index.md      1 bullet` and the result line then counted files, back-links,
+  DB rows and claim edges — never the bullet — leaving the reader unable to
+  confirm the one thing the plan had promised. `RemovalResult.index_bullet_removed`
+  was already tracked; it is now printed and written to the `log.md` entry.
 
 - **Bottom-up discovery proposals now lead to an executable, bounded review
   path.** `candidates pairs` ranked exact claim pairs in the 0.72–0.83 band,
