@@ -20,6 +20,8 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-21
+
 ### Added
 
 - **`lint` reports the two things a hand-deleted page strands.** Deleting
@@ -50,6 +52,88 @@ the reasoning behind any line below.
   callers had disagreed (`lint` walks every `*.md`; `status` holds
   `read_pages()`, which drops a file with no `---` fence), and it keeps
   `status` off the ~20 ms `lint` package import for one predicate.
+
+
+- **`WORKFLOW.md` gains *Bottom-up discovery — when the wiki proposes the page*.**
+  Documents the four proposal tiers and, more importantly, carries the calibration
+  evidence behind their thresholds: why literal member search fails hardest on
+  bridge terms, why the true/false membership margin of 0.003 forces
+  propose-never-decide, why lowering a cosine floor makes 80% of all paper pairs
+  "related" at 0.70, why IDF-weighted rare-term overlap beats cosine in the band
+  (cosine measures register, rare-term overlap measures subject), why semantic
+  proposals at ingest time would return nothing, and why ≥85% of the 0.85
+  contradiction pool is already judged at ~1-in-900.
+
+  These numbers previously existed only in a tracking doc that is being retired.
+  Two provenance facts are stated with them, because they are not all measured on
+  the same corpus: the 2026-08-19 figures come from a 117-paper / 3,027-claim
+  corpus on another machine, and the papers they cite — including the
+  `mixture-model` hub the whole workstream opened around — **are not in this
+  wiki**, so those cases are not reproducible here even though the mechanisms
+  transfer. The 2026-08-20 figures are this corpus. Test docstrings and the
+  module map now point here instead of at the retiring doc.
+
+- **`cross_paper_judgements` — the contradiction judge now records what it cleared.**
+  Its only trace was a `contradicts` edge, written for the two disagreement verdicts
+  alone, so `agree` and `different_topic` — the overwhelming majority — left nothing
+  behind. A re-run therefore re-paid for every pair it had already dismissed, and
+  "has this pool been judged?" had no answer; deciding whether the 0.85 pool was
+  worth a judged sweep had to be inferred from a pairs-per-paper distribution
+  because no record could answer it. Every verdict is now recorded, so a repeat run
+  judges only what the last one never reached (`lint --cross-paper-rejudge`
+  overrides). Keyed on the two claim slugs and nothing else: slugs are
+  content-addressed, so editing a claim gives it a new slug and its pairs stop
+  matching — self-invalidating on exactly the change that should invalidate it, the
+  same property `pair_dismissals` relies on.
+
+- **`lint --json` gains `cross_paper_stats`** — `null` unless `--cross-paper` ran,
+  then `{pool, judged, skipped_already_judged, disagreements, sim_threshold}`. `pool`
+  is filled before the `max_pairs` slice, which makes
+  `--cross-paper-max-pairs 0` a zero-cost way to size a sweep before paying for one.
+  Additive; no existing key renamed or removed. The prose report also prints a zero
+  section when the check ran and found nothing, because silence there was
+  indistinguishable from never having run — the ambiguity the new table exists to
+  remove.
+
+### Changed
+
+- **Dropped the planned tension-hunting discovery tier.** The last open item in
+  the discovery workstream was a generator that proposes a page because two papers
+  argue with each other. Measured before building: the existing contradiction judge
+  confirms real errors at ~1 in 900, and softening the target to "papers pulling in
+  opposite directions" reaches ~1 in 15 across the top 60 cross-category pairs
+  (hand-classified, zero tokens). All four survivors were then rejected on
+  inspection — none had one paper saying the other was wrong, two dissolved once
+  scope was checked (one paper supplied the very evidence the other asked for), and
+  three of the near-misses were papers *agreeing* while criticizing some third
+  method neither used.
+
+  Genuine inter-paper disagreement is rare, so the tier would spend a judge call
+  per pair to surface mostly shared vocabulary, with the reviewer absorbing the
+  cost of separating them. The reasoning is recorded in WORKFLOW.md under
+  *Bottom-up discovery → Decided not to build*, including the two leads worth
+  keeping if it is ever revisited, so the question is closed rather than merely
+  unfinished.
+
+- **`candidates concepts` counts membership over contribution sections only.**
+  It advertised `direction of effect` as "4 paper pages, 3 categories —
+  concept-ready (bridge)"; the scaffolder then found 2 and refused it. Both read
+  claims; the detector applied no section filter while `find_members` restricts
+  to `key_contributions`/`results`/`methodology`, on the stated ground that a
+  term in a paper's limitations is a mention and not an instantiation. Two of
+  that term's four "paper pages" were limitations, and the bridge tier is
+  exactly the list a reviewer is told to act on. `weighted` and the `sections`
+  key still see every section, so the 0.5 `SECTION_WEIGHTS` signal survives and
+  the author can still see why a term looks bigger than its member count.
+
+  Four of thirty candidates drop below the `>= 3` floor — `direction of effect`,
+  `attention mechanism`, `target profiling`, `AMP`, two of them previously
+  labelled concept-ready (bridge) — and `status`'s bridge count falls 10 -> 8.
+  Every remaining bridge candidate was checked to return `>= 3` members when
+  scaffolded. The detector can still under-count relative to the scaffolder,
+  which also has a keyword signal (`foundation models`: 5 advertised, 20
+  members); that direction is harmless, since the advertised number becomes a
+  floor rather than an over-promise.
 
 ### Fixed
 
@@ -227,89 +311,6 @@ the reasoning behind any line below.
   anchor's query, so hint and anchor cannot disagree. `attach_after_ingest`
   keeps its fallback: there the anchor doubles as the membership test, so
   removing it changes what auto-attaches at ingest — a separate question.
-
-### Added
-
-- **`WORKFLOW.md` gains *Bottom-up discovery — when the wiki proposes the page*.**
-  Documents the four proposal tiers and, more importantly, carries the calibration
-  evidence behind their thresholds: why literal member search fails hardest on
-  bridge terms, why the true/false membership margin of 0.003 forces
-  propose-never-decide, why lowering a cosine floor makes 80% of all paper pairs
-  "related" at 0.70, why IDF-weighted rare-term overlap beats cosine in the band
-  (cosine measures register, rare-term overlap measures subject), why semantic
-  proposals at ingest time would return nothing, and why ≥85% of the 0.85
-  contradiction pool is already judged at ~1-in-900.
-
-  These numbers previously existed only in a tracking doc that is being retired.
-  Two provenance facts are stated with them, because they are not all measured on
-  the same corpus: the 2026-08-19 figures come from a 117-paper / 3,027-claim
-  corpus on another machine, and the papers they cite — including the
-  `mixture-model` hub the whole workstream opened around — **are not in this
-  wiki**, so those cases are not reproducible here even though the mechanisms
-  transfer. The 2026-08-20 figures are this corpus. Test docstrings and the
-  module map now point here instead of at the retiring doc.
-
-- **`cross_paper_judgements` — the contradiction judge now records what it cleared.**
-  Its only trace was a `contradicts` edge, written for the two disagreement verdicts
-  alone, so `agree` and `different_topic` — the overwhelming majority — left nothing
-  behind. A re-run therefore re-paid for every pair it had already dismissed, and
-  "has this pool been judged?" had no answer; deciding whether the 0.85 pool was
-  worth a judged sweep had to be inferred from a pairs-per-paper distribution
-  because no record could answer it. Every verdict is now recorded, so a repeat run
-  judges only what the last one never reached (`lint --cross-paper-rejudge`
-  overrides). Keyed on the two claim slugs and nothing else: slugs are
-  content-addressed, so editing a claim gives it a new slug and its pairs stop
-  matching — self-invalidating on exactly the change that should invalidate it, the
-  same property `pair_dismissals` relies on.
-
-- **`lint --json` gains `cross_paper_stats`** — `null` unless `--cross-paper` ran,
-  then `{pool, judged, skipped_already_judged, disagreements, sim_threshold}`. `pool`
-  is filled before the `max_pairs` slice, which makes
-  `--cross-paper-max-pairs 0` a zero-cost way to size a sweep before paying for one.
-  Additive; no existing key renamed or removed. The prose report also prints a zero
-  section when the check ran and found nothing, because silence there was
-  indistinguishable from never having run — the ambiguity the new table exists to
-  remove.
-
-### Changed
-
-- **Dropped the planned tension-hunting discovery tier.** The last open item in
-  the discovery workstream was a generator that proposes a page because two papers
-  argue with each other. Measured before building: the existing contradiction judge
-  confirms real errors at ~1 in 900, and softening the target to "papers pulling in
-  opposite directions" reaches ~1 in 15 across the top 60 cross-category pairs
-  (hand-classified, zero tokens). All four survivors were then rejected on
-  inspection — none had one paper saying the other was wrong, two dissolved once
-  scope was checked (one paper supplied the very evidence the other asked for), and
-  three of the near-misses were papers *agreeing* while criticizing some third
-  method neither used.
-
-  Genuine inter-paper disagreement is rare, so the tier would spend a judge call
-  per pair to surface mostly shared vocabulary, with the reviewer absorbing the
-  cost of separating them. The reasoning is recorded in WORKFLOW.md under
-  *Bottom-up discovery → Decided not to build*, including the two leads worth
-  keeping if it is ever revisited, so the question is closed rather than merely
-  unfinished.
-
-- **`candidates concepts` counts membership over contribution sections only.**
-  It advertised `direction of effect` as "4 paper pages, 3 categories —
-  concept-ready (bridge)"; the scaffolder then found 2 and refused it. Both read
-  claims; the detector applied no section filter while `find_members` restricts
-  to `key_contributions`/`results`/`methodology`, on the stated ground that a
-  term in a paper's limitations is a mention and not an instantiation. Two of
-  that term's four "paper pages" were limitations, and the bridge tier is
-  exactly the list a reviewer is told to act on. `weighted` and the `sections`
-  key still see every section, so the 0.5 `SECTION_WEIGHTS` signal survives and
-  the author can still see why a term looks bigger than its member count.
-
-  Four of thirty candidates drop below the `>= 3` floor — `direction of effect`,
-  `attention mechanism`, `target profiling`, `AMP`, two of them previously
-  labelled concept-ready (bridge) — and `status`'s bridge count falls 10 -> 8.
-  Every remaining bridge candidate was checked to return `>= 3` members when
-  scaffolded. The detector can still under-count relative to the scaffolder,
-  which also has a keyword signal (`foundation models`: 5 advertised, 20
-  members); that direction is harmless, since the advertised number becomes a
-  floor rather than an over-promise.
 
 ## [0.4.1] - 2026-08-20
 
@@ -1652,7 +1653,8 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/johapark/research-wiki/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/johapark/research-wiki/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/johapark/research-wiki/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/johapark/research-wiki/compare/v0.3.0...v0.3.1
