@@ -22,6 +22,25 @@ the intended state: a visible to-do queue, not a defect.
 
 `log.md` is append-only, so a removal appends an entry rather than editing
 history out of it.
+
+**Any page type can be the target.** `scan` resolves the argument by *filename
+stem* across all of `wiki/`, and nothing branches on `type:` — a synthesis,
+idea, concept, reference doc or commentary page is removed the same way a paper
+is, with the paper-shaped machinery (PDF, supplementary dir, grade/figure
+caches, `claims` rows) simply finding nothing. The paper-specific vocabulary in
+this command's output is a naming artefact, not a restriction. Two consequences
+worth stating:
+
+- `AUTHORED_TYPES` protects *citing* pages, never the target. Removing a
+  synthesis or idea page deletes hand-authored, twice-gated prose; dry-run-by-
+  default is the only guard, and `wiki/` may be gitignored.
+- The reciprocal `[[concepts/<slug>]]` bullets a concept hub puts on its member
+  papers are generated back-links like any other, so removing the hub strips
+  them. Its members are not otherwise touched — expect newly `orphans`-listed
+  papers when the removed page was their only inbound link.
+
+`index.md` and `log.md` are excluded from the page scan, so the wiki-root
+bookkeeping pages can never be the target.
 """
 
 from __future__ import annotations

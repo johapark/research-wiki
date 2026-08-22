@@ -34,6 +34,12 @@ def _emit_json(**kw) -> int:
             {"page": src, "targets": sorted(set(bad))}
             for src, bad in kw["broken"]
         ],
+        # Two keys for what a hand-deleted page strands. `broken_index_bullets`
+        # is `index.md`-only by design (root meta pages are excluded from
+        # `broken_wikilinks`, for `log.md`'s sake); `orphan_pdfs` is a list of
+        # stems, since the path is always `papers/{stem}.pdf`.
+        "broken_index_bullets": kw["broken_index_bullets"],
+        "orphan_pdfs": kw["orphan_pdfs"],
         "missing_backlinks": [
             {"src": src, "tgt": t} for src, t in kw["missing_back"]
         ],
@@ -161,6 +167,10 @@ def _emit_prose(**kw) -> int:
     else:
         print("_none._")
     print()
+
+    from .report_deletions import print_broken_index_bullets, print_orphan_pdfs
+    print_broken_index_bullets(kw["broken_index_bullets"])
+    print_orphan_pdfs(kw["orphan_pdfs"])
 
     missing_back = kw["missing_back"]
     print(f"## Missing back-links ({len(missing_back)})")

@@ -25,7 +25,7 @@ from ..paths import (
     wiki_dir, wiki_root,
 )
 from ..agents import model_config as _mc
-from ..wiki import read_pages
+from ..wiki import find_orphan_pdfs, read_pages
 
 
 # Model pricing moved to `config/pricing.yaml`, read via `agents.model_config`.
@@ -418,6 +418,15 @@ def main(argv: list[str]) -> int:
     inbox_files = _pending_pdfs(inbox_dir())
     ingest_files = _pending_digests(ingest_dir())
     failed = _failed_parsing_entries(wiki_pages)
+    # A PDF in `papers/` that no page claims. Belongs beside the other two
+    # counters above rather than only in `lint`: this is workflow state, not a
+    # defect — `remove --keep-pdf` produces it deliberately, and it is the same
+    # shape as an `inbox/` file (a PDF sitting somewhere, awaiting an action).
+    # `lint --json` keeps the full stem list; here it is a count, matching how
+    # the claim-overlap backlog is split between the two commands. Walks the
+    # tree itself rather than reusing `wiki_pages`, which drops any file with no
+    # `---` fence — that page's PDF is not orphaned, and `lint` would disagree.
+    orphan_pdfs = find_orphan_pdfs()
 
     all_pages = []
     for p in papers:
@@ -537,6 +546,13 @@ def main(argv: list[str]) -> int:
                   f"({j.get('status', '?')}, attempts={j.get('attempts', 0)}) "
                   f"{(j.get('details') or {}).get('stem', '')}")
         print("    → the next `agent ingest` rolls these back automatically")
+    if orphan_pdfs:
+        print(f"  papers/ PDFs with no page:      {len(orphan_pdfs)}")
+        for stem in orphan_pdfs[:5]:
+            print(f"    - {stem}.pdf")
+        if len(orphan_pdfs) > 5:
+            print(f"    ... ({len(orphan_pdfs) - 5} more)")
+        print("    → re-ingest with `agent ingest papers/<stem>.pdf`, or delete")
     print(f"  PDFs failed parsing:            {len(failed)}")
     for key, note in failed[:8]:
         # The note is the actionable half — it says what the page was built from

@@ -12,8 +12,8 @@ This subpackage groups checks by what they read so each module is
 focused and individually testable:
 
   walk            — page enumeration + link/yaml parsing primitives
-  link_checks     — orphans, broken_wikilinks, missing_backlinks,
-                    none_placeholders, --fix
+  link_checks     — orphans, broken_wikilinks, broken_index_bullets,
+                    missing_backlinks, none_placeholders, --fix
   yaml_checks     — invalid_fm, type/category/doi/year/keywords drift,
                     venue_suspect
   staleness       — stale_synthesis, stale_by_content, audit_count, proposals
@@ -23,6 +23,10 @@ focused and individually testable:
                     stems_missing_claim_overlap, duplicate_claim_sets,
                     db_drift
   supplementary   — supp YAML ↔ disk consistency
+  report_deletions— prose for the two hand-deleted-page checks
+
+`orphan_pdfs` is the one check that does not live here: it is a corpus-level
+fact about `papers/` (`wiki.find_orphan_pdfs`), and `status` reports it too.
 
 The orchestrator below walks pages once, calls each check, then renders
 either the prose report or the JSON object. Public CLI signature
@@ -61,6 +65,7 @@ from .index_checks import find_thin_index_text
 from .report import _emit_json, _emit_prose
 from .link_checks import (
     apply_backlink_fixes,
+    find_broken_index_bullets,
     find_none_placeholders,
     build_link_graph,
     find_missing_backlinks,
@@ -73,6 +78,7 @@ from .staleness import (
     find_stale_synthesis,
 )
 from .supplementary import find_supplementary_issues
+from ...wiki import find_orphan_pdfs
 from .walk import all_pages, page_key
 from .yaml_checks import (
     find_category_drift,
@@ -115,7 +121,8 @@ def main(argv: list[str]) -> int:
                              "never reached, so resuming an interrupted sweep is cheap.")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Emit a structured JSON object instead of the prose report. "
-                             "Keys: pages_scanned, orphans, broken_wikilinks, missing_backlinks, "
+                             "Keys: pages_scanned, orphans, broken_wikilinks, "
+                             "broken_index_bullets, orphan_pdfs, missing_backlinks, "
                              "missing_type, page_type_mismatches, category_yaml_drift, stale_synthesis, stale_by_content, "
                              "stale_by_audit_count, p2_entries_with_anchor_hits, "
                              "stale_evolution_proposals, missing_keywords, "
@@ -162,6 +169,13 @@ def main(argv: list[str]) -> int:
     # --- link graph + dependent checks (orphans, broken, missing_back)
     out_links, in_links, broken = build_link_graph(pages, pages_prose, known)
     orphans = find_orphans(pages, out_links, in_links)
+    # Two checks for the wreckage a hand-deleted page leaves behind. Both are
+    # blind spots of the pass above: `build_link_graph` excludes root meta
+    # pages, so a stale `index.md` bullet is invisible to `broken_wikilinks`,
+    # and every other check starts from the page corpus, so a PDF whose page is
+    # gone is reachable from nothing at all.
+    broken_index_bullets = find_broken_index_bullets(known)
+    orphan_pdfs = find_orphan_pdfs()
     missing_back = find_missing_backlinks(out_links)
     none_placeholders = find_none_placeholders(pages_body)
 
@@ -236,7 +250,9 @@ def main(argv: list[str]) -> int:
     if args.as_json:
         return _emit_json(
             pages=pages, fm_check_ran=fm_check_ran, invalid_fm=invalid_fm,
-            orphans=orphans, broken=broken, missing_back=missing_back,
+            orphans=orphans, broken=broken,
+            broken_index_bullets=broken_index_bullets,
+            orphan_pdfs=orphan_pdfs, missing_back=missing_back,
             missing_type=missing_type,
         type_mismatches=type_mismatches, category_drift=category_drift,
             stale=stale, stale_by_content=stale_by_content,
@@ -266,7 +282,9 @@ def main(argv: list[str]) -> int:
 
     return _emit_prose(
         pages=pages, fm_check_ran=fm_check_ran, invalid_fm=invalid_fm,
-        orphans=orphans, broken=broken, missing_back=missing_back,
+        orphans=orphans, broken=broken,
+        broken_index_bullets=broken_index_bullets,
+        orphan_pdfs=orphan_pdfs, missing_back=missing_back,
         missing_type=missing_type,
         type_mismatches=type_mismatches, category_drift=category_drift,
         stale=stale, stale_by_content=stale_by_content,

@@ -1,6 +1,6 @@
-# Remove — retract a paper from the wiki
+# Remove — retract a page from the wiki
 
-Trigger: a paper was ingested in error, retracted upstream (`retraction-check` flagged it), superseded by a version under a different stem, or landed as a mis-typed commentary. **Not** for re-ingesting with corrected metadata — that's [`recovery.md`](./recovery.md), which keeps the PDF and the back-link graph.
+Trigger: a paper was ingested in error, retracted upstream (`retraction-check` flagged it), superseded by a version under a different stem, or landed as a mis-typed commentary — or any other page (synthesis, idea, concept, reference doc) is being retired and its `index.md` bullet and inbound back-links should go with it. **Not** for re-ingesting with corrected metadata — that's [`recovery.md`](./recovery.md), which keeps the PDF and the back-link graph.
 
 ```bash
 researchwiki remove <stem>                      # dry run (default) — writes nothing
@@ -35,4 +35,18 @@ A concept hub is the one page that gets both treatments: its spoke registry is g
 
 Dry run is the default; `--apply` is required to write anything. The whole removal runs inside a mutation journal (`researchwiki/mutation.py`), so a failure part-way through rolls the tree back rather than leaving a half-removed paper. If the process is killed mid-removal, `status` reports the journal and the next `agent ingest` drains it.
 
-`--keep-pdf` when the page is wrong but the paper should be re-ingested: everything else goes, `papers/{stem}.pdf` stays, and `researchwiki agent ingest papers/{stem}.pdf` starts clean.
+`--keep-pdf` when the page is wrong but the paper should be re-ingested: everything else goes, `papers/{stem}.pdf` stays, and `researchwiki agent ingest papers/{stem}.pdf` starts clean. The kept PDF then shows up under `lint`'s `orphan_pdfs` until you re-ingest it — that is the queue, not a complaint.
+
+## Removing a non-paper page
+
+**The target resolves by filename stem, and nothing branches on `type:`.** `scan` walks all of `wiki/**/*.md` looking for a matching filename, so a synthesis, idea, concept, reference doc or commentary page is removed exactly the way a paper is. The paper-shaped machinery just finds nothing: no `papers/{stem}.pdf`, no `.supp/`, no grade or figure cache, no `claims` rows. What still applies is everything that isn't paper-specific — the page itself, its `index.md` bullet, inbound *Related Papers* bullets, its `papers`-table row, and the append-only `log.md` entry.
+
+`index.md` and `log.md` are excluded from the page scan, so the wiki-root bookkeeping pages can never be the target.
+
+Three things to know before doing it:
+
+- **The authored-prose protection does not cover the target.** `AUTHORED_TYPES` guards pages that *cite* the stem; the target is deleted whatever its type. `researchwiki remove <synthesis-slug> --apply` therefore destroys hand-authored prose that has passed `check-grounding` and `grade synthesis`, and `wiki/` is gitignored (and often a symlink into a synced folder). The dry run is the only guard — read it, and copy the page somewhere first if there is any chance you want it back.
+- **Removing a hub can orphan its members.** A concept hub's reciprocal `[[concepts/<slug>]]` bullets on member papers are generated back-links and are stripped with the hub; an idea or synthesis page's footnotes are that page's own text and vanish with it. Either way, a paper whose only inbound link was the removed page shows up under `lint`'s `orphans` afterwards. That is correct, not damage — but check the list, because an orphaned paper is invisible to the wiki's own navigation.
+- **The page-type-specific reporting still fires.** If another authored page cites the one you are removing, it is listed as an authored citation and left alone — the same to-do queue a paper removal produces.
+
+`researchwiki db rebuild && researchwiki reindex` afterwards, as always: for a non-paper target the rebuild is what re-derives the page counts and the semantic index.

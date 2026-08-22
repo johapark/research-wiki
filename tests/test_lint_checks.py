@@ -23,9 +23,11 @@ import pytest
 from researchwiki.concepts.candidates import find_concept_candidates
 from researchwiki.tasks.lint.link_checks import (
     build_link_graph,
+    find_broken_index_bullets,
     find_missing_backlinks,
     find_orphans,
 )
+from researchwiki.wiki import find_orphan_pdfs
 from researchwiki.tasks.lint.staleness import (
     find_stale_by_audit_count,
     find_stale_synthesis,
@@ -518,3 +520,153 @@ def test_find_concept_candidates_reports_category_span():
     out = find_concept_candidates(pages_body, existing_slugs=set())
     span = {tok: c for tok, _, c in out}
     assert span["RAPTOR"] == 3
+
+
+# ---------- broken index.md bullets ----------
+#
+# `build_link_graph` excludes root meta pages from the broken-link scan, which
+# is right for `log.md` (historical entries carry template fragments that were
+# never links) and wrong for `index.md` (every line is a generated catalogue
+# entry pointing at a page that is supposed to exist). These pin the narrow
+# scan that covers the gap: a page deleted by hand leaves its bullet behind and
+# no other check sees it.
+
+@pytest.fixture
+def tmp_index(tmp_wiki, monkeypatch):
+    """`find_broken_index_bullets` reads `index_path()`, bound at import."""
+    idx = tmp_wiki / "index.md"
+    monkeypatch.setattr("researchwiki.tasks.lint.link_checks.index_path", lambda: idx)
+    return idx
+
+
+def test_index_bullet_pointing_at_a_deleted_page_is_reported(tmp_wiki, tmp_index):
+    live = _mkpage(tmp_wiki, "cgt/foo-2024-bar")
+    tmp_index.write_text(
+        "# Wiki index\n\n## cgt\n\n"
+        "- [[cgt/foo-2024-bar]] — **Foo** (*Nature* 2024): still here.\n"
+        "- [[cgt/gone-2023-deleted-by-hand]] — **Gone** (*Cell* 2023): not here.\n"
+    )
+    assert find_broken_index_bullets({page_key(live)}) == [
+        {"line": 6, "targets": ["cgt/gone-2023-deleted-by-hand"]}
+    ]
+
+
+def test_only_bullet_lines_are_scanned(tmp_wiki, tmp_index):
+    """A heading or an intro paragraph is hand-written prose, not catalogue."""
+    tmp_index.write_text(
+        "# Wiki index\n\n"
+        "Prose mentioning [[cgt/not-a-bullet]] in passing.\n\n"
+        "## cgt\n"
+    )
+    assert find_broken_index_bullets(set()) == []
+
+
+def test_a_hook_quoting_link_syntax_is_not_a_broken_link(tmp_wiki, tmp_index):
+    """Regression: the first run of this check on the real wiki flagged
+    `` `[[stem#slug]]` `` inside an idea page's hook — the hook describes the
+    wiki's own anchor syntax. `strip_non_prose` is the same guard
+    `build_link_graph` applies."""
+    live = _mkpage(tmp_wiki, "ideas/supervision")
+    tmp_index.write_text(
+        "## ideas\n"
+        "- [[ideas/supervision]] — content-addressed slugs orphan "
+        "`[[stem#slug]]` anchors, which lint reports.\n"
+    )
+    assert find_broken_index_bullets({page_key(live)}) == []
+
+
+def test_a_bare_stem_bullet_still_resolves(tmp_wiki, tmp_index):
+    live = _mkpage(tmp_wiki, "cgt/foo-2024-bar")
+    tmp_index.write_text("- [[foo-2024-bar]] — bare-stem form.\n")
+    assert find_broken_index_bullets({page_key(live)}) == []
+
+
+def test_no_index_file_is_not_an_error(tmp_wiki, tmp_index):
+    assert find_broken_index_bullets(set()) == []
+
+
+# ---------- orphan PDFs ----------
+
+@pytest.fixture
+def tmp_papers(tmp_wiki, tmp_path, monkeypatch):
+    """`find_orphan_pdfs` walks both trees itself, so both bindings are patched.
+
+    `tmp_wiki` patches `wiki_dir` for `paths` and `lint.walk`; `researchwiki.wiki`
+    holds its own module-level binding, which is the one this function reads.
+    """
+    papers = tmp_path / "papers"
+    papers.mkdir()
+    monkeypatch.setattr("researchwiki.wiki.papers_dir", lambda: papers)
+    monkeypatch.setattr("researchwiki.wiki.wiki_dir", lambda: tmp_wiki)
+    return papers
+
+
+def test_a_pdf_with_no_page_is_reported(tmp_wiki, tmp_papers):
+    _mkpage(tmp_wiki, "cgt/foo-2024-bar")
+    (tmp_papers / "foo-2024-bar.pdf").write_bytes(b"%PDF-1.4\n")
+    (tmp_papers / "gone-2023-deleted-by-hand.pdf").write_bytes(b"%PDF-1.4\n")
+    assert find_orphan_pdfs() == ["gone-2023-deleted-by-hand"]
+
+
+def test_supplementary_pdfs_are_not_orphans(tmp_wiki, tmp_papers):
+    """They belong to their parent page and are `find_supplementary_issues`'
+    business; a recursive walk would report every one of them here."""
+    _mkpage(tmp_wiki, "cgt/foo-2024-bar")
+    (tmp_papers / "foo-2024-bar.pdf").write_bytes(b"%PDF-1.4\n")
+    supp = tmp_papers / "foo-2024-bar.supp"
+    supp.mkdir()
+    (supp / "supplementary-tables.pdf").write_bytes(b"%PDF-1.4\n")
+    assert find_orphan_pdfs() == []
+
+
+def test_a_page_in_any_category_claims_its_pdf(tmp_wiki, tmp_papers):
+    """The join key is the stem, not the path — a reference doc under
+    `references/` claims `papers/{stem}.pdf` exactly as a paper page does."""
+    _mkpage(tmp_wiki, "references/fda-2026-a-guidance-about-things")
+    (tmp_papers / "fda-2026-a-guidance-about-things.pdf").write_bytes(b"%PDF-1.4\n")
+    assert find_orphan_pdfs() == []
+
+
+def test_no_papers_dir_is_not_an_error(tmp_papers, tmp_path, monkeypatch):
+    monkeypatch.setattr("researchwiki.wiki.papers_dir",
+                        lambda: tmp_path / "nonexistent")
+    assert find_orphan_pdfs() == []
+
+
+def test_a_page_with_no_frontmatter_fence_still_claims_its_pdf(tmp_wiki, tmp_papers):
+    """Regression: `status` used to pass `read_pages()`, which returns None for
+    a file with no leading `---` fence and drops it. That page's PDF is not
+    orphaned — and `lint`, which walks every `*.md`, disagreed. The function now
+    walks the tree itself so both callers get the same answer."""
+    (tmp_wiki / "cgt").mkdir(parents=True, exist_ok=True)
+    (tmp_wiki / "cgt" / "foo-2024-bar.md").write_text("# Hand-written, no YAML\n")
+    (tmp_papers / "foo-2024-bar.pdf").write_bytes(b"%PDF-1.4\n")
+    assert find_orphan_pdfs() == []
+
+
+def test_status_reports_orphan_pdfs_in_workflow_state(tmp_path, monkeypatch, capsys):
+    """`status` is the human-facing home for this one: an orphan PDF is
+    workflow state (a file awaiting an action), the same shape as an `inbox/`
+    drop, and `remove --keep-pdf` produces it on purpose. `lint --json` keeps
+    the full stem list; `status` carries the count — the split the
+    claim-overlap backlog already uses."""
+    from researchwiki import paths
+    from researchwiki.tasks import status as status_task
+
+    (tmp_path / "wiki" / "cgt").mkdir(parents=True)
+    (tmp_path / "papers").mkdir()
+    (tmp_path / "wiki" / "cgt" / "foo-2024-bar.md").write_text(
+        "---\ntype: paper\ncategory: [cgt]\n---\n\n## Summary\nbody\n")
+    (tmp_path / "papers" / "foo-2024-bar.pdf").write_bytes(b"%PDF-1.4\n")
+    (tmp_path / "papers" / "gone-2023-deleted-by-hand.pdf").write_bytes(b"%PDF-1.4\n")
+    (tmp_path / "wiki" / "index.md").write_text("# index\n")
+    (tmp_path / "wiki" / "log.md").write_text("# log\n")
+    monkeypatch.setattr(paths, "wiki_root", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    status_task.main([])
+
+    out = capsys.readouterr().out
+    assert "papers/ PDFs with no page:      1" in out
+    assert "gone-2023-deleted-by-hand.pdf" in out
+    assert "foo-2024-bar.pdf" not in out, "the claimed PDF is not a finding"

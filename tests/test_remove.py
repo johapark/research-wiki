@@ -318,3 +318,119 @@ def test_a_failure_mid_removal_restores_everything(wiki, monkeypatch):
     assert cli.main([STEM, "--apply"]) == 2
     assert (page.read_bytes(), other.read_bytes(), idx.read_bytes()) == before
     assert (wiki / "papers" / f"{STEM}.pdf").exists()
+
+
+# ---------- non-paper targets ----------
+#
+# `scan` resolves the target by filename stem and never branches on `type:`, so
+# every page type is removable. These pin that as contract rather than accident:
+# the command's prose, its `--help`, and every test above speak of papers, so a
+# refactor that added a `type: paper` guard would otherwise pass green.
+
+def _index_lines(wiki) -> list[str]:
+    return (wiki / "wiki" / "index.md").read_text(encoding="utf-8").splitlines()
+
+
+def test_a_synthesis_page_can_be_the_target(wiki):
+    """The page goes, and so does its index bullet — the same treatment a
+    paper gets, with the paper-shaped file probes finding nothing."""
+    page = wiki / "wiki" / "synthesis" / "a-field-map.md"
+    idx = wiki / "wiki" / "index.md"
+    idx.write_text(idx.read_text(encoding="utf-8")
+                   + "\n## synthesis\n\n- [[synthesis/a-field-map]] — a map.\n",
+                   encoding="utf-8")
+
+    plan = removal.scan("a-field-map")
+    assert plan.page_path == page
+    assert plan.page_type == "synthesis"
+    assert plan.files == [], "no PDF, supp dir or cache exists for a synthesis page"
+    assert plan.index_bullet is True
+
+    removal.apply(plan)
+    assert not page.exists()
+    assert "a-field-map" not in idx.read_text(encoding="utf-8")
+
+
+def test_removing_a_concept_hub_strips_its_reciprocal_backlinks(wiki):
+    """Members carry a generated `[[concepts/<slug>]]` bullet. It is a
+    back-link like any other, so it goes with the hub."""
+    member = wiki / "wiki" / "compbio" / "jones-2025-another.md"
+    member.write_text(member.read_text(encoding="utf-8")
+                      + "- [[concepts/pangenome]] — instantiates the concept "
+                        "(auto-added; concept-link)\n", encoding="utf-8")
+
+    plan = removal.scan("pangenome")
+    assert plan.page_type == "concept"
+    assert [p.name for p, _ in plan.backlink_pages] == ["jones-2025-another.md"]
+
+    removal.apply(plan)
+    assert not (wiki / "wiki" / "concepts" / "pangenome.md").exists()
+    text = member.read_text(encoding="utf-8")
+    assert "concepts/pangenome" not in text
+    assert STEM in text, "the member paper's other bullets are untouched"
+
+
+def test_an_authored_page_citing_the_target_is_still_only_reported(wiki):
+    """`AUTHORED_TYPES` guards *citing* pages, not the target — so removing one
+    authored page never rewrites another."""
+    citing = wiki / "wiki" / "synthesis" / "b-field-map.md"
+    citing.write_text(
+        "---\ntype: synthesis\ncategory: [compbio]\n---\n\n"
+        "## Question\nWhat?\n\n## Short answer\n"
+        "Argued at length in [[concepts/pangenome]].\n",
+        encoding="utf-8")
+    before = citing.read_bytes()
+
+    plan = removal.scan("pangenome")
+    assert [r.path.name for r in plan.prose_refs] == ["b-field-map.md"]
+
+    removal.apply(plan)
+    assert citing.read_bytes() == before
+
+
+def test_a_reference_doc_target_takes_its_pdf(wiki):
+    """A guidance/protocol/whitepaper page has a PDF like a paper does, and it
+    is not in AUTHORED_TYPES, so it gets the full paper treatment."""
+    (wiki / "wiki" / "references").mkdir()
+    stem = "fda-2026-human-gene-therapy-products-incorporating"
+    page = wiki / "wiki" / "references" / f"{stem}.md"
+    page.write_text("---\ntype: guidance\nissuer: FDA\n---\n\n## Summary\nbody\n",
+                    encoding="utf-8")
+    pdf = wiki / "papers" / f"{stem}.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+
+    plan = removal.scan(stem)
+    assert plan.page_type == "guidance"
+    assert pdf in plan.files
+
+    removal.apply(plan)
+    assert not page.exists() and not pdf.exists()
+
+
+def test_the_wiki_root_bookkeeping_pages_are_not_targets(wiki):
+    """`_iter_pages` excludes them by name, so no stem can resolve to one."""
+    for stem in ("index", "log"):
+        assert removal.scan(stem).page_path is None
+    assert (wiki / "wiki" / "index.md").exists()
+    assert (wiki / "wiki" / "log.md").exists()
+
+
+def test_the_summary_reports_the_index_bullet(wiki, capsys):
+    """The plan promises `index.md  1 bullet`; the result has to confirm it."""
+    assert cli.main([STEM, "--apply"]) == 0
+    assert "1 index.md bullet" in capsys.readouterr().out
+
+
+def test_keep_pdf_lands_the_stem_in_lint_orphan_pdfs(wiki):
+    """The documented hand-off: `--keep-pdf` deliberately leaves a PDF with no
+    page, and `lint`'s `orphan_pdfs` is where it then shows up as a re-ingest
+    queue. Pinned end-to-end because the two features only make sense together
+    — before the check existed the kept PDF was simply forgotten."""
+    from researchwiki.wiki import find_orphan_pdfs
+
+    assert find_orphan_pdfs() == []
+
+    removal.apply(removal.scan(STEM), keep_pdf=True)
+
+    assert (wiki / "papers" / f"{STEM}.pdf").exists()
+    assert find_orphan_pdfs() == [STEM]

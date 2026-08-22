@@ -1,11 +1,22 @@
-"""Retract a paper — remove its page and every generated trace of it.
+"""Retract a wiki page — remove it and every generated trace of it.
 
 ✅ Use when: a paper was ingested in error, retracted upstream, superseded by a
-   version under a different stem, or landed as a mis-typed commentary.
+   version under a different stem, or landed as a mis-typed commentary — or
+   when any other page (synthesis, idea, concept, reference doc) is being
+   retired and its `index.md` bullet and inbound back-links should go with it.
 ❌ Don't use: to re-ingest with corrected metadata — that's
    `prompts/recovery.md`, which keeps the PDF and the back-link graph. Don't
    use it to "clean up" a paper you might want back: the PDF goes too unless
    you pass `--keep-pdf`.
+
+**The target is resolved by filename stem, not by `type:`.** Every page type is
+removable the same way; on a non-paper target the paper-shaped machinery (PDF,
+supplementary dir, grade/figure caches, `claims` rows) simply finds nothing.
+`index.md` and `log.md` are excluded from the scan and can never be the target.
+
+Note the asymmetry: authored prose is protected on *citing* pages, never on the
+target. `remove <synthesis-slug> --apply` deletes a hand-authored page that has
+passed both gates, and `wiki/` may be gitignored — the dry run is the guard.
 
 Dry-run is the default. Nothing is written until `--apply`.
 
@@ -94,9 +105,13 @@ def _print_plan(plan, *, keep_pdf: bool) -> None:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="researchwiki remove",
-        description="Retract a paper: remove its page and every generated trace.",
+        description="Retract a wiki page: remove it and every generated trace.",
     )
-    parser.add_argument("stem", help="Paper stem (basename of papers/{stem}.pdf).")
+    parser.add_argument(
+        "stem",
+        help="Page stem — the page's filename without .md (for a paper, the "
+             "basename of papers/{stem}.pdf). Any page type is accepted.",
+    )
     parser.add_argument("--apply", action="store_true",
                         help="Actually remove. Without this, nothing is written.")
     parser.add_argument("--keep-pdf", dest="keep_pdf", action="store_true",
@@ -157,14 +172,20 @@ def main(argv: list[str]) -> int:
         "remove",
         f"{plan.stem}",
         f"Removed {len(res.removed_files)} file(s), {res.backlinks_removed} "
-        f"back-link bullet(s), {sum(res.db_rows_deleted.values())} db row(s), "
+        f"back-link bullet(s), "
+        f"{'1' if res.index_bullet_removed else '0'} index.md bullet, "
+        f"{sum(res.db_rows_deleted.values())} db row(s), "
         f"{res.edges_deleted} claim edge(s)."
         + (f" {len(plan.prose_refs)} authored citation(s) left for review."
            if plan.prose_refs else ""),
     )
 
+    # The index bullet is named separately rather than folded into the counts:
+    # the plan promises it above, so a summary that never mentions it leaves the
+    # reader unable to tell whether it went.
     print(f"\n  removed       {len(res.removed_files)} file(s), "
           f"{res.backlinks_removed} back-link bullet(s), "
+          f"{'1' if res.index_bullet_removed else '0'} index.md bullet, "
           f"{sum(res.db_rows_deleted.values())} db row(s), "
           f"{res.edges_deleted} claim edge(s)")
     if res.concept_hubs_updated:
