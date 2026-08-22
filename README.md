@@ -1,6 +1,6 @@
 # Research Wiki
 
-A markdown-first wiki for research papers that compounds as you add to it. **You don't operate the CLI — your LLM does.** You converse with Claude Code (or any LLM with file + shell access), and it authors each wiki page from the source PDF, grades claims against it, surfaces synthesis opportunities, and refines neighboring pages when related work arrives. Your job: drop PDFs in `inbox/`, ask cross-paper questions, review the LLM's edits. Local, Obsidian-compatible, Git-trackable.
+A markdown-first wiki for research papers that compounds as you add to it. **You don't operate the CLI — your LLM does.** You converse with Claude Code (or any LLM with file + shell access), and it authors each wiki page from the source PDF, grades claims against it, surfaces synthesis opportunities, and refines neighboring pages when related work arrives. Your job: drop PDFs in `inbox/`, ask cross-paper questions, review the LLM's edits. Local, Git-trackable, and read through Obsidian — you browse the corpus in a vault, starting from the `views.md` dashboard.
 
 This README is for **you**, the human. [CLAUDE.md](./CLAUDE.md) is the contract your LLM reads — you don't need to. [WORKFLOW.md](./WORKFLOW.md) has an end-to-end walkthrough with real agent output.
 
@@ -147,7 +147,7 @@ For reference, the taxonomy this wiki's author ended up with after bootstrapping
 
 ### Your first ingest (~5 min, ~$0.01)
 
-Drop a PDF in `inbox/` and say *"Ingest the paper I just dropped in `inbox/`."* The LLM runs `researchwiki agent ingest`. ~3–5 min later: metadata reconciled (the extractor cross-checks Semantic Scholar), a draft written and graded against the PDF, promoted to `wiki/{category}/{stem}.md` with back-links added, and any synthesis-evolution proposals surfaced for review. Then ask *"What did we just learn?"* for a summary.
+Drop a PDF in `inbox/` and say *"Ingest the paper I just dropped in `inbox/`."* The LLM runs `researchwiki agent ingest`. ~3–5 min later: metadata reconciled (the extractor cross-checks Semantic Scholar), a draft written and graded against the PDF, promoted to `wiki/{category}/{stem}.md` with back-links added, and any synthesis-evolution proposals surfaced for review. Then ask *"What did we just learn?"* for a summary — and open `wiki/` in Obsidian to read the page it wrote, starting from `views.md` ([Navigating the wiki](#navigating-the-wiki)).
 
 **Backlog?** Say *"ingest everything in inbox/"* — the LLM loops over each file (~$0.01/paper on the default OpenAI config). **If something breaks mid-ingest**, tell the LLM; it follows the recovery procedure in CLAUDE.md (don't hand-patch YAML). Then the workflow is conversational: batch ingest, cross-paper Q&A, `neighbors` discovery, synthesis detection, idea pages, page fixes.
 
@@ -169,6 +169,32 @@ Most users won't run `researchwiki` commands directly — the LLM picks among th
 
 ## Navigating the wiki
 
+**Open `wiki/` as an [Obsidian](https://obsidian.md/) vault and start at `wiki/views.md`.** That is the default way to read your corpus: the LLM is how you *ask* things, Obsidian is how you *browse* them. `[[wikilinks]]` become clickable, the graph view shows the corpus shape, and `pdf_path:` links open the source PDF on tap — keep `wiki/` and `papers/` as siblings so those resolve.
+
+### Set it up once
+
+`views.md` is a **Dataview** dashboard, so that community plugin has to be enabled before it renders:
+
+1. Open `wiki/` as a vault (**Open folder as vault**).
+2. **Settings → Community plugins** → **Turn on community plugins** (leaves Restricted Mode).
+3. **Browse** → search **Dataview** → **Install**, then toggle it on.
+4. Open `wiki/views.md` in **Reading view** — the `dataview` blocks render as live tables.
+
+Without Dataview the file is still valid markdown; its queries just show as code blocks, which is also what you get on GitHub. `researchwiki init` scaffolds `views.md` for you (recent papers / synthesis / ideas) — ask your LLM for more cuts, since they are ordinary Dataview queries over the YAML the pages already carry.
+
+### Where to start
+
+| Open | For |
+| --- | --- |
+| **`wiki/views.md`** | **The dashboard, and your default landing page.** Structured cuts that stay current on their own: recent additions, papers by year, citation hubs, orphans, syntheses by member count. |
+| `wiki/index.md` | The full catalog, grouped by category, with a one-line gloss per page. Regenerated from each page's `hook:`, so it reads as a table of contents rather than a hand-kept list. |
+| `wiki/log.md` | Chronological history — what was ingested, queried and filed, in order. |
+| A category dir | Reading one specific paper, once you know which one you want. |
+
+On a phone or tablet it works the same way: if you followed [Syncing your library](#syncing-your-library-and-reading-it-on-your-phone), the Obsidian mobile app opens the same vault with the same dashboard.
+
+### Page types
+
 Directories represent *page types*, each with its own contract and trigger:
 
 ```
@@ -187,7 +213,7 @@ wiki/
 - **`concepts/` — single-term hub notes.** A mini-synthesis around one recurring concept, tying every paper that instantiates the term into one bridge node — most valuable when it spans categories the citation graph and semantic search don't connect. `candidates concepts` surfaces terms at ≥3 papers; scaffolding one requires a **thesis** (one sentence on why it's a concept and not a glossary entry), which is what keeps the directory from filling with acronyms. Strictly grounded.
 - **`ideas/` — design proposals (manual).** Propose **what could be built** (vs synthesis's what *exists*). Structure: **Verdict** (`strong`/`incremental`/`weak` + tl;dr, written last and placed first) → **Background** (source-supported motivation) → **Opportunities** (the design, from wiki-grounded principles) → **Plans** (staged, with checkpoints) → **Caveats** (failure modes). The one page type where model priors are allowed, and only in Opportunities/Plans, marked `*(model prior)*`. `status:` lifecycle `open → scoping → validated | superseded | abandoned`. No auto-generation — ask explicitly.
 - **`references/` — non-peer-reviewed.** Guidance (FDA/EMA/ICH), protocols, whitepapers, textbooks. Manual (no S2 metadata). Cross-links describe **methodological alignment**, not citation.
-- **Bookkeeping.** `index.md` (curated catalog), `log.md` (auto-appended history). Both inside `wiki/` so `[[wikilinks]]` resolve in Obsidian. A PDF that wouldn't text-extract is recorded on the page itself via YAML `pdf_extraction_note:` and listed by `researchwiki status` — there's no separate ledger to keep current.
+- **Bookkeeping.** `views.md` (the Dataview dashboard you navigate from), `index.md` (curated catalog), `log.md` (auto-appended history). All inside `wiki/` so `[[wikilinks]]` resolve in Obsidian. A PDF that wouldn't text-extract is recorded on the page itself via YAML `pdf_extraction_note:` and listed by `researchwiki status` — there's no separate ledger to keep current.
 - **`papers/{stem}.pdf` + `papers/{stem}.supp/`.** Canonical PDFs + supplementary attachments (listed under `supplementary:` YAML). The LLM `Read`s these on demand (Rule 3).
 
 See [CLAUDE.md Page Types](./CLAUDE.md) for the full contracts.
@@ -205,17 +231,6 @@ only the graph shows you that four of them land on the same paper. Useful for
 deciding whether a dense cluster has earned a synthesis page, and for spotting a
 component that has drifted loose from the rest of the corpus. A table view carries
 the same data for reading rather than looking.
-
-## Optional Dataview dashboard
-
-`wiki/index.md` is the curated catalog, but for **structured cuts** — recent additions, papers by year, citation hubs, orphans, syntheses by member count — install [Dataview](https://blacksmithgu.github.io/obsidian-dataview/) and use `wiki/views.md`. Vault-only (renders as code blocks on GitHub). The cold-start setup already scaffolds `wiki/views.md` (recent papers / synthesis / ideas); ask your LLM for more cuts.
-
-**Installing Dataview** (a community plugin — enable once per vault):
-
-1. Open `wiki/` as a vault (**Open folder as vault**).
-2. **Settings → Community plugins** → **Turn on community plugins** (leaves Restricted Mode).
-3. **Browse** → search **Dataview** → **Install**, then toggle it on.
-4. Open `wiki/views.md` in **Reading view** — the `dataview` blocks render as live tables.
 
 ## What's tracked
 
@@ -241,7 +256,7 @@ Two carve-outs, neither covered by that MIT grant:
 - **Two-tier**: raw PDF (immutable) → single LLM-authored wiki page. No separate "summary" layer.
 - **No prose from the web**: only Semantic Scholar structural metadata + verbatim abstract + draft-only TLDR (Rule 1).
 - **Git-trackable framework, gitignored content**: share the workflow, keep your library.
-- **Obsidian-native**: `[[wikilinks]]` + plain markdown, no lock-in.
+- **Obsidian-native**: `[[wikilinks]]` + plain markdown, no lock-in. Obsidian is the default reader and `views.md` the default entry point — but nothing depends on it, so any editor still gives you the whole corpus.
 - **Query → File loop**: non-trivial cross-paper answers are persisted back as synthesis pages. This is how the wiki compounds.
 
 ## Inspiration
