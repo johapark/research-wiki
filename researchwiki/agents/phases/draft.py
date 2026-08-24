@@ -457,13 +457,13 @@ def _wrap_with_frontmatter(
 def tournament(drafts: list[Draft]) -> tuple[Draft, str]:
     """Pick the winning draft via deterministic argmax on the author fitness.
 
-    Ranking is the AUTHOR lens from `agents.fitness.tournament_key`: paraphrase
-    fidelity first, then *coverage breadth* (graded-claim count) as the near-tie
-    tie-break, then numeric integrity, BM25, and the weakest claim. semantic_score
-    is None when the embedding model isn't installed; we degrade gracefully to
-    BM25-primary in that case.
+    Ranking is the AUTHOR lens from `agents.fitness.tournament_key`: combined
+    fidelity + salience + importance-weighted target-claim coverage first,
+    then coherence, numeric integrity, coverage breadth, BM25, and the weakest
+    claim. Missing axes degrade gracefully; BM25 becomes the late fallback when
+    no primary coverage/fidelity signal is available.
     """
-    from ..fitness import tournament_key
+    from ..fitness import combined_quality, tournament_key
 
     if not drafts:
         raise ValueError("tournament called with no drafts")
@@ -476,7 +476,12 @@ def tournament(drafts: list[Draft]) -> tuple[Draft, str]:
     def _fmt(d: Draft) -> str:
         sem = d.scores.get("semantic_score")
         sem_s = f"{sem:.2f}" if sem is not None else "n/a"
-        return (f"#{d.iteration_id} sem={sem_s} graded={d.scores.get('n_graded') or 0} "
+        target = d.scores.get("target_claim_score")
+        target_s = f"{target:.2f}" if target is not None else "n/a"
+        quality = combined_quality(d.scores)
+        quality_s = f"{quality:.2f}" if quality is not None else "n/a"
+        return (f"#{d.iteration_id} quality={quality_s} sem={sem_s} "
+                f"target={target_s} graded={d.scores.get('n_graded') or 0} "
                 f"drift={d.scores.get('n_drift') or 0} "
                 f"bm25={(d.scores.get('mean_bm25') or 0.0):.1f}")
 

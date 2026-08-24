@@ -4,8 +4,8 @@
    a given page. Agents answering cross-paper questions should `--json`
    and feed the hits into the answer.
 ❌ Don't use: to list every page in the wiki (use `index.md` or `status`).
-   Don't use before `researchwiki reindex` after major ingests — stale
-   index returns stale results.
+   Agent ingest updates indexes incrementally; reindex first only after manual
+   bulk mutations or an ingest warning that the incremental update failed.
 
 Two modes:
   - `researchwiki search "keywords"` — query.

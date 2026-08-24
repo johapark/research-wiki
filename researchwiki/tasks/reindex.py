@@ -1,8 +1,8 @@
 """Rebuild the full-text and semantic search indexes from the current `wiki/` state.
 
-✅ Use when: a wiki page was added, deleted, or substantially edited and
-   you want `search` / See-Also / category auto-suggest / Phase-B candidate
-   selection to see the change. Fast enough to run every time.
+✅ Use when: pages were deleted, manually/bulk edited outside ingest, or an
+   ingest reported an incremental-index warning. Successful agent ingests
+   upsert only the pages they changed, so routine ingest needs no full rebuild.
 ❌ Don't use: as a fix for a bad search result — the ranking issue is
    probably in the query, not staleness.
 

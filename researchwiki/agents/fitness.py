@@ -18,33 +18,39 @@ modes. This module makes the lenses explicit:
                               mean slips.
 
 All three lenses now read a **combined-quality** primary signal —
-`combined_quality()` — that blends fidelity (`semantic_score`) and
-salience-recall (`salience_score`) at equal weight (0.5/0.5). This replaces
-`semantic_score` as the primary signal so a revision that improves PDF-anchor
-recall without changing paraphrase fidelity is correctly credited as an
-improvement; the prior single-axis rule discarded exactly those gains.
+`combined_quality()` — that blends fidelity (`semantic_score`), structural
+PDF-anchor recall (`salience_score`), and importance-weighted extracted-claim
+recall (`target_claim_score`). The target axis is absent on legacy or failed
+extractions, preserving the prior fidelity/salience behavior exactly.
 
 Aggregate keys consumed (from `phases.grade_draft()`):
-  semantic_score, salience_score, n_anchors, mean_bm25, n_graded, n_drift,
-  weakest_score, coherence_score.
+  semantic_score, salience_score, n_anchors, target_claim_score,
+  n_target_claims, mean_bm25, n_graded, n_drift, weakest_score,
+  coherence_score.
 
 Thresholds (combined ε = 0.01, floor margin = 0.03, BM25 margin = 0.5) are
 the same magnitudes the prior single rule used; behavior on clearly-separated
-drafts is unchanged. Salience and coherence weights (`SAL_WEIGHT`, `SEM_WEIGHT`)
-are first-cut and tunable — calibrate after observing real ingests.
+drafts is unchanged. Axis weights (`SEM_WEIGHT`, `SAL_WEIGHT`,
+`TARGET_WEIGHT`) are first-cut and tunable — calibrate after observing real
+ingests with target-score history.
 """
 
 from __future__ import annotations
 
 # Combined-quality margin to count as a real improvement. Same magnitude as
-# the prior sem-only EPSILON; combined is the average of two 0..1 quantities,
+# the prior sem-only EPSILON; combined is an average of 0..1 quantities,
 # so 0.01 still corresponds to "noticeable" rather than "noise."
 SEMANTIC_EPSILON = 0.01
 FLOOR_MARGIN = 0.03
 BM25_MARGIN = 0.5
 
-# Default 0.5/0.5: salience and fidelity are coequal axes (one says "what you
-# wrote is in the PDF," the other "what's in the PDF made it onto the page").
+# Equal base weights: fidelity, structural salience, and triaged target claims
+# are coequal axes when all have confident denominators. The target score is
+# already importance-weighted critical=3/high=2/normal=1 by grade.scorer.
+# With no target extraction, this reduces exactly to the prior 0.5/0.5 blend.
+# Salience and fidelity say respectively "what's in the PDF made it onto the
+# page" and "what you wrote is in the PDF"; target claims add "the
+# load-bearing, paper-wide items made it onto the page."
 # Measured on 533 historical drafts the two are essentially independent
 # (Pearson +0.034), which is what justifies carrying both rather than folding
 # them together. Kept at parity deliberately: nothing in the corpus data
@@ -52,6 +58,7 @@ BM25_MARGIN = 0.5
 # tuned to a sample. Tuning here changes all three fitness lenses at once.
 SAL_WEIGHT = 0.5
 SEM_WEIGHT = 0.5
+TARGET_WEIGHT = 0.5
 
 # Anchor count at which salience earns its full weight. Below it the score is
 # a ratio over too small a denominator to trust — 9% of historical drafts had
@@ -60,6 +67,7 @@ SEM_WEIGHT = 0.5
 # proportion and the blend renormalized, so a thin recall estimate dilutes
 # toward fidelity instead of swinging selection at full strength.
 ANCHOR_CONFIDENCE_FULL = 10
+TARGET_CONFIDENCE_FULL = 5
 
 
 def salience_confidence(scores: dict) -> float:
@@ -77,41 +85,61 @@ def salience_confidence(scores: dict) -> float:
     return min(1.0, max(0.0, float(n) / ANCHOR_CONFIDENCE_FULL))
 
 
+def target_claim_confidence(scores: dict) -> float:
+    """Weight multiplier for target-claim recall, from valid claim count.
+
+    Five claims is enough for full confidence because the extraction prompt
+    reserves roughly 3–6 critical claims for a paper's load-bearing core. As
+    with salience, a missing count means unknown/legacy and retains full weight.
+    """
+    n = scores.get("n_target_claims")
+    if n is None:
+        return 1.0
+    return min(1.0, max(0.0, float(n) / TARGET_CONFIDENCE_FULL))
+
+
 def combined_quality(scores: dict) -> float | None:
-    """Primary fitness signal: confidence-weighted blend of fidelity and salience.
+    """Confidence-weighted blend of fidelity and two coverage signals.
 
-    Returns None when neither axis is available; gracefully falls back when
-    one is missing:
+    Returns None when no axis is available; gracefully falls back when some
+    are missing:
 
-      both present  → normalized SEM_WEIGHT*sem + (SAL_WEIGHT*conf)*sal
-      sem only      → sem    (no salience anchors recoverable from the PDF,
-                              or `--no-salience` was set)
-      sal only      → sal    (semantic disabled / model unavailable)
-      neither       → None   (caller picks a fallback ordering)
+      all present   → normalized weighted blend, with denominator confidence
+      one present   → that score
+      none present  → None (caller picks a fallback ordering)
 
     Note for callers comparing against SEMANTIC_EPSILON: this is a weighted
     average, so a gain of d on one axis alone moves the result by w*d — at
-    parity weights, an 0.01 single-axis gain registers as 0.005 and does NOT
-    clear the epsilon. `tournament_key` sidesteps that by quantizing the axes
+    two-axis parity, an 0.01 single-axis gain registers as 0.005 (and less with
+    three axes) and does NOT clear the epsilon. `tournament_key` sidesteps that
+    by quantizing the axes
     before blending; the improvement rules keep the continuous blend, so they
     require roughly a 0.02 single-axis move. That asymmetry is deliberate for
     now — the historical `ingest_iterations` rows can't be joined into
     revision pairs (`parent_iteration_id` yields no grade-to-grade links), so
     there's no evidence available to calibrate a different epsilon against.
     """
+    components = []
     sem = scores.get("semantic_score")
     sal = scores.get("salience_score")
-    if sem is not None and sal is not None:
-        w_sal = SAL_WEIGHT * salience_confidence(scores)
-        total = SEM_WEIGHT + w_sal
-        if total <= 0:
-            return sem
-        return (SEM_WEIGHT * sem + w_sal * sal) / total
+    target = scores.get("target_claim_score")
     if sem is not None:
-        return sem
+        components.append((float(sem), SEM_WEIGHT))
     if sal is not None:
-        return sal
-    return None
+        components.append((float(sal), SAL_WEIGHT * salience_confidence(scores)))
+    if target is not None:
+        components.append((
+            float(target), TARGET_WEIGHT * target_claim_confidence(scores),
+        ))
+    if not components:
+        return None
+    total = sum(weight for _, weight in components)
+    if total <= 0:
+        # A score with an explicitly zero denominator is not trustworthy, but
+        # retaining the only available value is a safer fallback than erasing
+        # the primary signal entirely.
+        return components[0][0]
+    return sum(value * weight for value, weight in components) / total
 
 
 def _quantized_quality(scores: dict) -> float | None:
@@ -136,11 +164,14 @@ def _quantized_quality(scores: dict) -> float | None:
     """
     sem = scores.get("semantic_score")
     sal = scores.get("salience_score")
+    target = scores.get("target_claim_score")
     quantized = dict(scores)
     if sem is not None:
         quantized["semantic_score"] = round(sem, 2)
     if sal is not None:
         quantized["salience_score"] = round(sal, 2)
+    if target is not None:
+        quantized["target_claim_score"] = round(target, 2)
     return combined_quality(quantized)
 
 
@@ -153,10 +184,9 @@ def tournament_key(draft) -> tuple[float, float, float, float, float, float]:
     The primary blends axes that have each been rounded to 2 decimals (~0.01
     granularity, matching SEMANTIC_EPSILON) rather than rounding the blend —
     see `_quantized_quality` for why that distinction decides real tournaments.
-    Drafts genuinely within 0.01 on both axes still tie here, so coherence and
+    Drafts genuinely within 0.01 on every available axis still tie here, so coherence and
     coverage break the near-tie. Stuffing low-quality claims can't game the
-    primary because extra weak claims drag both `semantic_score` and
-    `salience_score` down.
+    primary because extra weak claims drag fidelity and/or coverage down.
     """
     s = draft.scores
     q = _quantized_quality(s)

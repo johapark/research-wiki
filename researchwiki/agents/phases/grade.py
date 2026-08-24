@@ -11,7 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from ...benchmark.fixture import ContentFixture, FixtureItem
 from ...grade.fidelity.paper import grade_page
+from ...grade.scorer import IMPORTANCE_WEIGHTS, VERDICT_SCORES, score_text
 from ...grade.support import Classifier, check_support, unsupported_claims
 from .draft import _wrap_with_frontmatter
 
@@ -71,6 +73,7 @@ def grade_draft(
     pdf_path: Path | str | None = None,
     use_semantic: bool = True,
     support_classifier: Classifier | None = None,
+    target_claims=None,
 ) -> tuple[dict, list[ClaimDetail]]:
     """Grade a draft via the Phase 1 grader.
 
@@ -125,6 +128,19 @@ def grade_draft(
         for m in (sal.missed_anchors if sal is not None else [])
     ]
 
+    target_scores = _score_target_claims(
+        stem=stem,
+        draft_text=draft_text,
+        target_claims=target_claims,
+        use_semantic=use_semantic,
+    )
+    # Target claims come from a paper-wide extraction pass and therefore make
+    # omissions actionable beyond the structurally extracted salience anchors.
+    # Preserve the existing critic transport rather than introducing a second
+    # gap channel. Exact misses only: partial coverage already affects fitness,
+    # but should not automatically trigger additive prose.
+    missed_anchors.extend(target_scores.get("missed_target_claims", []))
+
     aggregate = {
         "n_claims": report.n_claims,
         "n_graded": report.n_graded,
@@ -141,6 +157,7 @@ def grade_draft(
         "n_anchors_matched": n_anchors_matched,
         "n_anchors_missed": n_anchors_missed,
         "missed_anchors": missed_anchors,
+        **target_scores,
     }
     details = [
         ClaimDetail(
@@ -178,3 +195,101 @@ def grade_draft(
         ]
 
     return aggregate, details
+
+
+def _score_target_claims(
+    *,
+    stem: str,
+    draft_text: str,
+    target_claims,
+    use_semantic: bool,
+) -> dict:
+    """Score the authored page against the extractor's triaged claim set.
+
+    The shared fixture scorer already implements the desired importance
+    weighting (critical=3, high=2, normal=1), numeric-integrity checks, and
+    paraphrase-tolerant semantic matching. Reusing it keeps benchmark and live
+    ingest semantics aligned instead of growing a second coverage heuristic.
+    """
+    claims = list(getattr(target_claims, "claims", None) or [])
+    if not claims:
+        return {}
+
+    axes: dict[str, list[FixtureItem]] = {
+        "headline": [],
+        "capability": [],
+        "limitation": [],
+    }
+    claim_by_id = {}
+    for position, claim in enumerate(claims):
+        claim_type = getattr(claim, "type", "")
+        importance = getattr(claim, "importance", "normal")
+        content = (getattr(claim, "content", "") or "").strip()
+        if claim_type not in axes or importance not in IMPORTANCE_WEIGHTS or not content:
+            continue
+        item_id = f"target-{position:03d}"
+        axes[claim_type].append(FixtureItem(
+            id=item_id,
+            importance=importance,
+            verbalization=content,
+            location=getattr(claim, "location", None),
+        ))
+        claim_by_id[item_id] = claim
+
+    n_valid = len(claim_by_id)
+    if not n_valid:
+        return {}
+
+    fixture = ContentFixture(
+        paper_stem=stem,
+        paper_type="research",
+        title="",
+        notes="live target-claim evaluation",
+        headline_claims=axes["headline"],
+        capabilities=axes["capability"],
+        limitations=axes["limitation"],
+        related_papers=[],
+    )
+    report = score_text(fixture, draft_text, use_semantic=use_semantic)
+    verdicts = [
+        verdict
+        for axis in ("headline_claims", "capabilities", "limitations")
+        for verdict in report.axes[axis].items
+    ]
+
+    tier_recall: dict[str, float | None] = {}
+    for tier, weight in IMPORTANCE_WEIGHTS.items():
+        tier_items = [v for v in verdicts if v.importance == tier]
+        possible = len(tier_items) * weight
+        achieved = sum(VERDICT_SCORES[v.verdict] * weight for v in tier_items)
+        tier_recall[tier] = (achieved / possible) if possible else None
+
+    misses = []
+    for verdict in verdicts:
+        if verdict.verdict != "miss":
+            continue
+        claim = claim_by_id[verdict.item_id]
+        misses.append({
+            "axis": "target_claims",
+            "id": verdict.item_id,
+            "importance": verdict.importance,
+            "text": (getattr(claim, "content", "") or "")[:_ANCHOR_TEXT_CAP],
+            "location": getattr(claim, "location", None),
+        })
+
+    return {
+        "target_claim_score": report.overall_weighted_recall,
+        "n_target_claims": n_valid,
+        "n_target_claims_matched": sum(v.verdict == "match" for v in verdicts),
+        "n_target_claims_partial": sum(v.verdict == "partial" for v in verdicts),
+        "n_target_claims_missed": len(misses),
+        "n_critical_target_claims": sum(v.importance == "critical" for v in verdicts),
+        "n_critical_target_claims_missed": sum(
+            v.importance == "critical" and v.verdict == "miss" for v in verdicts
+        ),
+        "target_claim_recall_by_importance": tier_recall,
+        "critical_target_claim_recall": tier_recall["critical"],
+        "high_target_claim_recall": tier_recall["high"],
+        "normal_target_claim_recall": tier_recall["normal"],
+        "missed_target_claims": misses,
+    }

@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
 
@@ -154,5 +155,26 @@ def update_locked(
         fcntl.flock(lock_fp, fcntl.LOCK_EX)
         try:
             return _apply()
+        finally:
+            fcntl.flock(lock_fp, fcntl.LOCK_UN)
+
+
+@contextmanager
+def exclusive_lock(path: Path | str):
+    """Cross-process exclusive lock keyed by an arbitrary shared resource.
+
+    Unlike :func:`update_locked`, this guards a multi-file operation. Page-level
+    index updates rewrite Tantivy plus the aligned semantic ``.npy``/JSON pair,
+    so no single target file can represent the whole critical section.
+    """
+    path = Path(path)
+    if fcntl is None:  # pragma: no cover - Windows fallback
+        yield
+        return
+    lock_path = _lock_path_for(path)
+    with open(lock_path, "w") as lock_fp:
+        fcntl.flock(lock_fp, fcntl.LOCK_EX)
+        try:
+            yield
         finally:
             fcntl.flock(lock_fp, fcntl.LOCK_UN)

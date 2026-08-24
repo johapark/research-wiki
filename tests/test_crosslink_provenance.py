@@ -320,3 +320,34 @@ def test_populated_reference_list_is_not_flagged(monkeypatch):
         stats=stats,
     )
     assert stats["citation_graph_unresolved"] is False
+
+
+def test_topical_candidates_skip_stale_semantic_rows(monkeypatch, tmp_path):
+    """A removed page can remain in the derived index until the next upsert."""
+    present = tmp_path / "compbio" / "present.md"
+    present.parent.mkdir(parents=True)
+    present.write_text("---\ntitle: Present\ntype: paper\n---\n\n## Summary\nPresent.\n")
+    hits = [_Hit("compbio/missing"), _Hit("compbio/present")]
+
+    monkeypatch.setattr(crosslinks, "wiki_dir", lambda: tmp_path)
+    monkeypatch.setattr(crosslinks.semantic_pages, "index_exists", lambda: True)
+    monkeypatch.setattr(
+        crosslinks.semantic_pages, "query_text", lambda *args, **kwargs: hits,
+    )
+
+    out = crosslinks.propose_crosslinks(
+        {"title": "New paper"}, {}, use_stub=True,
+    )
+
+    assert [candidate.wikilink for candidate in out] == ["compbio/present"]
+
+
+def test_judge_prompt_tolerates_candidate_removed_during_prompt_build(
+    monkeypatch, tmp_path,
+):
+    monkeypatch.setattr(crosslinks, "wiki_dir", lambda: tmp_path)
+
+    prompt = crosslinks._build_judge_prompt({}, {}, [_Hit("compbio/gone")])
+
+    assert "# Candidate wiki pages" in prompt
+    assert "compbio/gone" not in prompt

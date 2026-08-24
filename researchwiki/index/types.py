@@ -70,7 +70,7 @@ class SearchBackend(ABC):
 
     @abstractmethod
     def add(self, doc: Document) -> None:
-        """Incrementally add one document to an existing index."""
+        """Incrementally upsert one document, replacing the same stem."""
 
     @abstractmethod
     def query(self, q: str, limit: int = 10) -> list[SearchHit]:

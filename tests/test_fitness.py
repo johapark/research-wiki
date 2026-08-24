@@ -235,7 +235,10 @@ def test_strict_combined_margin_below_epsilon_falls_through():
 
 from researchwiki.agents.fitness import (
     ANCHOR_CONFIDENCE_FULL,
+    TARGET_CONFIDENCE_FULL,
+    TARGET_WEIGHT,
     salience_confidence,
+    target_claim_confidence,
 )
 
 
@@ -306,3 +309,53 @@ def test_zero_anchor_confidence_falls_back_to_fidelity():
     q = combined_quality({"semantic_score": 0.80, "salience_score": 0.20,
                           "n_anchors": 0})
     assert q == 0.80
+
+
+# ---------- importance-weighted target-claim coverage ----------
+
+def test_target_claim_axis_joins_primary_before_coherence():
+    covered = _d(
+        semantic_score=0.70, salience_score=0.70, n_anchors=20,
+        target_claim_score=0.90, n_target_claims=12,
+        coherence_score=0.10,
+    )
+    omitted = _d(
+        semantic_score=0.70, salience_score=0.70, n_anchors=20,
+        target_claim_score=0.40, n_target_claims=12,
+        coherence_score=0.99,
+    )
+    assert tournament_key(covered) > tournament_key(omitted)
+
+
+def test_three_confident_axes_receive_equal_base_weight():
+    scores = {
+        "semantic_score": 0.9,
+        "salience_score": 0.6,
+        "n_anchors": ANCHOR_CONFIDENCE_FULL,
+        "target_claim_score": 0.3,
+        "n_target_claims": TARGET_CONFIDENCE_FULL,
+    }
+    expected = (
+        SEM_WEIGHT * 0.9 + SAL_WEIGHT * 0.6 + TARGET_WEIGHT * 0.3
+    ) / (SEM_WEIGHT + SAL_WEIGHT + TARGET_WEIGHT)
+    assert combined_quality(scores) == expected
+
+
+def test_thin_target_claim_set_is_confidence_diluted():
+    thin = {
+        "semantic_score": 0.8,
+        "target_claim_score": 0.2,
+        "n_target_claims": 1,
+    }
+    thick = {**thin, "n_target_claims": TARGET_CONFIDENCE_FULL}
+    assert combined_quality(thin) > combined_quality(thick)
+    assert target_claim_confidence(thin) == 1 / TARGET_CONFIDENCE_FULL
+
+
+def test_missing_target_axis_preserves_previous_two_axis_result():
+    scores = {
+        "semantic_score": 0.8,
+        "salience_score": 0.6,
+        "n_anchors": ANCHOR_CONFIDENCE_FULL,
+    }
+    assert combined_quality(scores) == SEM_WEIGHT * 0.8 + SAL_WEIGHT * 0.6

@@ -25,6 +25,7 @@ from ..db.iterations import write_iteration, update_paper_stem
 from ..grade import coherence
 from . import fitness, model_config, phases
 from .context import Context, PromoteFailed, ReconcileFailed, StemRenameRefused
+from .commit_support import promotion_decision_reason, update_indexes_after_promotion
 from .relay import set_relay_identity
 from ..fsatomic import write_text_atomic
 from ..log import log
@@ -253,7 +254,7 @@ def run_ingest(
             log(f"author #{slot + 1} → stance={draft.stance} t={t:.1f} {len(draft.text)} chars", tag="agent")
 
         # Phase 4: grade each draft (BM25 + bi-encoder semantic similarity +
-        # PDF-anchor salience + structural coherence)
+        # PDF-anchor salience + importance-weighted target claims + coherence)
         for d in ctx.drafts:
             ctx.next_iter()
             _phase_grade(ctx, conn, d)
@@ -261,9 +262,11 @@ def run_ingest(
             sal_str = f"{sal:.2f}" if sal is not None else "n/a"
             sem = d.scores.get("semantic_score")
             sem_str = f"{sem:.2f}" if sem is not None else "n/a"
+            target = d.scores.get("target_claim_score")
+            target_str = f"{target:.2f}" if target is not None else "n/a"
             log(
                 f"grade   → draft {d.iteration_id} "
-                f"sem={sem_str} sal={sal_str} "
+                f"sem={sem_str} sal={sal_str} target={target_str} "
                 f"coh={d.scores.get('coherence_score', 0):.2f} "
                 f"bm25={d.scores.get('mean_bm25', 0):.2f}", tag="agent"
             )
@@ -296,7 +299,10 @@ def run_ingest(
 
             ctx.next_iter()
             _phase_grade(ctx, conn, evolved)
+            target = evolved.scores.get("target_claim_score")
+            target_str = f"{target:.2f}" if target is not None else "n/a"
             log(f"grade   → evolved sem={(evolved.scores.get('semantic_score') or 0):.2f} "
+                  f"target={target_str} "
                   f"bm25={(evolved.scores.get('mean_bm25') or 0):.2f}", tag="agent")
 
             if fitness.is_evolve_improvement(evolved, ctx.winner):
@@ -559,6 +565,7 @@ def _phase_grade(ctx: Context, conn, draft) -> None:
         sandbox_dir=ctx.sandbox_dir,
         pdf_path=ctx.pdf_path,
         use_semantic=ctx.use_semantic,
+        target_claims=ctx.target_claims,
     )
     coh = coherence.score_coherence(draft.text, page_type="paper")
     scores["coherence_score"] = coh.score
@@ -749,8 +756,11 @@ def _phase_debug(
     # Re-grade against the original PDF.
     ctx.next_iter()
     _phase_grade(ctx, conn, new_draft)
+    target = new_draft.scores.get("target_claim_score")
+    target_str = f"{target:.2f}" if target is not None else "n/a"
     log(
         f"grade    → debug sem={(new_draft.scores.get('semantic_score') or 0):.2f} "
+        f"target={target_str} "
         f"bm25={(new_draft.scores.get('mean_bm25') or 0):.2f} "
         f"drift={new_draft.scores.get('n_drift') or 0}", tag="agent"
     )
@@ -1060,14 +1070,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # Record the failure, then raise: the iteration row has to exist before
         # the exception unwinds, because `run_ingest`'s `finally` closes `conn`.
         if not result.promoted:
-            decision_reason = (
-                f"category={result.category}; wiki={result.wiki_path}; "
-                f"pdf={result.pdf_path}; backlinks_added={result.backlinks_added}; "
-                f"index_updated={result.index_updated}; "
-                f"log_appended={result.log_appended}"
-            )
-            if result.warnings:
-                decision_reason += f"; warnings={result.warnings}"
+            decision_reason = promotion_decision_reason(result)
             write_iteration(
                 attempt_id=ctx.attempt_id,
                 paper_stem=ctx.paper_stem,
@@ -1107,14 +1110,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
                   f"(old_doi={result.pdf_upgrade.get('old_doi')}, "
                   f"new_doi={result.pdf_upgrade.get('new_doi')})", tag="agent")
         decision = "committed-to-wiki"
-        decision_reason = (
-            f"category={result.category}; "
-            f"wiki={result.wiki_path}; pdf={result.pdf_path}; "
-            f"backlinks_added={result.backlinks_added}; "
-            f"index_updated={result.index_updated}; log_appended={result.log_appended}"
-        )
-        if result.warnings:
-            decision_reason += f"; warnings={result.warnings}"
+        decision_reason = promotion_decision_reason(result)
         log(f"promote  → wiki/{result.category}/{ctx.paper_stem}.md "
               f"({len(result.backlinks_added)} back-links added)", tag="agent")
         if result.warnings:
@@ -1142,6 +1138,10 @@ def _phase_commit(ctx: Context, conn) -> Path:
                 except (FileNotFoundError, FileExistsError, ValueError) as e:
                     log(f"supp     ⚠ skipped {sp}: {e}", tag="agent")
 
+        # Update only the new/edited pages. Parallel ingests serialize in the
+        # index layer; failures remain recoverable derived-cache warnings.
+        update_indexes_after_promotion(result)
+
         # Memory evolution: now that the new page is on disk, ask whether
         # any neighboring synthesis pages need updating.
         # Cosine prefilter inside skips zero-signal candidates so the cost
@@ -1156,6 +1156,11 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # synthesis grounding) have no signal to consume.
         ctx.next_iter()
         phases.persist_grades(ctx, conn)
+
+        # Warnings can be added after promotion itself (supplementary staging,
+        # incremental indexing), so assemble the durable commit reason only
+        # after those derived operations have finished.
+        decision_reason = promotion_decision_reason(result)
 
         out_path = result.wiki_path
     else:

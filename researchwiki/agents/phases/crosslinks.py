@@ -298,7 +298,15 @@ def propose_crosslinks(
         k=k * 2,                     # over-fetch; we'll filter by exclude_keys
         page_types=("paper",),
     )
-    hits = [h for h in hits if h.key not in exclude_keys][:k]
+    eligible = [h for h in hits if h.key not in exclude_keys]
+    existing = [h for h in eligible if _candidate_page(h) is not None]
+    n_stale = len(eligible) - len(existing)
+    hits = existing[:k]
+    if n_stale:
+        log(
+            f"dropped {n_stale} stale/missing semantic candidate(s)",
+            tag="propose_crosslinks",
+        )
     if not hits:
         return []
 
@@ -563,7 +571,7 @@ def _build_gleaning_prompt(metadata: dict, sections: dict, rejected_hits: list) 
         "# Previously-rejected candidates — review these for borderline cases",
     ]
     for h in rejected_hits:
-        page = read_page(wiki_dir() / f"{h.key}.md")
+        page = _candidate_page(h)
         if page is None:
             continue
         parts.extend(_format_candidate_block(h, page))
@@ -591,7 +599,7 @@ def _build_judge_prompt(metadata: dict, sections: dict, hits: list) -> str:
         "# Candidate wiki pages (top semantic neighbors)",
     ]
     for h in hits:
-        page = read_page(wiki_dir() / f"{h.key}.md")
+        page = _candidate_page(h)
         if page is None:
             continue
         parts.extend(_format_candidate_block(h, page))
@@ -599,6 +607,20 @@ def _build_judge_prompt(metadata: dict, sections: dict, hits: list) -> str:
     parts.append("Output JSON per the system prompt. One verdict per "
                  "candidate. No prose outside the JSON.")
     return "\n".join(parts)
+
+
+def _candidate_page(hit):
+    """Read a semantic hit's canonical page, tolerating stale index rows.
+
+    Page removal and a subsequent clean re-ingest intentionally leave derived
+    indexes stale until the new page is promoted. Retrieval may therefore
+    return a key whose Markdown file no longer exists. A missing candidate is
+    simply ineligible evidence for cross-link judging, not an ingest failure.
+    """
+    try:
+        return read_page(wiki_dir() / f"{hit.key}.md")
+    except OSError:
+        return None
 
 
 def _top_graded_claims(stem: str, k: int = 3) -> list[dict]:

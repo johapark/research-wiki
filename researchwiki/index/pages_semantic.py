@@ -23,6 +23,8 @@ from __future__ import annotations
 import hashlib
 import re
 import json
+import os
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +35,7 @@ from . import embeddings as semantic
 from ..paths import semantic_cache_dir
 from ..wiki import Page, extract_section, read_pages, strip_non_prose
 from ..log import log
+from ..fsatomic import write_json_atomic
 
 PAGES_NPY = "pages.npy"
 PAGES_META = "pages_meta.json"
@@ -294,6 +297,116 @@ def build_index(pages: list[Page] | None = None) -> dict | None:
             "thin": thin}
 
 
+def upsert_pages(pages: list[Page]) -> dict | None:
+    """Embed and upsert only changed pages in the existing semantic index.
+
+    Rows are keyed by stem so a category move replaces the old key. Unchanged
+    content hashes skip embedding. If the aligned cache is absent/corrupt, fall
+    back to a full rebuild—the Markdown tree remains canonical.
+    """
+    if not semantic.is_available():
+        log("embedding model unavailable; skipping", tag="semantic-pages")
+        return None
+    loaded = _load()
+    if loaded is None:
+        result = build_index()
+        if result is not None:
+            result["mode"] = "rebuilt"
+        return result
+
+    arr, old_rows = loaded
+    by_stem = {p.stem: p for p in pages}
+    if not by_stem:
+        return {"n_pages": len(old_rows), "n_updated": 0, "n_embedded": 0,
+                "model": semantic.DEFAULT_MODEL, "dim": int(arr.shape[1] if arr.ndim == 2 else 0),
+                "mode": "incremental", "thin": []}
+
+    old_by_stem = {row["stem"]: (i, row) for i, row in enumerate(old_rows)}
+    pending: list[tuple[Page, str, dict]] = []
+    thin: list[dict] = []
+    removed_stems: set[str] = set()
+    for stem, page in by_stem.items():
+        text = page_index_text(page)
+        reason = thin_index_reason(page, text)
+        if reason:
+            thin.append({"key": page.key, "page_type": page.page_type, "reason": reason})
+        if not text.strip():
+            if stem in old_by_stem:
+                removed_stems.add(stem)
+            continue
+        row = {
+            "key": page.key,
+            "stem": page.stem,
+            "category": page.category,
+            "page_type": page.page_type,
+            "title": page.fm.get("title", ""),
+            "content_hash": _content_hash(text),
+        }
+        prior = old_by_stem.get(stem)
+        if prior is not None and prior[1] == row:
+            continue
+        pending.append((page, text, row))
+
+    new_vectors = None
+    if pending:
+        new_vectors = semantic.embed_texts([text for _, text, _ in pending])
+        if new_vectors is None or new_vectors.shape[0] != len(pending):
+            log("incremental embedding pass failed", tag="semantic-pages")
+            return None
+        if arr.ndim != 2 or new_vectors.ndim != 2 or new_vectors.shape[1] != arr.shape[1]:
+            # A cache produced by another embedding model/build cannot be
+            # safely row-spliced. Rebuild every row under the active model.
+            result = build_index()
+            if result is not None:
+                result["mode"] = "rebuilt"
+            return result
+
+    replaced = removed_stems | {page.stem for page, _, _ in pending}
+    keep_indices = [i for i, row in enumerate(old_rows) if row["stem"] not in replaced]
+    rows = [old_rows[i] for i in keep_indices]
+    kept = arr[keep_indices] if keep_indices else np.zeros((0, arr.shape[1]), dtype=np.float32)
+    if pending and new_vectors is not None:
+        rows.extend(row for _, _, row in pending)
+        embeddings = np.vstack([kept, new_vectors]) if kept.size else new_vectors
+    else:
+        embeddings = kept
+
+    if not replaced:
+        return {"n_pages": len(rows), "n_updated": 0, "n_embedded": 0,
+                "model": semantic.DEFAULT_MODEL, "dim": int(embeddings.shape[1] if embeddings.ndim == 2 else 0),
+                "mode": "incremental", "thin": thin}
+
+    out_dir = semantic_cache_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    _save_npy_atomic(out_dir / PAGES_NPY, embeddings)
+    meta = {
+        "model": semantic.DEFAULT_MODEL,
+        "dim": int(embeddings.shape[1] if embeddings.ndim == 2 else 0),
+        "built_at": int(time.time()),
+        "rows": rows,
+    }
+    write_json_atomic(out_dir / PAGES_META, meta)
+    return {"n_pages": len(rows), "n_updated": len(replaced),
+            "n_embedded": len(pending), "model": meta["model"],
+            "dim": meta["dim"], "mode": "incremental", "thin": thin}
+
+
+def _save_npy_atomic(path: Path, array: np.ndarray) -> None:
+    """Write a NumPy array by atomic replace in the destination directory."""
+    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            np.save(fh, array)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+
+
 def _write_empty(out_dir: Path) -> None:
     np.save(out_dir / PAGES_NPY, np.zeros((0, 0), dtype=np.float32))
     (out_dir / PAGES_META).write_text(json.dumps({
@@ -310,8 +423,13 @@ def _load() -> tuple[np.ndarray, list[dict]] | None:
     meta = out_dir / PAGES_META
     if not npy.exists() or not meta.exists():
         return None
-    rows = json.loads(meta.read_text(encoding="utf-8")).get("rows", [])
-    arr = np.load(npy)
+    try:
+        rows = json.loads(meta.read_text(encoding="utf-8")).get("rows", [])
+        arr = np.load(npy)
+    except (json.JSONDecodeError, OSError, ValueError, TypeError):
+        return None
+    if not isinstance(rows, list) or not isinstance(arr, np.ndarray):
+        return None
     if arr.shape[0] != len(rows):
         # Index is corrupt or partially written — caller should rebuild.
         return None

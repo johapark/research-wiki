@@ -36,6 +36,7 @@ __all__ = [
     "suggest_category_knn",
     "suggest_category_llm",
     "build_documents_from_wiki",
+    "document_from_page",
     "format_claim_ref",
 ]
 
@@ -67,23 +68,22 @@ def build_documents_from_wiki() -> list[Document]:
     year, type) populate the corresponding Document fields. The `## Summary`
     section is extracted separately so the index can weight it higher.
     """
-    docs: list[Document] = []
-    for p in read_pages():
-        summary = extract_section(p.body, "Summary")
-        docs.append(
-            Document(
-                stem=p.stem,
-                category=p.category,
-                page_type=p.page_type,
-                title=p.str_field("title"),
-                authors=p.str_field("authors"),
-                year=p.year_int(),
-                summary=summary,
-                body=p.body,
-                keywords=p.str_field("keywords"),
-            )
-        )
-    return docs
+    return [document_from_page(p) for p in read_pages()]
+
+
+def document_from_page(p) -> Document:
+    """Convert one parsed wiki Page into the canonical BM25 document."""
+    return Document(
+        stem=p.stem,
+        category=p.category,
+        page_type=p.page_type,
+        title=p.str_field("title"),
+        authors=p.str_field("authors"),
+        year=p.year_int(),
+        summary=extract_section(p.body, "Summary"),
+        body=p.body,
+        keywords=p.str_field("keywords"),
+    )
 
 
 def suggest_category_knn(

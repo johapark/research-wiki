@@ -134,8 +134,15 @@ class TantivySearchBackend(SearchBackend):
         idx.reload()
 
     def add(self, doc: Document) -> None:
+        """Upsert one page by stem.
+
+        Stems are corpus-unique and survive category moves, so deleting on the
+        raw ``stem`` field prevents both re-ingest duplicates and stale rows at
+        an old category key.
+        """
         idx = self._open_or_create()
         writer = idx.writer(heap_size=15_000_000)
+        writer.delete_documents("stem", doc.stem)
         writer.add_document(_to_tantivy_doc(doc))
         writer.commit()
         writer.wait_merging_threads()
