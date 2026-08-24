@@ -54,6 +54,7 @@ def _relay_once(tmp_path, monkeypatch, *, phase="author", prompt="hello"):
         path.write_text(json.dumps({
             "schema_version": 1,
             "op_id": path.name.split(".")[0],
+            "via": "test/model-1",
             "response": "ok",
         }), encoding="utf-8")
 
@@ -107,3 +108,29 @@ def test_schema_version_unchanged_by_additive_fields(tmp_path, monkeypatch):
     relay.set_relay_identity(stem="a-2020-b", pdf="c.pdf")
     _out, payload = _relay_once(tmp_path, monkeypatch)
     assert payload["schema_version"] == 1
+
+
+@pytest.mark.parametrize("via", ["codex/gpt-5.6", "claude-code/claude-4"])
+def test_relay_rejects_an_ambiguous_model_family_alias(tmp_path, via):
+    with pytest.raises(relay.SchemaError, match="specific model variant"):
+        relay._check_response_shape(
+            {"via": via, "response": "ok"},
+            tmp_path / "response.json",
+            schema=None,
+        )
+
+
+def test_relay_accepts_an_exact_gpt_variant(tmp_path):
+    relay._check_response_shape(
+        {"via": "codex/gpt-5.6-terra", "response": "ok"},
+        tmp_path / "response.json",
+        schema=None,
+    )
+
+
+def test_relay_accepts_an_exact_anthropic_variant(tmp_path):
+    relay._check_response_shape(
+        {"via": "claude-code/opus-4-7", "response": "ok"},
+        tmp_path / "response.json",
+        schema=None,
+    )

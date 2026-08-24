@@ -62,7 +62,7 @@ pending prompt" / "watch for prompts" / similar:
   "phase": "author" | "classifier" | "judge" | "critic" | ...,
   "stem": "smith-2024-a-title-in-five-words" | null,  // null on `reconcile`
   "pdf":  "raw-drop.pdf",              // always set; use it when stem is null
-  "model_hint": "claude-sonnet-4-6",   // advisory; you can use any model
+  "model_hint": "gpt-5.6-terra",       // configured model; advisory
   "system": "<system prompt or null>",
   "prompt": "<the actual user prompt — usually a long block>",
   "schema": { /* JSON Schema, or null */ },
@@ -84,7 +84,8 @@ Field notes:
   from the start and is the identifier to use there. Neither feeds the
   op_id hash.
 - **`model_hint`** — *advisory only*. Whatever model the chat platform is
-  using is fine; the `via` field in your response carries traceability.
+  using is fine; the `via` field in your response records the model that
+  actually authored the response.
 - **`schema`** — when non-null, your response **must** validate. You'll
   see retries if it doesn't.
 - **`retry_of` / `retry_feedback`** — non-null when this is a retry. The
@@ -101,7 +102,7 @@ Field notes:
 {
   "schema_version": 1,
   "op_id": "<echo the op_id from the pending file>",
-  "via": "<your platform/model identifier, e.g. claude-code/opus-4.7>",
+  "via": "<exact platform/model identifier, e.g. codex/gpt-5.6-terra>",
   "response":   "<free-text response>",      // OR
   "structured": { /* arbitrary JSON value */ }
 }
@@ -115,9 +116,12 @@ Exactly **one** of `response` or `structured` per file:
   use the `response` text field, since that means the structured-output
   contract was ignored.
 
-The `via` field is optional but recommended — it helps the user audit
-which platform/model produced which response if the relay archive is
-enabled.
+The `via` field is required. It is the source of `author_model:` for the
+committed page, so name the exact model variant that authored the response.
+Family labels are rejected for every provider: for example,
+`codex/gpt-5.6` and `claude-code/claude-4` are ambiguous. Write an exact
+variant such as `codex/gpt-5.6-terra` or `claude-code/opus-4-7`.
+Do not copy `model_hint` unless it is also the model you actually used.
 
 ### Atomic write
 

@@ -26,6 +26,7 @@ import hashlib
 import itertools
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -342,7 +343,7 @@ def call_chat_relay(
         {
           "schema_version": 1,
           "op_id": "<echoed>",
-          "via": "<platform/model identifier, optional>",
+          "via": "<exact platform/model identifier, e.g. codex/gpt-5.6-terra>",
           "response":   "<free-text>",                  // OR
           "structured": { ... }                          // arbitrary JSON
         }
@@ -440,7 +441,7 @@ def call_chat_relay(
         text = data["response"]
     else:
         text = json.dumps(data["structured"], ensure_ascii=False)
-    via = data.get("via", "unknown")
+    via = data["via"].strip()
 
     prompt_path.unlink(missing_ok=True)
     response_path.unlink(missing_ok=True)
@@ -465,6 +466,26 @@ def _check_response_shape(data, response_path: Path, schema: dict | None) -> Non
         raise SchemaError(
             f"response file {response_path.name} must be a JSON object; "
             f"got {type(data).__name__}"
+        )
+    via = data.get("via")
+    if not isinstance(via, str) or not via.strip():
+        raise SchemaError(
+            "response must contain a non-empty via identifying the exact "
+            "platform/model that authored it (for example "
+            "codex/gpt-5.6-terra)"
+        )
+    # A bare vendor-family version does not identify a model tier or variant:
+    # gpt-5.6 could be Sol/Terra/Luna; claude-4 could be Opus/Sonnet/Haiku;
+    # and similarly for Gemini, Llama, and Qwen. Reject these known generic
+    # shapes without imposing a vendor-specific registry on other providers.
+    if re.search(
+        r"(?<![\w.-])(?:gpt|claude|gemini|llama|qwen)[-_]?\d+(?:\.\d+)?(?![-\w.])",
+        via,
+        flags=re.IGNORECASE,
+    ):
+        raise SchemaError(
+            "via must name a specific model variant, not a family alias; "
+            "use e.g. codex/gpt-5.6-terra or claude-code/opus-4-7"
         )
     has_text = isinstance(data.get("response"), str)
     has_structured = isinstance(data.get("structured"), (dict, list))
