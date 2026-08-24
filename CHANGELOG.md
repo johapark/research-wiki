@@ -20,6 +20,8 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-24
+
 ### Added
 
 - **Ingest now has enforceable per-PDF resource budgets.** `agent ingest`
@@ -43,6 +45,20 @@ the reasoning behind any line below.
   the terminal timer use a labeled event-span fallback instead of invented
   zeroes.
 
+- **Successful agent ingests now update the page indexes immediately.** The
+  promoted page and every backlink target receive locked BM25 and semantic
+  upserts, so parallel workers cannot clobber the aligned index files. A
+  missing or corrupt index falls back to the existing full builder, while an
+  update failure remains a recoverable warning with an explicit `reindex`
+  instruction rather than rolling back a valid page/PDF commit.
+
+- **Draft selection now measures importance-weighted target-claim coverage.**
+  The paper-wide extraction is scored as a third fitness axis beside fidelity
+  and structural salience, with critical/high/normal claims weighted 3/2/1 and
+  low-denominator confidence damped. Exact misses feed the existing critic gap
+  channel; legacy or failed extractions omit the axis and preserve the prior
+  two-axis behavior.
+
 - **Four release invariants that the v0.4.2 cut violated unnoticed.** The
   existing checks verify that a version has *a* changelog section and *a* link
   reference — never what is inside the section or where the link points, which
@@ -55,6 +71,15 @@ the reasoning behind any line below.
   type per section, Keep a Changelog's heading order, `[Unreleased]` comparing
   against the latest release, and each release comparing against its
   predecessor (the oldest exempt — it links to its tag).
+
+### Changed
+
+- **Chat-relay responses must identify the exact model that authored them.**
+  The `via` field is now required and family-only aliases such as
+  `codex/gpt-5.6` or `claude-code/claude-4` are rejected in favor of a concrete
+  variant. That value is the provenance ultimately written as `author_model:`,
+  so silently accepting an absent or ambiguous label made committed pages
+  claim less model provenance than direct-provider ingests.
 
 ### Fixed
 
@@ -1705,7 +1730,8 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/johapark/research-wiki/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/johapark/research-wiki/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/johapark/research-wiki/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/johapark/research-wiki/compare/v0.3.1...v0.4.0
