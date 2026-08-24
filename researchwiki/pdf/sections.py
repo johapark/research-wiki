@@ -69,8 +69,7 @@ SECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 # Period-style generalization was attempted on 2026-06-13 but rolled back
 # pending multi-run validation: the wider regex extracted captions for
 # Science/NEJM/Mol Cell papers but single-run scores moved within the
-# ~±10pp variance band, so attribution wasn't conclusive. See
-# benchmark-fixtures/PLAN.md for the trajectory.
+# ~±10pp variance band, so attribution wasn't conclusive.
 CAPTION_START_RE = re.compile(
     r"(?im)^\s*(?P<ed>Extended\s+Data\s+)?(?:Fig\.|Figure|Table)\s+\d+\w?\s*\|",
 )

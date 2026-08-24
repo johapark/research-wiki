@@ -35,7 +35,7 @@ Fetch verified on 2026-07-03. Licenses re-confirmed via each article's
 ### li-2026-schilda-hierarchical-integration-of-llm.pdf
 
 - **Title**: scHilda: Hierarchical Integration of LLM with KG database for single cell type annotation
-- **Authors**: Yifei Li, Yuxin Sun, Anqi Geng, Jia Xu, Yajing Meng, Feifei Cui, et al.
+- **Authors**: Yilang Li, Yidi Sun, Aoyun Geng, Junlin Xu, Yajie Meng, Feifei Cui, Leyi Wei, Quan Zou, Xiulai Li, Zilong Zhang
 - **Venue**: PLoS Computational Biology 22(5):e1014291 (2026)
 - **Published**: 2026-05-11
 - **DOI**: [10.1371/journal.pcbi.1014291](https://doi.org/10.1371/journal.pcbi.1014291)

@@ -161,8 +161,7 @@ def _build_author_prompt(
     # 4000-char anchor cap drops, especially for short-format papers
     # (Brief Communications, clinical-trial Articles) where load-bearing
     # results, ED-figure captions, and quantitative anchors live past the
-    # cap. Validated against benchmark-fixtures/{kim,yang,lai}-2026-* — see
-    # benchmark-fixtures/PLAN.md.
+    # cap. Validated against the benchmark fixture corpus.
     parts = [
         f"# Paper metadata",
         f"- Title: {metadata.get('title') or 'unknown'}",

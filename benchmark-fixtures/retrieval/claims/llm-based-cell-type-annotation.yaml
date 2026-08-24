@@ -11,7 +11,6 @@ notes: |
   Portability caveat: if the author phase places the LLM+KG claim at a
   different position on a new ingest, this fixture reports a rank miss.
   When that happens the fix is to update `position:` here, not the ingest.
-  See PLAN.md for calibration guidance after the first ingest run.
 
 expected_claims:
   - paper_stem: li-2026-schilda-hierarchical-integration-of-llm

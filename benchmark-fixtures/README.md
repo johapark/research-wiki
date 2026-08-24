@@ -7,7 +7,6 @@ The harness is **portable**: five CC-BY-4.0 OA papers are committed under `pdfs/
 ```
 benchmark-fixtures/
 ├── LICENSES.md                # per-paper CC-BY-4.0 attribution
-├── PLAN.md                    # rolling improvement plan + scoreboard
 ├── CALIBRATION-2026-06.md     # archived — pre-OA threshold calibration
 ├── pdfs/                      # bundled CC-BY-4.0 OA papers (committed)
 │   └── {stem}.pdf
@@ -165,4 +164,4 @@ Two modes:
 
 Add `--with-grader` for reference-free per-claim faithfulness (BM25 + bi-encoder + numeric-integrity + negation-parity). Add `--with-style` for compression + extractiveness. Add `--repeat N` for author-stochasticity replication.
 
-See `PLAN.md` for the running scoreboard and `CALIBRATION-2026-06.md` for the archived threshold-calibration exercise.
+See `CALIBRATION-2026-06.md` for the archived threshold-calibration exercise.
