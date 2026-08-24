@@ -295,11 +295,12 @@ def test_evolve_revision_inherits_the_authors_handle_and_hook(monkeypatch):
 def test_debug_repair_inherits_the_authors_handle_and_hook(monkeypatch):
     prior = _prior_draft()
     ctx = _revision_ctx(prior)
+    rows = []
     monkeypatch.setattr(runner.phases, "debug", lambda **kw: SimpleNamespace(
         text="## Summary\n\nRepaired prose.\n", model="m", temperature=0.0,
         input_tokens=10, output_tokens=20, issues_addressed=["drift"],
     ))
-    monkeypatch.setattr(runner, "write_iteration", lambda **kw: 102)
+    monkeypatch.setattr(runner, "write_iteration", lambda **kw: rows.append(kw) or 102)
     monkeypatch.setattr(runner, "_phase_grade", lambda *a, **kw: None)
     # Revert path: the Draft is built (and appended) before the improvement
     # gate, so the inheritance is observable without mocking promote's gates.
@@ -314,6 +315,7 @@ def test_debug_repair_inherits_the_authors_handle_and_hook(monkeypatch):
     assert repaired.text != prior.text, "sanity: the repair replaced the body"
     assert repaired.handle == prior.handle
     assert repaired.hook == prior.hook
+    assert rows[0]["duration_ms"] >= 0
 
 
 # ---------- venue / title quoting (regression, 2026-08-11) ----------

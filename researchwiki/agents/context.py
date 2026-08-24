@@ -114,6 +114,8 @@ class Context:
     supplementary: list[Path] | None = None  # paths to supp files staged after promote
     use_llm_reconcile: bool = True            # default-on after R3 (--no-llm-reconcile to opt out)
     allow_rename: bool = False                # opt-in: allow committing a stem rename when reconcile finds a prior page at a different stem
+    budget_tracker: object | None = None      # BudgetTracker; object avoids a module cycle
+    budget_exhausted: dict | None = None
 
     # Filled by phases (None until set):
     paper_stem: str | None = None
@@ -129,5 +131,7 @@ class Context:
     committed_path: Path | None = None
 
     def next_iter(self) -> int:
+        if self.budget_tracker is not None and self.budget_exhausted is None:
+            self.budget_tracker.check_wall()
         self.iteration += 1
         return self.iteration

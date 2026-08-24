@@ -17,6 +17,7 @@ explanation in the conversation log for the design rationale.
 from __future__ import annotations
 
 import time
+import sys
 import uuid
 from pathlib import Path
 
@@ -26,31 +27,20 @@ from ..grade import coherence
 from . import fitness, model_config, phases
 from .context import Context, PromoteFailed, ReconcileFailed, StemRenameRefused
 from .commit_support import promotion_decision_reason, update_indexes_after_promotion
+from .budget import BudgetExhausted, activate
+from .runner_support import (
+    finalize_attempt_timing, handle_budget_exhausted,
+    keyword_body_gaps as _keyword_body_gaps,
+    make_budget_tracker, phase_extract as _phase_extract,
+    phase_reconcile as _phase_reconcile,
+    phase_target_claims as _phase_target_claims,
+    record_revision_decision,
+    record_timed_subphase,
+    warn_thin_extraction as _warn_thin_extraction,
+)
 from .relay import set_relay_identity
 from ..fsatomic import write_text_atomic
 from ..log import log
-
-
-def _keyword_body_gaps(keywords: list[str], body_text: str) -> list[str]:
-    """Return the subset of `keywords` whose first token doesn't appear in
-    `body_text` (case-insensitive). Used by the runner to flag source-derived
-    keywords absent from the page body — a structural coverage signal.
-
-    The check is on the keyword's first whitespace-split token rather than
-    the full keyword string because the body often expresses a multi-word
-    keyword via a paraphrase or abbreviation. Matching on the first token
-    gives a generous-presence signal (false-positive rate low; missing is
-    actually missing) without being so loose it surfaces nothing.
-    """
-    body_lc = body_text.lower()
-    missing: list[str] = []
-    for kw in keywords:
-        first_tok = (kw.split() or [""])[0].lower().strip(".,;:()[]{}")
-        if not first_tok:
-            continue
-        if first_tok not in body_lc:
-            missing.append(kw)
-    return missing
 
 
 def run_ingest(
@@ -71,6 +61,10 @@ def run_ingest(
     supplementary: list[Path] | None = None,
     use_llm_reconcile: bool = True,
     allow_rename: bool = False,
+    max_model_calls: int | None = None,
+    max_tokens: int | None = None,
+    max_cost_usd: float | None = None,
+    max_wall_seconds: float | None = None,
 ) -> Context:
     """Drive a single ingest attempt end-to-end.
 
@@ -98,6 +92,12 @@ def run_ingest(
         use_llm_reconcile=use_llm_reconcile,
         allow_rename=allow_rename,
     )
+    ctx.budget_tracker = make_budget_tracker(
+        max_model_calls=max_model_calls,
+        max_tokens=max_tokens,
+        max_cost_usd=max_cost_usd,
+        max_wall_seconds=max_wall_seconds,
+    )
 
     log(f"attempt_id={ctx.attempt_id}", tag="agent")
     log(f"pdf={pdf_path.name}", tag="agent")
@@ -115,7 +115,10 @@ def run_ingest(
     # Open one connection for the whole attempt so all phases share the same
     # transaction view. Each write_iteration commits its own row, which is
     # what we want — append-only, durable as soon as the row is written.
+    attempt_t0 = time.monotonic()
     conn = get_connection()
+    budget_scope = activate(ctx.budget_tracker)
+    budget_scope.__enter__()
     try:
         # Phase 1: reconcile
         ctx.next_iter()
@@ -305,7 +308,10 @@ def run_ingest(
                   f"target={target_str} "
                   f"bm25={(evolved.scores.get('mean_bm25') or 0):.2f}", tag="agent")
 
-            if fitness.is_evolve_improvement(evolved, ctx.winner):
+            evolve_accepted = fitness.is_evolve_improvement(evolved, ctx.winner)
+            record_revision_decision(ctx, conn, evolved, operator="evolve",
+                                     accepted=evolve_accepted, writer=write_iteration)
+            if evolve_accepted:
                 ctx.winner = evolved
                 log(f"swap    → evolved beats prior winner; promoted", tag="agent")
             else:
@@ -317,144 +323,16 @@ def run_ingest(
         ctx.committed_path = _phase_commit(ctx, conn)
         log(f"commit  → {ctx.committed_path}", tag="agent")
 
+    except BudgetExhausted as e:
+        handle_budget_exhausted(ctx, conn, e)
+        raise
     finally:
+        error = sys.exc_info()[1]
+        budget_scope.__exit__(None, None, None)
+        finalize_attempt_timing(ctx, conn, started=attempt_t0, error=error, writer=write_iteration)
         conn.close()
 
     return ctx
-
-
-def _phase_reconcile(ctx: Context, conn) -> tuple[dict, int]:
-    """Wrapper for the reconcile phase. Persists one row before returning."""
-    t0 = time.time()
-    meta = phases.reconcile_metadata(
-        ctx.pdf_path,
-        doi_override=ctx.doi_override,
-        title_override=ctx.title_override,
-        year_override=ctx.year_override,
-        authors_override=ctx.authors_override,
-        use_llm=ctx.use_llm_reconcile,
-    )
-    elapsed_ms = int((time.time() - t0) * 1000)
-    iter_id = write_iteration(
-        attempt_id=ctx.attempt_id,
-        pdf_filename=ctx.pdf_filename,
-        iteration=ctx.iteration,
-        role="reconcile",
-        paper_stem=meta.get("stem"),
-        decision="observed",
-        decision_reason=f"reconciled in {elapsed_ms}ms; sources={meta.get('sources', [])}",
-        critic_notes=str(meta),
-        conn=conn,
-    )
-    return meta, iter_id
-
-
-# Section names that carry a paper's findings. An extraction that returns none
-# of them has recovered the paper's framing but not its evidence.
-_FINDING_SECTIONS = ("results", "discussion", "conclusion", "findings")
-
-
-def _warn_thin_extraction(sections: dict) -> None:
-    """Log a warning when section extraction recovered no findings text.
-
-    Silent-degradation guard. `kim-2019-spcas9-activity-prediction-by-deepspcas9`
-    extracted `['introduction', 'methods', 'abstract']` with `pdf_claims=0` from a
-    9-page research article — no results, no discussion — and still produced a
-    page that passed every gate, because the author phase works from whatever
-    sections it is handed and the graders check the draft against the PDF's *full*
-    text rather than against the sections. So the page was fine and the grounding
-    corpus behind it was thinner than it looked, with nothing anywhere saying so.
-
-    Warning only, never a failure: thin extraction is a quality risk, not a
-    defect, and some genuinely have no results section (editorials, commentary,
-    perspectives). The wiki-page analogue is `lint`'s `zero_claim_papers`; this is
-    the ingest-time counterpart, and its job is to put the fact in the log where a
-    reviewer reading a surprising page can find it.
-
-    The zero-claims half of this warning used to live here too, keyed off the
-    bullet-counting `claim_count` that `extract_sections` no longer returns (see
-    that function for why the number was meaningless). It now fires from the
-    target-claims phase, which is the one that actually extracts claims.
-    """
-    names = {str(k).lower() for k in (sections or {})}
-    if not names:
-        log("extract ⚠ no sections recovered at all — the page will rest on the "
-            "abstract and full-text retrieval alone", tag="agent")
-        return
-    if not any(any(f in n for f in _FINDING_SECTIONS) for n in names):
-        log(f"extract ⚠ no findings section recovered "
-            f"(got {sorted(names)}) — claims will be graded against full text "
-            f"only, so treat the Results section of the draft with extra care",
-            tag="agent")
-
-
-def _phase_extract(ctx: Context, conn) -> tuple[dict, str]:
-    """Wrapper for the extract phase. Persists one row."""
-    t0 = time.time()
-    sections, full_text = phases.extract_sections(ctx.pdf_path)
-    elapsed_ms = int((time.time() - t0) * 1000)
-    write_iteration(
-        attempt_id=ctx.attempt_id,
-        paper_stem=ctx.paper_stem,
-        pdf_filename=ctx.pdf_filename,
-        iteration=ctx.iteration,
-        role="extract",
-        decision="observed",
-        decision_reason=(
-            f"extracted in {elapsed_ms}ms; sections={list(sections.keys())}; "
-            f"full_text_chars={len(full_text)}"
-        ),
-        conn=conn,
-    )
-    return sections, full_text
-
-
-def _phase_target_claims(ctx: Context, conn):
-    """Wrapper for the target-claims phase (L3). Persists one row.
-
-    Returns a TargetClaimsOutput. On any LLM/JSON failure, returns the
-    output object with `error` set and `claims=[]` — the caller treats
-    empty claims as a no-op and the author phase reverts to the pre-L3
-    prompt shape. So target-claims failure is non-fatal.
-    """
-    from .phases.target_claims import extract_target_claims
-    t0 = time.time()
-    out = extract_target_claims(
-        metadata=ctx.metadata or {},
-        sections=ctx.sections or {},
-        pdf_full_text=ctx.pdf_full_text,
-        use_stub=ctx.use_stub,
-    )
-    elapsed_ms = int((time.time() - t0) * 1000)
-    if out.error:
-        decision = "error"
-        reason = f"{out.error[:200]}; elapsed={elapsed_ms}ms"
-    elif out.is_empty():
-        decision = "empty"
-        reason = f"no claims extracted; elapsed={elapsed_ms}ms"
-    else:
-        n = len(out.claims)
-        n_crit = sum(1 for c in out.claims if c.importance == "critical")
-        n_high = sum(1 for c in out.claims if c.importance == "high")
-        decision = "extracted"
-        reason = (
-            f"n={n} (critical={n_crit}, high={n_high}); "
-            f"elapsed={elapsed_ms}ms"
-        )
-    write_iteration(
-        attempt_id=ctx.attempt_id,
-        paper_stem=ctx.paper_stem,
-        pdf_filename=ctx.pdf_filename,
-        iteration=ctx.iteration,
-        role="target_claims",
-        decision=decision,
-        decision_reason=reason,
-        model_used=out.model or "(no calls)",
-        cost_input_tokens=out.input_tokens,
-        cost_output_tokens=out.output_tokens,
-        conn=conn,
-    )
-    return out
 
 
 def _phase_crosslinks(ctx: Context, conn) -> list:
@@ -470,7 +348,7 @@ def _phase_crosslinks(ctx: Context, conn) -> list:
     Both lists are unioned with citation-graph winning on duplicate wikilinks
     (its `kind` carries directional info the topical path can't recover).
     """
-    t0 = time.time()
+    t0 = time.monotonic()
     cl_stats: dict = {}
     cite_cands = phases.crosslink_candidates(
         ctx.pdf_path, ctx.metadata or {}, stats=cl_stats
@@ -493,7 +371,7 @@ def _phase_crosslinks(ctx: Context, conn) -> list:
     # 'category/stem' wikilink.
     if ctx.paper_stem:
         cands = [c for c in cands if c.wikilink.rsplit("/", 1)[-1] != ctx.paper_stem]
-    elapsed_ms = int((time.time() - t0) * 1000)
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
     summary = "; ".join(f"{c.wikilink} ({c.kind})" for c in cands[:10])
     write_iteration(
         attempt_id=ctx.attempt_id,
@@ -507,6 +385,12 @@ def _phase_crosslinks(ctx: Context, conn) -> list:
             f"({len(cite_cands)} citation-graph + {len(topical_cands)} topical)"
             + (f"; first 10: {summary}" if cands else "")
         ),
+        duration_ms=elapsed_ms,
+        gate_metrics={
+            "candidates": len(cands),
+            "citation_candidates": len(cite_cands),
+            "topical_candidates": len(topical_cands),
+        },
         conn=conn,
     )
     return cands
@@ -518,6 +402,7 @@ def _phase_author(ctx: Context, conn, temperature: float, slot: int = 0):
     `slot` selects the drafting stance (instruction-level draft diversity) so
     parallel drafts differ by stance, not just temperature/sampling noise.
     """
+    t0 = time.monotonic()
     stance = phases.stance_for_slot(slot)
     draft = phases.author(
         metadata=ctx.metadata,
@@ -544,6 +429,7 @@ def _phase_author(ctx: Context, conn, temperature: float, slot: int = 0):
         temperature=draft.temperature,
         cost_input_tokens=draft.input_tokens,
         cost_output_tokens=draft.output_tokens,
+        duration_ms=int((time.monotonic() - t0) * 1000),
         conn=conn,
     )
     draft.iteration_id = iter_id
@@ -558,6 +444,7 @@ def _phase_grade(ctx: Context, conn, draft) -> None:
     tournament can see it. Coherence is regex-only and adds no noticeable
     latency.
     """
+    t0 = time.monotonic()
     scores, details = phases.grade_draft(
         stem=ctx.paper_stem,
         draft_text=draft.text,
@@ -585,12 +472,20 @@ def _phase_grade(ctx: Context, conn, draft) -> None:
         grader_scores=scores,
         decision="observed",
         decision_reason=f"{sem_label} grade of draft {draft.iteration_id}",
+        duration_ms=int((time.monotonic() - t0) * 1000),
+        gate_metrics={
+            k: scores.get(k) for k in (
+                "n_graded", "n_drift", "n_negation_mismatches",
+                "n_anchors", "n_target_claims",
+            ) if scores.get(k) is not None
+        },
         conn=conn,
     )
 
 
 def _phase_tournament(ctx: Context, conn):
     """Wrapper for tournament phase. Picks the highest-scored draft."""
+    t0 = time.monotonic()
     winner, rationale = phases.tournament(ctx.drafts)
     write_iteration(
         attempt_id=ctx.attempt_id,
@@ -602,6 +497,7 @@ def _phase_tournament(ctx: Context, conn):
         decision="kept",
         decision_reason=rationale,
         grader_scores=winner.scores,
+        duration_ms=int((time.monotonic() - t0) * 1000),
         conn=conn,
     )
     return winner
@@ -610,6 +506,7 @@ def _phase_tournament(ctx: Context, conn):
 def _phase_critic(ctx: Context, conn, draft):
     """Wrapper for critic phase. Persists one row, returns CritiqueOutput
     (with cost fields the runner uses for the print line)."""
+    t0 = time.monotonic()
     critique = phases.critic(
         draft=draft,
         metadata=ctx.metadata,
@@ -633,6 +530,8 @@ def _phase_critic(ctx: Context, conn, draft):
         model_used=critique.model,
         cost_input_tokens=critique.input_tokens,
         cost_output_tokens=critique.output_tokens,
+        duration_ms=int((time.monotonic() - t0) * 1000),
+        gate_metrics={"weak_claims": n_weak, "coverage_gaps": n_gaps},
         conn=conn,
     )
     # Stash cost on the object so the runner's print line works without
@@ -644,6 +543,7 @@ def _phase_critic(ctx: Context, conn, draft):
 
 def _phase_evolve(ctx: Context, conn, prior_draft, critique):
     """Wrapper for evolve phase. Returns a new Draft (graded by next phase)."""
+    t0 = time.monotonic()
     out = phases.evolve(
         draft=prior_draft,
         critique=critique,
@@ -681,6 +581,7 @@ def _phase_evolve(ctx: Context, conn, prior_draft, critique):
         temperature=new_draft.temperature,
         cost_input_tokens=new_draft.input_tokens,
         cost_output_tokens=new_draft.output_tokens,
+        duration_ms=int((time.monotonic() - t0) * 1000),
         conn=conn,
     )
     new_draft.iteration_id = iter_id
@@ -713,6 +614,7 @@ def _phase_debug(
 
     log(f"debug    → structural issues: {issues}", tag="agent")
     ctx.next_iter()
+    t0 = time.monotonic()
     out = phases.debug(
         draft=ctx.winner,
         issues=issues,
@@ -748,6 +650,7 @@ def _phase_debug(
         temperature=new_draft.temperature,
         cost_input_tokens=new_draft.input_tokens,
         cost_output_tokens=new_draft.output_tokens,
+        duration_ms=int((time.monotonic() - t0) * 1000),
         conn=conn,
     )
     new_draft.iteration_id = iter_id
@@ -769,9 +672,13 @@ def _phase_debug(
     # it actually beats the original on the comparison rule. This prevents
     # DEBUG from making things worse in pursuit of a structural fix.
     if not _is_strict_improvement(new_draft, ctx.winner):
+        record_revision_decision(ctx, conn, new_draft, operator="debug",
+                                 accepted=False, writer=write_iteration)
         log("debug    → did not strictly improve; reverting to prior winner", tag="agent")
         return cleaned_text, n_kc, gate, verification
 
+    record_revision_decision(ctx, conn, new_draft, operator="debug",
+                             accepted=True, writer=write_iteration)
     log("debug    → repaired draft beats prior winner; promoted", tag="agent")
     ctx.winner = new_draft
     cleaned_text, verification = phases.verify_crosslinks(
@@ -807,6 +714,7 @@ def _run_entailment_check(ctx: Context, conn, cleaned_text: str) -> None:
     afterward so the veto lands on the draft that actually gets promoted.
     """
     from ..grade.support import llm_support_classifier
+    t0 = time.monotonic()
     try:
         support_scores, _ = phases.grade_draft(
             stem=ctx.paper_stem,
@@ -845,6 +753,8 @@ def _run_entailment_check(ctx: Context, conn, cleaned_text: str) -> None:
             },
             decision="observed",
             decision_reason=f"{n_unsup} unsupported / {n_checked} checked",
+            duration_ms=int((time.monotonic() - t0) * 1000),
+            gate_metrics={"unsupported_claims": n_unsup, "claims_checked": n_checked},
             conn=conn,
         )
     except Exception as e:
@@ -861,6 +771,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
         (auto-promote); or
       - falls back to .agent-output/{stem}.md (sandbox).
     """
+    t0 = time.monotonic()
     from . import promote as promote_mod
 
     cleaned_text, verification = phases.verify_crosslinks(
@@ -965,6 +876,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
             model_used=(ctx.winner.model if ctx.winner else None),
             cost_input_tokens=0,
             cost_output_tokens=0,
+            duration_ms=0,
             conn=conn,
         )
         log(f"shortname → {short_name!r}", tag="agent")
@@ -986,6 +898,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # the source but missing from the page body are flagged in the
         # body-coverage log line below.
         ctx.next_iter()
+        kw_t0 = time.monotonic()
         kw_out = phases.propose_keywords(
             metadata=ctx.metadata,
             draft_text=cleaned_text,
@@ -1004,6 +917,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
             model_used=kw_out.model,
             cost_input_tokens=kw_out.input_tokens,
             cost_output_tokens=kw_out.output_tokens,
+            duration_ms=int((time.monotonic() - kw_t0) * 1000),
             conn=conn,
         )
         log(f"keywords  → {kw_out.keywords}", tag="agent")
@@ -1036,6 +950,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # evolved Draft). Either way, the model attribution on disk reflects
         # the LLM that authored the committed prose.
         author_model_id = (ctx.winner.model if ctx.winner else None) or None
+        promote_t0 = time.monotonic()
         result = promote_mod.promote_to_wiki(
             stem=ctx.paper_stem,
             draft_text=cleaned_text,
@@ -1070,6 +985,13 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # Record the failure, then raise: the iteration row has to exist before
         # the exception unwinds, because `run_ingest`'s `finally` closes `conn`.
         if not result.promoted:
+            if ctx.budget_tracker is not None:
+                ctx.budget_tracker.suspend()
+            record_timed_subphase(
+                ctx, conn, role="promote", started=promote_t0,
+                decision="failed", reason=promotion_decision_reason(result),
+                writer=write_iteration,
+            )
             decision_reason = promotion_decision_reason(result)
             write_iteration(
                 attempt_id=ctx.attempt_id,
@@ -1080,6 +1002,12 @@ def _phase_commit(ctx: Context, conn) -> Path:
                 parent_iteration_id=ctx.winner.iteration_id,
                 decision="promote-failed",
                 decision_reason=decision_reason,
+                duration_ms=int((time.monotonic() - t0) * 1000),
+                gate_metrics={
+                    "promoted": False,
+                    "gate_failures": len(gate.reasons),
+                    "warnings": len(result.warnings),
+                },
                 conn=conn,
             )
             for w in result.warnings:
@@ -1089,6 +1017,19 @@ def _phase_commit(ctx: Context, conn) -> Path:
                 page_path=result.wiki_path,
                 warnings=result.warnings,
             )
+
+        # Promotion moves the PDF and writes several canonical files. Once it
+        # succeeds, a wall/token stop must not interrupt supplementary staging,
+        # indexing, or grade persistence and leave a half-landed paper. Budgets
+        # therefore cover work through the promotion gate; post-promotion
+        # maintenance completes unbudgeted.
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.suspend()
+        record_timed_subphase(
+            ctx, conn, role="promote", started=promote_t0,
+            decision="promoted", reason=f"category={result.category}",
+            writer=write_iteration,
+        )
 
         if result.pdf_upgrade:
             ctx.next_iter()
@@ -1140,7 +1081,12 @@ def _phase_commit(ctx: Context, conn) -> Path:
 
         # Update only the new/edited pages. Parallel ingests serialize in the
         # index layer; failures remain recoverable derived-cache warnings.
+        index_t0 = time.monotonic()
         update_indexes_after_promotion(result)
+        record_timed_subphase(
+            ctx, conn, role="index_update", started=index_t0,
+            reason="incremental page and claim indexes", writer=write_iteration,
+        )
 
         # Memory evolution: now that the new page is on disk, ask whether
         # any neighboring synthesis pages need updating.
@@ -1214,6 +1160,14 @@ def _phase_commit(ctx: Context, conn) -> Path:
         parent_iteration_id=ctx.winner.iteration_id,
         decision=decision,
         decision_reason=decision_reason,
+        duration_ms=int((time.monotonic() - t0) * 1000),
+        gate_metrics={
+            "promoted": decision == "committed-to-wiki",
+            "sandboxed": decision == "committed-to-sandbox",
+            "gate_failures": len(gate.reasons),
+            "warnings": len(gate.warnings),
+            "unsupported_claims": (ctx.winner.scores.get("n_unsupported") or 0),
+        },
         conn=conn,
     )
     return out_path

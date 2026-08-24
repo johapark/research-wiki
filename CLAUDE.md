@@ -304,6 +304,8 @@ Per-phase provider comes from `config/models.yaml`. **`RW_LLM_PROVIDER`** is a g
 
 **Anthropic-compatible third parties (e.g. z.ai GLM)**: use `provider: anthropic` with `ANTHROPIC_BASE_URL` stopping at the host root (z.ai: `https://api.z.ai/api/anthropic`, **no** trailing `/v1`). Free tiers may 429 the parallel author phase — drop to `-n 1`.
 
+**Thinking controls are transport-specific.** `reasoning_effort:` is sent only on the OpenAI-compatible transport. Providers disagree on its vocabulary, so a rejection that names `reasoning_effort` / `reasoning.effort` is negotiated to the nearest advertised value (preferring less thinking on a tie), or the field is omitted when the endpoint supports none; the result is cached per endpoint+model for the process. LiteLLM-wrapped 500 responses are handled the same as direct 400s. Anthropic models never receive `reasoning_effort`: calls that request no thinking use Anthropic's native `thinking: {type: disabled}` instead. Thus the intent works on both transports, but the wire field does not.
+
 **Gemini free tier (`config/models.gemini.yaml`)**: observed ceiling is ~5 requests/minute on the Flash model, shared per-project (not per-key) — `agent ingest`'s default 4 batch workers × 2 parallel author drafts blows through it. Pass `-w 1` to serialize the batch; add `-n 1` if 429s persist.
 
 **`chat-relay` provider** — when the user sets `RW_LLM_PROVIDER=chat-relay`, `researchwiki` has no API key of its own and instead relays each prompt to *you* to fill. Read [`prompts/chat-relay.md`](./prompts/chat-relay.md) for that protocol; it's a specialized worker role and fires only under that env var.
@@ -326,12 +328,18 @@ Per-million-token rates for Anthropic + OpenAI models, carrying an **`as_of:` da
 
 **Run it backgrounded** — one invocation, backgrounded, whether it's 1 PDF or 20, so the conversation continues; this is not the banned per-file fan-out, and it needs no subagent (a subagent spends a whole context waiting on stdout you have to read yourself anyway). While it runs the wiki is **read-only**: no `reindex` / `db rebuild` / `lint` / `grade` until the completion notification lands, or they contend with promote's writes to `state.db`, `wiki/`, `index.md` and `log.md` — and a `reindex` that wins the race indexes a half-landed tree.
 
+**Keep monitoring until the process reaches a terminal state.** Silence or a long provider retry is not completion. Retain the background session, poll it without starting competing wiki writes, and do not begin After ingest until the command has exited and every batch input is terminal in the checkpoint. Report failures and sandboxed papers alongside successes; never stop after the first completion in a multi-paper batch.
+
 ```bash
 researchwiki agent ingest inbox/<raw-filename>.pdf              # single PDF
 researchwiki agent ingest inbox/*.pdf                           # ≥2 PDFs — batch, 4 workers, checkpoint
 researchwiki agent ingest inbox/*.pdf -w 2                      # cap workers (e.g. rate-limited providers)
 researchwiki agent ingest --resume .ingest/batch-<ts>/          # resume after a crash / Ctrl-C
 ```
+
+Optional per-PDF guardrails are `--max-model-calls`, `--max-tokens`, `--max-cost-usd`, and `--max-wall-seconds`; batch mode forwards them to every worker. A limit is reserved before a model call, so parallel drafts cannot oversubscribe it. Exhaustion writes a terminal `budget-exhausted` event and preserves the best graded partial under `.agent-output/` when one exists. Cost budgets refuse an unpriced cloud model instead of pretending it is free. Once promotion has irreversibly succeeded, the guard is suspended so indexing and grade persistence finish rather than leaving a half-maintained page.
+
+**Timing and telemetry questions use `researchwiki insights`, not ad-hoc SQL.** `researchwiki insights --attempts` lists attempts (combine with `--days N` for a recent window); `--attempt-id <full-id>` prints that ingest's phase breakdown; `--stem <stem>` filters the attempt/lineage views; add `--json` for machine-readable milliseconds. The phase table reports min/mean/median/p95/max plus `samples/eligible`, so migrated and interrupted rows with NULL timing are never treated as zero. `commit` is the end-to-end parent; rows prefixed `↳` are nested maintenance and excluded from phase-work totals. New runs have an exact terminal wall timer. Older or partial attempts show `wall≈` from their event span, explicitly marked as a fallback.
 
 **Never write ad-hoc scripts to ingest PDFs, and never fan out one Bash task per file.** Always use `agent ingest` (or digest path for recovery); rely on its built-in batch mode for multi-PDF runs. **One exception: `chat-relay`** — batch mode redirects each worker's stderr into `.ingest/batch-*/worker-*.log`, which is where the relay prints its pending-prompt notice, so a batch run under chat-relay looks like a hang and then times out. Parallelize it with one foreground single-PDF invocation per subagent instead ([`prompts/chat-relay.md`](./prompts/chat-relay.md#parallel-ingests--fan-out-but-not-with-batch-mode)).
 
@@ -425,7 +433,7 @@ When asked to benchmark/test an LLM by ingesting a `benchmark-fixtures/` paper: 
 
 1. Answer from `wiki/` first. `researchwiki claims "<topic>"` is the **first stop** for factual claims (pre-graded, BM25+semantic-scored). Each hit prints its `[[stem#claim_slug]]` citation form — copy that directly into prose. `researchwiki search` for page-level discovery.
 
-   **Structural/bibliometric questions go to the DB.** Corpus counts/filters — "how many cgt papers from 2024?", "which lack a DOI?", "everything in *Nature*" — via `researchwiki db papers [--year/--category/--page-type/--no-doi/--venue/--author/--status] [--count] [--json]` or `researchwiki db query "SELECT …"` for ad-hoc. Ingest telemetry (model quality/cost, hardest sections, token spend) via `researchwiki insights`.
+   **Structural/bibliometric questions go to the DB.** Corpus counts/filters — "how many cgt papers from 2024?", "which lack a DOI?", "everything in *Nature*" — via `researchwiki db papers [--year/--category/--page-type/--no-doi/--venue/--author/--status] [--count] [--json]` or `researchwiki db query "SELECT …"` for ad-hoc. Ingest telemetry — model quality/cost, hardest sections, token spend, phase distributions, attempt wall time, and exact per-step timings — goes through `researchwiki insights`; do not bypass that interface with `db query`.
 2. Insufficient (Rule 3): re-read PDFs; update paper pages if worth keeping. `researchwiki pdf-search <stem> "<query>"` for a raw passage. When the evidence is *in a figure* — the passage says "see Fig. 4" and Fig. 4 is where the number lives — `researchwiki figures <stem>` lists captions (free, and often answers it), and `--figure N` renders that one page to `.figures-cache/` for you to `Read`. Render one page, only when the caption doesn't settle it: the PNG costs context in proportion to its pixel area.
 3. No paper covers it (Rule 4): say so.
 4. Cite facts with `[[wikilink]]`; mention sections in prose.

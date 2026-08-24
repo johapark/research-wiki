@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 from ..agents.runner import PromoteFailed, ReconcileFailed, StemRenameRefused, run_ingest
+from ..agents.budget import BudgetExhausted
 from ..db.iterations import read_attempt
 from ..log import log
 
@@ -107,6 +108,15 @@ def _batch_passthrough_args(args) -> list[str]:
     out += ["-n", str(args.n_drafts)]
     if args.max_evolve != 1:
         out += ["--max-evolve", str(args.max_evolve)]
+    for attr, flag in (
+        ("max_model_calls", "--max-model-calls"),
+        ("max_tokens", "--max-tokens"),
+        ("max_cost_usd", "--max-cost-usd"),
+        ("max_wall_seconds", "--max-wall-seconds"),
+    ):
+        value = getattr(args, attr, None)
+        if value is not None:
+            out += [flag, str(value)]
     if not args.llm_reconcile:
         out.append("--no-llm-reconcile")
     return out
@@ -141,6 +151,18 @@ def _cmd_ingest(args) -> int:
         print("researchwiki agent ingest: need PDF path(s) (or --resume BATCH_DIR)",
               file=sys.stderr)
         return 1
+
+    for attr, flag in (
+        ("max_model_calls", "--max-model-calls"),
+        ("max_tokens", "--max-tokens"),
+        ("max_cost_usd", "--max-cost-usd"),
+        ("max_wall_seconds", "--max-wall-seconds"),
+    ):
+        value = getattr(args, attr, None)
+        if value is not None and value <= 0:
+            print(f"researchwiki agent ingest: {flag} must be greater than zero",
+                  file=sys.stderr)
+            return 1
 
     # Validate argv before the environment, so a typo'd path stays a
     # user-input error (1) instead of being masked by a credentials error (2)
@@ -236,7 +258,19 @@ def _cmd_ingest(args) -> int:
             ),
             use_llm_reconcile=args.llm_reconcile,
             allow_rename=args.allow_rename,
+            max_model_calls=args.max_model_calls,
+            max_tokens=args.max_tokens,
+            max_cost_usd=args.max_cost_usd,
+            max_wall_seconds=args.max_wall_seconds,
         )
+    except BudgetExhausted as e:
+        print(f"researchwiki agent ingest: {e}", file=sys.stderr)
+        partial = getattr(e, "partial_path", None)
+        if partial:
+            print(f"  best graded partial preserved at: {partial}", file=sys.stderr)
+        print("  no page was auto-promoted; raise the limit or resume with a fresh ingest",
+              file=sys.stderr)
+        return 1
     except ReconcileFailed as e:
         # Focused diagnostic for the common case where the metadata
         # cascade gave up — print the providers tried + which fields
@@ -467,6 +501,14 @@ def build_parser() -> argparse.ArgumentParser:
                                "opt into the tournament.")
     p_ingest.add_argument("--max-evolve", type=int, default=1,
                           help="Max critic+evolve rounds after tournament (default 1, 0 to disable)")
+    p_ingest.add_argument("--max-model-calls", type=int, default=None,
+                          help="Stop before launching a pre-promotion model call that would exceed this per-PDF limit.")
+    p_ingest.add_argument("--max-tokens", type=int, default=None,
+                          help="Conservative per-PDF input+output token ceiling; parallel calls reserve capacity.")
+    p_ingest.add_argument("--max-cost-usd", type=float, default=None,
+                          help="Conservative per-PDF estimated cloud-cost ceiling using config/pricing.yaml.")
+    p_ingest.add_argument("--max-wall-seconds", type=float, default=None,
+                          help="Stop launching model work after this per-PDF wall-clock budget.")
     p_ingest.add_argument("--auto-promote", action="store_true",
                           help="Always promote to wiki/ even if gates fail (use cautiously)")
     p_ingest.add_argument("--force-sandbox", action="store_true",

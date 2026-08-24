@@ -116,7 +116,10 @@ def test_failed_promote_records_the_iteration_before_unwinding(ctx, commit_env, 
         runner._phase_commit(ctx, conn=None)
 
     commits = [r for r in commit_env if r.get("role") == "commit"]
+    promotes = [r for r in commit_env if r.get("role") == "promote"]
     assert len(commits) == 1
+    assert len(promotes) == 1 and promotes[0]["duration_ms"] >= 0
+    assert promotes[0]["decision"] == "failed"
     assert commits[0]["decision"] == "promote-failed"
     assert "already exists" in commits[0]["decision_reason"]
     assert commits[0]["paper_stem"] == ctx.paper_stem

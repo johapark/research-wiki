@@ -122,6 +122,13 @@ uncitable until re-graded) and `ingest_iterations` are missing. If the old DB is
 truly gone, `researchwiki grade regression --missing-only` re-derives grades
 locally with no API calls; telemetry is per-machine and not re-derivable.
 
+That missing history is a supported state, not a reason to synthesize rows.
+`researchwiki insights` reports corpus telemetry coverage and timing
+`samples/eligible`; migrated pages with no ingest attempt remain
+`migrated/untracked`, while historical attempts with phase rows but no terminal
+timer use a visibly approximate event-span fallback. Never zero-fill either
+case, and never use raw SQL to make the report look complete.
+
 **Three traps specific to syncing.**
 
 *A stale sync looks exactly like uncommitted work.* A wall of modified and deleted files after a pull is usually the daemon lagging behind another machine's commits, not local edits — the files are simply older copies. Confirm before you preserve *or* discard them: if a file's blob matches an earlier commit, it is stale, and `git restore` is safe.

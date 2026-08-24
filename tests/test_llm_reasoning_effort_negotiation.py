@@ -34,6 +34,19 @@ _LUNA_400 = json.dumps({
     }
 })
 
+_LITELLM_500 = json.dumps({
+    "error": {
+        "message": (
+            "litellm.APIConnectionError: Bedrock_mantleException - "
+            "Unsupported value: 'minimal' is not supported with the "
+            "'openai.gpt-5.6-terra' model. Supported values are: 'none', "
+            "'low', 'medium', 'high', 'xhigh', and 'max'."
+        ),
+        "param": "reasoning.effort",
+        "type": "invalid_request_error",
+    }
+})
+
 
 @pytest.fixture(autouse=True)
 def _clear_negotiation_cache():
@@ -94,6 +107,23 @@ def test_rejected_value_is_renegotiated_not_raised(monkeypatch):
 
     assert resp.text == "hi"
     assert [b.get("reasoning_effort") for b in fake.bodies] == ["minimal", "none"]
+
+
+def test_litellm_wrapped_500_is_renegotiated(monkeypatch):
+    """LiteLLM can translate the upstream vocabulary 400 into a gateway 500."""
+    fake = _FakeUrlopen([_http_error(_LITELLM_500, code=500)])
+    resp = _call(
+        monkeypatch, fake, model="gpt-5.6-terra", reasoning_effort="minimal"
+    )
+    assert resp.text == "hi"
+    assert [b.get("reasoning_effort") for b in fake.bodies] == ["minimal", "none"]
+
+
+def test_unrelated_500_keeps_transient_retry_policy(monkeypatch):
+    fake = _FakeUrlopen([_http_error("gateway overloaded", code=500)])
+    monkeypatch.setattr(llm.time, "sleep", lambda *_: None)
+    _call(monkeypatch, fake, reasoning_effort="minimal")
+    assert [b.get("reasoning_effort") for b in fake.bodies] == ["minimal", "minimal"]
 
 
 def test_advertised_vocabulary_is_honored(monkeypatch):

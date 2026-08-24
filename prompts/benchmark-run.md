@@ -32,6 +32,12 @@ should capture). Score coverage per item (HIT / PARTIAL / MISS), weight by
 `importance` (critical/high/normal), and check comparator_fidelity ratios
 verbatim.
 
+Record the `attempt_id` printed at startup and include
+`researchwiki insights --attempt-id <id>` in the benchmark result when latency
+matters. Report terminal wall time separately from summed phase work (drafts
+may run in parallel), and use the per-step rows for phase comparisons. Do not
+reconstruct timings with `researchwiki db query`.
+
 **Prefer judging manually** (read both files, score directly). The automated
 `researchwiki benchmark-fixture <stem> --llm` scorer resolves the page from
 `wiki/`, so it does **not** see a sandboxed page — and its LLM judge inherits the

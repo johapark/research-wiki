@@ -47,16 +47,30 @@ def evolve_memory(ctx: "Context", conn, *, source_key: str) -> dict:
     generation hits the LLM in current shape, and stub-mode runs assume
     zero network).
     """
+    t0 = time.monotonic()
     if ctx.use_stub:
+        write_iteration(
+            attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,
+            pdf_filename=ctx.pdf_filename, iteration=ctx.iteration,
+            role="memory_evolve", decision="skipped",
+            decision_reason="stub-mode", model_used="(skipped)",
+            duration_ms=int((time.monotonic() - t0) * 1000), conn=conn,
+        )
         return {"skipped": "stub-mode"}
 
-    t0 = time.time()
     try:
         proposals, stats = propose_evolution(source_key)
     except FileNotFoundError as e:
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        write_iteration(
+            attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,
+            pdf_filename=ctx.pdf_filename, iteration=ctx.iteration,
+            role="memory_evolve", decision="error", decision_reason=str(e),
+            model_used="(no calls)", duration_ms=elapsed_ms, conn=conn,
+        )
         log(f"evolve   ⚠ {e}", tag="agent")
         return {"error": str(e)}
-    elapsed_ms = int((time.time() - t0) * 1000)
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
 
     actionable = [p for p in proposals if p.is_actionable()]
     proposal_dir = ingest_dir() / f"{ctx.paper_stem}-evolution-proposals"
@@ -92,6 +106,7 @@ def evolve_memory(ctx: "Context", conn, *, source_key: str) -> dict:
         model_used=(stats.get("model") or "unknown") if stats["n_judged"] else "(no calls)",
         cost_input_tokens=stats["input_tokens"],
         cost_output_tokens=stats["output_tokens"],
+        duration_ms=elapsed_ms,
         conn=conn,
     )
 

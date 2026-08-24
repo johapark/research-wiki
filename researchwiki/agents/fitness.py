@@ -114,10 +114,9 @@ def combined_quality(scores: dict) -> float | None:
     three axes) and does NOT clear the epsilon. `tournament_key` sidesteps that
     by quantizing the axes
     before blending; the improvement rules keep the continuous blend, so they
-    require roughly a 0.02 single-axis move. That asymmetry is deliberate for
-    now — the historical `ingest_iterations` rows can't be joined into
-    revision pairs (`parent_iteration_id` yields no grade-to-grade links), so
-    there's no evidence available to calibrate a different epsilon against.
+    require roughly a 0.02 single-axis move. `researchwiki insights --lineage`
+    now reconstructs revision pairs through author-parent and grade-author
+    edges, providing the evidence needed for future epsilon calibration.
     """
     components = []
     sem = scores.get("semantic_score")

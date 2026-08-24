@@ -107,6 +107,8 @@ CREATE INDEX IF NOT EXISTS idx_claims_xref      ON claims(is_cross_ref);
 --   tournament : framework picked a winner across sibling author drafts
 --   critic     : critic flagged issues on a prior draft
 --   commit     : final draft chosen, markdown written to wiki/
+--   promote / index_update : nested commit subphases (their durations overlap commit)
+--   attempt    : terminal wall-clock summary (success, failure, or interruption)
 CREATE TABLE IF NOT EXISTS ingest_iterations (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     attempt_id          TEXT NOT NULL,                      -- groups iterations of one ingest run
@@ -125,6 +127,8 @@ CREATE TABLE IF NOT EXISTS ingest_iterations (
     temperature         REAL,
     cost_input_tokens   INTEGER,
     cost_output_tokens  INTEGER,
+    duration_ms         INTEGER,                            -- NULL on historical rows; measured wall time for this phase
+    gate_metrics        TEXT,                               -- JSON counters/status only; no evaluator prose
     created_at          INTEGER NOT NULL,
     FOREIGN KEY (parent_iteration_id) REFERENCES ingest_iterations(id)
 );

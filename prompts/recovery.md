@@ -71,6 +71,13 @@ Then resolve the cause and re-ingest from wherever the PDF actually is:
 
 Batch note: an input the resume calls unresumable is recorded terminal in `checkpoint.json` under `unresumable` and is never re-queued, so finishing it by hand is the only path. `worker_started: true` means the subprocess ran and died mid-promote (check the four things above); `false` means the file left `inbox/` some other way.
 
+For the failed run's official trace, copy its full `attempt_id` from the agent
+output and run `researchwiki insights --attempt-id <id>`. This prints every
+measured phase, the failure outcome, and timing coverage without a raw DB query.
+New attempts include an exact terminal wall timer even on failure or budget
+exhaustion; a killed historical process without that terminal row is labeled
+with the approximate event-span fallback instead.
+
 ## Override flags
 
 LLM-reconcile is on by default since R3, so most overrides are cold paths now.

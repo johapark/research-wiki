@@ -39,11 +39,11 @@ def persist_grades(ctx: "Context", conn) -> dict:
     """
     from ...grade.fidelity.paper import grade_page
 
-    t0 = time.time()
+    t0 = time.monotonic()
     try:
         report = grade_page(ctx.paper_stem, persist=True)
     except Exception as e:
-        elapsed_ms = int((time.time() - t0) * 1000)
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
         write_iteration(
             attempt_id=ctx.attempt_id,
             paper_stem=ctx.paper_stem,
@@ -53,12 +53,13 @@ def persist_grades(ctx: "Context", conn) -> dict:
             decision="error",
             decision_reason=f"{type(e).__name__}: {e}; elapsed={elapsed_ms}ms",
             model_used="(local)",
+            duration_ms=elapsed_ms,
             conn=conn,
         )
         log(f"grade    ⚠ {type(e).__name__}: {e}", tag="agent")
         return {"error": str(e)}
 
-    elapsed_ms = int((time.time() - t0) * 1000)
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
     summary = (
         f"n_claims={report.n_claims} graded={report.n_graded} "
         f"xref={report.n_cross_refs} mean_top1={report.mean_top1:.3f} "
@@ -91,6 +92,7 @@ def persist_grades(ctx: "Context", conn) -> dict:
             "n_with_numeric_drift": report.n_with_numeric_drift,
         }),
         model_used="(local)",
+        duration_ms=elapsed_ms,
         conn=conn,
     )
     log(f"grade    → {summary}", tag="agent")

@@ -92,3 +92,117 @@ def test_days_filter_excludes_old(seeded):
     data = insights._gather(seeded, future_cutoff)
     assert data["n_attempts"] == 0
     assert data["by_model"] == {}
+
+
+def test_revision_lineage_is_partial_record_safe(seeded):
+    parent = _add(seeded, attempt_id="att2", role="author", section="page",
+                  model_used="m", decision="kept")
+    _add(seeded, attempt_id="att2", role="grade", parent_iteration_id=parent,
+         grader_scores=json.dumps({"semantic_score": 0.5, "n_drift": 1}))
+    revision = _add(seeded, attempt_id="att2", role="author", section="page",
+                    parent_iteration_id=parent, model_used="m",
+                    cost_input_tokens=80, cost_output_tokens=20)
+    _add(seeded, attempt_id="att2", role="grade", parent_iteration_id=revision,
+         grader_scores=json.dumps({"semantic_score": 0.7, "n_drift": 0}))
+    # A historical revision whose grade never landed remains eligible but is
+    # explicitly incomparable; it is never treated as a regression or zero.
+    _add(seeded, attempt_id="att2", role="debug", section="page",
+         parent_iteration_id=revision, model_used="m")
+    seeded.commit()
+
+    lineage = insights._gather(seeded, None)["lineage"]
+    assert lineage["eligible"] == 2
+    assert lineage["comparable"] == 1
+    assert lineage["improved"] == 1
+    assert lineage["incomparable"] == 1
+    assert lineage["tokens_per_improvement"] == 100
+
+
+def test_latency_and_gate_metrics_report_denominators(seeded):
+    _add(seeded, attempt_id="att3", role="commit", duration_ms=250,
+         gate_metrics=json.dumps({"promoted": True, "gate_failures": 0}),
+         decision="committed-to-wiki")
+    _add(seeded, attempt_id="att4", role="commit", duration_ms=None,
+         gate_metrics=None, decision="committed-to-sandbox")
+    seeded.commit()
+    data = insights._gather(seeded, None)
+    assert data["latency"]["commit"] == {
+        "samples": 1, "eligible": 2,
+        "min_ms": 250, "mean_ms": 250, "median_ms": 250,
+        "p95_ms": 250, "max_ms": 250, "nested_in_commit": False,
+    }
+    assert data["gate_health"]["samples"] == 1
+    # The two historical grade rows are also eligible and correctly remain
+    # unmeasured rather than being interpreted as zero defects.
+    assert data["gate_health"]["eligible"] == 4
+    assert data["attempt_status"]["completed"] >= 2
+
+
+def test_attempt_timings_exclude_nested_commit_subphases(seeded):
+    _add(seeded, attempt_id="timed", role="reconcile", duration_ms=1000)
+    _add(seeded, attempt_id="timed", role="author", duration_ms=2000)
+    _add(seeded, attempt_id="timed", role="keywords", duration_ms=3000)
+    _add(seeded, attempt_id="timed", role="commit", duration_ms=5000,
+         decision="committed-to-wiki")
+    seeded.commit()
+
+    attempt = next(a for a in insights._gather(seeded, None)["attempts"]
+                   if a["attempt_id"] == "timed")
+    assert attempt["measured_duration_ms"] == 8000
+    assert attempt["measured_minutes"] == pytest.approx(0.133)
+    assert attempt["wall_source"] == "event-span-fallback"
+    assert attempt["timing_samples"] == attempt["timing_eligible"] == 3
+    keyword = next(s for s in attempt["steps"] if s["role"] == "keywords")
+    assert keyword["nested_in_commit"] is True
+
+
+def test_terminal_attempt_timer_supplies_exact_wall_time(seeded):
+    _add(seeded, attempt_id="terminal", role="reconcile", duration_ms=1000)
+    _add(seeded, attempt_id="terminal", role="attempt", duration_ms=72500,
+         decision="failed", decision_reason="RuntimeError: nope")
+    seeded.commit()
+
+    attempt = next(a for a in insights._gather(seeded, None)["attempts"]
+                   if a["attempt_id"] == "terminal")
+    assert attempt["wall_duration_ms"] == 72500
+    assert attempt["wall_minutes"] == pytest.approx(1.208)
+    assert attempt["wall_source"] == "terminal-timer"
+    assert attempt["outcome"] == "failed"
+    assert [step["role"] for step in attempt["steps"]] == ["reconcile"]
+
+
+def test_revision_decision_event_is_not_a_timing_gap(seeded):
+    _add(seeded, attempt_id="decision", role="tournament", duration_ms=None,
+         gate_metrics=json.dumps({"operator": "evolve", "revision_accepted": False}),
+         decision="discarded")
+    seeded.commit()
+    data = insights._gather(seeded, None)
+    attempt = next(a for a in data["attempts"] if a["attempt_id"] == "decision")
+    assert attempt["timing_eligible"] == 0
+
+
+def test_attempts_text_view_needs_no_sql(seeded, monkeypatch, capsys):
+    monkeypatch.setenv("RESEARCHWIKI_DB_PATH", str(seeded.execute(
+        "PRAGMA database_list"
+    ).fetchone()["file"]))
+    assert insights.main(["--attempts"]) == 0
+    out = capsys.readouterr().out
+    assert "Attempt timings:" in out
+    assert "att1" in out
+
+
+def test_attempt_detail_text_lists_steps(seeded, monkeypatch, capsys):
+    _add(seeded, attempt_id="detail", role="extract", duration_ms=60000,
+         decision="observed")
+    _add(seeded, attempt_id="detail", role="attempt", duration_ms=75000,
+         decision="completed")
+    seeded.commit()
+    monkeypatch.setenv("RESEARCHWIKI_DB_PATH", str(seeded.execute(
+        "PRAGMA database_list"
+    ).fetchone()["file"]))
+
+    assert insights.main(["--attempt-id", "detail"]) == 0
+    out = capsys.readouterr().out
+    assert "wall" in out and "1.25m" in out
+    assert "extract" in out and "1.00m" in out
+    assert "By model" not in out

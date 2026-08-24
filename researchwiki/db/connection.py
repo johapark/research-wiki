@@ -251,6 +251,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_claims_slug ON claims(paper_stem, claim_slug)"
     )
+    iter_cols = {
+        row["name"] for row in conn.execute("PRAGMA table_info(ingest_iterations)")
+    }
+    # Direct `_migrate` callers in recovery/tests may expose only the claims
+    # table. Normal bootstrap creates ingest_iterations via schema.sql first;
+    # an empty PRAGMA result means the table is absent, not that every column
+    # needs adding to a nonexistent table.
+    if iter_cols:
+        if "duration_ms" not in iter_cols:
+            _safe_add_column(
+                conn, "ALTER TABLE ingest_iterations ADD COLUMN duration_ms INTEGER"
+            )
+        if "gate_metrics" not in iter_cols:
+            _safe_add_column(
+                conn, "ALTER TABLE ingest_iterations ADD COLUMN gate_metrics TEXT"
+            )
     _install_claims_fts(conn)
 
 

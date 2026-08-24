@@ -332,13 +332,15 @@ _QUOTED_RE = re.compile(r"['\"`]([a-z_]+)['\"`]", re.IGNORECASE)
 
 
 def _mentions_reasoning_effort(body_text: str) -> bool:
-    """True when a 400 body implicates the `reasoning_effort` field.
+    """True when an error body implicates the reasoning-effort field.
 
-    Deliberately narrow: a 400 that doesn't name the field is a real bad
-    request (bad model, malformed messages) and must keep failing loudly
-    rather than being masked by a retry.
+    LiteLLM/Bedrock can wrap an upstream 400 as HTTP 500 and spell the nested
+    parameter ``reasoning.effort``. Keep this deliberately narrow: an error
+    that names neither spelling is a real request/transient failure and must
+    retain the normal retry behavior.
     """
-    return "reasoning_effort" in (body_text or "")
+    text = body_text or ""
+    return "reasoning_effort" in text or "reasoning.effort" in text
 
 
 def _parse_supported_efforts(body_text: str) -> set[str]:
@@ -521,12 +523,12 @@ def call_openai_compatible(
             break
         except urllib.error.HTTPError as e:
             body_text = e.read().decode("utf-8", errors="replace")[:500]
-            # A 400 naming `reasoning_effort` is the server telling us its
-            # vocabulary. Renegotiate and resend — deliberately NOT counted
-            # against the transient-retry budget, since nothing transient
-            # happened and the next request differs.
+            # A direct 400, or a LiteLLM-wrapped 500, naming reasoning effort
+            # is the server telling us its vocabulary. Renegotiate and resend
+            # without consuming the transient-retry budget: the next request
+            # differs and the failure is deterministic rather than transient.
             if (
-                e.code == 400
+                e.code in (400, 500)
                 and effort is not None
                 and renegotiations < _EFFORT_MAX_RENEGOTIATIONS
                 and _mentions_reasoning_effort(body_text)
@@ -843,60 +845,76 @@ def call(
             system=system,
         )
 
+    # Optional per-ingest budget. The reservation happens before throttling or
+    # network I/O, and is shared by parallel author threads, so two drafts
+    # cannot both observe the same remaining allowance and oversubscribe it.
+    from .budget import current_tracker
+    tracker = current_tracker()
+    reservation = None
+    if tracker is not None:
+        prompt_chars = len(_np_prompt) + len(system or "")
+        reservation = tracker.reserve_call(
+            model=model,
+            provider=provider,
+            prompt_chars=prompt_chars,
+            max_tokens=max_tokens,
+        )
+
     # Client-side RPM cap (config-driven) — block before any real network
     # call so free-tier models stay under their ceiling. Keyed by model.
     _throttle(model, rpm)
 
-    p = provider.lower().strip()
-    if p == "anthropic":
-        return call_anthropic(
-            model=model,
-            prompt=prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            system=system,
-            cache_prompt=cache_prompt,
-            cache_prefix=cache_prefix,
-            disable_thinking=disable_thinking,
+    try:
+        p = provider.lower().strip()
+        if p == "anthropic":
+            response = call_anthropic(
+                model=model,
+                prompt=prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                system=system,
+                cache_prompt=cache_prompt,
+                cache_prefix=cache_prefix,
+                disable_thinking=disable_thinking,
+            )
+        elif p in _OPENAI_COMPAT_PROVIDERS:
+            # base_url precedence: environment → models config → localhost.
+            base_url = os.environ.get("RW_LLM_BASE_URL") or model_config.base_url()
+            response = call_openai_compatible(
+                model=model,
+                prompt=_np_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                system=system,
+                base_url=base_url,
+                reasoning_effort=reasoning_effort,
+            )
+        elif p == "chat-relay":
+            response = call_chat_relay(
+                model=model,
+                prompt=_np_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                system=system,
+                phase=phase,
+                fresh=bool(os.environ.get("RW_RELAY_FRESH")),
+                schema=schema,
+            )
+        else:
+            raise ValueError(
+                f"llm.call: unknown provider {provider!r}. Supported: "
+                "'anthropic', 'openai-compatible' / 'lmstudio' / 'openai', "
+                "'chat-relay'."
+            )
+    except Exception:
+        if tracker is not None and reservation is not None:
+            tracker.fail(reservation)
+        raise
+    if tracker is not None and reservation is not None:
+        tracker.finish(
+            reservation,
+            model=response.model or model,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
         )
-    if p in _OPENAI_COMPAT_PROVIDERS:
-        if cache_prompt:
-            # Silently no-op: OpenAI-compatible spec doesn't expose KV-cache
-            # reuse the way Anthropic's cache_control header does. Caller
-            # accepts the loss of cache discount.
-            pass
-        # base_url precedence: RW_LLM_BASE_URL env (ad-hoc override) → the
-        # config's top-level `base_url:` → None (call_openai_compatible then
-        # falls back to the LM Studio localhost default). Folding the endpoint
-        # into the config lets a backend switch ride on RW_MODELS_CONFIG alone.
-        base_url = os.environ.get("RW_LLM_BASE_URL") or model_config.base_url()
-        return call_openai_compatible(
-            model=model,
-            prompt=_np_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            system=system,
-            base_url=base_url,
-            reasoning_effort=reasoning_effort,
-        )
-    if p == "chat-relay":
-        # cache_prompt is silently ignored — relay caching is op_id-based,
-        # not KV-cache-based. Setting RW_RELAY_FRESH=1 in the environment
-        # bypasses op_id reuse and forces a fresh prompt every call.
-        # `schema` (if provided) drives validation + retry-with-feedback
-        # inside call_chat_relay; see agents/relay.py for the protocol.
-        return call_chat_relay(
-            model=model,
-            prompt=_np_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            system=system,
-            phase=phase,
-            fresh=bool(os.environ.get("RW_RELAY_FRESH")),
-            schema=schema,
-        )
-    raise ValueError(
-        f"llm.call: unknown provider {provider!r}. "
-        f"Supported: 'anthropic', 'openai-compatible' / 'lmstudio' / 'openai', "
-        f"'chat-relay'."
-    )
+    return response

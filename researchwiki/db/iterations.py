@@ -19,6 +19,9 @@ VALID_ROLES = {
     "reconcile", "extract", "target_claims", "crosslinks", "author",
     "grade", "grade_persist", "tournament", "critic", "debug", "short_name",
     "keywords", "commit", "memory_evolve", "pdf_upgrade", "claim_support",
+    "budget",
+    "promote", "index_update",
+    "attempt",
 }
 
 
@@ -41,6 +44,8 @@ class Iteration:
     temperature: float | None
     cost_input_tokens: int | None
     cost_output_tokens: int | None
+    duration_ms: int | None
+    gate_metrics: dict | None
     created_at: int
 
     @classmethod
@@ -64,6 +69,8 @@ class Iteration:
             temperature=row["temperature"],
             cost_input_tokens=row["cost_input_tokens"],
             cost_output_tokens=row["cost_output_tokens"],
+            duration_ms=row["duration_ms"],
+            gate_metrics=json.loads(row["gate_metrics"]) if row["gate_metrics"] else None,
             created_at=row["created_at"],
         )
 
@@ -86,6 +93,8 @@ def write_iteration(
     temperature: float | None = None,
     cost_input_tokens: int | None = None,
     cost_output_tokens: int | None = None,
+    duration_ms: int | None = None,
+    gate_metrics: dict | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> int:
     """Insert one ingest_iterations row. Returns the new row's id.
@@ -107,12 +116,14 @@ def write_iteration(
             attempt_id, paper_stem, pdf_filename, iteration, role, section,
             draft_text, parent_iteration_id, grader_scores, critic_notes,
             decision, decision_reason, model_used, temperature,
-            cost_input_tokens, cost_output_tokens, created_at
+            cost_input_tokens, cost_output_tokens, duration_ms, gate_metrics,
+            created_at
         ) VALUES (
             :attempt_id, :paper_stem, :pdf_filename, :iteration, :role, :section,
             :draft_text, :parent_iteration_id, :grader_scores, :critic_notes,
             :decision, :decision_reason, :model_used, :temperature,
-            :cost_input_tokens, :cost_output_tokens, :created_at
+            :cost_input_tokens, :cost_output_tokens, :duration_ms, :gate_metrics,
+            :created_at
         )
         """,
         {
@@ -132,6 +143,8 @@ def write_iteration(
             "temperature": temperature,
             "cost_input_tokens": cost_input_tokens,
             "cost_output_tokens": cost_output_tokens,
+            "duration_ms": duration_ms,
+            "gate_metrics": json.dumps(gate_metrics) if gate_metrics is not None else None,
             "created_at": int(time.time()),
         },
     )

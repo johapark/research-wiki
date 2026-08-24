@@ -22,6 +22,27 @@ the reasoning behind any line below.
 
 ### Added
 
+- **Ingest now has enforceable per-PDF resource budgets.** `agent ingest`
+  accepts `--max-model-calls`, `--max-tokens`, `--max-cost-usd`, and
+  `--max-wall-seconds`, forwards them through batch workers, and reserves
+  capacity before parallel calls so drafts cannot oversubscribe a shared
+  limit. Exhaustion records a terminal event and preserves the best graded
+  partial when one exists; unpriced cloud models fail a cost budget rather
+  than being treated as free. Post-promotion maintenance is allowed to finish
+  after the irreversible write boundary.
+
+- **`researchwiki insights` is now the complete ingest-observability surface.**
+  Phase latency reports include min/mean/median/p95/max and measured/eligible
+  coverage; `--attempts` lists run timings, `--attempt-id` gives a focused
+  per-step trace, and `--lineage` reconstructs revision outcomes. New attempts
+  persist exact terminal wall time across success, failure, interruption, and
+  budget exhaustion. Nested commit timers (`promote`, `index_update`, keywords,
+  memory evolution, and grade persistence) remain visible without being
+  double-counted. Migrated and historical corpora are first-class: missing
+  telemetry stays NULL, corpus coverage is explicit, and attempts predating
+  the terminal timer use a labeled event-span fallback instead of invented
+  zeroes.
+
 - **Four release invariants that the v0.4.2 cut violated unnoticed.** The
   existing checks verify that a version has *a* changelog section and *a* link
   reference — never what is inside the section or where the link points, which
@@ -36,6 +57,14 @@ the reasoning behind any line below.
   predecessor (the oldest exempt — it links to its tag).
 
 ### Fixed
+
+- **OpenAI-compatible reasoning-effort negotiation now survives LiteLLM's
+  wrapped error shape.** A backend rejection naming either
+  `reasoning_effort` or `reasoning.effort`, including an upstream 400 exposed
+  by LiteLLM as HTTP 500, renegotiates to the nearest advertised effort (lower
+  on ties) or omits the unsupported field and caches that capability per
+  endpoint/model. Anthropic remains transport-native: no OpenAI field is sent,
+  and no-thinking calls use `thinking: {type: disabled}`.
 
 - **Two historical changelog sections were out of Keep a Changelog order**,
   found by the new test rather than by reading: `[0.2.1]` ran Added -> Fixed ->

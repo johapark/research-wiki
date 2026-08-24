@@ -10,6 +10,8 @@ LLM — it's a reporting view over data already captured at ingest.
 Usage:
   researchwiki insights                 # all-time
   researchwiki insights --days 30       # last 30 days
+  researchwiki insights --attempts      # one timing row per ingest
+  researchwiki insights --attempt-id ID # exact phase breakdown for one ingest
   researchwiki insights --json
 
 Exit codes: 0 = printed (including "no telemetry yet"); 2 = DB unreachable.
@@ -21,6 +23,11 @@ import argparse
 import json
 import sys
 import time
+from collections import Counter
+from types import SimpleNamespace
+
+from ..agents import fitness
+from .insights_timing import gather_attempts, latency_distribution
 
 # Reuse the single source of truth for pricing so cost figures match `status`.
 from ..agents import model_config as _mc
@@ -44,7 +51,114 @@ def _estimate_usd(model: str, in_tok: int, out_tok: int) -> float:
     return _mc.estimate_usd(model, in_tok, out_tok)
 
 
-def _gather(conn, cutoff: int | None) -> dict:
+def _score_value(scores: dict, key: str):
+    if key == "semantic_score":
+        return scores.get("semantic_score", scores.get("mean_semantic"))
+    return scores.get(key)
+
+
+def _revision_outcomes(conn, where_time: str, params: tuple,
+                       stem: str | None = None) -> dict:
+    """Compare revision drafts with their parent drafts when both have grades.
+
+    Missing links and legacy score shapes are counted as incomparable. Nothing
+    is imputed, which is essential for migrated corpora and interrupted runs.
+    """
+    stem_sql = " AND child.paper_stem = ?" if stem else ""
+    rows = conn.execute(
+        "SELECT child.id, child.attempt_id, child.paper_stem, child.role, "
+        "child.parent_iteration_id, child.model_used, child.cost_input_tokens, "
+        "child.cost_output_tokens, parent.role AS parent_role "
+        "FROM ingest_iterations child "
+        "LEFT JOIN ingest_iterations parent ON parent.id=child.parent_iteration_id "
+        "WHERE child.parent_iteration_id IS NOT NULL "
+        "AND child.role IN ('author','debug')" +
+        where_time.replace("created_at", "child.created_at") + stem_sql,
+        (*params, *((stem,) if stem else ())),
+    ).fetchall()
+    grade_rows = conn.execute(
+        "SELECT parent_iteration_id, grader_scores FROM ingest_iterations "
+        "WHERE role='grade' AND parent_iteration_id IS NOT NULL"
+    ).fetchall()
+    grades: dict[int, dict] = {}
+    for row in grade_rows:
+        try:
+            grades[row["parent_iteration_id"]] = json.loads(row["grader_scores"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            pass
+
+    counts = Counter()
+    details = []
+    deltas = []
+    improved_tokens = 0
+    for row in rows:
+        intervention = "debug" if row["role"] == "debug" else "evolve"
+        child_scores = grades.get(row["id"])
+        parent_scores = grades.get(row["parent_iteration_id"])
+        status = "incomparable"
+        delta = None
+        if child_scores is not None and parent_scores is not None:
+            axes = []
+            for key in ("semantic_score", "salience_score", "target_claim_score",
+                        "coherence_score"):
+                child = _score_value(child_scores, key)
+                parent = _score_value(parent_scores, key)
+                if isinstance(child, (int, float)) and isinstance(parent, (int, float)):
+                    axes.append(float(child) - float(parent))
+            if axes:
+                delta = sum(axes) / len(axes)
+            # Classification replays the exact operator lens used by runner,
+            # rather than treating a mean across heterogeneous axes as the
+            # acceptance rule. The mean delta remains descriptive only.
+            child_obj = SimpleNamespace(scores=child_scores)
+            parent_obj = SimpleNamespace(scores=parent_scores)
+            accepts = (fitness.is_strict_improvement if intervention == "debug"
+                       else fitness.is_evolve_improvement)
+            if accepts(child_obj, parent_obj):
+                status = "improved"
+            elif accepts(parent_obj, child_obj):
+                status = "regressed"
+            else:
+                status = "tied"
+        counts[(intervention, status)] += 1
+        if delta is not None:
+            deltas.append(delta)
+        tokens = int(row["cost_input_tokens"] or 0) + int(row["cost_output_tokens"] or 0)
+        if status == "improved":
+            improved_tokens += tokens
+        details.append({
+            "attempt_id": row["attempt_id"], "paper_stem": row["paper_stem"],
+            "revision_id": row["id"], "parent_id": row["parent_iteration_id"],
+            "intervention": intervention, "status": status,
+            "mean_axis_delta": round(delta, 6) if delta is not None else None,
+            "model": row["model_used"], "tokens": tokens,
+        })
+    by_intervention = {}
+    for intervention in ("evolve", "debug"):
+        slot = {s: counts[(intervention, s)] for s in
+                ("improved", "regressed", "tied", "incomparable")}
+        slot["eligible"] = sum(slot.values())
+        slot["comparable"] = slot["eligible"] - slot["incomparable"]
+        by_intervention[intervention] = slot
+    return {
+        "eligible": len(rows),
+        "comparable": sum(1 for d in details if d["status"] != "incomparable"),
+        "improved": sum(1 for d in details if d["status"] == "improved"),
+        "regressed": sum(1 for d in details if d["status"] == "regressed"),
+        "tied": sum(1 for d in details if d["status"] == "tied"),
+        "incomparable": sum(1 for d in details if d["status"] == "incomparable"),
+        "mean_axis_delta": round(sum(deltas) / len(deltas), 6) if deltas else None,
+        "tokens_per_improvement": (
+            round(improved_tokens / max(1, sum(1 for d in details if d["status"] == "improved")))
+            if any(d["status"] == "improved" for d in details) else None
+        ),
+        "by_intervention": by_intervention,
+        "details": details,
+    }
+
+
+def _gather(conn, cutoff: int | None, stem: str | None = None,
+            attempt_id: str | None = None) -> dict:
     """Run the aggregation queries and fold grader_scores JSON in Python (robust
     across SQLite builds without JSON1)."""
     where_time = " AND created_at >= ?" if cutoff is not None else ""
@@ -145,6 +259,67 @@ def _gather(conn, cutoff: int | None) -> dict:
         params,
     ).fetchone()["n"]
 
+    # Attempt completion is derived conservatively. No terminal row means
+    # incomplete, not failed: old/migrated databases and killed processes are
+    # indistinguishable after the fact.
+    attempt_rows = conn.execute(
+        "SELECT attempt_id, role, decision FROM ingest_iterations WHERE 1=1" + where_time,
+        params,
+    ).fetchall()
+    attempts: dict[str, list] = {}
+    for row in attempt_rows:
+        attempts.setdefault(row["attempt_id"], []).append(row)
+    attempt_status = Counter()
+    for rows in attempts.values():
+        if any(r["role"] == "budget" and r["decision"] == "budget-exhausted" for r in rows):
+            attempt_status["budget_exhausted"] += 1
+        elif any(r["role"] == "commit" and str(r["decision"] or "").startswith("committed") for r in rows):
+            attempt_status["completed"] += 1
+        elif any(r["role"] == "commit" and r["decision"] == "promote-failed" for r in rows):
+            attempt_status["promote_failed"] += 1
+        else:
+            attempt_status["incomplete"] += 1
+
+    duration_rows = conn.execute(
+        "SELECT role, duration_ms, gate_metrics FROM ingest_iterations "
+        "WHERE 1=1" + where_time,
+        params,
+    ).fetchall()
+    latency = latency_distribution(duration_rows)
+
+    gate_rows = conn.execute(
+        "SELECT role, gate_metrics FROM ingest_iterations "
+        "WHERE role IN ('target_claims','grade','critic','claim_support','commit','budget')" +
+        where_time,
+        params,
+    ).fetchall()
+    gate_totals: Counter = Counter()
+    gate_measured = 0
+    for row in gate_rows:
+        if not row["gate_metrics"]:
+            continue
+        try:
+            metrics = json.loads(row["gate_metrics"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        gate_measured += 1
+        for key, value in metrics.items():
+            if isinstance(value, bool):
+                gate_totals[key] += int(value)
+            elif isinstance(value, (int, float)):
+                gate_totals[key] += value
+
+    try:
+        corpus_papers = int(conn.execute(
+            "SELECT COUNT(*) AS n FROM papers WHERE page_type='paper'"
+        ).fetchone()["n"] or 0)
+        tracked_papers = int(conn.execute(
+            "SELECT COUNT(DISTINCT i.paper_stem) AS n FROM ingest_iterations i "
+            "JOIN papers p ON p.stem=i.paper_stem WHERE p.page_type='paper'"
+        ).fetchone()["n"] or 0)
+    except Exception:
+        corpus_papers = tracked_papers = 0
+
     return {
         "quality": quality,
         "by_model": by_model,
@@ -152,6 +327,22 @@ def _gather(conn, cutoff: int | None) -> dict:
         "by_section": by_section,
         "decisions": decisions,
         "n_attempts": int(n_attempts or 0),
+        "attempt_status": dict(attempt_status),
+        "telemetry_coverage": {
+            "tracked_papers": tracked_papers,
+            "corpus_papers": corpus_papers,
+            "untracked_papers": max(0, corpus_papers - tracked_papers),
+        },
+        "latency": latency,
+        "attempts": gather_attempts(
+            conn, where_time, params, stem=stem, attempt_id=attempt_id,
+        ),
+        "gate_health": {
+            "samples": gate_measured,
+            "eligible": len(gate_rows),
+            "totals": dict(gate_totals),
+        },
+        "lineage": _revision_outcomes(conn, where_time, params, stem=stem),
     }
 
 
@@ -183,16 +374,59 @@ def _to_json(data: dict, days: int | None) -> dict:
             for s, v in sorted(data["by_section"].items())
         },
         "decisions": data["decisions"],
+        "attempt_status": data["attempt_status"],
+        "telemetry_coverage": data["telemetry_coverage"],
+        "latency": data["latency"],
+        "attempts": data["attempts"],
+        "gate_health": data["gate_health"],
+        "lineage": data["lineage"],
     }
 
 
-def _print_report(data: dict, days: int | None) -> None:
+def _minutes(ms: int | None) -> str:
+    return "—" if ms is None else f"{ms / 60000:.2f}"
+
+
+def _print_attempt_timings(attempts: list[dict], *, detailed: bool) -> None:
+    print("Attempt timings:")
+    if not attempts:
+        print("  (no matching attempts)")
+    for attempt in attempts:
+        label = attempt["paper_stem"] or attempt["pdf_filename"]
+        wall_s = f"{attempt['wall_minutes']:.2f}m"
+        phase = attempt["measured_minutes"]
+        phase_s = "—" if phase is None else f"{phase:.2f}m"
+        fallback = "≈" if attempt["wall_source"] == "event-span-fallback" else " "
+        print(f"  {attempt['attempt_id'][:8]}  wall{fallback}{wall_s:>7}  "
+              f"phase={phase_s:>7}  "
+              f"{attempt['timing_samples']}/{attempt['timing_eligible']} timed  "
+              f"{attempt['outcome']:<22} {label}")
+        if detailed:
+            for step in attempt["steps"]:
+                prefix = "↳" if step["nested_in_commit"] else " "
+                mins = _minutes(step["duration_ms"])
+                duration = "—" if mins == "—" else f"{mins}m"
+                print(f"      {prefix} {step['iteration']:>3} "
+                      f"{step['role']:<18} {duration:>7}  "
+                      f"{step['decision'] or ''}")
+
+
+def _print_report(data: dict, days: int | None, show_lineage: bool = False,
+                  show_attempts: bool = False,
+                  attempt_id: str | None = None) -> None:
     window = f"last {days} days" if days else "all time"
     print(f"Research Wiki — ingest insights  ({window})\n")
+    if attempt_id:
+        _print_attempt_timings(data["attempts"], detailed=True)
+        return
     if data["n_attempts"] == 0:
         print("No ingest telemetry yet — run `researchwiki agent ingest` to populate.")
         return
     print(f"Ingest attempts: {data['n_attempts']}\n")
+    cov = data["telemetry_coverage"]
+    if cov["corpus_papers"]:
+        print(f"Telemetry coverage: {cov['tracked_papers']}/{cov['corpus_papers']} paper pages "
+              f"({cov['untracked_papers']} migrated/untracked)\n")
 
     # By model
     print("By model (drafts scored against the PDF; tokens across all roles):")
@@ -227,6 +461,46 @@ def _print_report(data: dict, days: int | None) -> None:
         for d, n in sorted(data["decisions"].items(), key=lambda kv: -kv[1]):
             print(f"  {d:<16}{n:>6}")
 
+    lineage = data["lineage"]
+    if lineage["eligible"]:
+        print("\nRevision outcomes:")
+        print(f"  comparable: {lineage['comparable']}/{lineage['eligible']}  "
+              f"improved: {lineage['improved']}  regressed: {lineage['regressed']}  "
+              f"tied: {lineage['tied']}  missing grades/parents: {lineage['incomparable']}")
+        for name, slot in lineage["by_intervention"].items():
+            if slot["eligible"]:
+                print(f"  {name:<8} {slot['comparable']}/{slot['eligible']} comparable; "
+                      f"{slot['improved']} improved, {slot['regressed']} regressed")
+        if show_lineage:
+            for d in lineage["details"]:
+                delta = "—" if d["mean_axis_delta"] is None else f"{d['mean_axis_delta']:+.3f}"
+                print(f"    {d['paper_stem'] or '(unknown)'}  {d['intervention']:<6} "
+                      f"{d['status']:<12} delta={delta}  id={d['revision_id']}")
+
+    measured = sum(v["samples"] for v in data["latency"].values())
+    eligible = sum(v["eligible"] for v in data["latency"].values())
+    if eligible:
+        print(f"\nLatency telemetry: {measured}/{eligible} phase rows measured")
+        print(f"  {'phase':<18}{'n':>7}{'avg':>8}{'min':>8}{'med':>8}{'p95':>8}{'max':>8}")
+        for role, v in sorted(data["latency"].items()):
+            marker = "↳ " if v["nested_in_commit"] else ""
+            label = f"{marker}{role}"
+            print(f"  {label:<18}{v['samples']:>3}/{v['eligible']:<3}"
+                  f"{_minutes(v['mean_ms']):>8}{_minutes(v['min_ms']):>8}"
+                  f"{_minutes(v['median_ms']):>8}{_minutes(v['p95_ms']):>8}"
+                  f"{_minutes(v['max_ms']):>8}")
+        print("  minutes; ↳ nested in commit and excluded from attempt totals")
+
+    if show_attempts or attempt_id:
+        print()
+        _print_attempt_timings(data["attempts"], detailed=False)
+
+    gh = data["gate_health"]
+    if gh["eligible"]:
+        print(f"\nGate-health telemetry: {gh['samples']}/{gh['eligible']} eligible rows measured")
+        for key, value in sorted(gh["totals"].items()):
+            print(f"  {key:<24}{value:g}")
+
     print(f"\n(Rates as of {_mc.pricing_as_of() or 'unknown'} from config/pricing.yaml; "
           f"local/unpriced models show $0.00. Upper bound — prompt-cache hits "
           f"cost 0.1x input and aren't recorded per-call.)")
@@ -240,6 +514,14 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--days", type=int, default=None,
                         help="Restrict to the last N days (default: all time).")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of a text report.")
+    parser.add_argument("--lineage", action="store_true",
+                        help="Print individual revision-parent comparisons.")
+    parser.add_argument("--stem", default=None,
+                        help="Restrict lineage and attempt timings to one paper stem.")
+    parser.add_argument("--attempts", action="store_true",
+                        help="Print one timing summary row per ingest attempt.")
+    parser.add_argument("--attempt-id", default=None,
+                        help="Print the timing breakdown for one exact attempt ID.")
     args = parser.parse_args(argv)
 
     try:
@@ -254,7 +536,9 @@ def main(argv: list[str]) -> int:
 
     cutoff = int(time.time()) - args.days * 86400 if args.days else None
     try:
-        data = _gather(conn, cutoff)
+        data = _gather(
+            conn, cutoff, stem=args.stem, attempt_id=args.attempt_id,
+        )
     finally:
         try:
             conn.close()
@@ -264,5 +548,8 @@ def main(argv: list[str]) -> int:
     if args.json:
         print(json.dumps(_to_json(data, args.days), indent=2, ensure_ascii=False))
     else:
-        _print_report(data, args.days)
+        _print_report(
+            data, args.days, show_lineage=args.lineage,
+            show_attempts=args.attempts, attempt_id=args.attempt_id,
+        )
     return 0
