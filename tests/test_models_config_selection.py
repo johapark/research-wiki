@@ -182,7 +182,6 @@ def test_broken_implicit_config_symlink_fails_closed(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("url", [
-    "http://provider.invalid/v1",
     "https://user:secret@provider.invalid/v1",
     "https://provider.invalid/v1?token=secret",
     "https://provider.invalid/v1#fragment",
@@ -205,8 +204,10 @@ def test_unsafe_base_url_in_implicit_config_fails_closed(monkeypatch, tmp_path, 
     "http://localhost:1234/v1",
     "http://127.0.0.1:8000/v1",
     "http://[::1]:11434/v1",
+    "http://10.212.23.212/v1",
+    "http://litellm.lan:4000/v1",
 ])
-def test_loopback_http_base_url_remains_valid(monkeypatch, tmp_path, url):
+def test_http_base_url_remains_valid(monkeypatch, tmp_path, url):
     cfgdir = tmp_path / "config"
     cfgdir.mkdir()
     (cfgdir / "models.yaml").write_text(
@@ -218,7 +219,6 @@ def test_loopback_http_base_url_remains_valid(monkeypatch, tmp_path, url):
 
 
 @pytest.mark.parametrize("url", [
-    "http://remote.invalid/v1",
     "https://user:secret@remote.invalid/v1",
     "https://remote.invalid/v1?token=secret",
     "https://remote.invalid/v1#fragment",
@@ -239,6 +239,8 @@ def test_unsafe_env_base_url_fails_closed_without_echoing_value(
 
 @pytest.mark.parametrize("url", [
     "https://remote.invalid/v1",
+    "http://remote.invalid/v1",
+    "http://10.212.23.212/v1",
     "http://localhost:1234/v1",
     "http://127.0.0.1:8000/v1",
 ])
@@ -249,7 +251,6 @@ def test_safe_env_base_url_remains_valid(monkeypatch, tmp_path, url):
 
 
 @pytest.mark.parametrize("url", [
-    "http://remote.invalid/anthropic",
     "https://user:secret@remote.invalid/anthropic",
     "https://remote.invalid/anthropic?token=secret",
     "https://remote.invalid/anthropic\u200b",
@@ -270,6 +271,12 @@ def test_shipped_glm_anthropic_endpoint_remains_valid(monkeypatch):
     monkeypatch.setenv(
         "ANTHROPIC_BASE_URL", "https://api.z.ai/api/anthropic",
     )
+    mc.validate_config()
+
+
+def test_remote_http_anthropic_endpoint_remains_valid(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://192.168.1.10:4000/anthropic")
     mc.validate_config()
 
 

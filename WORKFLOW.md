@@ -1247,11 +1247,11 @@ shell variables still take precedence. Avoid plain `source .env.litellm`:
 dotenv's `KEY=value` assignments are not exported to the child CLI unless the
 shell is put into export-all mode.
 
-Every explicit endpoint follows the same transport rule, whether it comes from
-YAML, `RW_LLM_BASE_URL`, or `ANTHROPIC_BASE_URL`: remote hosts require HTTPS;
-plain HTTP is accepted only on loopback. Credentials in the URL, whitespace or
-control characters, query strings, fragments, and invalid ports are rejected
-before provider preflight or an LLM request.
+Every explicit endpoint follows the same validation rule, whether it comes from
+YAML, `RW_LLM_BASE_URL`, or `ANTHROPIC_BASE_URL`: HTTP and HTTPS are accepted,
+including trusted LAN services. Credentials in the URL, whitespace or control
+characters, query strings, fragments, and invalid ports are rejected before
+provider preflight or an LLM request. Only use endpoints you trust.
 
 ### Pinning the state DB (`RESEARCHWIKI_DB_PATH`)
 

@@ -177,16 +177,9 @@ def test_remove_env_keys_preserves_credentials_and_restricts_mode(tmp_path):
 def test_provider_base_url_requires_absolute_http_url():
     assert init._valid_provider_base_url("https://api.groq.com/openai/v1")
     assert init._valid_provider_base_url("http://localhost:1234/v1")
-    assert not init._valid_provider_base_url("http://api.groq.com/openai/v1")
-    assert init._valid_provider_base_url(
-        "https://127.0.0.1:8443/v1", local_only=True
-    )
-    assert not init._valid_provider_base_url(
-        "https://api.groq.com/openai/v1", local_only=True
-    )
-    assert not init._valid_provider_base_url(
-        "http://192.168.1.10:1234/v1", local_only=True
-    )
+    assert init._valid_provider_base_url("http://api.groq.com/openai/v1")
+    assert init._valid_provider_base_url("http://10.212.23.212/v1")
+    assert init._valid_provider_base_url("http://192.168.1.10:1234/v1")
     assert not init._valid_provider_base_url("api.groq.com/openai/v1")
     assert not init._valid_provider_base_url("file:///tmp/provider")
     assert not init._valid_provider_base_url("https://example.com:bad/v1")

@@ -42,9 +42,9 @@ is sent.** The environment variable wins when both are present, and the key
 travels as a Bearer token to whatever host is selected. Treat both like
 credential settings: only use endpoints you trust. The same caution applies to
 `ANTHROPIC_BASE_URL` when using Anthropic-compatible third parties. Both env
-overrides and YAML endpoints require HTTPS remotely; plain HTTP is allowed only
-on loopback, and credential-bearing or structurally unsafe URLs are rejected
-before preflight or transmission. A missing explicit `RW_MODELS_CONFIG`, or any
+overrides and YAML endpoints accept HTTP and HTTPS so trusted LAN services can
+be used. Credential-bearing or structurally unsafe URLs are rejected before
+preflight or transmission; only use endpoints you trust. A missing explicit `RW_MODELS_CONFIG`, or any
 selected model config that exists but is unreadable, malformed, incomplete, or
 has an ambiguous endpoint, fails closed rather than silently switching to
 another provider. The built-in OpenAI route is used only when the implicit

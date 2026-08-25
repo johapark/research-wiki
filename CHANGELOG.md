@@ -34,7 +34,7 @@ the reasoning behind any line below.
   explicit `RW_MODELS_CONFIG`, or any selected config that exists but is
   unreadable, malformed, schema-invalid, or lacks an unambiguous endpoint, is
   an environment error rather than a silent OpenAI/localhost fallback. The
-  setup wizard also validates cloud HTTPS versus loopback HTTP, confirms key
+  setup wizard also validates HTTP(S) endpoint structure, confirms key
   reuse across endpoints, checks the actual credential profile against Git,
   and writes the exact model IDs selected by the user. The same URL policy now
   covers YAML, `RW_LLM_BASE_URL`, and `ANTHROPIC_BASE_URL` at status, preflight,

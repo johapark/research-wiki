@@ -78,7 +78,7 @@ Run `researchwiki init --scaffold-only` afterwards to create the page-type dirs 
 
 ### Providers
 
-Set credentials/routing via a gitignored **`.env`** at the project root (loaded automatically every invocation — no `source` needed) or inline shell exports (which take precedence). For isolated backend profiles, copy `.env.template`, run `chmod 600` on the copy, and select it explicitly with `researchwiki --env-file .env.NAME COMMAND`. Put your **API key** in the profile; keep the endpoint in the selected model config's `base_url:`. `RW_LLM_BASE_URL` is an ad-hoc override and wins over that config. Endpoint URLs must use HTTPS remotely; plain HTTP is accepted only on loopback.
+Set credentials/routing via a gitignored **`.env`** at the project root (loaded automatically every invocation — no `source` needed) or inline shell exports (which take precedence). For isolated backend profiles, copy `.env.template`, run `chmod 600` on the copy, and select it explicitly with `researchwiki --env-file .env.NAME COMMAND`. Put your **API key** in the profile; keep the endpoint in the selected model config's `base_url:`. `RW_LLM_BASE_URL` is an ad-hoc override and wins over that config. HTTP and HTTPS endpoints are accepted; use only hosts you trust because the key and paper content are sent there.
 
 ```bash
 # .env

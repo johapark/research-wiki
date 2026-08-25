@@ -106,7 +106,7 @@ def test_explicit_unsafe_openai_endpoint_fails_before_request(monkeypatch):
         llm.call_openai_compatible(
             model="test-model",
             prompt="must not be sent",
-            base_url="http://remote.invalid/v1",
+            base_url="http://remote.invalid/v1?token=must-not-echo",
         )
 
 

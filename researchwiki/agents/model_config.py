@@ -33,7 +33,6 @@ Ollama, etc.), this config schema doesn't change — just edit a role's
 from __future__ import annotations
 
 import datetime as _dt
-import ipaddress
 import math
 import os
 import stat
@@ -202,25 +201,13 @@ def _schema_error(path: Path, detail: str) -> ModelConfigUnavailable:
     return _config_error(path, f"its schema is invalid ({detail})")
 
 
-def _loopback_host(hostname: str) -> bool:
-    """Match the setup wizard's safe exception for plaintext local endpoints."""
-    host = hostname.rstrip(".").lower()
-    if host == "localhost" or host.endswith(".localhost"):
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
-
-
 def _valid_base_url(value: str) -> bool:
-    """Allow HTTPS remotely and HTTP only for a loopback model server."""
+    """Accept a structurally safe absolute HTTP(S) endpoint."""
     try:
         parsed = urllib.parse.urlsplit(value)
         port = parsed.port
     except ValueError:
         return False
-    is_loopback = _loopback_host(parsed.hostname or "")
     return (
         value == value.strip()
         and not any(
@@ -235,7 +222,6 @@ def _valid_base_url(value: str) -> bool:
         and (port is None or port > 0)
         and not parsed.query
         and not parsed.fragment
-        and (parsed.scheme == "https" or is_loopback)
     )
 
 
@@ -245,8 +231,8 @@ def validate_env_base_url(
     """Validate an env endpoint without reflecting possible secrets in errors."""
     if not _valid_base_url(value):
         raise ModelConfigUnavailable(
-            f"{variable} is not a safe absolute endpoint; use HTTPS remotely "
-            "or HTTP on loopback, without credentials, whitespace, query, or fragment"
+            f"{variable} is not a safe absolute endpoint; use HTTP(S) and omit "
+            "credentials, whitespace, query, and fragment"
         )
     return value
 
@@ -316,8 +302,8 @@ def _validate_document(path: Path, data: dict) -> None:
         if not isinstance(value, str) or not _valid_base_url(value):
             raise _schema_error(
                 path,
-                "base_url must be a safe absolute endpoint (HTTPS remotely; "
-                "HTTP only on loopback; no credentials, query, or fragment)",
+                "base_url must be a safe absolute endpoint using HTTP(S), "
+                "without credentials, query, or fragment",
             )
 
     roles = data.get("roles", {})

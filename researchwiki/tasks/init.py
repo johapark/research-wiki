@@ -21,7 +21,6 @@ to skip or reconfigure each.
 
 from __future__ import annotations
 
-import ipaddress
 import json
 import os
 import re
@@ -274,22 +273,12 @@ def _external_routing_keys(env_path: Path) -> set[str]:
     }
 
 
-def _loopback_host(hostname: str) -> bool:
-    host = hostname.rstrip(".").lower()
-    if host == "localhost" or host.endswith(".localhost"):
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
-
-
-def _valid_provider_base_url(value: str, *, local_only: bool = False) -> bool:
+def _valid_provider_base_url(value: str) -> bool:
     """True for a safe request-compatible HTTP(S) base endpoint.
 
-    Bearer credentials require HTTPS off-host.  The local provider is stricter:
-    it may target loopback only, so choosing the friendly "local" label cannot
-    silently send prompts or a retained token to another machine on the LAN.
+    Transport trust is the user's decision: remote HTTP is useful for trusted
+    LAN services such as LiteLLM. URL credentials and ambiguous URL components
+    remain forbidden.
     """
     try:
         parsed = urllib.parse.urlsplit(value)
@@ -315,10 +304,7 @@ def _valid_provider_base_url(value: str, *, local_only: bool = False) -> bool:
     )
     if not structurally_valid:
         return False
-    is_loopback = _loopback_host(parsed.hostname or "")
-    return (not local_only or is_loopback) and (
-        parsed.scheme == "https" or is_loopback
-    )
+    return True
 
 
 def _effective_openai_base_url() -> str | None:
@@ -667,9 +653,8 @@ def _step_provider(root: Path) -> None:
             default=previous_base_url,
         ) or None
         if not base_url or not _valid_provider_base_url(base_url):
-            print("… Provider setup cancelled — an absolute HTTPS base URL "
-                  "without credentials, query, or fragment is required "
-                  "(plain HTTP is allowed only on loopback); the existing "
+            print("… Provider setup cancelled — an absolute HTTP(S) base URL "
+                  "without credentials, query, or fragment is required; the existing "
                   "routing was left unchanged.")
             return
         proceed, api_key = _choose_openai_api_key(
@@ -697,12 +682,12 @@ def _step_provider(root: Path) -> None:
             previous_base_url
             if current and current[0] in {"local", "lmstudio"}
             and previous_base_url
-            and _valid_provider_base_url(previous_base_url, local_only=True)
+            and _valid_provider_base_url(previous_base_url)
             else _LOCAL_DEFAULT_BASE_URL
         )
         base_url = _ask("Local server base URL", default=local_default)
-        if not _valid_provider_base_url(base_url, local_only=True):
-            print("… Provider setup cancelled — an absolute loopback HTTP(S) "
+        if not _valid_provider_base_url(base_url):
+            print("… Provider setup cancelled — an absolute HTTP(S) "
                   "base URL without credentials, query, or fragment is required; "
                   "the existing routing was left unchanged.")
             return
