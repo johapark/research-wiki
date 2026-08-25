@@ -20,6 +20,61 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- **Dotenv profiles and model routing now fail closed.** The CLI accepts
+  `--env-file PATH` before a command, loads that profile instead of the root
+  `.env`, and lets `init` update the selected profile. Profiles are parsed in
+  full before use; accept a UTF-8 BOM, `export KEY=...`, and exact `$NAME` or
+  `${NAME}` shell references; preserve shell-over-file precedence with
+  provenance tracking, bind permission checks and bytes to one opened inode,
+  and are atomically written from a 0600 inode. Provider transitions
+  roll back the config and profile together, while inherited shell routing
+  overrides stop setup before mutation. A missing
+  explicit `RW_MODELS_CONFIG`, or any selected config that exists but is
+  unreadable, malformed, schema-invalid, or lacks an unambiguous endpoint, is
+  an environment error rather than a silent OpenAI/localhost fallback. The
+  setup wizard also validates cloud HTTPS versus loopback HTTP, confirms key
+  reuse across endpoints, checks the actual credential profile against Git,
+  and writes the exact model IDs selected by the user. The same URL policy now
+  covers YAML, `RW_LLM_BASE_URL`, and `ANTHROPIC_BASE_URL` at status, preflight,
+  availability checks, and the final request path.
+
+- **Setup resources now survive wheel and source-distribution installs.** The
+  dotenv template and all eight model-routing templates ship as package data;
+  `researchwiki init` falls back to those bundled copies outside a checkout.
+  A local loopback `base_url:` in the selected YAML now also counts as a
+  synchronous-LLM signal without duplicating it in `RW_LLM_BASE_URL`. Package
+  metadata now uses the SPDX license form supported by current setuptools.
+
+### Fixed
+
+- **Paper-scoped provider checks no longer count DOI-bearing books or
+  commentaries as papers.** `read_wiki_papers()` now enforces the page-type
+  boundary shared by `audit`, `preprint-check --all`, and
+  `retraction-check --all`. On a mixed corpus the leak could make audit's
+  `papers_skipped_no_doi` count negative (the live corpus reported `-6`) and
+  send reference documents through paper-only external lookups. Structural
+  page-type directories are excluded even when a malformed legacy page omits
+  `type:`, and a stale `no_doi_reason` beside a newly added DOI is no longer
+  subtracted twice from the audit denominator.
+
+- **Post-commit grading now stores structured grader scores as JSON objects.**
+  `grade_persist` passes the score mapping directly to the iteration writer
+  instead of pre-serializing it, avoiding a second JSON encoding that made
+  downstream readers receive a string. A regression test pins the stored type.
+
+- **Dotenv references cannot acquire secrets from earlier lines in the same
+  profile.** Exact `$NAME` and `${NAME}` values resolve only against the
+  pre-load parent environment, while `init` still recognizes a successfully
+  resolved credential as profile-controlled for safe replacement or removal.
+
+- **Cost budgets classify the endpoint that will receive the request.** The
+  OpenAI-compatible resolver now supplies one local/remote decision to both
+  reservation and completion accounting, so an environment override cannot
+  disagree with models YAML, priced local models stay unmetered, and remote
+  hostnames merely containing `localhost` are not treated as free.
+
 ## [0.4.3] - 2026-08-24
 
 ### Added

@@ -39,8 +39,10 @@ def _clean_provider_env(monkeypatch):
     running pytest with keys exported in their shell would otherwise silently
     skip every negative case here.
     """
-    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-                "RW_LLM_BASE_URL", "RW_LLM_PROVIDER"):
+    for var in (
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "RW_LLM_BASE_URL",
+        "RW_LLM_PROVIDER", "RW_MODELS_CONFIG", "ANTHROPIC_BASE_URL",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -50,9 +52,9 @@ def no_models_config(monkeypatch, tmp_path):
     resolves to the OpenAI-compatible fallback at api.openai.com."""
     monkeypatch.setattr(llm.model_config, "config_path", lambda: tmp_path / "models.yaml")
     monkeypatch.setattr(llm.model_config, "base_url", lambda: llm.model_config._FALLBACK_BASE_URL)
-    llm.model_config._config.cache_clear()
+    llm.model_config.clear_caches()
     yield
-    llm.model_config._config.cache_clear()
+    llm.model_config.clear_caches()
 
 
 # ---------- endpoint resolution ----------
@@ -73,14 +75,158 @@ def test_is_local_endpoint(url, is_local):
 def test_base_url_precedence_matches_call_site(monkeypatch, no_models_config):
     """RW_LLM_BASE_URL wins over the config's base_url, which wins over the
     LM Studio default — the same order `llm.call` applies."""
-    assert llm._resolved_openai_base_url() == "https://api.openai.com/v1"
+    resolved = llm.resolve_openai_endpoint()
+    assert (resolved.url, resolved.source) == ("https://api.openai.com/v1", "fallback")
     monkeypatch.setenv("RW_LLM_BASE_URL", "http://localhost:9999/v1")
-    assert llm._resolved_openai_base_url() == "http://localhost:9999/v1"
+    resolved = llm.resolve_openai_endpoint()
+    assert (resolved.url, resolved.source) == ("http://localhost:9999/v1", "env")
+
+
+def test_unsafe_env_endpoint_fails_before_resolution_or_availability(
+    monkeypatch, no_models_config,
+):
+    unsafe = "http://remote.invalid/v1?token=must-not-echo"
+    monkeypatch.setenv("RW_LLM_BASE_URL", unsafe)
+    with pytest.raises(llm.model_config.ModelConfigUnavailable) as exc:
+        llm.resolve_openai_endpoint()
+    assert "RW_LLM_BASE_URL" in str(exc.value)
+    assert unsafe not in str(exc.value)
+    with pytest.raises(llm.model_config.ModelConfigUnavailable):
+        llm.has_synchronous_llm()
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    with pytest.raises(llm.model_config.ModelConfigUnavailable):
+        llm.has_synchronous_llm()
+    with pytest.raises(llm.model_config.ModelConfigUnavailable):
+        llm.call_openai_compatible(model="test-model", prompt="must not be sent")
+
+
+def test_explicit_unsafe_openai_endpoint_fails_before_request(monkeypatch):
+    monkeypatch.delenv("RW_LLM_BASE_URL", raising=False)
+    with pytest.raises(llm.model_config.ModelConfigUnavailable):
+        llm.call_openai_compatible(
+            model="test-model",
+            prompt="must not be sent",
+            base_url="http://remote.invalid/v1",
+        )
 
 
 def test_falls_back_to_lm_studio_default_when_config_declares_none(monkeypatch):
     monkeypatch.setattr(llm.model_config, "base_url", lambda: None)
-    assert llm._resolved_openai_base_url() == llm._DEFAULT_LOCAL_BASE_URL
+    resolved = llm.resolve_openai_endpoint()
+    assert (resolved.url, resolved.source) == (llm._DEFAULT_LOCAL_BASE_URL, "fallback")
+
+
+def test_endpoint_resolution_reports_config_source(monkeypatch, tmp_path):
+    config = tmp_path / "models.yaml"
+    config.write_text("base_url: https://provider.invalid/v1\n", encoding="utf-8")
+    monkeypatch.setattr(llm.model_config, "config_path", lambda: config)
+    monkeypatch.setattr(
+        llm.model_config, "base_url", lambda: "https://provider.invalid/v1",
+    )
+    resolved = llm.resolve_openai_endpoint()
+    assert (resolved.url, resolved.source) == ("https://provider.invalid/v1", "config")
+
+
+def test_endpoint_source_uses_the_same_cached_file_snapshot(monkeypatch, tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config = config_dir / "models.yaml"
+    monkeypatch.setattr(llm.model_config, "wiki_root", lambda: tmp_path)
+    llm.model_config.clear_caches()
+    try:
+        resolved = llm.resolve_openai_endpoint()
+        assert (resolved.url, resolved.source) == (
+            llm.model_config._FALLBACK_BASE_URL,
+            "fallback",
+        )
+
+        config.write_text(
+            "base_url: https://provider.invalid/v1\n",
+            encoding="utf-8",
+        )
+        resolved = llm.resolve_openai_endpoint()
+        assert (resolved.url, resolved.source) == (
+            llm.model_config._FALLBACK_BASE_URL,
+            "fallback",
+        )
+
+        llm.model_config.clear_caches()
+        resolved = llm.resolve_openai_endpoint()
+        assert (resolved.url, resolved.source) == (
+            "https://provider.invalid/v1",
+            "config",
+        )
+        config.unlink()
+        resolved = llm.resolve_openai_endpoint()
+        assert (resolved.url, resolved.source) == (
+            "https://provider.invalid/v1",
+            "config",
+        )
+    finally:
+        llm.model_config.clear_caches()
+
+
+def test_endpoint_display_does_not_expose_url_credentials():
+    resolved = llm.EndpointResolution(
+        "https://user:secret@provider.invalid/v1?api_key=secret#fragment", "config",
+    )
+    assert resolved.display_url == "https://provider.invalid/v1"
+
+
+def test_lmstudio_yaml_base_url_counts_as_synchronous(tmp_path, monkeypatch):
+    """Selecting the LM Studio profile is itself the local-server signal.
+
+    Users normally select it with ``RW_MODELS_CONFIG=models.lmstudio.yaml``;
+    they should not also have to duplicate its ``base_url:`` in an environment
+    variable merely to enable synchronous-only features.
+    """
+    config = tmp_path / "models.lmstudio.yaml"
+    config.write_text("base_url: http://localhost:1234/v1\n", encoding="utf-8")
+    monkeypatch.setattr(llm.model_config, "config_path", lambda: config)
+    llm.model_config.clear_caches()
+    try:
+        assert llm.has_synchronous_llm() is True
+    finally:
+        llm.model_config.clear_caches()
+
+
+@pytest.mark.parametrize("routing", [
+    (
+        'roles:\n  author: {provider: " OpenAI-Compatible ", model: test-model}\n'
+        "phases:\n  author: {role: author}\n"
+    ),
+    (
+        "roles:\n  author: {provider: anthropic, model: test-model}\n"
+        'phases:\n  author: {role: author, provider: " OPENAI "}\n'
+    ),
+])
+def test_canonical_provider_id_matches_actual_dispatch(
+    tmp_path, monkeypatch, routing,
+):
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "models.yaml").write_text(
+        "base_url: https://provider.invalid/v1\n" + routing,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(llm.model_config, "wiki_root", lambda: tmp_path)
+    dispatched = []
+    sentinel = object()
+
+    def fake_openai(**kwargs):
+        dispatched.append(kwargs["base_url"])
+        return sentinel
+
+    monkeypatch.setattr(llm, "call_openai_compatible", fake_openai)
+    llm.model_config.clear_caches()
+    try:
+        assert llm.model_config.for_phase("author").provider in {
+            "openai-compatible", "openai",
+        }
+        assert llm.call(prompt="test", phase="author") is sentinel
+        assert dispatched == ["https://provider.invalid/v1"]
+    finally:
+        llm.model_config.clear_caches()
 
 
 # ---------- credential diagnosis ----------
@@ -114,6 +260,29 @@ def test_anthropic_route_without_key_is_a_problem(monkeypatch, no_models_config)
     problems = llm.missing_provider_credentials()
     assert len(problems) == 1
     assert "ANTHROPIC_API_KEY is not set" in problems[0]
+
+
+def test_unsafe_anthropic_endpoint_fails_preflight_and_call_without_echo(
+    monkeypatch, no_models_config,
+):
+    unsafe = "http://remote.invalid/anthropic?token=must-not-echo"
+    monkeypatch.setenv("RW_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", unsafe)
+
+    with pytest.raises(llm.model_config.ModelConfigUnavailable) as exc:
+        llm.missing_provider_credentials()
+    assert "ANTHROPIC_BASE_URL" in str(exc.value)
+    assert unsafe not in str(exc.value)
+    with pytest.raises(llm.model_config.ModelConfigUnavailable):
+        llm.call_anthropic(model="claude-test", prompt="must not be sent")
+
+
+def test_glm_anthropic_endpoint_is_accepted_by_preflight(monkeypatch, no_models_config):
+    monkeypatch.setenv("RW_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.z.ai/api/anthropic")
+    assert llm.missing_provider_credentials() == []
 
 
 def test_anthropic_key_against_openai_config_still_fails(monkeypatch, no_models_config):

@@ -98,9 +98,10 @@ def has_synchronous_llm() -> bool:
     """True if a fast-turnaround LLM provider is reachable.
 
     Means: an Anthropic API key is set, OR an OpenAI key is set (for real
-    OpenAI), OR a local OpenAI-compatible endpoint is plausibly reachable
-    (we don't probe the network — we infer from RW_LLM_BASE_URL being set
-    or non-default, which is the user's signal that they have a server).
+    OpenAI), OR a local OpenAI-compatible endpoint is plausibly reachable.
+    We don't probe the network: an explicit RW_LLM_BASE_URL is the user's
+    signal that they have a server, while a loopback ``base_url:`` in the
+    selected models YAML is the equivalent config-file signal.
 
     Chat-relay does NOT count as synchronous. Each call blocks polling for
     a chat agent's response, with a default 10-minute timeout. Callers
@@ -108,14 +109,19 @@ def has_synchronous_llm() -> bool:
     completions, hot-loop validators) check this signal; callers that
     just need *some* LLM reachable use `has_any_llm()` instead.
     """
+    _validated_anthropic_base_url()
+    env_endpoint = os.environ.get("RW_LLM_BASE_URL")
+    if env_endpoint:
+        model_config.validate_env_base_url(env_endpoint)
     if os.environ.get("ANTHROPIC_API_KEY"):
         return True
     if os.environ.get("OPENAI_API_KEY"):
         return True
     # Local LM-server signal: either explicitly configured or implied.
-    if os.environ.get("RW_LLM_BASE_URL"):
+    if env_endpoint:
         return True
-    return False
+    configured_url = model_config.base_url()
+    return bool(configured_url and _is_local_endpoint(configured_url))
 
 
 def has_any_llm() -> bool:
@@ -153,6 +159,40 @@ _DEFAULT_LOCAL_BASE_URL = "http://localhost:1234/v1"
 _OPENAI_COMPAT_PROVIDERS = frozenset({"openai-compatible", "lmstudio", "openai"})
 
 
+def _validated_anthropic_base_url() -> str | None:
+    """Validate the SDK-controlled endpoint without echoing its raw value."""
+    value = os.environ.get("ANTHROPIC_BASE_URL")
+    if not value:
+        return None
+    return model_config.validate_env_base_url(
+        value, variable="ANTHROPIC_BASE_URL",
+    )
+
+
+@dataclass(frozen=True)
+class EndpointResolution:
+    """Effective OpenAI-compatible endpoint and the layer that selected it."""
+
+    url: str
+    source: str  # "env" | "config" | "fallback"
+
+    @property
+    def display_url(self) -> str:
+        """URL safe for diagnostics: omit user-info, query, and fragment."""
+        try:
+            parsed = urllib.parse.urlsplit(self.url)
+            host = parsed.hostname or ""
+            port = parsed.port
+        except ValueError:
+            return "(invalid endpoint URL)"
+        if not host:
+            return "(invalid endpoint URL)"
+        netloc = f"[{host}]" if ":" in host else host
+        if port is not None:
+            netloc += f":{port}"
+        return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+
+
 class ProviderUnavailable(EnvironmentFailure):
     """The configured LLM provider has no usable credentials — exit code 2.
 
@@ -162,19 +202,25 @@ class ProviderUnavailable(EnvironmentFailure):
     """
 
 
-def _resolved_openai_base_url() -> str:
+def resolve_openai_endpoint() -> EndpointResolution:
     """The endpoint an `openai-compatible` role will actually POST to.
 
-    Mirrors `call`'s precedence exactly — `RW_LLM_BASE_URL`, then the config's
-    top-level `base_url:`, then the LM Studio localhost default — because a
-    preflight that resolves the endpoint differently from the call site is
-    worse than no preflight at all.
+    One resolver serves the request path, provider preflight, and ``status`` so
+    their precedence and provenance cannot drift apart.
     """
-    return (
-        os.environ.get("RW_LLM_BASE_URL")
-        or model_config.base_url()
-        or _DEFAULT_LOCAL_BASE_URL
-    )
+    override = os.environ.get("RW_LLM_BASE_URL")
+    if override:
+        return EndpointResolution(model_config.validate_env_base_url(override), "env")
+    configured = model_config.base_url()
+    if configured:
+        source = "config" if model_config.config_file_present() else "fallback"
+        return EndpointResolution(configured, source)
+    return EndpointResolution(_DEFAULT_LOCAL_BASE_URL, "fallback")
+
+
+def _resolved_openai_base_url() -> str:
+    """Backward-compatible URL-only view of :func:`resolve_openai_endpoint`."""
+    return resolve_openai_endpoint().url
 
 
 def _is_local_endpoint(url: str) -> bool:
@@ -207,10 +253,15 @@ def missing_provider_credentials() -> list[str]:
     set, the config copy skipped, and every role therefore still routed to
     OpenAI.
     """
+    _validated_anthropic_base_url()
     providers: set[str] = set()
     for name in model_config.list_phases():
         try:
-            providers.add(model_config.for_phase(name).provider.lower().strip())
+            providers.add(
+                model_config.canonical_provider_id(
+                    model_config.for_phase(name).provider,
+                ),
+            )
         except model_config.PhaseNotRegistered:
             continue
 
@@ -464,7 +515,18 @@ def call_openai_compatible(
     ignored for this provider.
     """
     if base_url is None:
-        base_url = os.environ.get("RW_LLM_BASE_URL", _DEFAULT_LOCAL_BASE_URL)
+        env_base_url = os.environ.get("RW_LLM_BASE_URL")
+        base_url = model_config.validate_env_base_url(
+            env_base_url or _DEFAULT_LOCAL_BASE_URL,
+            variable=(
+                "RW_LLM_BASE_URL" if env_base_url
+                else "OpenAI-compatible base_url"
+            ),
+        )
+    else:
+        base_url = model_config.validate_env_base_url(
+            base_url, variable="OpenAI-compatible base_url",
+        )
 
     messages: list[dict] = []
     if system is not None:
@@ -654,6 +716,7 @@ def call_anthropic(
     span (e.g. a neighbor page) across calls whose only difference is the
     trailing task/source content. Takes precedence over `cache_prompt`.
     """
+    _validated_anthropic_base_url()
     try:
         import anthropic
     except ImportError as e:
@@ -845,6 +908,27 @@ def call(
             system=system,
         )
 
+    p = model_config.canonical_provider_id(provider)
+    supported = {"anthropic", "chat-relay"} | _OPENAI_COMPAT_PROVIDERS
+    if p not in supported:
+        raise ValueError(
+            f"llm.call: unknown provider {provider!r}. Supported: "
+            "'anthropic', 'openai-compatible' / 'lmstudio' / 'openai', "
+            "'chat-relay'."
+        )
+    openai_endpoint = (
+        resolve_openai_endpoint() if p in _OPENAI_COMPAT_PROVIDERS else None
+    )
+    anthropic_endpoint = (
+        _validated_anthropic_base_url() if p == "anthropic" else None
+    )
+    effective_endpoint = (
+        openai_endpoint.url if openai_endpoint is not None else anthropic_endpoint
+    )
+    call_is_free = bool(
+        effective_endpoint and _is_local_endpoint(effective_endpoint)
+    )
+
     # Optional per-ingest budget. The reservation happens before throttling or
     # network I/O, and is shared by parallel author threads, so two drafts
     # cannot both observe the same remaining allowance and oversubscribe it.
@@ -858,14 +942,13 @@ def call(
             provider=provider,
             prompt_chars=prompt_chars,
             max_tokens=max_tokens,
+            free=call_is_free,
         )
 
-    # Client-side RPM cap (config-driven) — block before any real network
-    # call so free-tier models stay under their ceiling. Keyed by model.
-    _throttle(model, rpm)
-
     try:
-        p = provider.lower().strip()
+        # The reservation already exists, so even an exceptional throttle
+        # implementation must settle it through the same failure path.
+        _throttle(model, rpm)
         if p == "anthropic":
             response = call_anthropic(
                 model=model,
@@ -878,8 +961,14 @@ def call(
                 disable_thinking=disable_thinking,
             )
         elif p in _OPENAI_COMPAT_PROVIDERS:
-            # base_url precedence: environment → models config → localhost.
-            base_url = os.environ.get("RW_LLM_BASE_URL") or model_config.base_url()
+            if cache_prompt:
+                # OpenAI-compatible transports expose no Anthropic-style
+                # cache-control primitive; the caller accepts that no-op.
+                pass
+            # The same resolver drives preflight and status; no path may
+            # report one endpoint and then send the prompt to another.
+            assert openai_endpoint is not None
+            base_url = openai_endpoint.url
             response = call_openai_compatible(
                 model=model,
                 prompt=_np_prompt,

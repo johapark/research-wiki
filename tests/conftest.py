@@ -26,7 +26,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def _no_dotenv_leak(monkeypatch):
     from researchwiki import __main__ as cli
-    monkeypatch.setattr(cli, "_load_dotenv", lambda: None)
+    monkeypatch.setattr(cli, "_load_dotenv", lambda *_args, **_kwargs: None)
 
 
 @pytest.fixture(autouse=True)

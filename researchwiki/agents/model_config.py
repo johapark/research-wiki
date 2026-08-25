@@ -15,10 +15,14 @@ Public API:
   estimate_usd(model, in_tok, out_tok) -> float
   pricing_as_of() -> str
   list_phases()   -> list[str]
+  validate_config() -> None
+  clear_caches()  -> None
 
-If `config/models.yaml` is missing, malformed, or PyYAML isn't installed,
-the loader silently falls back to the hardcoded defaults below. That makes
-the framework usable on a fresh checkout without any new dependency.
+If the implicit `config/models.yaml` is missing, the loader falls back to the
+hardcoded defaults below. That makes the framework usable on a fresh checkout.
+Any selected file that *exists* fails closed when unreadable, malformed, or
+schema-invalid; only absence of the implicit file enables zero-config fallback.
+This prevents a damaged profile from silently changing both model and endpoint.
 
 `provider` is forward-compatible. Today only "anthropic" is implemented in
 researchwiki/agents/llm.py. When a second provider is added (OpenAI,
@@ -29,14 +33,19 @@ Ollama, etc.), this config schema doesn't change — just edit a role's
 from __future__ import annotations
 
 import datetime as _dt
+import ipaddress
+import math
 import os
+import stat
 import sys
+import unicodedata
+import urllib.parse
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 
+from ..errors import EnvironmentFailure
 from ..paths import wiki_root
-from ..log import log
 
 
 class PhaseNotRegistered(KeyError):
@@ -54,6 +63,34 @@ class PhaseNotRegistered(KeyError):
     """
 
 
+class ModelConfigUnavailable(EnvironmentFailure):
+    """The selected model-routing file cannot be used safely."""
+
+
+def _explicit_config_error(path: Path, detail: str) -> ModelConfigUnavailable:
+    override = os.environ.get("RW_MODELS_CONFIG")
+    return ModelConfigUnavailable(
+        f"RW_MODELS_CONFIG={override!r} resolves to {path}, {detail}; "
+        "fix the path/config or unset RW_MODELS_CONFIG to use the implicit "
+        "config/models.yaml (or built-in OpenAI defaults when that file is absent)"
+    )
+
+
+def _config_error(path: Path, detail: str) -> ModelConfigUnavailable:
+    """Describe a selected-file failure without mislabeling implicit config."""
+    if _has_explicit_config():
+        return _explicit_config_error(path, detail)
+    return ModelConfigUnavailable(
+        f"implicit model config {path} is present but {detail}; fix that file "
+        "or remove it to use the built-in OpenAI defaults"
+    )
+
+
+def _has_explicit_config() -> bool:
+    """Whether the override exists, including an unsafe empty value."""
+    return "RW_MODELS_CONFIG" in os.environ
+
+
 def config_path() -> Path:
     """Resolve which models-config file to load.
 
@@ -65,9 +102,14 @@ def config_path() -> Path:
     swaps — the selected file keeps its per-role provider mixing, whereas
     `RW_LLM_PROVIDER` forces one provider across every phase.
     """
-    override = os.environ.get("RW_MODELS_CONFIG")
-    if not override:
+    if not _has_explicit_config():
         return wiki_root() / "config" / "models.yaml"
+    override = os.environ["RW_MODELS_CONFIG"]
+    if not override.strip():
+        raise ModelConfigUnavailable(
+            f"RW_MODELS_CONFIG={override!r} is empty; set it to an existing "
+            "models YAML file or unset it to use the implicit config"
+        )
     p = Path(override).expanduser()
     sep_in = os.sep in override or bool(os.altsep and os.altsep in override)
     if p.is_absolute() or sep_in:
@@ -96,11 +138,12 @@ class ModelConfig:
     rpm: int | None = None
 
 
-# Hardcoded defaults — used if `config/models.yaml` is absent / malformed
-# or PyYAML isn't installed. Mirrors `config/models.chatgpt.yaml` (the
-# recommended default) so a fresh checkout with OPENAI_API_KEY set works with
-# no copy. The paired endpoint is _FALLBACK_BASE_URL below; keep the two in
-# sync, and update both whenever the default config's roles change.
+# Hardcoded zero-config defaults — used only when the implicit
+# `config/models.yaml` is absent. Every role is Luna so a fresh checkout with
+# OPENAI_API_KEY works with no copy. A present file always validates strictly,
+# including when PyYAML is unavailable. This deliberately does
+# *not* mirror opt-in `models.chatgpt.yaml`, which upgrades three roles to
+# Terra. The paired endpoint is _FALLBACK_BASE_URL below; keep the two in sync.
 _FALLBACK_ROLES: dict[str, ModelConfig] = {
     "author":     ModelConfig("openai-compatible", "gpt-5.6-luna", 0.5, 6000),
     "critic":     ModelConfig("openai-compatible", "gpt-5.6-luna", 0.3, 2500),
@@ -147,92 +190,333 @@ _FALLBACK_PHASES: dict[str, dict] = {
 }
 
 
-def _load_yaml() -> tuple[dict[str, ModelConfig], dict[str, dict]] | None:
-    """Read config/models.yaml. Returns (roles, phase-overrides) on success.
-    None if file missing, PyYAML absent, or schema malformed — caller falls
-    back to hardcoded defaults."""
-    path = config_path()
-    if not path.exists():
-        # Silent fallback is fine for the default path (fresh clone), but an
-        # explicit RW_MODELS_CONFIG that points nowhere is a misconfig worth
-        # surfacing rather than silently routing to the hardcoded defaults.
-        if os.environ.get("RW_MODELS_CONFIG"):
-            log(f"RW_MODELS_CONFIG={os.environ['RW_MODELS_CONFIG']!r} resolves to "
-                f"{path}, which does not exist — using hardcoded defaults", tag="model-config")
-        return None
+_MODEL_TOP_LEVEL_KEYS = frozenset({"base_url", "roles", "phases", "ingest"})
+_ROLE_FIELDS = frozenset({
+    "provider", "model", "temperature", "max_tokens", "reasoning_effort", "rpm",
+})
+_PHASE_FIELDS = _ROLE_FIELDS | {"role"}
+_INGEST_FIELDS = frozenset({"n_drafts", "target_claims_max_chars"})
+
+
+def _schema_error(path: Path, detail: str) -> ModelConfigUnavailable:
+    return _config_error(path, f"its schema is invalid ({detail})")
+
+
+def _loopback_host(hostname: str) -> bool:
+    """Match the setup wizard's safe exception for plaintext local endpoints."""
+    host = hostname.rstrip(".").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _valid_base_url(value: str) -> bool:
+    """Allow HTTPS remotely and HTTP only for a loopback model server."""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return False
+    is_loopback = _loopback_host(parsed.hostname or "")
+    return (
+        value == value.strip()
+        and not any(
+            char.isspace() or unicodedata.category(char).startswith("C")
+            for char in value
+        )
+        and parsed.scheme in {"http", "https"}
+        and bool(parsed.hostname)
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.netloc.endswith(":")
+        and (port is None or port > 0)
+        and not parsed.query
+        and not parsed.fragment
+        and (parsed.scheme == "https" or is_loopback)
+    )
+
+
+def validate_env_base_url(
+    value: str, *, variable: str = "RW_LLM_BASE_URL",
+) -> str:
+    """Validate an env endpoint without reflecting possible secrets in errors."""
+    if not _valid_base_url(value):
+        raise ModelConfigUnavailable(
+            f"{variable} is not a safe absolute endpoint; use HTTPS remotely "
+            "or HTTP on loopback, without credentials, whitespace, query, or fragment"
+        )
+    return value
+
+
+def canonical_provider_id(value: str) -> str:
+    """Canonical identifier used by routing analysis and provider dispatch."""
+    return value.strip().lower()
+
+
+def _env_provider_override() -> str:
+    """One normalized value for endpoint analysis, warnings, and application."""
+    return canonical_provider_id(os.environ.get("RW_LLM_PROVIDER") or "")
+
+
+def _validate_positive_int(path: Path, label: str, value) -> None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as e:
+        raise _schema_error(path, f"{label} must be a positive integer") from e
+    if isinstance(value, bool) or parsed < 1 or (
+        isinstance(value, float) and not value.is_integer()
+    ):
+        raise _schema_error(path, f"{label} must be a positive integer")
+
+
+def _validate_routing_fields(
+    path: Path, label: str, fields: dict, *, require_model: bool,
+) -> None:
+    allowed = _ROLE_FIELDS if require_model else _PHASE_FIELDS
+    unknown = sorted(str(k) for k in set(fields) - allowed)
+    if unknown:
+        raise _schema_error(path, f"{label} has unknown field(s): {', '.join(unknown)}")
+    if require_model and "model" not in fields:
+        raise _schema_error(path, f"{label} is missing required field 'model'")
+    for name in ("provider", "model"):
+        if name in fields and (
+            not isinstance(fields[name], str) or not fields[name].strip()
+        ):
+            raise _schema_error(path, f"{label}.{name} must be a non-empty string")
+    if "temperature" in fields:
+        try:
+            temperature = float(fields["temperature"])
+        except (TypeError, ValueError) as e:
+            raise _schema_error(path, f"{label}.temperature must be a finite number") from e
+        if isinstance(fields["temperature"], bool) or not math.isfinite(temperature):
+            raise _schema_error(path, f"{label}.temperature must be a finite number")
+    if "max_tokens" in fields:
+        _validate_positive_int(path, f"{label}.max_tokens", fields["max_tokens"])
+    if fields.get("rpm") is not None:
+        _validate_positive_int(path, f"{label}.rpm", fields["rpm"])
+    effort = fields.get("reasoning_effort")
+    if effort is not None and not isinstance(effort, str):
+        raise _schema_error(path, f"{label}.reasoning_effort must be a string or null")
+
+
+def _validate_document(path: Path, data: dict) -> None:
+    """Reject any present file that cannot safely drive provider routing."""
+    keys = set(data)
+    unknown = sorted(str(k) for k in keys - _MODEL_TOP_LEVEL_KEYS)
+    if unknown:
+        raise _schema_error(path, f"unknown top-level key(s): {', '.join(unknown)}")
+    if not keys:
+        raise _schema_error(path, "the document is empty")
+
+    if "base_url" in data:
+        value = data["base_url"]
+        if not isinstance(value, str) or not _valid_base_url(value):
+            raise _schema_error(
+                path,
+                "base_url must be a safe absolute endpoint (HTTPS remotely; "
+                "HTTP only on loopback; no credentials, query, or fragment)",
+            )
+
+    roles = data.get("roles", {})
+    if not isinstance(roles, dict):
+        raise _schema_error(path, "roles must be a mapping")
+    for name, fields in roles.items():
+        if not isinstance(name, str) or not name.strip():
+            raise _schema_error(path, "every role name must be a non-empty string")
+        if not isinstance(fields, dict):
+            raise _schema_error(path, f"role {name!r} must be a mapping")
+        _validate_routing_fields(path, f"role {name!r}", fields, require_model=True)
+
+    phases = data.get("phases", {})
+    if not isinstance(phases, dict):
+        raise _schema_error(path, "phases must be a mapping")
+    known_roles = set(_FALLBACK_ROLES) | set(roles)
+    for name, spec in phases.items():
+        if not isinstance(name, str) or not name.strip():
+            raise _schema_error(path, "every phase name must be a non-empty string")
+        if isinstance(spec, str):
+            role = spec
+        elif isinstance(spec, dict):
+            _validate_routing_fields(path, f"phase {name!r}", spec, require_model=False)
+            role = spec.get("role")
+        else:
+            raise _schema_error(path, f"phase {name!r} must be a role string or mapping")
+        if not isinstance(role, str) or not role.strip():
+            raise _schema_error(path, f"phase {name!r} needs a non-empty role")
+        if role not in known_roles:
+            raise _schema_error(path, f"phase {name!r} references unknown role {role!r}")
+
+    ingest = data.get("ingest", {})
+    if not isinstance(ingest, dict):
+        raise _schema_error(path, "ingest must be a mapping")
+    unknown_ingest = sorted(str(k) for k in set(ingest) - _INGEST_FIELDS)
+    if unknown_ingest:
+        raise _schema_error(
+            path, f"ingest has unknown field(s): {', '.join(unknown_ingest)}",
+        )
+    for name in _INGEST_FIELDS & set(ingest):
+        _validate_positive_int(path, f"ingest.{name}", ingest[name])
+
+
+@dataclass(frozen=True)
+class _RoutingSnapshot:
+    """One coherent view of every field read from the selected YAML file."""
+
+    file_present: bool
+    roles: dict[str, ModelConfig]
+    phases: dict[str, dict]
+    ingest: dict
+    base_url: str | None
+
+
+@lru_cache(maxsize=8)
+def _load_routing_snapshot(
+    path: Path,
+    explicit_override: str | None,
+    env_base_url: str,
+    env_provider: str,
+) -> _RoutingSnapshot:
+    """Parse, validate, and resolve one selected config atomically.
+
+    ``path`` and the routing-relevant environment are cache keys so all three
+    consumers (models, ingest defaults, endpoint) observe the same document.
+    Public :func:`clear_caches` is still required when a file is edited in
+    place, as it is for the benchmark profile switch.
+    """
+    try:
+        mode = path.stat().st_mode
+    except FileNotFoundError as e:
+        # ``Path.exists()`` treats a broken symlink as absent. It is instead a
+        # deliberately present but unusable selection and must not enable the
+        # implicit zero-config fallback.
+        if path.is_symlink():
+            raise _config_error(path, "cannot be read (broken symbolic link)") from e
+        if explicit_override is not None:
+            raise _config_error(path, "does not exist")
+        return _RoutingSnapshot(
+            file_present=False,
+            roles=dict(_FALLBACK_ROLES),
+            phases=dict(_FALLBACK_PHASES),
+            ingest={},
+            base_url=_FALLBACK_BASE_URL,
+        )
+    except OSError as e:
+        raise _config_error(path, f"cannot be inspected ({e})") from e
+    if not stat.S_ISREG(mode):
+        raise _config_error(path, "is not a regular file")
+
     try:
         import yaml
-    except ImportError:
-        return None
+    except ImportError as e:
+        raise _config_error(path, "cannot be read because PyYAML is not installed") from e
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as e:
+        raise _config_error(path, f"cannot be read ({e})") from e
+    try:
+        data = yaml.safe_load(source)
     except Exception as e:
-        log(f"could not parse {path}: {e}", tag="model-config")
-        return None
+        raise _config_error(path, f"cannot be parsed ({e})") from e
     if not isinstance(data, dict):
-        return None
+        raise _config_error(path, "must contain a YAML mapping")
+    _validate_document(path, data)
 
-    roles: dict[str, ModelConfig] = {}
-    for name, fields in (data.get("roles") or {}).items():
-        if not isinstance(fields, dict) or "model" not in fields:
-            continue
-        try:
-            re_raw = fields.get("reasoning_effort")
-            rpm_raw = fields.get("rpm")
-            roles[name] = ModelConfig(
-                provider=str(fields.get("provider", "anthropic")),
-                model=str(fields["model"]),
-                temperature=float(fields.get("temperature", 0.5)),
-                max_tokens=int(fields.get("max_tokens", 2000)),
-                reasoning_effort=str(re_raw) if re_raw is not None else None,
-                rpm=int(rpm_raw) if rpm_raw is not None else None,
-            )
-        except (ValueError, TypeError) as e:
-            log(f"bad role {name!r}: {e}", tag="model-config")
-            continue
+    yaml_roles: dict[str, ModelConfig] = {}
+    for name, fields in data.get("roles", {}).items():
+        re_raw = fields.get("reasoning_effort")
+        rpm_raw = fields.get("rpm")
+        yaml_roles[name] = ModelConfig(
+            provider=canonical_provider_id(
+                str(fields.get("provider", "anthropic")),
+            ),
+            model=str(fields["model"]),
+            temperature=float(fields.get("temperature", 0.5)),
+            max_tokens=int(fields.get("max_tokens", 2000)),
+            reasoning_effort=str(re_raw) if re_raw is not None else None,
+            rpm=int(rpm_raw) if rpm_raw is not None else None,
+        )
 
-    phases: dict[str, dict] = {}
-    for phase, spec in (data.get("phases") or {}).items():
-        if not isinstance(phase, str):
-            continue
+    yaml_phases: dict[str, dict] = {}
+    for phase, spec in data.get("phases", {}).items():
         if isinstance(spec, str):
-            phases[phase] = {"role": spec}
-        elif isinstance(spec, dict) and "role" in spec:
-            phases[phase] = {k: v for k, v in spec.items()
-                             if k in ("role", "model", "provider",
-                                      "temperature", "max_tokens",
-                                      "reasoning_effort", "rpm")}
-    return roles, phases
+            yaml_phases[phase] = {"role": spec}
+        else:
+            yaml_phases[phase] = dict(spec)
+
+    roles = {**_FALLBACK_ROLES, **yaml_roles}
+    phases = {**_FALLBACK_PHASES, **yaml_phases}
+    configured_base_url = data.get("base_url")
+
+    # Provider env override is applied last by for_phase(), so include it when
+    # deciding whether any *effective* role needs an OpenAI-compatible endpoint.
+    from .llm import _OPENAI_COMPAT_PROVIDERS
+    forced_provider = canonical_provider_id(env_provider)
+    if forced_provider:
+        compat = (
+            [f"role {name!r}" for name in sorted(roles)]
+            if forced_provider in _OPENAI_COMPAT_PROVIDERS else []
+        )
+    else:
+        compat_targets = {
+            f"role {name!r}" for name, cfg in roles.items()
+            if canonical_provider_id(cfg.provider) in _OPENAI_COMPAT_PROVIDERS
+        }
+        for phase, spec in phases.items():
+            role = roles[spec["role"]]
+            provider = canonical_provider_id(
+                str(spec.get("provider", role.provider)),
+            )
+            if provider in _OPENAI_COMPAT_PROVIDERS:
+                compat_targets.add(f"phase {phase!r}")
+        compat = sorted(compat_targets)
+    if compat and configured_base_url is None and not env_base_url:
+        shown = ", ".join(compat[:4]) + (", …" if len(compat) > 4 else "")
+        raise _config_error(
+            path,
+            "does not declare a top-level base_url and RW_LLM_BASE_URL is unset, "
+            f"although effective OpenAI-compatible role(s) are {shown}; add an "
+            "endpoint to the config or environment",
+        )
+
+    return _RoutingSnapshot(
+        file_present=True,
+        roles=roles,
+        phases=phases,
+        ingest=dict(data.get("ingest", {})),
+        base_url=str(configured_base_url) if configured_base_url is not None else None,
+    )
 
 
-@lru_cache(maxsize=1)
+def _routing_snapshot() -> _RoutingSnapshot:
+    override = os.environ.get("RW_MODELS_CONFIG") if _has_explicit_config() else None
+    env_base_url = os.environ.get("RW_LLM_BASE_URL") or ""
+    if env_base_url:
+        validate_env_base_url(env_base_url)
+    env_provider = _env_provider_override()
+    return _load_routing_snapshot(
+        config_path(), override, env_base_url, env_provider,
+    )
+
+
 def _ingest_settings() -> dict:
     """Top-level `ingest:` block from the models config — pipeline defaults
     that aren't per-role (as opposed to `roles:` / `phases:`). Optional; an
-    empty dict when the file is absent, unparsable, or has no `ingest:` key.
+    empty dict when the implicit file is absent or has no `ingest:` key.
 
     Currently recognizes `n_drafts` (default author-draft count when the CLI
-    `-n` flag is omitted). Cached like `_config`; test resets clear both.
+    `-n` flag is omitted). The shared routing snapshot supplies the caching.
     """
-    path = config_path()
-    if not path.exists():
-        return {}
-    try:
-        import yaml
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    ing = data.get("ingest")
-    return dict(ing) if isinstance(ing, dict) else {}
+    return dict(_routing_snapshot().ingest)
 
 
 def default_n_drafts() -> int | None:
-    """Config default for author drafts (`ingest.n_drafts`), or None when
-    unset/invalid so the caller falls back to its hardcoded default. A value
-    < 1 is treated as unset (a tournament needs >= 1 draft). The CLI `-n`
-    flag, when passed, overrides this.
+    """Config default for author drafts (`ingest.n_drafts`), or None if unset.
+
+    Invalid values are rejected while loading a present config. The CLI `-n`
+    flag, when passed, overrides this setting.
     """
     val = _ingest_settings().get("n_drafts")
     if val is None:
@@ -265,7 +549,6 @@ def target_claims_max_chars() -> int:
     return n if n > 0 else _DEFAULT_TARGET_CLAIMS_MAX_CHARS
 
 
-@lru_cache(maxsize=1)
 def base_url() -> str | None:
     """Top-level `base_url:` from the models config — the OpenAI-compatible
     endpoint for this config's `openai-compatible`/`lmstudio`/`openai` roles.
@@ -274,41 +557,28 @@ def base_url() -> str | None:
     only `RW_MODELS_CONFIG` to change, not a paired `RW_LLM_BASE_URL` edit.
     Precedence at the call site (see llm.call): the `RW_LLM_BASE_URL` env var,
     when set, still wins as an ad-hoc override; then this; then the built-in
-    LM Studio localhost default. Returns None when the file is present but
-    declares no `base_url:`. On the no-config-file path returns
+    LM Studio localhost default. Returns None only when a present file has no
+    `base_url:` and no effective role needs one. On the no-config-file path returns
     `_FALLBACK_BASE_URL` — the OpenAI endpoint paired with the openai-compatible
     fallback roles — so a fresh checkout reaches OpenAI, not localhost.
     `anthropic` roles ignore it (they use `ANTHROPIC_BASE_URL`).
     """
-    path = config_path()
-    if not path.exists():
-        return _FALLBACK_BASE_URL
-    try:
-        import yaml
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    if not isinstance(data, dict):
-        return None
-    url = data.get("base_url")
-    return str(url) if url else None
+    return _routing_snapshot().base_url
 
 
-@lru_cache(maxsize=1)
+def config_file_present() -> bool:
+    """Whether the cached routing snapshot came from a selected YAML file."""
+    return _routing_snapshot().file_present
+
+
 def _config() -> tuple[dict[str, ModelConfig], dict[str, dict]]:
     """Resolve the merged config — YAML overrides, then fallback fills gaps.
 
-    Cached so the YAML is read once per process. Tests that need to
-    reset can clear with `_config.cache_clear()`.
+    The shared routing snapshot caches the YAML once per selected path and
+    routing environment. Use :func:`clear_caches` after editing a file in place.
     """
-    loaded = _load_yaml()
-    if loaded is None:
-        return dict(_FALLBACK_ROLES), dict(_FALLBACK_PHASES)
-    yaml_roles, yaml_phases = loaded
-    # Merge: YAML wins, fallback fills gaps so missing roles still resolve.
-    roles = {**_FALLBACK_ROLES, **yaml_roles}
-    phases = {**_FALLBACK_PHASES, **yaml_phases}
-    return roles, phases
+    snapshot = _routing_snapshot()
+    return snapshot.roles, snapshot.phases
 
 
 _env_override_warned = False
@@ -331,7 +601,7 @@ def _maybe_warn_env_override_defeats_mixing() -> None:
     global _env_override_warned
     if _env_override_warned:
         return
-    env_provider = os.environ.get("RW_LLM_PROVIDER")
+    env_provider = _env_provider_override()
     if not env_provider:
         return
     roles, _ = _config()
@@ -372,12 +642,12 @@ def _maybe_warn_env_override_model_mismatch() -> None:
     global _env_model_mismatch_warned
     if _env_model_mismatch_warned:
         return
-    env_provider = (os.environ.get("RW_LLM_PROVIDER") or "").strip()
+    env_provider = _env_provider_override()
     if not env_provider or env_provider.lower() == "chat-relay":
         return
     roles, _ = _config()
     clashing = {n: c for n, c in roles.items()
-                if c.provider.lower() != env_provider.lower()}
+                if canonical_provider_id(c.provider) != env_provider}
     if not clashing:
         return
     role_name, cfg = sorted(clashing.items())[0]
@@ -397,50 +667,41 @@ def _maybe_warn_env_override_model_mismatch() -> None:
 _missing_base_url_warned = False
 
 
-def _maybe_warn_missing_base_url() -> None:
-    """Fire once per process when a config declares OpenAI-compatible roles but
-    no top-level `base_url:`.
+def clear_caches() -> None:
+    """Forget every process-scoped model-routing decision and warning.
 
-    `base_url()` returns None there and `call_openai_compatible` reads None as
-    "use the LM Studio default", so a cloud config missing one key silently
-    becomes a localhost one. The asymmetry is what makes it hard to spot: a
-    *missing* config file falls back to OpenAI (`_FALLBACK_BASE_URL`), while a
-    *present* file with no `base_url:` falls back to http://localhost:1234/v1.
-    Same "unspecified endpoint", two different answers.
-
-    No shipped template trips this — the two without `base_url:`
-    (models.anthropic.yaml, models.glm.yaml) both route to the `anthropic`
-    provider, which ignores it — so this is aimed at hand-edited configs.
-    Silent when RW_LLM_BASE_URL is set, since that supplies the endpoint.
+    ``RW_MODELS_CONFIG`` is normally fixed for one CLI process, but the benchmark
+    A/B harness deliberately switches it between arms. Keeping cache invalidation
+    in one public helper prevents the model, endpoint, and ingest settings from
+    coming from different profiles.
     """
-    global _missing_base_url_warned
-    if _missing_base_url_warned:
-        return
-    if os.environ.get("RW_LLM_BASE_URL"):
-        return
-    path = config_path()
-    if not path.exists() or base_url() is not None:
-        return
-    # Lazy import: llm imports this module at module scope, so the reverse
-    # edge has to be deferred to call time.
-    from .llm import _DEFAULT_LOCAL_BASE_URL, _OPENAI_COMPAT_PROVIDERS
-    roles, _ = _config()
-    compat = sorted(n for n, c in roles.items()
-                    if c.provider.lower() in _OPENAI_COMPAT_PROVIDERS)
-    if not compat:
-        return
-    # "resolve to", not "declares": the fallback fills roles the file omits, so
-    # some of these are inherited rather than written down in it.
-    shown = ", ".join(compat[:4]) + (", …" if len(compat) > 4 else "")
-    print(
-        f"⚠  With {path.name} in force, role(s) {shown} resolve to an "
-        f"OpenAI-compatible provider, but no top-level `base_url:` is set.\n"
-        f"    Those calls will go to {_DEFAULT_LOCAL_BASE_URL} (the LM Studio "
-        f"default), not to a cloud endpoint.\n"
-        f"    Add `base_url:` to the config, or set RW_LLM_BASE_URL.",
-        file=sys.stderr,
-    )
-    _missing_base_url_warned = True
+    global _env_override_warned, _env_model_mismatch_warned, _missing_base_url_warned
+    _load_routing_snapshot.cache_clear()
+    _env_override_warned = False
+    _env_model_mismatch_warned = False
+    _missing_base_url_warned = False
+
+
+def validate_config() -> None:
+    """Load every routing section, raising on any unusable selected config."""
+    _config()
+    _ingest_settings()
+    base_url()
+    anthropic_base_url = os.environ.get("ANTHROPIC_BASE_URL")
+    if anthropic_base_url:
+        validate_env_base_url(
+            anthropic_base_url, variable="ANTHROPIC_BASE_URL",
+        )
+
+
+def _maybe_warn_missing_base_url() -> None:
+    """Compatibility no-op for the former warning-only endpoint check.
+
+    The shared snapshot now rejects this state before returning any routing
+    data, so warning and continuing would reintroduce the unsafe localhost
+    fallback. The helper remains temporarily to avoid a needless call-path
+    change while downstream code migrates.
+    """
 
 
 def for_phase(name: str) -> ModelConfig:
@@ -479,7 +740,9 @@ def for_phase(name: str) -> ModelConfig:
         re_val = base.reasoning_effort
     rpm_val = int(spec["rpm"]) if spec.get("rpm") is not None else base.rpm
     cfg = ModelConfig(
-        provider=str(spec.get("provider", base.provider)),
+        provider=canonical_provider_id(
+            str(spec.get("provider", base.provider)),
+        ),
         model=str(spec.get("model", base.model)),
         temperature=float(spec.get("temperature", base.temperature)),
         max_tokens=int(spec.get("max_tokens", base.max_tokens)),
@@ -490,7 +753,7 @@ def for_phase(name: str) -> ModelConfig:
     # subscription users to flip every phase to chat-relay without editing
     # the YAML.
     _maybe_warn_missing_base_url()
-    env_provider = os.environ.get("RW_LLM_PROVIDER")
+    env_provider = _env_provider_override()
     if env_provider:
         _maybe_warn_env_override_defeats_mixing()
         _maybe_warn_env_override_model_mismatch()
@@ -504,6 +767,9 @@ def for_role(name: str) -> ModelConfig:
     cfg = roles.get(name)
     if cfg is None:
         raise PhaseNotRegistered(f"role {name!r} not in model config")
+    env_provider = _env_provider_override()
+    if env_provider:
+        cfg = replace(cfg, provider=env_provider)
     return cfg
 
 
@@ -519,7 +785,11 @@ def uses_chat_relay() -> bool:
     Used to warn before a batch run, where chat-relay's handoff notice would be
     redirected into a per-worker log file nobody is watching.
     """
-    if (os.environ.get("RW_LLM_PROVIDER") or "").strip().lower() == "chat-relay":
+    # Always materialize the strict snapshot first. The env fast path used to
+    # return before a malformed selected file was read, letting batch workers
+    # start only to fail after spawning.
+    _routing_snapshot()
+    if _env_provider_override() == "chat-relay":
         return True
     for name in list_phases():
         try:

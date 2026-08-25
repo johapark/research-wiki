@@ -8,7 +8,7 @@ Fast (no network calls) — reads only local YAML frontmatter, wiki page text,
 and `inbox/` / `.ingest/` filesystem state. For a full citation-graph audit
 (which does make Semantic Scholar calls) run `researchwiki audit`.
 
-Exit code: 0 always (reports state, never fails on content).
+Exit code: 0 for a report; 2 when an explicitly selected environment/config is unusable.
 """
 
 from __future__ import annotations
@@ -301,6 +301,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     root = wiki_root()
+    _mc.validate_config()  # fail before printing a report under an unsafe explicit profile
     wdir = wiki_dir()
     # Scan pages directly rather than `read_wiki_papers()`, which silently
     # drops any page missing a `doi:` field from its result — that erased
@@ -570,18 +571,34 @@ def main(argv: list[str]) -> int:
         print(f"  {key:<65} {rel}")
     print()
 
-    # --- active model config (which file drives ingest LLM routing)
-    try:
-        import os as _os
-        from ..agents.model_config import config_path
-        cfg = config_path()
-        rel = cfg.name if cfg.parent == (root / "config") else str(cfg)
-        marker = "" if cfg.exists() else "  (missing — using hardcoded defaults)"
-        origin = " [RW_MODELS_CONFIG]" if _os.environ.get("RW_MODELS_CONFIG") else ""
-        print(f"Model config:          {rel}{origin}{marker}")
-        print()
-    except Exception:
-        pass
+    # --- active model routing (validate the selected YAML, then show where an
+    # OpenAI-compatible request would really go without ever printing its key)
+    import os as _os
+    from ..agents import llm as _llm
+    cfg = _mc.config_path()
+    rel = cfg.name if cfg.parent == (root / "config") else str(cfg)
+    explicit = "RW_MODELS_CONFIG" in _os.environ
+    marker = "" if cfg.exists() else "  (missing — using hardcoded defaults)"
+    origin = " [RW_MODELS_CONFIG]" if explicit else ""
+    providers: set[str] = set()
+    for phase in _mc.list_phases():
+        try:
+            providers.add(_mc.for_phase(phase).provider.lower().strip())
+        except _mc.PhaseNotRegistered:
+            continue
+    print(f"Model config:          {rel}{origin}{marker}")
+    print(f"Model provider(s):     {', '.join(sorted(providers))}")
+    if providers & _llm._OPENAI_COMPAT_PROVIDERS:
+        endpoint = _llm.resolve_openai_endpoint()
+        print(f"Model endpoint:        {endpoint.display_url} [source={endpoint.source}]")
+    elif "anthropic" in providers:
+        endpoint = _os.environ.get("ANTHROPIC_BASE_URL")
+        shown = (_llm.EndpointResolution(endpoint, "env").display_url
+                 if endpoint else "(Anthropic SDK default)")
+        print(f"Model endpoint:        {shown} [source={'env' if endpoint else 'fallback'}]")
+    else:
+        print("Model endpoint:        (no HTTP endpoint for the active provider)")
+    print()
 
     # --- index health
     tantivy, semantic = _index_status()

@@ -52,6 +52,7 @@ class BudgetExhausted(BaseException):
 class _Reservation:
     tokens: int
     cost_usd: float
+    free: bool
 
 
 class BudgetTracker:
@@ -97,28 +98,22 @@ class BudgetTracker:
 
     def reserve_call(
         self, *, model: str, provider: str, prompt_chars: int, max_tokens: int,
-        free: bool = False,
+        free: bool | None = None,
     ) -> _Reservation:
         estimated_input = max(1, prompt_chars // 4)
         reserved_tokens = estimated_input + max(0, max_tokens)
-        provider_key = provider.lower().strip()
-        configured_url = model_config.base_url() or ""
-        local_provider = (
-            provider_key == "lmstudio"
-            or (provider_key == "openai-compatible" and (
-                not configured_url
-                or "localhost" in configured_url
-                or "127.0.0.1" in configured_url
-            ))
-        )
+        # The dispatch layer passes whether its *resolved* endpoint is
+        # unmetered. Direct tracker callers retain the historical LM Studio
+        # default without consulting a potentially different config endpoint.
+        if free is None:
+            free = model_config.canonical_provider_id(provider) == "lmstudio"
         priced = model_config.rate_for(model) is not None
-        if (self.budget.max_cost_usd is not None and not free
-                and not local_provider and not priced):
+        if self.budget.max_cost_usd is not None and not free and not priced:
             raise BudgetExhausted(
                 "cost_pricing_missing", self.budget.max_cost_usd, 0,
                 self.snapshot(),
             )
-        reserved_cost = 0.0 if free or local_provider else model_config.estimate_usd(
+        reserved_cost = 0.0 if free else model_config.estimate_usd(
             model, estimated_input, max(0, max_tokens)
         )
         with self._lock:
@@ -153,12 +148,20 @@ class BudgetTracker:
             self.calls = next_calls
             self.reserved_tokens += reserved_tokens
             self.reserved_cost_usd += reserved_cost
-        return _Reservation(reserved_tokens, reserved_cost)
+        return _Reservation(reserved_tokens, reserved_cost, free)
 
-    def finish(self, reservation: _Reservation, *, model: str,
-               input_tokens: int, output_tokens: int, free: bool = False) -> None:
+    def finish(
+        self,
+        reservation: _Reservation,
+        *,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        free: bool | None = None,
+    ) -> None:
         actual_tokens = max(0, input_tokens) + max(0, output_tokens)
-        actual_cost = 0.0 if free else model_config.estimate_usd(
+        unmetered = reservation.free if free is None else free
+        actual_cost = 0.0 if unmetered else model_config.estimate_usd(
             model, max(0, input_tokens), max(0, output_tokens)
         )
         with self._lock:

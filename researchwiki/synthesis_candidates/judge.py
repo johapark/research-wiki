@@ -9,9 +9,9 @@ Per-member calls would lose that comparative context.
 
 The public entry point is `judge_candidate` — it mutates the passed-in
 `Candidate` in place (member_verdicts, judge_topic, token counts, judged
-flag). Called from `detect.find_candidates` when `judge=True`. Silently
-no-ops if the LLM module can't be imported (stub test harnesses) or the
-call fails.
+flag). Called from `detect.find_candidates` when `judge=True`. Silently no-ops
+if the LLM module can't be imported (stub test harnesses) or an untyped runtime
+call fails. Typed environment/configuration failures propagate to the CLI.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import re
 
+from ..errors import EnvironmentFailure
 from ..log import log
 from ..wiki import Page, extract_section
 from .detect import Candidate, MemberVerdict
@@ -310,6 +311,8 @@ def judge_candidate(
                 system=_TOPIC_SYSTEM,
                 schema=_TOPIC_SCHEMA,
             )
+        except EnvironmentFailure:
+            raise
         except Exception as e:
             log(f"LLM topic call failed for {c.slug}: {e}", tag="judge")
             return
@@ -345,6 +348,8 @@ def judge_candidate(
                 system=system,
                 schema=_JUDGMENT_SCHEMA,
             )
+        except EnvironmentFailure:
+            raise
         except Exception as e:
             log(f"LLM call failed for {c.slug} batch {batch_no}/{len(batches)}: {e}",
                 tag="judge")

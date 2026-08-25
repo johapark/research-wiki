@@ -1,0 +1,78 @@
+# Google Gemini 3.1 Flash-Lite via its OpenAI-compatible endpoint.
+#
+# Uses the `openai-compatible` provider — same endpoint/key as
+# models.gemini.yaml. Endpoint folded into `base_url:` below; .env needs only:
+#   OPENAI_API_KEY=AIza...        # Gemini API key, forwarded as Bearer
+#
+# One model for every role: gemini-3.1-flash-lite. It carries the most
+# generous free-tier budget of any real Gemini text model — 15 RPM / 250K
+# TPM / 500 RPD — versus gemini-3.5-flash's 5 RPM / 20 RPD, which is what
+# rate-limited the benchmark judge into 429s. This config trades Flash's
+# prose quality for a daily budget ~25x larger, so single-key free-tier
+# ingest runs (and the LLM benchmark scorer) actually complete.
+#
+# reasoning_effort: low on the drafting roles to bound thinking-token spend;
+# the short roles (classifier/proposer/extractor) barely think on Flash-Lite
+# (models.gemini.yaml runs them uncapped at max_tokens=200) but we set it
+# anyway for consistency and give them a little more headroom.
+#
+# rpm: 15 on every role — gemini-3.1-flash-lite's free-tier RPM ceiling (see
+# llm._throttle). Keyed by model, so all six roles share one 15 RPM budget and
+# calls pace evenly instead of bursting into 429s. Raise/remove on a paid tier.
+#
+# Phases fall back to _FALLBACK_PHASES via the config merge, so only roles
+# need defining here.
+#
+# ingest.n_drafts: default author-draft count when `-n` is omitted. 1 keeps
+# author calls low on the free tier; CLI `-n` still overrides.
+
+base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+
+ingest:
+  n_drafts: 1
+
+roles:
+  author:
+    provider: openai-compatible
+    model: gemini-3.1-flash-lite
+    temperature: 0.5
+    max_tokens: 6000
+    reasoning_effort: low
+    rpm: 15
+
+  critic:
+    provider: openai-compatible
+    model: gemini-3.1-flash-lite
+    temperature: 0.3
+    max_tokens: 2500
+    reasoning_effort: low
+    rpm: 15
+
+  judge:
+    provider: openai-compatible
+    model: gemini-3.1-flash-lite
+    temperature: 0.2
+    max_tokens: 1500
+    reasoning_effort: low
+    rpm: 15
+
+  classifier:
+    provider: openai-compatible
+    model: gemini-3.1-flash-lite
+    temperature: 0.1
+    max_tokens: 500
+    rpm: 15
+
+  proposer:
+    provider: openai-compatible
+    model: gemini-3.1-flash-lite
+    temperature: 0.3
+    max_tokens: 500
+    rpm: 15
+
+  extractor:
+    provider: openai-compatible
+    model: gemini-3.1-flash-lite
+    temperature: 0.0
+    max_tokens: 1200
+    rpm: 15

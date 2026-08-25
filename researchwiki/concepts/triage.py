@@ -15,8 +15,9 @@ and auto-writes the noise verdicts to the decline list (tagged
 Design mirrors `tasks/suggest_splits.py` (LLM judgment as an explicit,
 reviewable command) but lives in `concepts/` and never imports from
 `tasks/` — the ~8-line JSON parse recipe is duplicated on purpose to keep
-that package boundary clean. Every LLM path degrades to a no-op (verdict
-`uncertain` = keep) and never raises.
+that package boundary clean. Untyped LLM failures degrade to a no-op (verdict
+`uncertain` = keep); typed environment/configuration failures propagate so the
+CLI preserves its exit-2 contract.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ import json
 import re
 import sys
 
+from ..errors import EnvironmentFailure
 from .candidates import _term_slug, collect_candidates
 from .declines import add_declines
 
@@ -106,8 +108,12 @@ def _parse_verdicts(text: str) -> list[dict] | None:
 
 
 def _judge_chunk(chunk: list[dict], *, use_stub: bool) -> list[dict] | None:
-    """One LLM call over a chunk. Returns parsed verdicts or None on any
-    failure (provider error, missing prompt, unparsable output)."""
+    """One LLM call over a chunk.
+
+    Returns parsed verdicts or None on an untyped call failure, a missing prompt,
+    or unparsable output. Typed environment/configuration failures propagate to
+    the CLI funnel.
+    """
     from ..agents import llm
     from ..paths import wiki_root
 
@@ -126,6 +132,8 @@ def _judge_chunk(chunk: list[dict], *, use_stub: bool) -> list[dict] | None:
             schema=_TRIAGE_SCHEMA,
             use_stub=use_stub,
         )
+    except EnvironmentFailure:
+        raise
     except Exception as e:
         print(f"  concept-triage: LLM call failed ({e}) — keeping chunk",
               file=sys.stderr)
@@ -167,7 +175,9 @@ def triage_candidates(
         by_slug = {c["slug"]: c for c in chunk}
         try:
             raw = judge_fn(chunk) if judge_fn is not None else _judge_chunk(chunk, use_stub=use_stub)
-        except Exception as e:   # never raise — a failed chunk keeps its terms as uncertain
+        except EnvironmentFailure:
+            raise
+        except Exception as e:   # an untyped failed chunk keeps its terms uncertain
             print(f"  concept-triage: judge failed ({e}) — keeping chunk", file=sys.stderr)
             raw = None
 

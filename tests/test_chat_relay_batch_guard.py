@@ -70,6 +70,30 @@ def test_detector_catches_env_override(monkeypatch):
     assert model_config.uses_chat_relay() is False
 
 
+def test_malformed_config_fails_before_chat_relay_batch_spawns(
+    _batch_args, tmp_path, monkeypatch,
+):
+    from researchwiki.agents import model_config
+    from researchwiki.tasks import _ingest_batch
+
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "models.yaml").write_text("roles: [unterminated\n", encoding="utf-8")
+    monkeypatch.setattr(model_config, "wiki_root", lambda: tmp_path)
+    monkeypatch.setenv("RW_LLM_PROVIDER", "chat-relay")
+    spawned = []
+    monkeypatch.setattr(
+        _ingest_batch, "new_batch", lambda *args, **kwargs: spawned.append((args, kwargs)),
+    )
+    model_config.clear_caches()
+    try:
+        with pytest.raises(model_config.ModelConfigUnavailable, match="cannot be parsed"):
+            agent_task._cmd_ingest(_batch_args)
+        assert spawned == []
+    finally:
+        model_config.clear_caches()
+
+
 def test_detector_catches_a_single_phase_routed_by_config(monkeypatch):
     # The env var is not the only way in: models.yaml can route individual phases
     # to chat-relay while the rest stay on an API provider. A guard that checked
