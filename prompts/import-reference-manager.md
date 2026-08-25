@@ -39,9 +39,9 @@ researchwiki import apply --run <dir> --limit 30       # copy + ingest a wave
 researchwiki import verify --run <dir>                 # did it land?
 ```
 
-`preflight` and `inspect` cost **zero tokens** and write nothing outside their
-run directory under `.ingest/import-<stamp>/`. `apply` is the only phase that
-spends money or writes pages.
+`preflight` writes nothing. `inspect` costs zero tokens and writes only its run
+directory under `.ingest/import-<stamp>/`. `apply` is the only phase that spends
+money or writes pages.
 
 **The manifest is the import's only durable record**, and `.ingest/` is
 gitignored scratch that users are told to clear. It holds which PDF paired to
@@ -80,8 +80,9 @@ ReadCube and every CSL-JSON exporter omit them. Pairing falls back to content.
 ## Step 3 — `inspect`
 
 The phase that earns the design. Pairs records to PDFs, runs every gate, writes
-`manifest.json` and a human `report.md`. `--json` for programmatic use;
-`--limit N` to sample a big library first.
+`manifest.json` and a human `report.md`. `--json` is for programmatic use;
+`--limit N` emits a sample only after dedupe and pairing have considered the
+whole export.
 
 **`<pdf-root>` is optional.** With no PDFs, the report still lists every record
 that clears every gate except having a file, with its DOI — the fetch list. On
@@ -95,6 +96,14 @@ Read `report.md` before applying. Three things deserve attention:
 | `no-text-layer` | Scanned PDFs. OCR them or leave them out; importing one produces a page grounded on nothing. |
 | Missing PDFs | The fetch list, emitted as plain DOIs so it can be piped. |
 | Reference material | Books, guidance, theses the exporter typed as non-papers. They are real `wiki/references/` pages — hand-written, not ingested. Listed so a count doesn't become a dead end. |
+
+`apply` deliberately ignores every `review` item; never flip its manifest
+verdict to `ready`. For a confirmed weak/ambiguous pair, copy that one PDF into
+`inbox/` and run one foreground agent ingest with the record's frozen
+`ingest_args`. If reviews are numerous, fix the export/PDF layout and re-run
+`inspect` instead. Fix thin metadata in the export; handle commentary through
+the commentary workflow; resolve stem collisions individually under the naming
+rules. These are exceptional one-paper actions, not a hand-written import loop.
 
 ## Step 4 — `apply`
 
@@ -113,21 +122,22 @@ rather than a folder.
 If it crashes mid-wave, recover with `researchwiki agent ingest --resume
 .ingest/batch-<stamp>/` — the batch runner owns the checkpoint.
 
-## Step 5 — `verify`, then the free follow-ups
+## Step 5 — rebuild, grade, then verify
 
 ```bash
-researchwiki import verify --run <dir>
 researchwiki db rebuild && researchwiki reindex
-researchwiki grade regression --no-salience      # free; claims are uncitable until graded
+researchwiki grade regression --missing-only --no-salience
+researchwiki import verify --run <dir>
 ```
 
 `verify` reports landed / sandboxed / not-yet-imported per record, plus the
-`lint` keys an import can break. **Sandboxed** means the gates held a page in
+`lint` keys an import can break. Run it after rebuilding and grading so that
+snapshot is current. **Sandboxed** means the gates held a page in
 `.agent-output/` — it is finished work awaiting review, not a failure.
 
-`grade regression` without `--no-semantic`. That flag degrades grading to
-BM25-only and every claim would need re-grading later; the salience pass is the
-one worth skipping.
+Use `--missing-only` so each wave grades only new claims, and do not pass
+`--no-semantic`: that degrades grading to BM25-only and forces later re-grading.
+The salience pass is the one worth skipping.
 
 ## Step 6 — wire the new pages into the graph
 

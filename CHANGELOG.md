@@ -53,6 +53,15 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- **Reference-manager imports now keep identity decisions deterministic and
+  retries safe.** Duplicate-DOI records choose their metadata-complete survivor
+  before competing for a PDF while retaining attachment paths from duplicates;
+  `inspect --limit` samples only after corpus-wide dedupe and rival scoring.
+  Real apply checks the embedding environment before copying into `inbox/`,
+  failed dispatches no longer print success steps, and already-staged recovery
+  preserves the manifest's per-paper metadata arguments. Verification also
+  recognizes DOI-only records held under a reconciled sandbox stem.
+
 - **Paper-scoped provider checks no longer count DOI-bearing books or
   commentaries as papers.** `read_wiki_papers()` now enforces the page-type
   boundary shared by `audit`, `preprint-check --all`, and

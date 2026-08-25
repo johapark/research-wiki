@@ -506,6 +506,7 @@ less .ingest/import-*/report.md                      # read this before applying
 researchwiki import apply --run .ingest/import-<ts> --limit 30 --dry-run
 researchwiki import apply --run .ingest/import-<ts> --limit 30
 researchwiki db rebuild && researchwiki reindex
+researchwiki grade regression --missing-only --no-salience
 researchwiki import verify --run .ingest/import-<ts>
 ```
 
