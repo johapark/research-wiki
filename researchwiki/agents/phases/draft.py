@@ -27,6 +27,8 @@ class Draft:
     temperature: float
     input_tokens: int
     output_tokens: int
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     iteration_id: int = 0
     scores: dict = field(default_factory=dict)
     claim_details: list = field(default_factory=list)   # list[ClaimDetail]
@@ -140,6 +142,8 @@ def author(
         temperature=resp.temperature,
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
+        cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
+        cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
         stance=stance_name,
         handle=handle,
         hook=hook,

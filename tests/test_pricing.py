@@ -101,6 +101,27 @@ def test_estimate_matches_a_hand_computed_figure():
         == pytest.approx(2.730649 + 1.51203, rel=1e-6)
 
 
+def test_anthropic_cache_buckets_use_read_and_write_rates():
+    # Sonnet 4.6: $3/M fresh input, cache read 0.1x, 5m write 1.25x.
+    got = pricing.estimate_usd(
+        "claude-sonnet-4-6",
+        1_000_000,
+        0,
+        cache_read_tokens=200_000,
+        cache_write_tokens=100_000,
+    )
+    assert got == pytest.approx((700_000 + 20_000 + 125_000) / 1_000_000 * 3)
+
+
+def test_other_providers_conservatively_price_cached_input_at_base_rate():
+    plain = pricing.estimate_usd("gpt-5.6-luna", 1_000_000, 0)
+    cached = pricing.estimate_usd(
+        "gpt-5.6-luna", 1_000_000, 0,
+        cache_read_tokens=600_000, cache_write_tokens=100_000,
+    )
+    assert cached == plain
+
+
 def test_zero_tokens_is_zero():
     assert pricing.estimate_usd("claude-sonnet-5", 0, 0) == 0.0
 

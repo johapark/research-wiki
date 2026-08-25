@@ -34,6 +34,8 @@ class CritiqueOutput:
     model: str
     input_tokens: int
     output_tokens: int
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     coverage_gaps: list[dict] = field(default_factory=list)
 
 
@@ -143,6 +145,8 @@ def critic(
         model=resp.model,
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
+        cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
+        cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
         coverage_gaps=gaps,
     )
 
@@ -240,6 +244,8 @@ class EvolveOutput:
     temperature: float
     input_tokens: int
     output_tokens: int
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 def evolve(
@@ -265,6 +271,8 @@ def evolve(
         temperature=resp.temperature,
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
+        cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
+        cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
     )
 
 
@@ -305,6 +313,8 @@ class DebugOutput:
     input_tokens: int
     output_tokens: int
     issues_addressed: list[str]   # issue codes the prompt tried to fix
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 # Mapping from gate-rejection text → structured issue code.
@@ -385,6 +395,8 @@ def debug(
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
         issues_addressed=issues,
+        cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
+        cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
     )
 
 

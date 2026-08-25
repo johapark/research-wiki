@@ -7,6 +7,7 @@ import pytest
 from researchwiki.agents import budget, llm
 from researchwiki.agents.runner_support import finalize_attempt_timing
 from researchwiki.db.connection import get_connection
+from researchwiki.db.iterations import Iteration, write_iteration
 
 
 def test_parallel_reservations_cannot_oversubscribe_call_limit():
@@ -91,6 +92,32 @@ def test_llm_call_charges_actual_usage(monkeypatch):
     assert snap["model_calls"] == 1
     assert snap["tokens"] == 10
     assert snap["reserved_tokens"] == 0
+
+
+def test_llm_call_passes_cache_usage_to_cost_settlement(monkeypatch):
+    response = llm.LLMResponse(
+        "ok", "priced-model", 0.0, 20, 3,
+        cache_read_tokens=12, cache_write_tokens=4,
+    )
+    monkeypatch.setattr(llm, "call_anthropic", lambda **kwargs: response)
+    monkeypatch.setattr(budget.model_config, "rate_for", lambda model: object())
+    estimates = []
+
+    def estimate(model, input_tokens, output_tokens, **kwargs):
+        estimates.append((input_tokens, output_tokens, kwargs))
+        return 0.01
+
+    monkeypatch.setattr(budget.model_config, "estimate_usd", estimate)
+    tracker = budget.BudgetTracker(budget.IngestBudget(max_cost_usd=1.0))
+    with budget.activate(tracker):
+        llm.call(
+            prompt="small", model="priced-model", provider="anthropic",
+            max_tokens=20,
+        )
+
+    assert estimates[-1] == (
+        20, 3, {"cache_read_tokens": 12, "cache_write_tokens": 4},
+    )
 
 
 def test_priced_local_call_stays_unmetered_after_finish(monkeypatch):
@@ -247,8 +274,27 @@ def test_legacy_iteration_table_gets_nullable_telemetry_columns(tmp_path):
     conn = get_connection(path)
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(ingest_iterations)")}
     row = conn.execute(
-        "SELECT duration_ms, gate_metrics FROM ingest_iterations WHERE attempt_id='old'"
+        "SELECT duration_ms, gate_metrics, cost_cache_read_tokens, "
+        "cost_cache_write_tokens FROM ingest_iterations WHERE attempt_id='old'"
     ).fetchone()
-    assert {"duration_ms", "gate_metrics"} <= cols
-    assert row["duration_ms"] is None and row["gate_metrics"] is None
+    assert {
+        "duration_ms", "gate_metrics", "cost_cache_read_tokens",
+        "cost_cache_write_tokens",
+    } <= cols
+    assert all(row[key] is None for key in row.keys())
+    conn.close()
+
+
+def test_iteration_cache_usage_round_trips(tmp_path):
+    conn = get_connection(tmp_path / "fresh.db")
+    row_id = write_iteration(
+        attempt_id="new", pdf_filename="p.pdf", iteration=0, role="author",
+        cost_input_tokens=100, cost_output_tokens=20,
+        cost_cache_read_tokens=60, cost_cache_write_tokens=10, conn=conn,
+    )
+    stored = conn.execute(
+        "SELECT * FROM ingest_iterations WHERE id = ?", (row_id,),
+    ).fetchone()
+    parsed = Iteration.from_row(stored)
+    assert (parsed.cost_cache_read_tokens, parsed.cost_cache_write_tokens) == (60, 10)
     conn.close()

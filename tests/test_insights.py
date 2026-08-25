@@ -31,7 +31,9 @@ def seeded(tmp_path, monkeypatch):
     conn = get_connection()
     # Two author drafts by different models, each with a linked grade row.
     a1 = _add(conn, role="author", section="results", model_used="big-model",
-              temperature=0.5, cost_input_tokens=1000, cost_output_tokens=200, decision="committed")
+              temperature=0.5, cost_input_tokens=1000, cost_output_tokens=200,
+              cost_cache_read_tokens=600, cost_cache_write_tokens=100,
+              decision="committed")
     _add(conn, role="grade", section="results", parent_iteration_id=a1,
          grader_scores=json.dumps({"mean_semantic": 0.85, "n_drift": 1, "n_negation_mismatches": 0}))
     a2 = _add(conn, role="author", section="results", model_used="small-model",
@@ -58,6 +60,9 @@ def test_token_and_role_tallies(seeded):
     data = insights._gather(seeded, None)
     assert data["by_model"]["big-model"]["in_tok"] == 1000
     assert data["by_model"]["small-model"]["out_tok"] == 100
+    assert data["by_model"]["big-model"]["cache_read"] == 600
+    assert data["by_model"]["big-model"]["cache_write"] == 100
+    assert data["by_model"]["small-model"]["cache_unknown"] == 1
     assert "author" in data["by_role"] and "grade" in data["by_role"] and "extract" in data["by_role"]
     assert data["by_role"]["author"]["calls"] == 2
 

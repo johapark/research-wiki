@@ -106,6 +106,8 @@ def evolve_memory(ctx: "Context", conn, *, source_key: str) -> dict:
         model_used=(stats.get("model") or "unknown") if stats["n_judged"] else "(no calls)",
         cost_input_tokens=stats["input_tokens"],
         cost_output_tokens=stats["output_tokens"],
+        cost_cache_read_tokens=stats["cache_read_tokens"],
+        cost_cache_write_tokens=stats["cache_write_tokens"],
         duration_ms=elapsed_ms,
         conn=conn,
     )

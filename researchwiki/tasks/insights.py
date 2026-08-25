@@ -45,10 +45,17 @@ def _fmt_tokens(n: int) -> str:
     return str(n)
 
 
-def _estimate_usd(model: str, in_tok: int, out_tok: int) -> float:
+def _estimate_usd(
+    model: str, in_tok: int, out_tok: int, *,
+    cache_read_tokens: int = 0, cache_write_tokens: int = 0,
+) -> float:
     """Thin alias kept so existing call sites read unchanged; the rate table and
     the prefix matching both live in `agents.model_config`."""
-    return _mc.estimate_usd(model, in_tok, out_tok)
+    return _mc.estimate_usd(
+        model, in_tok, out_tok,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
+    )
 
 
 def _score_value(scores: dict, key: str):
@@ -194,7 +201,14 @@ def _gather(conn, cutoff: int | None, stem: str | None = None,
     m_rows = conn.execute(
         "SELECT model_used AS model, COUNT(*) AS calls, "
         "       SUM(COALESCE(cost_input_tokens,0)) AS in_tok, "
-        "       SUM(COALESCE(cost_output_tokens,0)) AS out_tok "
+        "       SUM(COALESCE(cost_output_tokens,0)) AS out_tok, "
+        "       SUM(COALESCE(cost_cache_read_tokens,0)) AS cache_read, "
+        "       SUM(COALESCE(cost_cache_write_tokens,0)) AS cache_write, "
+        "       SUM(CASE WHEN (cost_cache_read_tokens IS NULL "
+        "                       OR cost_cache_write_tokens IS NULL) "
+        "                      AND COALESCE(cost_input_tokens,0) > 0 "
+        "                 THEN 1 ELSE 0 END) "
+        "           AS cache_unknown "
         "FROM ingest_iterations "
         "WHERE model_used IS NOT NULL AND model_used NOT IN (?, ?)" + where_time +
         " GROUP BY model_used",
@@ -205,6 +219,9 @@ def _gather(conn, cutoff: int | None, stem: str | None = None,
             "calls": int(r["calls"]),
             "in_tok": int(r["in_tok"] or 0),
             "out_tok": int(r["out_tok"] or 0),
+            "cache_read": int(r["cache_read"] or 0),
+            "cache_write": int(r["cache_write"] or 0),
+            "cache_unknown": int(r["cache_unknown"] or 0),
         }
 
     # --- token spend by role.
@@ -212,7 +229,9 @@ def _gather(conn, cutoff: int | None, stem: str | None = None,
     r_rows = conn.execute(
         "SELECT role, COUNT(*) AS calls, "
         "       SUM(COALESCE(cost_input_tokens,0)) AS in_tok, "
-        "       SUM(COALESCE(cost_output_tokens,0)) AS out_tok "
+        "       SUM(COALESCE(cost_output_tokens,0)) AS out_tok, "
+        "       SUM(COALESCE(cost_cache_read_tokens,0)) AS cache_read, "
+        "       SUM(COALESCE(cost_cache_write_tokens,0)) AS cache_write "
         "FROM ingest_iterations WHERE 1=1" + where_time + " GROUP BY role",
         params,
     ).fetchall()
@@ -221,6 +240,8 @@ def _gather(conn, cutoff: int | None, stem: str | None = None,
             "calls": int(r["calls"]),
             "in_tok": int(r["in_tok"] or 0),
             "out_tok": int(r["out_tok"] or 0),
+            "cache_read": int(r["cache_read"] or 0),
+            "cache_write": int(r["cache_write"] or 0),
         }
 
     # --- section difficulty (graded drafts).
@@ -355,8 +376,16 @@ def _to_json(data: dict, days: int | None) -> dict:
         "pricing_as_of": _mc.pricing_as_of(),
         "by_model": {
             m: {
-                "calls": v["calls"], "input_tokens": v["in_tok"], "output_tokens": v["out_tok"],
-                "estimated_usd": round(_estimate_usd(m, v["in_tok"], v["out_tok"]), 4),
+                "calls": v["calls"], "input_tokens": v["in_tok"],
+                "output_tokens": v["out_tok"],
+                "cache_read_tokens": v["cache_read"],
+                "cache_write_tokens": v["cache_write"],
+                "cache_detail_missing_calls": v["cache_unknown"],
+                "estimated_usd": round(_estimate_usd(
+                    m, v["in_tok"], v["out_tok"],
+                    cache_read_tokens=v["cache_read"],
+                    cache_write_tokens=v["cache_write"],
+                ), 4),
                 "drafts": data["quality"].get(m, {}).get("drafts", 0),
                 "mean_semantic": _mean(data["quality"].get(m, {}).get("sem_sum", 0.0),
                                        data["quality"].get(m, {}).get("sem_n", 0)),
@@ -365,7 +394,10 @@ def _to_json(data: dict, days: int | None) -> dict:
             for m, v in sorted(data["by_model"].items())
         },
         "by_role": {
-            r: {"calls": v["calls"], "input_tokens": v["in_tok"], "output_tokens": v["out_tok"]}
+            r: {"calls": v["calls"], "input_tokens": v["in_tok"],
+                "output_tokens": v["out_tok"],
+                "cache_read_tokens": v["cache_read"],
+                "cache_write_tokens": v["cache_write"]}
             for r, v in sorted(data["by_role"].items())
         },
         "by_section": {
@@ -436,8 +468,18 @@ def _print_report(data: dict, days: int | None, show_lineage: bool = False,
         sem = (q["sem_sum"] / q["sem_n"]) if q.get("sem_n") else None
         sem_s = f"{sem:.3f}" if sem is not None else "—"
         toks = f"{_fmt_tokens(v['in_tok'])}/{_fmt_tokens(v['out_tok'])}"
-        usd = f"${_estimate_usd(m, v['in_tok'], v['out_tok']):.2f}"
+        estimated = _estimate_usd(
+            m, v["in_tok"], v["out_tok"],
+            cache_read_tokens=v["cache_read"],
+            cache_write_tokens=v["cache_write"],
+        )
+        usd = f"${estimated:.2f}"
         print(f"  {m:<34}{q.get('drafts', 0):>7}{sem_s:>10}{q.get('drift', 0):>7}{toks:>18}{usd:>10}")
+        if v["cache_read"] or v["cache_write"] or v["cache_unknown"]:
+            missing = (f"; {v['cache_unknown']} legacy call(s) unknown"
+                       if v["cache_unknown"] else "")
+            print(f"    cache: {_fmt_tokens(v['cache_read'])} read / "
+                  f"{_fmt_tokens(v['cache_write'])} written{missing}")
 
     # Section difficulty
     if data["by_section"]:
@@ -502,8 +544,8 @@ def _print_report(data: dict, days: int | None, show_lineage: bool = False,
             print(f"  {key:<24}{value:g}")
 
     print(f"\n(Rates as of {_mc.pricing_as_of() or 'unknown'} from config/pricing.yaml; "
-          f"local/unpriced models show $0.00. Upper bound — prompt-cache hits "
-          f"cost 0.1x input and aren't recorded per-call.)")
+          f"local/unpriced models show $0.00. Cache discounts are applied where "
+          f"the provider and rate table expose them.)")
 
 
 def main(argv: list[str]) -> int:

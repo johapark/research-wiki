@@ -29,6 +29,8 @@ class ShortNameOutput:
     input_tokens: int
     output_tokens: int
     hook: str = ""
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 def propose_short_name(
@@ -123,6 +125,8 @@ def propose_short_name(
         model=resp.model,
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
+        cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
+        cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
     )
 
 
@@ -179,6 +183,8 @@ class KeywordsOutput:
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 # Keyword tokens are *retrieval* tokens — terms a researcher would type in a
@@ -344,6 +350,14 @@ def propose_keywords(
                     model=retry.model,
                     input_tokens=resp.input_tokens + retry.input_tokens,
                     output_tokens=resp.output_tokens + retry.output_tokens,
+                    cache_read_tokens=(
+                        getattr(resp, "cache_read_tokens", 0)
+                        + getattr(retry, "cache_read_tokens", 0)
+                    ),
+                    cache_write_tokens=(
+                        getattr(resp, "cache_write_tokens", 0)
+                        + getattr(retry, "cache_write_tokens", 0)
+                    ),
                 )
         log("WARNING: keywords still empty after retry — page will need "
             "`researchwiki backfill keywords`", tag="agent")
@@ -352,6 +366,8 @@ def propose_keywords(
         model=resp.model,
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
+        cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
+        cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
     )
 
 
@@ -535,6 +551,8 @@ def propose_keywords_batch(
             model=resp.model,
             input_tokens=resp.input_tokens // n,
             output_tokens=resp.output_tokens // n,
+            cache_read_tokens=getattr(resp, "cache_read_tokens", 0) // n,
+            cache_write_tokens=getattr(resp, "cache_write_tokens", 0) // n,
         )
     return out
 

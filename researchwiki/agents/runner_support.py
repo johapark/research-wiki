@@ -11,6 +11,16 @@ from . import fitness, phases
 from .budget import BudgetExhausted, BudgetTracker, IngestBudget
 
 
+def usage_costs(result) -> dict[str, int]:
+    """Map a phase result's token usage onto iteration cost columns."""
+    return {
+        "cost_input_tokens": result.input_tokens,
+        "cost_output_tokens": result.output_tokens,
+        "cost_cache_read_tokens": getattr(result, "cache_read_tokens", 0),
+        "cost_cache_write_tokens": getattr(result, "cache_write_tokens", 0),
+    }
+
+
 def make_budget_tracker(*, max_model_calls=None, max_tokens=None,
                         max_cost_usd=None, max_wall_seconds=None):
     limits = IngestBudget(max_model_calls, max_tokens, max_cost_usd, max_wall_seconds)
@@ -184,6 +194,8 @@ def phase_target_claims(ctx, conn):
         pdf_filename=ctx.pdf_filename, iteration=ctx.iteration, role="target_claims",
         decision=decision, decision_reason=reason, model_used=out.model or "(no calls)",
         cost_input_tokens=out.input_tokens, cost_output_tokens=out.output_tokens,
+        cost_cache_read_tokens=out.cache_read_tokens,
+        cost_cache_write_tokens=out.cache_write_tokens,
         duration_ms=elapsed_ms,
         gate_metrics={"target_claims": len(out.claims), "error": bool(out.error)},
         conn=conn,

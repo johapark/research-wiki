@@ -127,6 +127,8 @@ CREATE TABLE IF NOT EXISTS ingest_iterations (
     temperature         REAL,
     cost_input_tokens   INTEGER,
     cost_output_tokens  INTEGER,
+    cost_cache_read_tokens  INTEGER,                            -- subset of cost_input_tokens; NULL on legacy rows
+    cost_cache_write_tokens INTEGER,                            -- subset of cost_input_tokens; NULL on legacy rows
     duration_ms         INTEGER,                            -- NULL on historical rows; measured wall time for this phase
     gate_metrics        TEXT,                               -- JSON counters/status only; no evaluator prose
     created_at          INTEGER NOT NULL,

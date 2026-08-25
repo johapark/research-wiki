@@ -58,6 +58,8 @@ class TargetClaimsOutput:
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     error: str | None = None
 
     def is_empty(self) -> bool:
@@ -205,6 +207,8 @@ def extract_target_claims(
             model=resp.model,
             input_tokens=resp.input_tokens,
             output_tokens=resp.output_tokens,
+            cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
+            cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
             error=f"no JSON object in LLM output: {raw[:120]!r}",
         )
     raw_json = json_match.group(0)
@@ -260,6 +264,8 @@ def extract_target_claims(
         model=resp.model,
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
+        cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
+        cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
         error="partial JSON — truncated output recovered" if partial else None,
     )
 

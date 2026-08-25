@@ -44,6 +44,8 @@ class Iteration:
     temperature: float | None
     cost_input_tokens: int | None
     cost_output_tokens: int | None
+    cost_cache_read_tokens: int | None
+    cost_cache_write_tokens: int | None
     duration_ms: int | None
     gate_metrics: dict | None
     created_at: int
@@ -69,6 +71,8 @@ class Iteration:
             temperature=row["temperature"],
             cost_input_tokens=row["cost_input_tokens"],
             cost_output_tokens=row["cost_output_tokens"],
+            cost_cache_read_tokens=row["cost_cache_read_tokens"],
+            cost_cache_write_tokens=row["cost_cache_write_tokens"],
             duration_ms=row["duration_ms"],
             gate_metrics=json.loads(row["gate_metrics"]) if row["gate_metrics"] else None,
             created_at=row["created_at"],
@@ -93,6 +97,8 @@ def write_iteration(
     temperature: float | None = None,
     cost_input_tokens: int | None = None,
     cost_output_tokens: int | None = None,
+    cost_cache_read_tokens: int | None = None,
+    cost_cache_write_tokens: int | None = None,
     duration_ms: int | None = None,
     gate_metrics: dict | None = None,
     conn: sqlite3.Connection | None = None,
@@ -116,13 +122,17 @@ def write_iteration(
             attempt_id, paper_stem, pdf_filename, iteration, role, section,
             draft_text, parent_iteration_id, grader_scores, critic_notes,
             decision, decision_reason, model_used, temperature,
-            cost_input_tokens, cost_output_tokens, duration_ms, gate_metrics,
+            cost_input_tokens, cost_output_tokens,
+            cost_cache_read_tokens, cost_cache_write_tokens,
+            duration_ms, gate_metrics,
             created_at
         ) VALUES (
             :attempt_id, :paper_stem, :pdf_filename, :iteration, :role, :section,
             :draft_text, :parent_iteration_id, :grader_scores, :critic_notes,
             :decision, :decision_reason, :model_used, :temperature,
-            :cost_input_tokens, :cost_output_tokens, :duration_ms, :gate_metrics,
+            :cost_input_tokens, :cost_output_tokens,
+            :cost_cache_read_tokens, :cost_cache_write_tokens,
+            :duration_ms, :gate_metrics,
             :created_at
         )
         """,
@@ -143,6 +153,8 @@ def write_iteration(
             "temperature": temperature,
             "cost_input_tokens": cost_input_tokens,
             "cost_output_tokens": cost_output_tokens,
+            "cost_cache_read_tokens": cost_cache_read_tokens,
+            "cost_cache_write_tokens": cost_cache_write_tokens,
             "duration_ms": duration_ms,
             "gate_metrics": json.dumps(gate_metrics) if gate_metrics is not None else None,
             "created_at": int(time.time()),

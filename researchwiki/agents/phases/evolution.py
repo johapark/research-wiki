@@ -95,11 +95,8 @@ class EvolutionProposal:
       contrast:  {target_line_match, note_for_author}
       none:      {} — caller filters these before materializing
 
-    `input_tokens` / `output_tokens` carry the LLM cost for the call that
-    produced this proposal. Summed by the runner for the cost-telemetry log
-    so the C2 dashboard reflects evolution overhead alongside ingest cost.
-    `model` is the resolved model string the call actually ran on (from the
-    LLMResponse), so telemetry records the real model rather than a literal.
+    `usage` carries the response metadata for cost telemetry. The proposal
+    text remains the durable artifact; usage is summed into the iteration log.
     """
     source_key: str                 # category/stem of the new paper
     target_key: str                 # category/stem of the page to edit
@@ -108,9 +105,7 @@ class EvolutionProposal:
     rationale: str                  # one-sentence summary
     patch: dict = field(default_factory=dict)
     claim_ids: list[str] = field(default_factory=list)
-    input_tokens: int = 0
-    output_tokens: int = 0
-    model: str = ""                 # resolved model for the judge call
+    usage: llm.LLMResponse | None = None
 
     def is_actionable(self) -> bool:
         """True when this proposal would actually change the target page."""
@@ -161,6 +156,8 @@ def propose_evolution(
         "n_actionable": 0,
         "input_tokens": 0,
         "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
         "model": "",  # resolved judge model — all calls share phase "memory_evolution"
     }
     if not candidates:
@@ -210,10 +207,11 @@ def propose_evolution(
                 continue
             proposals.append(prop)
             stats["n_judged"] += 1
-            stats["input_tokens"] += prop.input_tokens
-            stats["output_tokens"] += prop.output_tokens
-            if prop.model:
-                stats["model"] = prop.model
+            if usage := prop.usage:
+                for key in ("input_tokens", "output_tokens", "cache_read_tokens",
+                            "cache_write_tokens"):
+                    stats[key] += getattr(usage, key, 0)
+                stats["model"] = usage.model or stats["model"]
             if conn is not None:
                 if prop.verdict == "none":
                     evolve_ledger.record_none(
@@ -371,9 +369,7 @@ def _judge_one(
         rationale=(parsed.get("rationale") or "").strip()[:300],
         patch=patch,
         claim_ids=parsed.get("claim_ids") or [],
-        input_tokens=resp.input_tokens,
-        output_tokens=resp.output_tokens,
-        model=resp.model,
+        usage=resp,
     )
 
 

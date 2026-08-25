@@ -157,12 +157,16 @@ class BudgetTracker:
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
         free: bool | None = None,
     ) -> None:
         actual_tokens = max(0, input_tokens) + max(0, output_tokens)
         unmetered = reservation.free if free is None else free
         actual_cost = 0.0 if unmetered else model_config.estimate_usd(
-            model, max(0, input_tokens), max(0, output_tokens)
+            model, max(0, input_tokens), max(0, output_tokens),
+            cache_read_tokens=max(0, cache_read_tokens),
+            cache_write_tokens=max(0, cache_write_tokens),
         )
         with self._lock:
             self.reserved_tokens -= reservation.tokens

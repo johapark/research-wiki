@@ -19,12 +19,12 @@
 #   4. `python3 -m pytest tests/test_pricing.py`
 # ---------------------------------------------------------------------------
 #
-# WHAT THIS ESTIMATE IGNORES, and which direction it errs:
-#   * Prompt caching. The `claims` / `ingest_iterations` schema records only
-#     input and output token totals — there is no cache-read/write breakdown to
-#     read. Anthropic charges 0.1x base input for a cache hit, and the author
-#     phase passes `cache_prompt=True`, so real spend on cached runs is LOWER
-#     than what we print. The estimate is an upper bound, not a bill.
+# WHAT THIS ESTIMATE MODELS:
+#   * New ingest rows record cache-read/write tokens. Anthropic's 5-minute
+#     write and read multipliers below are applied to those buckets. Legacy rows
+#     remain unadjusted because their cache split is unknowable.
+#
+# WHAT THIS ESTIMATE IGNORES:
 #   * Batch API (50% off both directions). Nothing here uses it today.
 #   * Long-context surcharges, fast mode, and data-residency multipliers.
 #   * Server-side tools (e.g. web search at $10/1,000 searches).
@@ -41,8 +41,8 @@ sources:
   anthropic: "https://platform.claude.com/docs/en/about-claude/pricing"
   openai: "https://developers.openai.com/api/docs/pricing"
 
-# Multipliers relative to base input, for reference. Not applied automatically —
-# see "WHAT THIS ESTIMATE IGNORES" above.
+# Multipliers relative to base input. The 5-minute write and read rates are
+# applied when an Anthropic response reports those token buckets.
 modifiers:
   anthropic:
     cache_write_5m: 1.25

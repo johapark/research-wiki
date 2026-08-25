@@ -73,6 +73,25 @@ def test_openai_401_is_retried_then_succeeds(monkeypatch):
     assert calls["n"] == 2  # first attempt 401'd, retry succeeded
 
 
+def test_openai_usage_reports_cached_prompt_subset(monkeypatch):
+    payload = dict(_OK_PAYLOAD)
+    payload["usage"] = {
+        "prompt_tokens": 20,
+        "completion_tokens": 2,
+        "prompt_tokens_details": {"cached_tokens": 12},
+    }
+    monkeypatch.setattr(
+        llm.urllib.request, "urlopen", lambda req, timeout=None: _FakeResp(payload),
+    )
+    resp = llm.call_openai_compatible(
+        model="gpt-5.6-luna", prompt="p",
+        base_url="https://api.openai.com/v1", max_tokens=10,
+    )
+    assert (resp.input_tokens, resp.cache_read_tokens, resp.cache_write_tokens) == (
+        20, 12, 0,
+    )
+
+
 def test_openai_400_is_not_retried(monkeypatch):
     monkeypatch.setattr(llm.time, "sleep", lambda *_: None)
     calls = {"n": 0}
@@ -92,3 +111,17 @@ def test_openai_400_is_not_retried(monkeypatch):
             temperature=0.2,
         )
     assert calls["n"] == 1  # non-retryable 4xx fails fast
+
+
+def test_openai_exhausted_rate_limit_is_actionable(monkeypatch):
+    monkeypatch.setattr(llm.time, "sleep", lambda *_: None)
+
+    def rate_limited(req, timeout=None):
+        raise _http_error(req.full_url, 429, "rate limit exceeded")
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", rate_limited)
+    with pytest.raises(llm.ProviderUnavailable, match="lower ingest concurrency"):
+        llm.call_openai_compatible(
+            model="gpt-5.6-luna", prompt="p",
+            base_url="https://api.openai.com/v1", max_tokens=10,
+        )

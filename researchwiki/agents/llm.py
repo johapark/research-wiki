@@ -52,6 +52,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from . import model_config
+from .provider_errors import friendly_provider_error
 from ..errors import EnvironmentFailure
 
 
@@ -90,8 +91,12 @@ class LLMResponse:
     text: str
     model: str
     temperature: float
+    # Total prompt-side tokens occupying the context, including cache reads
+    # and cache writes.  The cache fields below are subsets of this total.
     input_tokens: int
     output_tokens: int
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 def has_synchronous_llm() -> bool:
@@ -194,11 +199,11 @@ class EndpointResolution:
 
 
 class ProviderUnavailable(EnvironmentFailure):
-    """The configured LLM provider has no usable credentials — exit code 2.
+    """The configured LLM provider cannot serve the request — exit code 2.
 
-    Raised by `preflight_providers()` before a run spends anything, not by the
-    call sites: a provider that 401s mid-pipeline is the same condition
-    discovered too late.
+    Usually raised by preflight, but call sites also use it when the provider
+    reveals a credential, quota, access, or availability problem only after a
+    request is sent.
     """
 
 
@@ -565,7 +570,9 @@ def call_openai_compatible(
     # Retry transient failures (401 / 429 / 5xx) with exponential backoff +
     # jitter. A fresh Request is built each attempt because urllib consumes the
     # body stream once. Non-retryable HTTP errors (other 4xx) and the final
-    # exhausted attempt re-raise as RuntimeError, preserving prior behavior.
+    # exhausted attempt becomes an actionable ProviderUnavailable when its
+    # response is recognizable. Unknown client errors keep their original
+    # RuntimeError path and body for debugging.
     data = None
     attempt = 1
     renegotiations = 0
@@ -622,12 +629,17 @@ def call_openai_compatible(
                 time.sleep(delay)
                 attempt += 1
                 continue
+            friendly = friendly_provider_error(
+                "OpenAI-compatible", model, status=e.code, body=body_text,
+            )
+            if friendly:
+                raise ProviderUnavailable(friendly) from e
             raise RuntimeError(
                 f"OpenAI-compatible server returned HTTP {e.code} at {url}: "
                 f"{body_text}"
             ) from e
         except urllib.error.URLError as e:
-            raise RuntimeError(
+            raise ProviderUnavailable(
                 f"OpenAI-compatible server unreachable at {url}: {e}. "
                 f"Is LM Studio (or your local server) running? "
                 f"Override RW_LLM_BASE_URL to point elsewhere."
@@ -647,12 +659,15 @@ def call_openai_compatible(
     text = re.sub(r"^\s*<thought>.*?</thought>\s*", "", text, count=1, flags=re.DOTALL)
 
     usage = data.get("usage") or {}
+    details = usage.get("prompt_tokens_details") or {}
+    cached = int(details.get("cached_tokens", 0) or 0)
     return LLMResponse(
         text=text,
         model=model,
         temperature=temperature,
         input_tokens=int(usage.get("prompt_tokens", 0)),
         output_tokens=int(usage.get("completion_tokens", 0)),
+        cache_read_tokens=cached,
     )
 
 
@@ -749,23 +764,45 @@ def call_anthropic(
         return client.messages.create(**kwargs)
 
     try:
-        resp = _do_call(include_temperature=True)
-        used_temp = temperature
-    except anthropic.BadRequestError as e:
-        msg = str(e).lower()
-        if "temperature" in msg and ("deprecated" in msg or "not supported" in msg):
-            resp = _do_call(include_temperature=False)
-            used_temp = float("nan")  # signal: model controls temperature internally
-        else:
-            raise
+        try:
+            resp = _do_call(include_temperature=True)
+            used_temp = temperature
+        except anthropic.BadRequestError as e:
+            msg = str(e).lower()
+            if "temperature" in msg and ("deprecated" in msg or "not supported" in msg):
+                resp = _do_call(include_temperature=False)
+                used_temp = float("nan")  # signal: model controls temperature internally
+            else:
+                raise
+    except Exception as e:
+        status = getattr(e, "status_code", None)
+        body = str(getattr(e, "body", None) or e)
+        friendly = friendly_provider_error(
+            "Anthropic", model, status=status, body=body,
+        )
+        if friendly:
+            raise ProviderUnavailable(friendly) from e
+        if type(e).__name__ in {"APIConnectionError", "APITimeoutError"}:
+            raise ProviderUnavailable(
+                "Anthropic is unreachable — check the network and "
+                "ANTHROPIC_BASE_URL, then retry."
+            ) from e
+        raise
 
     text = "".join(block.text for block in resp.content if hasattr(block, "text"))
+    cache_read = int(getattr(resp.usage, "cache_read_input_tokens", 0) or 0)
+    cache_write = int(getattr(resp.usage, "cache_creation_input_tokens", 0) or 0)
     return LLMResponse(
         text=text,
         model=model,
         temperature=used_temp,
-        input_tokens=resp.usage.input_tokens,
+        # Anthropic reports fresh, cache-read, and cache-creation input in
+        # separate buckets.  Normalize input_tokens to the total-context
+        # convention used by the OpenAI-compatible transport.
+        input_tokens=int(resp.usage.input_tokens) + cache_read + cache_write,
         output_tokens=resp.usage.output_tokens,
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
     )
 
 
@@ -1005,5 +1042,7 @@ def call(
             model=response.model or model,
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
+            cache_read_tokens=response.cache_read_tokens,
+            cache_write_tokens=response.cache_write_tokens,
         )
     return response

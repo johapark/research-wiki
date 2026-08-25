@@ -844,9 +844,33 @@ class Rate:
     provider: str = ""
     note: str = ""
 
-    def usd(self, in_tok: int, out_tok: int) -> float:
-        return (in_tok / 1_000_000) * self.input_per_mtok + \
-               (out_tok / 1_000_000) * self.output_per_mtok
+    def usd(
+        self, in_tok: int, out_tok: int, *,
+        cache_read_tokens: int = 0, cache_write_tokens: int = 0,
+    ) -> float:
+        """Price total input, applying cache discounts when they are modelled.
+
+        ``in_tok`` is total context input; cache buckets are subsets. Anthropic
+        is the only transport for which this project explicitly requests cache
+        writes and ships verified modifiers. Other providers conservatively
+        charge cached tokens at the ordinary input rate.
+        """
+        cached_read = min(max(0, cache_read_tokens), max(0, in_tok))
+        cached_write = min(
+            max(0, cache_write_tokens), max(0, in_tok) - cached_read,
+        )
+        fresh = max(0, in_tok) - cached_read - cached_write
+        read_multiplier = 1.0
+        write_multiplier = 1.0
+        if self.provider == "anthropic":
+            modifiers = pricing_modifiers().get("anthropic") or {}
+            read_multiplier = float(modifiers.get("cache_read", 1.0))
+            write_multiplier = float(modifiers.get("cache_write_5m", 1.0))
+        input_cost = (
+            fresh + cached_read * read_multiplier
+            + cached_write * write_multiplier
+        ) / 1_000_000 * self.input_per_mtok
+        return input_cost + (max(0, out_tok) / 1_000_000) * self.output_per_mtok
 
 
 def pricing_path() -> Path:
@@ -891,11 +915,7 @@ def pricing_sources() -> dict:
 
 
 def pricing_modifiers() -> dict:
-    """Cache / batch multipliers, for reference only.
-
-    Never applied automatically: `ingest_iterations` records just input and
-    output totals, so there is no cache-read/write split to multiply.
-    """
+    """Cache / batch multipliers declared by the pricing table."""
     return dict(_pricing().get("modifiers") or {})
 
 
@@ -972,16 +992,18 @@ def rate_for(model: str, *, today: _dt.date | None = None) -> Rate | None:
         return None
 
 
-def estimate_usd(model: str, in_tok: int, out_tok: int, *,
-                 today: _dt.date | None = None) -> float:
-    """Estimated USD for one model's token totals; 0.0 when unpriced.
-
-    An **upper bound**: a prompt-cache hit costs 0.1x base input and the author
-    phase passes `cache_prompt=True`, but the schema records no cache split, so
-    a cached run really cost less than this returns.
-    """
+def estimate_usd(
+    model: str, in_tok: int, out_tok: int, *,
+    cache_read_tokens: int = 0, cache_write_tokens: int = 0,
+    today: _dt.date | None = None,
+) -> float:
+    """Estimated USD for one model's token totals; 0.0 when unpriced."""
     rate = rate_for(model, today=today)
-    return rate.usd(in_tok, out_tok) if rate else 0.0
+    return rate.usd(
+        in_tok, out_tok,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
+    ) if rate else 0.0
 
 
 def unpriced_models(models) -> list[str]:

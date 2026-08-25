@@ -267,6 +267,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
             _safe_add_column(
                 conn, "ALTER TABLE ingest_iterations ADD COLUMN gate_metrics TEXT"
             )
+        if "cost_cache_read_tokens" not in iter_cols:
+            _safe_add_column(
+                conn,
+                "ALTER TABLE ingest_iterations "
+                "ADD COLUMN cost_cache_read_tokens INTEGER",
+            )
+        if "cost_cache_write_tokens" not in iter_cols:
+            _safe_add_column(
+                conn,
+                "ALTER TABLE ingest_iterations "
+                "ADD COLUMN cost_cache_write_tokens INTEGER",
+            )
     _install_claims_fts(conn)
 
 

@@ -36,6 +36,7 @@ from .runner_support import (
     phase_target_claims as _phase_target_claims,
     record_revision_decision,
     record_timed_subphase,
+    usage_costs,
     warn_thin_extraction as _warn_thin_extraction,
 )
 from .relay import set_relay_identity
@@ -427,8 +428,7 @@ def _phase_author(ctx: Context, conn, temperature: float, slot: int = 0):
         decision_reason=f"author draft #{len(ctx.drafts) + 1} t={temperature:.2f} stance={draft.stance}",
         model_used=draft.model,
         temperature=draft.temperature,
-        cost_input_tokens=draft.input_tokens,
-        cost_output_tokens=draft.output_tokens,
+        **usage_costs(draft),
         duration_ms=int((time.monotonic() - t0) * 1000),
         conn=conn,
     )
@@ -528,8 +528,7 @@ def _phase_critic(ctx: Context, conn, draft):
         decision="kept" if (n_weak or n_gaps) else "observed",
         decision_reason=reason,
         model_used=critique.model,
-        cost_input_tokens=critique.input_tokens,
-        cost_output_tokens=critique.output_tokens,
+        **usage_costs(critique),
         duration_ms=int((time.monotonic() - t0) * 1000),
         gate_metrics={"weak_claims": n_weak, "coverage_gaps": n_gaps},
         conn=conn,
@@ -557,6 +556,8 @@ def _phase_evolve(ctx: Context, conn, prior_draft, critique):
         temperature=out.temperature,
         input_tokens=out.input_tokens,
         output_tokens=out.output_tokens,
+        cache_read_tokens=getattr(out, "cache_read_tokens", 0),
+        cache_write_tokens=getattr(out, "cache_write_tokens", 0),
         # Inherit the author's catalog trailer. The evolve prompt is built from
         # `draft.text`, which `split_gloss_trailer` already stripped, so the
         # revision has no trailer of its own to parse — and a fresh Draft would
@@ -579,8 +580,7 @@ def _phase_evolve(ctx: Context, conn, prior_draft, critique):
         decision_reason="evolved from critic notes",
         model_used=new_draft.model,
         temperature=new_draft.temperature,
-        cost_input_tokens=new_draft.input_tokens,
-        cost_output_tokens=new_draft.output_tokens,
+        **usage_costs(new_draft),
         duration_ms=int((time.monotonic() - t0) * 1000),
         conn=conn,
     )
@@ -629,6 +629,8 @@ def _phase_debug(
         temperature=out.temperature,
         input_tokens=out.input_tokens,
         output_tokens=out.output_tokens,
+        cache_read_tokens=getattr(out, "cache_read_tokens", 0),
+        cache_write_tokens=getattr(out, "cache_write_tokens", 0),
         # Same trailer inheritance as `_phase_evolve` — DEBUG repairs structure
         # (drift, KC count), never the headline finding, so the author's handle
         # and hook survive the repair.
@@ -648,8 +650,7 @@ def _phase_debug(
         decision_reason=f"debug repair targeting {issues}",
         model_used=new_draft.model,
         temperature=new_draft.temperature,
-        cost_input_tokens=new_draft.input_tokens,
-        cost_output_tokens=new_draft.output_tokens,
+        **usage_costs(new_draft),
         duration_ms=int((time.monotonic() - t0) * 1000),
         conn=conn,
     )
@@ -915,8 +916,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
             decision="kept" if kw_out.keywords else "rejected",
             decision_reason=f"proposed: {kw_out.keywords!r}",
             model_used=kw_out.model,
-            cost_input_tokens=kw_out.input_tokens,
-            cost_output_tokens=kw_out.output_tokens,
+            **usage_costs(kw_out),
             duration_ms=int((time.monotonic() - kw_t0) * 1000),
             conn=conn,
         )

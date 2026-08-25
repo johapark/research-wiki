@@ -234,7 +234,9 @@ def _recent_ingest_costs(days: int = 7) -> dict:
         return conn.execute(
             "SELECT attempt_id, model_used, "
             "       COALESCE(cost_input_tokens, 0) AS in_tok, "
-            "       COALESCE(cost_output_tokens, 0) AS out_tok "
+            "       COALESCE(cost_output_tokens, 0) AS out_tok, "
+            "       cost_cache_read_tokens AS cache_read, "
+            "       cost_cache_write_tokens AS cache_write "
             "FROM ingest_iterations "
             "WHERE created_at >= ? AND model_used IS NOT NULL "
             "      AND model_used <> 'stub' AND model_used <> '(skipped)'",
@@ -249,12 +251,31 @@ def _recent_ingest_costs(days: int = 7) -> dict:
     attempts: set = set()
     usd = 0.0
     for r in rows:
-        attempt_id, model, in_tok, out_tok = r
+        attempt_id = r["attempt_id"]
+        model = r["model_used"]
+        in_tok = r["in_tok"]
+        out_tok = r["out_tok"]
         attempts.add(attempt_id)
-        slot = by_model.setdefault(model, {"in": 0, "out": 0})
+        slot = by_model.setdefault(model, {
+            "in": 0, "out": 0, "cache_read": 0, "cache_write": 0,
+            "cache_unknown": 0,
+        })
         slot["in"] += in_tok
         slot["out"] += out_tok
-        usd += _mc.estimate_usd(model, in_tok, out_tok)
+        cache_read = r["cache_read"]
+        cache_write = r["cache_write"]
+        if cache_read is None or cache_write is None:
+            if in_tok:
+                slot["cache_unknown"] += 1
+            cache_read = cache_write = 0
+        else:
+            slot["cache_read"] += int(cache_read)
+            slot["cache_write"] += int(cache_write)
+        usd += _mc.estimate_usd(
+            model, in_tok, out_tok,
+            cache_read_tokens=int(cache_read),
+            cache_write_tokens=int(cache_write),
+        )
 
     total_in = sum(s["in"] for s in by_model.values())
     total_out = sum(s["out"] for s in by_model.values())
@@ -265,6 +286,9 @@ def _recent_ingest_costs(days: int = 7) -> dict:
         "total_output": total_out,
         "by_model": by_model,
         "estimated_usd": usd,
+        "cache_read": sum(s["cache_read"] for s in by_model.values()),
+        "cache_write": sum(s["cache_write"] for s in by_model.values()),
+        "cache_unknown": sum(s["cache_unknown"] for s in by_model.values()),
         "pricing_as_of": _mc.pricing_as_of(),
         # Cloud models absent from the table price at $0.00, which is
         # indistinguishable from a local model unless we say so.
@@ -693,10 +717,17 @@ def main(argv: list[str]) -> int:
         print(f"Ingest cost (last {costs['days']} days):")
         print(f"  attempts:           {n_a}")
         print(f"  total tokens:       {in_k:,.0f}K input + {out_k:,.0f}K output")
+        if costs["cache_read"] or costs["cache_write"]:
+            print(f"  prompt cache:       {costs['cache_read']/1000:,.0f}K read + "
+                  f"{costs['cache_write']/1000:,.0f}K written "
+                  f"(included in input)")
         print(f"  mean per attempt:   {per_paper:,.0f}K tokens")
+        qualifier = (
+            f"; {costs['cache_unknown']} legacy call(s) lack cache detail"
+            if costs["cache_unknown"] else ""
+        )
         print(f"  estimated cost:     ${costs['estimated_usd']:.2f}  "
-              f"(rates as of {costs.get('pricing_as_of') or 'unknown'}; "
-              f"upper bound — ignores prompt-cache hits)")
+              f"(rates as of {costs.get('pricing_as_of') or 'unknown'}{qualifier})")
         if costs.get("unpriced_models"):
             # Local models are legitimately $0.00. A *cloud* model missing from
             # the table is a silently understated bill, so name it.
