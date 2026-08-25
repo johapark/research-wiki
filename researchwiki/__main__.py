@@ -13,44 +13,63 @@ import argparse
 import importlib
 import os
 import pkgutil
-import re
 import sys
 import traceback
 from pathlib import Path
 
 from . import __version__, tasks as _tasks
+from .env_profiles import (
+    ACTIVE_ENV_FILE_VAR,
+    clear_loader_metadata,
+    load_profile,
+)
 from .errors import EnvironmentFailure
 
 
-_ENV_REFERENCE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
+_ACTIVE_ENV_FILE_VAR = ACTIVE_ENV_FILE_VAR
 
 
-def _load_dotenv() -> None:
-    """Load .env from the wiki root into os.environ (explicit vars take precedence).
+def _load_dotenv(env_file: str | Path | None = None) -> None:
+    """Load an env file into ``os.environ``.
 
-    Accept the common ``export NAME=value`` form as well as ``NAME=value``.
-    A value that consists solely of ``$NAME`` or ``${NAME}`` reuses an already
-    exported variable without copying its secret into the repository.
+    With no argument, the historical ``<wiki root>/.env`` is optional.  An
+    explicit path comes from ``--env-file`` and is therefore required: a typo
+    must not silently fall back to the root ``.env`` and select a different LLM
+    backend.  Already-exported process variables keep precedence in both cases.
+
+    ``export KEY=value`` is accepted as well as dotenv's plain ``KEY=value`` so
+    the same profile can still be sourced by a shell when desired.
     """
-    env_file = Path.cwd() / ".env"
-    if not env_file.exists():
-        return
-    for raw in env_file.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        key = key.strip()
-        if key.startswith("export "):
-            key = key.removeprefix("export ").strip()
-        val = val.strip().strip('"').strip("'")
-        reference = _ENV_REFERENCE.fullmatch(val)
-        if reference:
-            source = reference.group(1) or reference.group(2)
-            if source not in os.environ:
-                continue
-            val = os.environ[source]
-        os.environ.setdefault(key, val)
+    explicit = env_file is not None
+    path = Path(env_file).expanduser() if explicit else Path.cwd() / ".env"
+    if explicit and not path.is_absolute():
+        path = Path.cwd() / path
+    # The shared loader validates the complete file before setting any key,
+    # records only values it actually inserted (not equal-valued shell vars),
+    # and treats a present default `.env` as strictly as a named profile.
+    load_profile(path, required=explicit)
+
+
+def _extract_env_file(argv: list[str]) -> tuple[str | None, list[str]]:
+    """Remove the leading global ``--env-file`` option from argv.
+
+    Task arguments are deliberately left untouched: global options belong
+    before the command, matching argparse's normal subcommand convention.
+    """
+    if not argv or not argv[0].startswith("--env-file"):
+        return None, argv
+    first = argv[0]
+    if first == "--env-file":
+        if len(argv) < 2 or not argv[1] or argv[1].startswith("--"):
+            raise ValueError("--env-file requires a path")
+        return argv[1], argv[2:]
+    prefix = "--env-file="
+    if first.startswith(prefix):
+        value = first[len(prefix):]
+        if not value:
+            raise ValueError("--env-file requires a path")
+        return value, argv[1:]
+    return None, argv
 
 
 def _discover_tasks() -> dict[str, str]:
@@ -113,6 +132,11 @@ def _build_parser(tasks: dict[str, str]) -> argparse.ArgumentParser:
                     "claim-graded against source PDFs, refines synthesis pages "
                     "as related work arrives. See CLAUDE.md for the full workflow.",
     )
+    parser.add_argument(
+        "--env-file",
+        metavar="PATH",
+        help="load PATH instead of the optional root .env (place before COMMAND)",
+    )
     parser.add_argument("--version", action="version", version=f"researchwiki {__version__}")
     subs = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     for cli_name, module_name in tasks.items():
@@ -145,8 +169,18 @@ def main(argv: list[str] | None = None) -> int:
     errors and swallows the traceback. Raise a typed failure at the boundary
     that touched the DB / index / provider instead.
     """
-    _load_dotenv()
     argv = list(sys.argv[1:] if argv is None else argv)
+    try:
+        env_file, argv = _extract_env_file(argv)
+    except ValueError as e:
+        print(f"researchwiki: {e}", file=sys.stderr)
+        return 1
+    clear_loader_metadata()
+    try:
+        _load_dotenv(env_file)
+    except EnvironmentFailure as e:
+        print(f"researchwiki: {e}", file=sys.stderr)
+        return 2
     tasks = _discover_tasks()
     if not argv:
         _build_parser(tasks).print_help(sys.stderr)
@@ -160,7 +194,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if command not in tasks:
         print(f"researchwiki: unknown command '{command}'. "
-              f"Available: {', '.join(tasks)}", file=sys.stderr)
+              f"Available: {', '.join(_entry_point_names(tasks))}", file=sys.stderr)
+        return 1
+    try:
+        module = importlib.import_module(f"researchwiki.tasks.{tasks[command]}")
+    except ImportError as e:
+        # A task module that won't import means a missing dependency or a
+        # broken install, not a bad command line.
+        print(f"researchwiki {command}: cannot load task module — {e}",
+              file=sys.stderr)
+        return 2
+    if not _is_entry_point(module):
+        # Do this before the wiki-root guard: naming a library module is a bad
+        # command line in every cwd, not an environment failure outside a wiki.
+        print(f"researchwiki: unknown command '{command}'. "
+              f"Available: {', '.join(_entry_point_names(tasks))}", file=sys.stderr)
         return 1
     # Paths resolve relative to cwd (paths.wiki_root), so running from any
     # other directory used to silently operate on a phantom empty repo —
@@ -173,21 +221,6 @@ def main(argv: list[str] | None = None) -> int:
               f"run from the wiki root (or `researchwiki init` to create one here).",
               file=sys.stderr)
         return 2
-    try:
-        module = importlib.import_module(f"researchwiki.tasks.{tasks[command]}")
-    except ImportError as e:
-        # A task module that won't import means a missing dependency or a
-        # broken install, not a bad command line.
-        print(f"researchwiki {command}: cannot load task module — {e}",
-              file=sys.stderr)
-        return 2
-    if not _is_entry_point(module):
-        # Reachable because `_discover_tasks` names modules without importing
-        # them. A library module under tasks/ is not a command, so this is a bad
-        # command line (1), not an internal bug (3).
-        print(f"researchwiki: unknown command '{command}'. "
-              f"Available: {', '.join(_entry_point_names(tasks))}", file=sys.stderr)
-        return 1
     try:
         return int(module.main(argv[1:]) or 0)
     except SystemExit as e:

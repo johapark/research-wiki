@@ -26,7 +26,21 @@ import pytest
 @pytest.fixture(autouse=True)
 def _no_dotenv_leak(monkeypatch):
     from researchwiki import __main__ as cli
-    monkeypatch.setattr(cli, "_load_dotenv", lambda: None)
+    monkeypatch.setattr(cli, "_load_dotenv", lambda *_args, **_kwargs: None)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_provider_environment(monkeypatch):
+    """Provider tests opt in explicitly; developer shell credentials never leak."""
+    for key in (
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "RW_MODELS_CONFIG",
+        "RW_LLM_PROVIDER",
+        "RW_LLM_BASE_URL",
+        "ANTHROPIC_BASE_URL",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
 
 @pytest.fixture(autouse=True)

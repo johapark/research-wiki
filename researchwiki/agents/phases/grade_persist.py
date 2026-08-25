@@ -19,7 +19,6 @@ yet another phase wrapper threading state.
 
 from __future__ import annotations
 
-import json
 import time
 from typing import TYPE_CHECKING
 
@@ -82,7 +81,7 @@ def persist_grades(ctx: "Context", conn) -> dict:
         role="grade_persist",
         decision="persisted" if report.n_graded else "no_gradable_claims",
         decision_reason=f"{summary}; elapsed={elapsed_ms}ms",
-        grader_scores=json.dumps({
+        grader_scores={
             "n_claims": report.n_claims,
             "n_graded": report.n_graded,
             "mean_top1": report.mean_top1,
@@ -90,7 +89,7 @@ def persist_grades(ctx: "Context", conn) -> dict:
             "semantic_score": report.semantic_score,
             "n_negation_mismatches": report.n_negation_mismatches,
             "n_with_numeric_drift": report.n_with_numeric_drift,
-        }),
+        },
         model_used="(local)",
         duration_ms=elapsed_ms,
         conn=conn,

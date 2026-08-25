@@ -1,13 +1,12 @@
 """Model-config loader, role/phase resolution, and the reasoning_effort plumb.
 
 Covers `researchwiki/agents/model_config.py`:
-  - Fallback path when YAML missing or malformed.
+  - Fallback only when the implicit YAML is missing.
   - YAML loading of role + phase entries (incl. reasoning_effort).
   - Per-phase override semantics, including explicit `null` to clear an
     inherited reasoning_effort (the short_name-on-thinking-role case).
   - `RW_LLM_PROVIDER` env override applied last.
-  - Failure modes: unknown phase, phase pointing at unknown role, role
-    missing `model:`, role with malformed numeric value.
+  - Failure modes: unknown phase and every present-file schema error.
 
 Hermetic — no network, no LLM calls. Each test patches `wiki_root` to a
 tmp_path so the live `config/models.yaml` doesn't bleed in, and clears
@@ -28,24 +27,19 @@ from researchwiki.agents import model_config
 @pytest.fixture(autouse=True)
 def reset_cache_and_env(monkeypatch):
     """Clear lru_cache, env-var overrides, and one-shot warning flag."""
-    model_config._config.cache_clear()
-    model_config._ingest_settings.cache_clear()
-    model_config.base_url.cache_clear()
-    model_config._env_override_warned = False
-    model_config._env_model_mismatch_warned = False
-    model_config._missing_base_url_warned = False
+    model_config.clear_caches()
     monkeypatch.delenv("RW_LLM_PROVIDER", raising=False)
     # A developer with either of these exported would otherwise silence the
     # base-URL warning and skew every config-selection test.
     monkeypatch.delenv("RW_LLM_BASE_URL", raising=False)
     monkeypatch.delenv("RW_MODELS_CONFIG", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    # Most tests exercise role/phase parsing rather than endpoint selection.
+    # Supply an endpoint so partial OpenAI-compatible fixtures remain valid;
+    # endpoint-boundary tests below explicitly remove this override.
+    monkeypatch.setenv("RW_LLM_BASE_URL", "https://unit-test.invalid/v1")
     yield
-    model_config._config.cache_clear()
-    model_config._ingest_settings.cache_clear()
-    model_config.base_url.cache_clear()
-    model_config._env_override_warned = False
-    model_config._env_model_mismatch_warned = False
-    model_config._missing_base_url_warned = False
+    model_config.clear_caches()
 
 
 def _write_yaml(tmp_path: Path, contents: str) -> Path:
@@ -56,9 +50,7 @@ def _write_yaml(tmp_path: Path, contents: str) -> Path:
 
 def _use_yaml(monkeypatch, root: Path) -> None:
     monkeypatch.setattr(model_config, "wiki_root", lambda: root)
-    model_config._config.cache_clear()
-    model_config._ingest_settings.cache_clear()
-    model_config.base_url.cache_clear()
+    model_config.clear_caches()
 
 
 # ---------- fallback (no YAML) ----------
@@ -327,12 +319,12 @@ roles:
 
 def test_ingest_n_drafts_missing_file_is_none(tmp_path, monkeypatch):
     monkeypatch.setattr(model_config, "wiki_root", lambda: tmp_path)
-    model_config._ingest_settings.cache_clear()
+    model_config.clear_caches()
     assert model_config.default_n_drafts() is None
 
 
-def test_ingest_n_drafts_below_one_treated_as_unset(tmp_path, monkeypatch):
-    """A tournament needs >= 1 draft; 0 / negative fall back to None."""
+def test_ingest_n_drafts_below_one_fails_closed(tmp_path, monkeypatch):
+    """A present invalid tournament setting cannot silently use a default."""
     root = _write_yaml(tmp_path, """
 ingest:
   n_drafts: 0
@@ -340,10 +332,11 @@ roles:
   author: {provider: openai-compatible, model: m, temperature: 0.5, max_tokens: 100}
 """)
     _use_yaml(monkeypatch, root)
-    assert model_config.default_n_drafts() is None
+    with pytest.raises(model_config.ModelConfigUnavailable, match="positive integer"):
+        model_config.default_n_drafts()
 
 
-def test_ingest_n_drafts_non_int_is_none(tmp_path, monkeypatch):
+def test_ingest_n_drafts_non_int_fails_closed(tmp_path, monkeypatch):
     root = _write_yaml(tmp_path, """
 ingest:
   n_drafts: "lots"
@@ -351,7 +344,8 @@ roles:
   author: {provider: openai-compatible, model: m, temperature: 0.5, max_tokens: 100}
 """)
     _use_yaml(monkeypatch, root)
-    assert model_config.default_n_drafts() is None
+    with pytest.raises(model_config.ModelConfigUnavailable, match="positive integer"):
+        model_config.default_n_drafts()
 
 
 # ---------- ingest.target_claims_max_chars ----------
@@ -376,7 +370,7 @@ roles:
     assert model_config.target_claims_max_chars() == model_config._DEFAULT_TARGET_CLAIMS_MAX_CHARS
 
 
-def test_target_claims_max_chars_invalid_falls_back(tmp_path, monkeypatch):
+def test_target_claims_max_chars_invalid_fails_closed(tmp_path, monkeypatch):
     root = _write_yaml(tmp_path, """
 ingest:
   target_claims_max_chars: 0
@@ -384,7 +378,8 @@ roles:
   author: {provider: openai-compatible, model: m, temperature: 0.5, max_tokens: 100}
 """)
     _use_yaml(monkeypatch, root)
-    assert model_config.target_claims_max_chars() == model_config._DEFAULT_TARGET_CLAIMS_MAX_CHARS
+    with pytest.raises(model_config.ModelConfigUnavailable, match="positive integer"):
+        model_config.target_claims_max_chars()
 
 
 # ---------- base_url (folded-in endpoint) ----------
@@ -412,7 +407,7 @@ def test_base_url_missing_file_is_fallback(tmp_path, monkeypatch):
     """No config file → the OpenAI endpoint paired with the openai-compatible
     fallback roles, so a fresh checkout reaches OpenAI (not localhost)."""
     monkeypatch.setattr(model_config, "wiki_root", lambda: tmp_path)
-    model_config.base_url.cache_clear()
+    model_config.clear_caches()
     assert model_config.base_url() == model_config._FALLBACK_BASE_URL
 
 
@@ -529,15 +524,15 @@ def test_unknown_phase_raises_keyerror(tmp_path, monkeypatch):
         model_config.for_phase("does_not_exist")
 
 
-def test_phase_pointing_at_unknown_role_raises_keyerror(tmp_path, monkeypatch):
-    """A phase whose role isn't in YAML *or* fallbacks raises clearly."""
+def test_phase_pointing_at_unknown_role_fails_schema_validation(tmp_path, monkeypatch):
+    """A present document with an impossible binding fails before routing."""
     root = _write_yaml(tmp_path, """
 roles: {}
 phases:
   newphase: {role: not_a_real_role}
 """)
     _use_yaml(monkeypatch, root)
-    with pytest.raises(KeyError):
+    with pytest.raises(model_config.ModelConfigUnavailable, match="unknown role"):
         model_config.for_phase("newphase")
 
 
@@ -547,8 +542,8 @@ def test_unknown_role_via_for_role_raises_keyerror(tmp_path, monkeypatch):
         model_config.for_role("not_a_real_role")
 
 
-def test_role_missing_model_field_silently_skipped(tmp_path, monkeypatch):
-    """Role without `model:` is dropped silently; fallback fills the gap."""
+def test_role_missing_model_field_fails_closed(tmp_path, monkeypatch):
+    """A broken role cannot be silently replaced by a different model."""
     root = _write_yaml(tmp_path, """
 roles:
   author:
@@ -558,18 +553,12 @@ phases:
   author: {role: author}
 """)
     _use_yaml(monkeypatch, root)
-    cfg = model_config.for_phase("author")
-    # YAML's broken `author` was skipped; fallback's `author` won.
-    assert cfg.provider == "openai-compatible"
-    assert cfg.model == "gpt-5.6-luna"
+    with pytest.raises(model_config.ModelConfigUnavailable, match="missing required field"):
+        model_config.for_phase("author")
 
 
-def test_role_with_bad_numeric_value_skipped_with_stderr(tmp_path, monkeypatch, capsys):
-    """A non-numeric temperature triggers a stderr log and skips the role.
-
-    Loader is intentionally lenient: a typo in one role shouldn't take
-    down the whole config — fallbacks fill in.
-    """
+def test_role_with_bad_numeric_value_fails_closed(tmp_path, monkeypatch):
+    """A typo cannot silently route the role through its fallback model."""
     root = _write_yaml(tmp_path, """
 roles:
   author:
@@ -580,18 +569,16 @@ phases:
   author: {role: author}
 """)
     _use_yaml(monkeypatch, root)
-    cfg = model_config.for_phase("author")
-    assert cfg.provider == "openai-compatible"  # fallback won
-    assert "bad role" in capsys.readouterr().err
+    with pytest.raises(model_config.ModelConfigUnavailable, match="finite number"):
+        model_config.for_phase("author")
 
 
-def test_malformed_yaml_falls_back_silently(tmp_path, monkeypatch, capsys):
-    """An unparseable YAML body logs to stderr and falls back."""
+def test_malformed_implicit_yaml_fails_closed(tmp_path, monkeypatch):
+    """Only absence, never malformed content, enables zero-config fallback."""
     root = _write_yaml(tmp_path, "::: not yaml :::\n  - [unbalanced")
     _use_yaml(monkeypatch, root)
-    cfg = model_config.for_phase("author")
-    assert cfg.provider == "openai-compatible"
-    assert "could not parse" in capsys.readouterr().err
+    with pytest.raises(model_config.ModelConfigUnavailable, match="cannot be parsed"):
+        model_config.for_phase("author")
 
 
 # ---------- introspection ----------
@@ -634,6 +621,42 @@ roles:
     assert cfg.temperature == 0.4
     assert cfg.max_tokens == 3000
     assert cfg.reasoning_effort == "medium"
+
+
+def test_role_provider_id_is_canonicalized(tmp_path, monkeypatch):
+    root = _write_yaml(tmp_path, """
+roles:
+  author: {provider: " OpenAI-Compatible ", model: test-model}
+phases:
+  author: {role: author}
+""")
+    _use_yaml(monkeypatch, root)
+    assert model_config.for_role("author").provider == "openai-compatible"
+    assert model_config.for_phase("author").provider == "openai-compatible"
+
+
+def test_phase_provider_id_is_canonicalized(tmp_path, monkeypatch):
+    root = _write_yaml(tmp_path, """
+roles:
+  author: {provider: anthropic, model: test-model}
+phases:
+  author: {role: author, provider: " LMSTUDIO "}
+""")
+    _use_yaml(monkeypatch, root)
+    assert model_config.for_role("author").provider == "anthropic"
+    assert model_config.for_phase("author").provider == "lmstudio"
+
+
+def test_canonical_yaml_chat_relay_is_detected(tmp_path, monkeypatch):
+    root = _write_yaml(tmp_path, """
+roles:
+  author: {provider: " Chat-Relay ", model: relay-label}
+phases:
+  author: {role: author}
+""")
+    _use_yaml(monkeypatch, root)
+    assert model_config.for_phase("author").provider == "chat-relay"
+    assert model_config.uses_chat_relay() is True
 
 
 # ---------- provider/model mismatch under RW_LLM_PROVIDER ----------
@@ -713,11 +736,6 @@ def test_model_mismatch_banner_fires_only_once(tmp_path, monkeypatch, capsys):
 
 
 # ---------- OpenAI-compatible roles with no base_url ----------
-#
-# base_url() returns None, and call_openai_compatible reads None as "use the
-# LM Studio default" — so a cloud config missing one key silently becomes a
-# localhost one. The asymmetry that hides it: a *missing* file falls back to
-# OpenAI, a *present* file with no base_url: falls back to localhost.
 
 _NO_BASE_URL_YAML = """
 roles:
@@ -727,15 +745,15 @@ phases:
 """
 
 
-def test_openai_roles_without_base_url_warn(tmp_path, monkeypatch, capsys):
+def test_openai_roles_without_base_url_fail_closed(tmp_path, monkeypatch):
+    monkeypatch.delenv("RW_LLM_BASE_URL")
     _use_yaml(monkeypatch, _write_yaml(tmp_path, _NO_BASE_URL_YAML))
-    model_config.for_phase("author")
-    err = capsys.readouterr().err
-    assert "no top-level `base_url:`" in err
-    assert "localhost:1234" in err
+    with pytest.raises(model_config.ModelConfigUnavailable, match="does not declare"):
+        model_config.for_phase("author")
 
 
 def test_base_url_present_does_not_warn(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("RW_LLM_BASE_URL")
     _use_yaml(monkeypatch, _write_yaml(tmp_path, _OPENAI_UNIFORM_YAML))
     model_config.for_phase("author")
     assert "base_url:" not in capsys.readouterr().err
@@ -759,37 +777,102 @@ def test_shipped_templates_without_base_url_do_not_warn(
     (without also adding base_url:) fails here rather than in someone's ingest."""
     src = Path(__file__).resolve().parent.parent / "config" / template
     root = _write_yaml(tmp_path, src.read_text(encoding="utf-8"))
+    monkeypatch.delenv("RW_LLM_BASE_URL")
     _use_yaml(monkeypatch, root)
     model_config.for_phase("author")
     assert "base_url:" not in capsys.readouterr().err
 
 
-def test_partial_config_inheriting_fallback_roles_warns(tmp_path, monkeypatch, capsys):
+def test_partial_config_inheriting_fallback_roles_fails_closed(tmp_path, monkeypatch):
     """A config that declares only some roles inherits the rest from
     `_FALLBACK_ROLES`, which are all OpenAI-compatible — so an anthropic-looking
-    partial config with no `base_url:` still sends five of six roles to
-    localhost. Warning correctly fires on the merged view, not the file's text."""
+    partial config with no `base_url:` would otherwise send five of six roles
+    elsewhere. Validation runs on the merged view, not just the file's text."""
     root = _write_yaml(tmp_path, """
 roles:
   author: {provider: anthropic, model: claude-sonnet-5}
 phases:
   author: {role: author}
 """)
+    monkeypatch.delenv("RW_LLM_BASE_URL")
     _use_yaml(monkeypatch, root)
-    model_config.for_phase("author")
-    assert "no top-level `base_url:`" in capsys.readouterr().err
+    with pytest.raises(model_config.ModelConfigUnavailable, match="does not declare"):
+        model_config.for_phase("author")
 
 
 def test_missing_config_file_does_not_warn(tmp_path, monkeypatch, capsys):
     """A fresh clone resolves to the fallback roles *and* _FALLBACK_BASE_URL,
     so there is no ambiguity to report."""
+    monkeypatch.delenv("RW_LLM_BASE_URL")
     monkeypatch.setattr(model_config, "wiki_root", lambda: tmp_path)
     model_config.for_phase("author")
     assert "base_url:" not in capsys.readouterr().err
 
 
-def test_base_url_banner_fires_only_once(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    "reader",
+    [
+        lambda: model_config.for_role("author"),
+        model_config.default_n_drafts,
+        model_config.base_url,
+    ],
+)
+def test_every_config_reader_rejects_ambiguous_endpoint(
+    tmp_path, monkeypatch, reader,
+):
+    monkeypatch.delenv("RW_LLM_BASE_URL")
     _use_yaml(monkeypatch, _write_yaml(tmp_path, _NO_BASE_URL_YAML))
-    for _ in range(5):
+    with pytest.raises(model_config.ModelConfigUnavailable, match="does not declare"):
+        reader()
+
+
+def test_phase_provider_override_needs_endpoint(tmp_path, monkeypatch):
+    """A phase can switch transport even when every declared role is Anthropic."""
+    monkeypatch.delenv("RW_LLM_BASE_URL")
+    roles = "\n".join(
+        f"  {name}: {{provider: anthropic, model: claude-test}}"
+        for name in ("author", "critic", "judge", "classifier", "proposer", "extractor")
+    )
+    root = _write_yaml(tmp_path, f"""
+roles:
+{roles}
+phases:
+  author: {{role: author, provider: openai-compatible}}
+""")
+    _use_yaml(monkeypatch, root)
+    with pytest.raises(model_config.ModelConfigUnavailable, match="phase 'author'"):
         model_config.for_phase("author")
-    assert capsys.readouterr().err.count("no top-level `base_url:`") == 1
+
+
+def test_forced_anthropic_provider_removes_endpoint_requirement(tmp_path, monkeypatch):
+    monkeypatch.delenv("RW_LLM_BASE_URL")
+    monkeypatch.setenv("RW_LLM_PROVIDER", "anthropic")
+    _use_yaml(monkeypatch, _write_yaml(tmp_path, _NO_BASE_URL_YAML))
+    assert model_config.for_phase("author").provider == "anthropic"
+    assert model_config.for_role("author").provider == "anthropic"
+    assert model_config.base_url() is None
+
+
+def test_provider_override_uses_one_normalized_value(tmp_path, monkeypatch):
+    monkeypatch.delenv("RW_LLM_BASE_URL")
+    monkeypatch.setenv("RW_LLM_PROVIDER", "  AnThRoPiC  ")
+    _use_yaml(monkeypatch, _write_yaml(tmp_path, _NO_BASE_URL_YAML))
+    assert model_config.for_phase("author").provider == "anthropic"
+    assert model_config.for_role("author").provider == "anthropic"
+    assert model_config.base_url() is None
+
+
+def test_forced_openai_provider_adds_endpoint_requirement(tmp_path, monkeypatch):
+    monkeypatch.delenv("RW_LLM_BASE_URL")
+    monkeypatch.setenv("RW_LLM_PROVIDER", "openai-compatible")
+    src = Path(__file__).resolve().parent.parent / "config" / "models.anthropic.yaml"
+    _use_yaml(monkeypatch, _write_yaml(tmp_path, src.read_text(encoding="utf-8")))
+    with pytest.raises(model_config.ModelConfigUnavailable, match="does not declare"):
+        model_config.for_phase("author")
+
+
+def test_whitespace_env_endpoint_does_not_bypass_requirement(tmp_path, monkeypatch):
+    monkeypatch.setenv("RW_LLM_BASE_URL", "   ")
+    _use_yaml(monkeypatch, _write_yaml(tmp_path, _NO_BASE_URL_YAML))
+    with pytest.raises(model_config.ModelConfigUnavailable, match="RW_LLM_BASE_URL"):
+        model_config.for_phase("author")

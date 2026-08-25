@@ -21,15 +21,39 @@ to skip or reconfigure each.
 
 from __future__ import annotations
 
+import json
 import os
 import re
-import shutil
+import subprocess
 import sys
+import unicodedata
+import urllib.parse
 from pathlib import Path
 
+from ..agents import model_config
 from ..categories import PAGE_TYPE_DIRS, content_categories
+from ..env_profiles import (
+    ACTIVE_ENV_FILE_VAR,
+    commit_profile_and_config,
+    credential_keys,
+    credential_keys_in_text,
+    edit_profile_text,
+    effective_assignment_value,
+    parse_assignment,
+    snapshot_profile,
+    write_profile_atomic,
+)
+from ..errors import EnvironmentFailure
 from ..fsatomic import write_text_atomic
+from ..package_resources import model_template_text
 from ..paths import ensure_scaffold, inbox_dir, wiki_dir, wiki_root
+from ._provider_setup import (
+    choose_endpoint_api_key as _choose_endpoint_api_key,
+    provider_config_target as _provider_config_target,
+    profile_controls_env_key as _profile_controls_env_key,
+    same_endpoint as _same_endpoint,
+    stale_routing_keys as _stale_routing_keys,
+)
 
 # ── Provider wiring ──────────────────────────────────────────────────────────
 
@@ -70,6 +94,8 @@ _TEMPLATE_BY_PROVIDER: dict[str, str | None] = {
 
 _LOCAL_DEFAULT_BASE_URL = "http://localhost:1234/v1"
 _OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+_ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com"
+_ACTIVE_ENV_FILE_VAR = ACTIVE_ENV_FILE_VAR
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -158,14 +184,35 @@ def _env_updates_for_provider(
     elif provider == "openai-compatible":
         if api_key:
             u["OPENAI_API_KEY"] = api_key
-        if base_url:
-            u["RW_LLM_BASE_URL"] = base_url
+        # The wizard writes this endpoint into the active models config. Keeping a
+        # second global override in .env would unexpectedly defeat the next
+        # named config the user selects.
     elif provider == "local":
         if base_url:
             u["RW_LLM_BASE_URL"] = base_url
     elif provider == "chat-relay":
         u["RW_LLM_PROVIDER"] = "chat-relay"
     return u
+
+
+def _dotenv_assignment(raw: str) -> tuple[str, str, bool] | None:
+    """Parse one simple dotenv assignment as ``(key, value, exported)``.
+
+    This deliberately mirrors ``__main__._load_dotenv`` rather than growing a
+    second, more permissive dotenv dialect in the setup writer.
+    """
+    try:
+        assignment = parse_assignment(raw, path=Path("<env>"), line_no=1)
+    except EnvironmentFailure:
+        return None
+    if assignment is None:
+        return None
+    return assignment.key, assignment.value, assignment.exported
+
+
+def _dotenv_value(path: Path, wanted: str) -> str | None:
+    """The effective value for ``wanted`` using the current ambient environment."""
+    return effective_assignment_value(snapshot_profile(path), wanted)
 
 
 def _upsert_env(path: Path, updates: dict[str, str]) -> None:
@@ -175,24 +222,204 @@ def _upsert_env(path: Path, updates: dict[str, str]) -> None:
     updates."""
     if not updates:
         return
-    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-    remaining = dict(updates)
-    out: list[str] = []
-    for raw in lines:
-        stripped = raw.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            key = stripped.split("=", 1)[0].strip()
-            if key in remaining:
-                out.append(f'{key}="{remaining.pop(key)}"')
-                continue
-        out.append(raw)
-    for key, val in remaining.items():
-        out.append(f'{key}="{val}"')
-    write_text_atomic(path, "\n".join(out).rstrip("\n") + "\n")
+    snapshot = snapshot_profile(path)
+    text, _removed = edit_profile_text(snapshot, updates=updates)
+    write_profile_atomic(path, text)
+
+
+def _remove_env_keys(path: Path, keys: set[str]) -> set[str]:
+    """Remove routing keys from a dotenv file without exposing their values."""
+    if not keys:
+        return set()
+    snapshot = snapshot_profile(path)
+    text, removed = edit_profile_text(snapshot, removals=keys)
+    if removed:
+        write_profile_atomic(path, text)
+    return removed
+
+
+def _active_env_path(root: Path) -> Path:
+    """The explicit profile loaded by the CLI, else the root ``.env``."""
+    selected = os.environ.get(_ACTIVE_ENV_FILE_VAR)
+    return Path(selected) if selected else root / ".env"
+
+
+def _external_routing_keys(env_path: Path) -> set[str]:
+    """Routing overrides that came from outside the selected dotenv profile."""
+    routing = {
+        "RW_MODELS_CONFIG", "RW_LLM_PROVIDER", "RW_LLM_BASE_URL",
+        "ANTHROPIC_BASE_URL",
+    }
+    return {
+        key for key in routing
+        if key in os.environ and not _profile_controls_env_key(env_path, key)
+    }
+
+
+def _valid_provider_base_url(value: str) -> bool:
+    """True for a safe request-compatible HTTP(S) base endpoint.
+
+    Transport trust is the user's decision: remote HTTP is useful for trusted
+    LAN services such as LiteLLM. URL credentials and ambiguous URL components
+    remain forbidden.
+    """
     try:
-        path.chmod(0o600)
-    except OSError:
-        pass
+        parsed = urllib.parse.urlsplit(value)
+        # Accessing `.port` performs the range/type validation that urlsplit
+        # itself defers (``:bad`` and ``:99999`` otherwise look valid).
+        port = parsed.port
+    except ValueError:
+        return False
+    structurally_valid = (
+        value == value.strip()
+        and not any(
+            char.isspace() or unicodedata.category(char).startswith("C")
+            for char in value
+        )
+        and parsed.scheme in {"http", "https"}
+        and bool(parsed.hostname)
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.netloc.endswith(":")
+        and (port is None or port > 0)
+        and not parsed.query
+        and not parsed.fragment
+    )
+    return structurally_valid
+
+
+def _effective_openai_base_url() -> str | None:
+    """Best-effort endpoint before the wizard changes any routing state."""
+    if os.environ.get("RW_LLM_BASE_URL"):
+        return os.environ["RW_LLM_BASE_URL"]
+    try:
+        return model_config.base_url()
+    except Exception:
+        # An unavailable explicit config is precisely something `init` should
+        # be able to repair, so do not block the wizard while describing it.
+        return None
+
+
+def _effective_anthropic_base_url() -> str:
+    """SDK endpoint before the wizard changes Anthropic routing state."""
+    return os.environ.get("ANTHROPIC_BASE_URL") or _ANTHROPIC_DEFAULT_BASE_URL
+
+
+def _effective_provider(models_yaml: Path) -> tuple[str, str] | None:
+    """Provider and source that currently win after environment precedence."""
+    forced = (os.environ.get("RW_LLM_PROVIDER") or "").strip()
+    if forced:
+        return forced, "RW_LLM_PROVIDER"
+
+    if "RW_MODELS_CONFIG" in os.environ:
+        selected = (os.environ.get("RW_MODELS_CONFIG") or "").strip()
+        if not selected:
+            return "unavailable", "RW_MODELS_CONFIG=''"
+        try:
+            selected_path = model_config.config_path()
+        except Exception:
+            selected_path = models_yaml.parent / selected
+        provider = _current_provider(selected_path)
+        return provider or "unavailable", f"RW_MODELS_CONFIG={selected!r}"
+
+    provider = _current_provider(models_yaml)
+    if provider:
+        return provider, "config/models.yaml"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai", "built-in defaults"
+    return None
+
+
+def _choose_openai_api_key(
+    env_path: Path,
+    *,
+    previous_endpoint: str | None,
+    selected_endpoint: str,
+    prompt: str,
+) -> tuple[bool, str | None]:
+    """Choose whether/how to use ``OPENAI_API_KEY`` at a selected endpoint.
+
+    Returns ``(proceed, replacement)``. ``replacement=None`` means retain the
+    existing value (or leave the key unset); a false ``proceed`` leaves both
+    config and env files untouched.
+    """
+    return _choose_endpoint_api_key(
+        env_path,
+        env_key="OPENAI_API_KEY",
+        previous_endpoint=previous_endpoint,
+        selected_endpoint=selected_endpoint,
+        prompt=prompt,
+        ask=_ask,
+        confirm=_confirm,
+    )
+
+
+def _choose_anthropic_api_key(
+    env_path: Path,
+    *,
+    previous_endpoint: str | None,
+    prompt: str,
+) -> tuple[bool, str | None]:
+    """Move an Anthropic credential to the official endpoint only by consent."""
+    return _choose_endpoint_api_key(
+        env_path,
+        env_key="ANTHROPIC_API_KEY",
+        previous_endpoint=previous_endpoint,
+        selected_endpoint=_ANTHROPIC_DEFAULT_BASE_URL,
+        prompt=prompt,
+        ask=_ask,
+        confirm=_confirm,
+    )
+
+
+def _prepare_local_api_key(
+    env_path: Path,
+    *,
+    previous_endpoint: str | None,
+    selected_endpoint: str,
+) -> tuple[bool, bool]:
+    """Decide whether a pre-existing OpenAI key may reach a local endpoint.
+
+    The OpenAI-compatible transport forwards ``OPENAI_API_KEY`` as a Bearer
+    token even to loopback servers.  A cloud credential must therefore never
+    follow an endpoint change merely because it happens to be present in the
+    process.  The second return value asks the caller to remove a profile-owned
+    key only after the new models config has been accepted.
+    """
+    existing = os.environ.get("OPENAI_API_KEY")
+    if not existing or _same_endpoint(previous_endpoint, selected_endpoint):
+        return True, False
+
+    if _confirm(
+        "The endpoint changed. Reuse the currently set OPENAI_API_KEY at this "
+        "local endpoint? It will be sent as a Bearer token", default=False
+    ):
+        shadowed = _dotenv_value(env_path, "OPENAI_API_KEY")
+        if shadowed is not None and shadowed != existing:
+            print(
+                "… Provider setup cancelled — the selected profile contains a "
+                "different OPENAI_API_KEY shadowed by the parent shell. Unset the "
+                "shell key and rerun init before changing endpoints."
+            )
+            return False, False
+        print("Reusing OPENAI_API_KEY at the newly selected local endpoint.")
+        return True, False
+
+    if not _profile_controls_env_key(env_path, "OPENAI_API_KEY"):
+        print(
+            "… Provider setup cancelled — OPENAI_API_KEY comes from the parent "
+            "shell (or another higher-precedence source), so this wizard cannot "
+            "stop it reaching the local endpoint. Unset it there, then rerun init."
+        )
+        return False, False
+
+    if not _confirm(
+        f"Remove OPENAI_API_KEY from {env_path.name} for the local endpoint?",
+        default=True,
+    ):
+        print("… Provider setup cancelled — the existing routing was left unchanged.")
+        return False, False
+    return True, True
 
 
 def _valid_slug(s: str) -> bool:
@@ -262,64 +489,293 @@ def _current_provider(models_yaml: Path) -> str | None:
     return None
 
 
+def _customize_openai_compatible_text(
+    template_text: str,
+    *,
+    base_url: str,
+    quality_model: str,
+    utility_model: str,
+) -> str:
+    """Return a validated generic template customized for one real provider.
+
+    The checked-in template is a documented Gemini example. Copying it while
+    changing only the endpoint creates invalid pairs such as Groq + Gemini
+    model IDs, so the wizard must rewrite both halves of the routing decision.
+    Comments and per-role budgets stay intact; JSON strings are valid YAML
+    scalars and safely preserve model IDs containing punctuation. Validation is
+    deliberately in-memory so template drift cannot destroy an active config.
+    """
+    lines = template_text.splitlines()
+    out: list[str] = []
+    in_roles = False
+    current_role: str | None = None
+    replaced_url = False
+    replaced_roles: set[str] = set()
+    quality_roles = {"author", "critic", "judge"}
+    expected_roles = quality_roles | {"classifier", "proposer", "extractor"}
+
+    for raw in lines:
+        stripped = raw.strip()
+        if raw.startswith("base_url:"):
+            out.append(f"base_url: {json.dumps(base_url)}")
+            replaced_url = True
+            continue
+        if raw == "roles:":
+            in_roles = True
+            current_role = None
+            out.append(raw)
+            continue
+        if raw == "phases:":
+            in_roles = False
+            current_role = None
+            out.append(raw)
+            continue
+        if in_roles:
+            role_match = re.fullmatch(r"  ([a-z][a-z0-9_-]*):", raw)
+            if role_match:
+                current_role = role_match.group(1)
+            elif current_role and raw.startswith("    model:"):
+                model = quality_model if current_role in quality_roles else utility_model
+                out.append(f"    model: {json.dumps(model)}")
+                replaced_roles.add(current_role)
+                continue
+        out.append(raw)
+
+    if not replaced_url or not expected_roles.issubset(replaced_roles):
+        raise RuntimeError(
+            "models.openai-compatible.yaml is missing its base_url or expected role model fields"
+        )
+    return "\n".join(out).rstrip("\n") + "\n"
+
+
+def _customize_openai_compatible_config(
+    models_yaml: Path,
+    *,
+    base_url: str,
+    quality_model: str,
+    utility_model: str,
+) -> None:
+    """Atomically customize an existing template path (test/maintenance API)."""
+    contents = _customize_openai_compatible_text(
+        models_yaml.read_text(encoding="utf-8"),
+        base_url=base_url,
+        quality_model=quality_model,
+        utility_model=utility_model,
+    )
+    write_text_atomic(models_yaml, contents)
+
+
 def _step_provider(root: Path) -> None:
     _header("Step 1 — LLM provider")
     config_dir = root / "config"
-    models_yaml = config_dir / "models.yaml"
+    default_models_yaml = config_dir / "models.yaml"
+    env_path = _active_env_path(root)
+    profile_before = snapshot_profile(env_path)
+    selected_models_yaml = (
+        model_config.config_path()
+        if _profile_controls_env_key(env_path, "RW_MODELS_CONFIG")
+        else None
+    )
+    active_models_yaml = selected_models_yaml or default_models_yaml
+    previous_base_url = _effective_openai_base_url()
+    previous_anthropic_base_url = _effective_anthropic_base_url()
 
-    current = _current_provider(models_yaml)
+    current = _effective_provider(active_models_yaml)
     if current:
-        print(f"config/models.yaml already routes to `{current}`.")
+        current_provider, source = current
+        print(f"Effective provider is `{current_provider}` via {source}.")
         if not _confirm("Reconfigure the provider?", default=False):
-            print("Keeping the current provider.")
+            if credential_keys(profile_before):
+                _warn_gitignore(root, env_path)
+            print("Keeping the effective provider routing.")
             return
-    elif os.environ.get("OPENAI_API_KEY"):
-        # No config file *is* the configured state for the default provider, so
-        # a re-run has to recognize it — otherwise the wizard re-asks a user who
-        # is already set up and reads as though nothing took.
-        print("No config/models.yaml — the built-in defaults route every role to "
-              "OpenAI, and OPENAI_API_KEY is set. You're already configured.")
-        if not _confirm("Reconfigure the provider?", default=False):
-            print("Keeping the built-in OpenAI defaults.")
-            return
+
+    external_routing = _external_routing_keys(env_path)
+    if external_routing:
+        print(
+            "… Provider setup cancelled — routing override(s) come from the "
+            "parent shell or another higher-precedence source: "
+            f"{', '.join(sorted(external_routing))}. Unset them there and rerun "
+            "init; changing only this child process would be undone by the next "
+            "researchwiki command."
+        )
+        return
 
     print("Which LLM provider will you use?")
     for i, (_pid, label, blurb) in enumerate(_PROVIDER_MENU, 1):
         print(f"  {i}. {label} — {blurb}")
     provider = _PROVIDER_MENU[_ask_choice(len(_PROVIDER_MENU))][0]
 
-    _write_models_config(config_dir, models_yaml, provider)
-
     # Collect + persist required env vars (skip any already set in the shell).
     api_key = base_url = None
+    quality_model = utility_model = None
+    remove_openai_key = False
+    anthropic_endpoint_changed = False
     if provider == "anthropic":
-        if os.environ.get("ANTHROPIC_API_KEY"):
-            print("ANTHROPIC_API_KEY already set in your shell — leaving it.")
-        else:
-            api_key = _ask("Anthropic API key (blank to set later)") or None
+        anthropic_endpoint_changed = not _same_endpoint(
+            previous_anthropic_base_url, _ANTHROPIC_DEFAULT_BASE_URL,
+        )
+        proceed, api_key = _choose_anthropic_api_key(
+            env_path,
+            previous_endpoint=previous_anthropic_base_url,
+            prompt="Anthropic API key (blank to set later)",
+        )
+        if not proceed:
+            return
     elif provider == "openai":
-        if os.environ.get("OPENAI_API_KEY"):
-            print("OPENAI_API_KEY already set in your shell — leaving it.")
-        else:
-            api_key = _ask("OpenAI API key (blank to set later)") or None
+        proceed, api_key = _choose_openai_api_key(
+            env_path,
+            previous_endpoint=previous_base_url,
+            selected_endpoint=_OPENAI_DEFAULT_BASE_URL,
+            prompt="OpenAI API key (blank to set later)",
+        )
+        if not proceed:
+            return
     elif provider == "openai-compatible":
-        if os.environ.get("OPENAI_API_KEY"):
-            print("OPENAI_API_KEY already set in your shell — leaving it.")
-        else:
-            api_key = _ask("Provider API key, forwarded as Bearer (blank to set later)") or None
-        base_url = _ask("Provider base URL", default=os.environ.get("RW_LLM_BASE_URL") or _OPENAI_DEFAULT_BASE_URL)
+        base_url = _ask(
+            "Provider base URL (required)",
+            default=previous_base_url,
+        ) or None
+        if not base_url or not _valid_provider_base_url(base_url):
+            print("… Provider setup cancelled — an absolute HTTP(S) base URL "
+                  "without credentials, query, or fragment is required; the existing "
+                  "routing was left unchanged.")
+            return
+        proceed, api_key = _choose_openai_api_key(
+            env_path,
+            previous_endpoint=previous_base_url,
+            selected_endpoint=base_url,
+            prompt="Provider API key, forwarded as Bearer (blank to set later)",
+        )
+        if not proceed:
+            return
+        quality_model = _ask(
+            "Exact model ID for author/critic/judge (required)"
+        ) or None
+        if quality_model:
+            utility_model = _ask(
+                "Exact model ID for classifier/proposer/extractor",
+                default=quality_model,
+            ) or quality_model
+        if not quality_model:
+            print("… Provider setup cancelled — model IDs are required; "
+                  "the existing routing was left unchanged.")
+            return
     elif provider == "local":
-        base_url = _ask("Local server base URL", default=os.environ.get("RW_LLM_BASE_URL") or _LOCAL_DEFAULT_BASE_URL)
+        local_default = (
+            previous_base_url
+            if current and current[0] in {"local", "lmstudio"}
+            and previous_base_url
+            and _valid_provider_base_url(previous_base_url)
+            else _LOCAL_DEFAULT_BASE_URL
+        )
+        base_url = _ask("Local server base URL", default=local_default)
+        if not _valid_provider_base_url(base_url):
+            print("… Provider setup cancelled — an absolute HTTP(S) "
+                  "base URL without credentials, query, or fragment is required; "
+                  "the existing routing was left unchanged.")
+            return
+        proceed, remove_openai_key = _prepare_local_api_key(
+            env_path,
+            previous_endpoint=previous_base_url,
+            selected_endpoint=base_url,
+        )
+        if not proceed:
+            return
     elif provider == "chat-relay":
         print("Chat-relay needs no key. Read prompts/chat-relay.md for the relay protocol before your first ingest.")
 
+    named_profile = bool(os.environ.get(_ACTIVE_ENV_FILE_VAR)) and (
+        env_path.resolve() != (root / ".env").resolve()
+    )
+    models_yaml, preserve_models_config, replacement_selector = (
+        _provider_config_target(
+            root,
+            env_path,
+            selected_models_yaml,
+            provider=provider,
+            named_profile=named_profile,
+        )
+    )
+
+    prepared_template: str | None = None
+    if provider == "openai-compatible":
+        assert base_url and quality_model and utility_model
+        template_name = _template_for_provider(provider)
+        assert template_name is not None
+        template_text = model_template_text(config_dir, template_name)
+        if template_text is None:
+            print(f"⚠ template {config_dir / template_name} not found locally or "
+                  "in the installed package — the existing routing was left unchanged.")
+            return
+        try:
+            prepared_template = _customize_openai_compatible_text(
+                template_text,
+                base_url=base_url,
+                quality_model=quality_model,
+                utility_model=utility_model,
+            )
+        except RuntimeError as e:
+            print(f"… Provider setup cancelled — {e}; the existing routing was "
+                  "left unchanged.")
+            return
+
+    stale_keys = _stale_routing_keys(
+        provider, preserve_models_config=preserve_models_config,
+    )
     updates = _env_updates_for_provider(provider, api_key=api_key, base_url=base_url)
+    if replacement_selector is not None:
+        updates["RW_MODELS_CONFIG"] = replacement_selector
+    preview_text, _preview_removed = edit_profile_text(
+        profile_before,
+        updates=updates,
+        removals=stale_keys | ({"OPENAI_API_KEY"} if remove_openai_key else set()),
+    )
+    existing_credentials = credential_keys(profile_before)
+    final_credentials = credential_keys_in_text(preview_text, path=env_path)
+    if existing_credentials or final_credentials:
+        ignored = _warn_gitignore(root, env_path)
+        if ignored is False and final_credentials and not _confirm(
+            f"Store credentials in unignored profile {env_path.name} anyway?",
+            default=False,
+        ):
+            print("… Provider setup cancelled before any config or credential change.")
+            return
+
+    committed, removed_file, removed_process = commit_profile_and_config(
+        config_path=models_yaml,
+        apply_config=lambda: _write_models_config(
+            config_dir,
+            models_yaml,
+            provider,
+            template_contents=prepared_template,
+        ),
+        env_path=env_path,
+        updates=updates,
+        removals=stale_keys,
+        remove_openai_key=remove_openai_key,
+        replace_openai_key=bool(api_key and os.environ.get("OPENAI_API_KEY")),
+        protected_credential_keys=(
+            {"ANTHROPIC_API_KEY"}
+            if provider == "anthropic" and anthropic_endpoint_changed
+            else set()
+        ),
+    )
+    if not committed:
+        print("… Provider setup stopped — the existing routing was left unchanged.")
+        return
+    if provider == "openai-compatible":
+        print(f"Wrote the selected endpoint and model IDs to {models_yaml}.")
+
+    if remove_openai_key:
+        print(f"Removed OPENAI_API_KEY from {env_path.name} for the local endpoint.")
+
+    removed = (removed_file | removed_process) & stale_keys
+    if removed:
+        print(f"Removed stale routing override(s): {', '.join(sorted(removed))}.")
+
     if updates:
-        env_path = root / ".env"
-        _upsert_env(env_path, updates)
-        os.environ.update(updates)  # so the readiness check below sees them
-        print(f"Wrote {', '.join(updates)} to .env (mode 600).")
-        _warn_gitignore(root)
+        print(f"Wrote {', '.join(updates)} to {env_path.name} (mode 600).")
         if "RW_LLM_PROVIDER" in updates:
             print("Note: RW_LLM_PROVIDER in .env is a GLOBAL override — it forces every "
                   "role to this provider and defeats per-role mixing. Comment it out "
@@ -331,8 +787,14 @@ def _step_provider(root: Path) -> None:
     _report_readiness(provider)
 
 
-def _write_models_config(config_dir: Path, models_yaml: Path, provider: str) -> None:
-    """Put `config/models.yaml` into the state the chosen provider needs.
+def _write_models_config(
+    config_dir: Path,
+    models_yaml: Path,
+    provider: str,
+    *,
+    template_contents: str | None = None,
+) -> bool:
+    """Put the active models config into the state the chosen provider needs.
 
     For every provider but OpenAI that means copying a template. For OpenAI it
     means the *absence* of the file, since the built-in fallback already routes
@@ -341,41 +803,94 @@ def _write_models_config(config_dir: Path, models_yaml: Path, provider: str) -> 
     reports success for a provider the user didn't pick.
     """
     template_name = _template_for_provider(provider)
+    display_path = (
+        "config/models.yaml"
+        if models_yaml == config_dir / "models.yaml"
+        else str(models_yaml)
+    )
 
     if template_name is None:
         if not models_yaml.exists():
-            print("No config/models.yaml needed — the built-in defaults already "
+            print(f"No {display_path} needed — the built-in defaults already "
                   "route every role to OpenAI.")
-            return
-        if _confirm("Remove the existing config/models.yaml so the built-in "
+            return True
+        if _confirm(f"Remove the existing {display_path} so the built-in "
                     "OpenAI defaults apply?", default=True):
             models_yaml.unlink()
-            print("Removed config/models.yaml — built-in OpenAI defaults now apply.")
+            print(f"Removed {display_path} — built-in OpenAI defaults now apply.")
+            return True
         else:
-            print("⚠ Left config/models.yaml in place. It overrides this choice — "
+            print(f"⚠ Left {display_path} in place. It overrides this choice — "
                   "whatever providers it names are what will actually run.")
-        return
+            return False
 
     template = config_dir / template_name
-    if not template.exists():
-        print(f"⚠ template {template} not found — skipping config copy. "
-              f"You'll need to create config/models.yaml by hand.")
-        return
+    contents = (
+        template_contents
+        if template_contents is not None
+        else model_template_text(config_dir, template_name)
+    )
+    if contents is None:
+        print(f"⚠ template {template} not found locally or in the installed "
+              "package — skipping config copy. "
+              f"You'll need to create {display_path} by hand.")
+        return False
     if models_yaml.exists() and not _confirm(
-        f"Overwrite existing config/models.yaml with the {provider} template?", default=True
+        f"Overwrite existing {display_path} with the {provider} template?", default=True
     ):
-        print("Left config/models.yaml untouched.")
-        return
-    shutil.copyfile(template, models_yaml)
-    print(f"Wrote config/models.yaml from {template.name}.")
+        print(f"Left {display_path} untouched.")
+        return False
+    models_yaml.parent.mkdir(parents=True, exist_ok=True)
+    write_text_atomic(models_yaml, contents)
+    print(f"Wrote {display_path} from {template_name}.")
+    return True
 
 
-def _warn_gitignore(root: Path) -> None:
-    gi = root / ".gitignore"
-    if gi.exists() and ".env" in gi.read_text(encoding="utf-8"):
-        return
-    print("⚠ .env does not appear to be gitignored — add it before committing so your "
-          "key doesn't reach GitHub.")
+def _warn_gitignore(root: Path, env_path: Path) -> bool:
+    """Warn unless git confirms the exact credential file is ignored.
+
+    Looking for the substring ``.env`` in ``.gitignore`` produced false safety
+    for explicitly selected files such as ``secrets.prod`` and for tracked
+    exceptions. ``git check-ignore`` applies the repository's complete rule
+    stack to the actual path and intentionally returns non-zero for tracked
+    files even when a broad pattern would otherwise match them.
+    """
+    try:
+        display = env_path.resolve().relative_to(root.resolve())
+    except ValueError:
+        # A profile outside this repository cannot be committed by it.
+        return True
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", "-q", "--", str(env_path)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        result = None
+    if result is not None and result.returncode == 0:
+        return True
+    try:
+        tracked = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--error-unmatch", "--", str(display)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode == 0
+    except OSError:
+        tracked = False
+    if tracked:
+        print(
+            f"⚠ {display} is tracked by git — run `git rm --cached -- "
+            f"{display}` and add an exact ignore rule before storing credentials."
+        )
+        return False
+    print(
+        f"⚠ {display} is not confirmed gitignored — add an exact ignore rule "
+        "before committing so your key doesn't reach version control."
+    )
+    return False
 
 
 def _report_readiness(provider: str) -> None:
@@ -388,17 +903,13 @@ def _report_readiness(provider: str) -> None:
     the precise mix-up this step exists to catch.
     """
     try:
-        from ..agents import model_config as _mc
         from ..agents.llm import missing_provider_credentials
     except Exception:  # pragma: no cover - defensive; llm deps optional
         return
-    # config/models.yaml was just written or removed, and each of these reads
-    # it behind an lru_cache — without clearing, the verdict describes the
-    # config as it was when the process started.
-    for fn in (_mc._config, _mc.base_url, _mc._ingest_settings):
-        cache_clear = getattr(fn, "cache_clear", None)
-        if cache_clear:
-            cache_clear()
+    # Use the public reset so warning latches and every present/future routing
+    # cache move together; reaching into three private cached functions drifted
+    # as soon as model_config gained another piece of cached state.
+    model_config.clear_caches()
 
     problems = missing_provider_credentials()
     if not problems:

@@ -183,6 +183,13 @@ def test_synthesis_cli_defaults_to_local_preview(monkeypatch, capsys):
 def test_synthesis_cli_returns_two_when_semantic_index_is_missing(monkeypatch, capsys):
     from researchwiki.tasks import _synthesis_candidates as cli
 
-    monkeypatch.setattr(cli, "find_candidates", lambda **_: ([], {"error": "missing"}))
+    monkeypatch.setattr(
+        cli,
+        "find_candidates",
+        lambda **_kwargs: ([], {"error": "semantic index is unavailable"}),
+    )
+
     assert cli.main([]) == 2
-    assert "error: missing" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "error: semantic index is unavailable\n"

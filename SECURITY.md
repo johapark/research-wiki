@@ -30,14 +30,27 @@ LLM provider keys are read from the environment, typically via a local `.env`:
   Upstage, Gemini's OpenAI shim, …)
 - `ANTHROPIC_API_KEY` — Anthropic and Anthropic-compatible third parties
 
-`.env` is gitignored and no key is committed. **Never commit one**, and prefer
-`git add <path>` over `git add -A` so a stray local file can't be swept in.
+`.env` and named `.env.*` profiles are gitignored and no key is committed.
+**Never commit one**. Restrict credential files with `chmod 600`; broader POSIX
+permissions produce a warning, while profiles created or updated by the wizard
+are written as `0600`. Also prefer `git add <path>` over `git add -A` so a stray
+local file can't be swept
+in. Select a named profile explicitly with
+`researchwiki --env-file .env.NAME COMMAND`; this avoids accidentally loading
+the root profile for a different provider.
 
-⚠️ **`RW_LLM_BASE_URL` redirects where your key is sent.** It overrides the
-endpoint for OpenAI-compatible providers, and the key travels as a Bearer token
-to whatever host you point it at. Treat it like a credential setting: only set it
-to endpoints you trust. The same caution applies to `ANTHROPIC_BASE_URL` when
-using Anthropic-compatible third parties.
+⚠️ **`RW_LLM_BASE_URL` and a model config's `base_url:` redirect where your key
+is sent.** The environment variable wins when both are present, and the key
+travels as a Bearer token to whatever host is selected. Treat both like
+credential settings: only use endpoints you trust. The same caution applies to
+`ANTHROPIC_BASE_URL` when using Anthropic-compatible third parties. Both env
+overrides and YAML endpoints accept HTTP and HTTPS so trusted LAN services can
+be used. Credential-bearing or structurally unsafe URLs are rejected before
+preflight or transmission; only use endpoints you trust. A missing explicit `RW_MODELS_CONFIG`, or any
+selected model config that exists but is unreadable, malformed, incomplete, or
+has an ambiguous endpoint, fails closed rather than silently switching to
+another provider. The built-in OpenAI route is used only when the implicit
+`config/models.yaml` is absent.
 
 ### What leaves your machine
 

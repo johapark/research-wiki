@@ -1,0 +1,5 @@
+# Keep the source-distribution layout useful when unpacked as a checkout.
+# Wheels use the mirrored importable copies declared as package data instead.
+include .env.template
+include config/models.*.yaml
+prune tests

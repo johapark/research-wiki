@@ -93,6 +93,122 @@ def test_llm_call_charges_actual_usage(monkeypatch):
     assert snap["reserved_tokens"] == 0
 
 
+def test_priced_local_call_stays_unmetered_after_finish(monkeypatch):
+    monkeypatch.setattr(budget.model_config, "rate_for", lambda model: object())
+    monkeypatch.setattr(
+        budget.model_config, "estimate_usd", lambda model, input_tokens, output_tokens: 5.0
+    )
+    tracker = budget.BudgetTracker(budget.IngestBudget(max_cost_usd=0.1))
+    reservation = tracker.reserve_call(
+        model="priced-local",
+        provider="lmstudio",
+        prompt_chars=40,
+        max_tokens=10,
+        free=True,
+    )
+
+    tracker.finish(
+        reservation, model="priced-local", input_tokens=1_000, output_tokens=1_000
+    )
+
+    assert tracker.snapshot()["estimated_cost_usd"] == 0.0
+
+
+def test_llm_cost_budget_uses_the_resolved_local_endpoint(monkeypatch):
+    response = llm.LLMResponse("ok", "priced-model", 0.0, 7, 3)
+    monkeypatch.setattr(
+        llm,
+        "resolve_openai_endpoint",
+        lambda: llm.EndpointResolution("http://localhost:1234/v1", "env"),
+    )
+    monkeypatch.setattr(llm, "call_openai_compatible", lambda **kwargs: response)
+    monkeypatch.setattr(budget.model_config, "rate_for", lambda model: object())
+    monkeypatch.setattr(
+        budget.model_config, "estimate_usd", lambda model, input_tokens, output_tokens: 5.0
+    )
+    tracker = budget.BudgetTracker(budget.IngestBudget(max_cost_usd=0.1))
+
+    with budget.activate(tracker):
+        got = llm.call(
+            prompt="small",
+            model="priced-model",
+            provider="openai-compatible",
+            max_tokens=20,
+        )
+
+    assert got.text == "ok"
+    assert tracker.snapshot()["estimated_cost_usd"] == 0.0
+
+
+def test_remote_hostname_containing_localhost_is_not_unmetered(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "resolve_openai_endpoint",
+        lambda: llm.EndpointResolution("https://localhost.invalid/v1", "env"),
+    )
+    monkeypatch.setattr(budget.model_config, "rate_for", lambda model: None)
+    monkeypatch.setattr(
+        llm,
+        "call_openai_compatible",
+        lambda **kwargs: pytest.fail("cost guard must run before transport"),
+    )
+    tracker = budget.BudgetTracker(budget.IngestBudget(max_cost_usd=1.0))
+
+    with budget.activate(tracker), pytest.raises(budget.BudgetExhausted) as exc:
+        llm.call(
+            prompt="small",
+            model="unpriced-remote",
+            provider="openai-compatible",
+            max_tokens=20,
+        )
+
+    assert exc.value.dimension == "cost_pricing_missing"
+
+
+def test_local_anthropic_endpoint_is_unmetered(monkeypatch):
+    response = llm.LLMResponse("ok", "priced-model", 0.0, 7, 3)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://localhost:8000")
+    monkeypatch.setattr(llm, "call_anthropic", lambda **kwargs: response)
+    monkeypatch.setattr(budget.model_config, "rate_for", lambda model: object())
+    monkeypatch.setattr(
+        budget.model_config, "estimate_usd", lambda model, input_tokens, output_tokens: 5.0
+    )
+    tracker = budget.BudgetTracker(budget.IngestBudget(max_cost_usd=0.1))
+
+    with budget.activate(tracker):
+        got = llm.call(
+            prompt="small",
+            model="priced-model",
+            provider="anthropic",
+            max_tokens=20,
+        )
+
+    assert got.text == "ok"
+    assert tracker.snapshot()["estimated_cost_usd"] == 0.0
+
+
+def test_throttle_failure_settles_the_reservation(monkeypatch):
+    def fail_throttle(*args, **kwargs):
+        raise RuntimeError("synthetic throttle failure")
+
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.setattr(llm, "_throttle", fail_throttle)
+    tracker = budget.BudgetTracker(
+        budget.IngestBudget(max_model_calls=1, max_tokens=100)
+    )
+
+    with budget.activate(tracker), pytest.raises(RuntimeError, match="throttle"):
+        llm.call(
+            prompt="small",
+            model="test-model",
+            provider="anthropic",
+            max_tokens=20,
+        )
+
+    snapshot = tracker.snapshot()
+    assert snapshot["model_calls"] == 1
+    assert snapshot["reserved_tokens"] == 0
+
 def test_old_batch_args_without_budgets_remain_valid():
     from researchwiki.tasks.agent import build_parser, _batch_passthrough_args
     args = build_parser().parse_args(["ingest", "a.pdf"])

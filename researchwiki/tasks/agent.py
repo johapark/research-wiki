@@ -539,7 +539,7 @@ def build_parser() -> argparse.ArgumentParser:
                                "DOI). Without a year, stem derivation can't run.")
     p_ingest.add_argument("--author-prompt-file", default=None,
                           help="Override the author system prompt with a custom file "
-                               "(e.g., prompts/author-system-experimental.md). Used by "
+                               "(e.g., prompts/author-system-research.md). Used by "
                                "the A/B regression eval to test prompt variants without "
                                "editing source.")
     p_ingest.add_argument("--allow-rename", action="store_true", default=False,
@@ -551,7 +551,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument("--llm-reconcile", action=argparse.BooleanOptionalAction,
                           default=True,
                           help="Use the configured `extractor` role (config/"
-                               "models.yaml — default Haiku 4.5) to extract title "
+                               "models.yaml; built-in default gpt-5.6-luna) to extract title "
                                "/ authors / year / DOI / paper_type from the first "
                                "1-2 PDF pages. ON by default after R3 dogfooding "
                                "(10 papers, 0 fabrications). Use --no-llm-reconcile "

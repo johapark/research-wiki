@@ -28,6 +28,7 @@ import json
 from collections import Counter
 from datetime import date
 
+from ..categories import PAGE_TYPE_DIRS
 from ..log import log
 from ..paths import s2_cache_dir
 from ..providers import ScholarlyArticle, get_default_provider
@@ -73,10 +74,14 @@ def main(argv: list[str]) -> int:
     for p in read_pages():
         if p.fm.get("type", "paper") != "paper":
             continue
-        if p.path.parent.name in ("synthesis", "references", "concepts"):
+        if p.category in PAGE_TYPE_DIRS:
             continue
         total_paper_pages += 1
-        if (p.fm.get("no_doi_reason") or "").strip():
+        # A stale `no_doi_reason` on a page that now has a DOI must not be
+        # subtracted as well as counted in `papers`; that would make the
+        # denominator arithmetic negative again. Lint can flag/clean the stale
+        # annotation, while audit counts the page by its effective DOI state.
+        if not p.fm.get("doi") and (p.fm.get("no_doi_reason") or "").strip():
             intentional_no_doi.append(p.stem)
     skipped_no_doi = total_paper_pages - len(papers) - len(intentional_no_doi)
     eligible = total_paper_pages - len(intentional_no_doi)

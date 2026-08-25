@@ -1,0 +1,90 @@
+# OpenAI ChatGPT — https://api.openai.com/v1
+# Endpoint folded into `base_url:` below, so .env needs only the key:
+#   OPENAI_API_KEY=sk-...
+# (RW_LLM_BASE_URL in .env still overrides base_url if set.)
+#
+# Select this config with RW_MODELS_CONFIG=models.chatgpt.yaml.
+# gpt-5.6-terra drives the quality-sensitive roles (author/critic/judge);
+# every other role runs on gpt-5.6-luna.
+#
+# gpt-5.4-mini is deliberately absent. It used to hold classifier/extractor as
+# "the cheap one", which it is not: per config/pricing.yaml mini is $0.75/$4.50
+# per Mtok against luna's $0.20/$1.20 — 3.75x dearer on both, because it is a
+# 5.4-generation model and the 5.6 line cut prices. There was no quality
+# argument for it either, so it is gone rather than merely demoted.
+#
+# Measured cost, this corpus (upper bounds — prompt-cache hits not subtracted):
+#   author/critic/judge on luna   ~$0.009/paper  (n=13)
+#   author/critic/judge on terra  ~$0.071/paper  (n=4)
+# Terra is 10x luna's rate on both input and output; normalized for paper size
+# the same ingests run ~9x dearer. Spend concentrates in two phases: `author`
+# and `target_claims` (46K and 32K input tokens respectively across 4 papers).
+
+base_url: https://api.openai.com/v1
+
+roles:
+  # Drafting — produces the page prose. Quality matters most here.
+  author:
+    provider: openai-compatible
+    model: gpt-5.6-terra
+    temperature: 0.5
+    max_tokens: 6000
+
+  # Critic — turns grader flags into revision notes.
+  critic:
+    provider: openai-compatible
+    model: gpt-5.6-terra
+    temperature: 0.3
+    max_tokens: 2500
+
+  # Judge — structural decisions (cross-link selection, memory evolution).
+  judge:
+    provider: openai-compatible
+    model: gpt-5.6-terra
+    temperature: 0.2
+    max_tokens: 1500
+
+  # Classifier — single JSON verdict, deterministic.
+  classifier:
+    provider: openai-compatible
+    model: gpt-5.6-luna
+    temperature: 0.1
+    max_tokens: 200
+
+  # Proposer — short-name / keyword lists.
+  proposer:
+    provider: openai-compatible
+    model: gpt-5.6-luna
+    temperature: 0.3
+    max_tokens: 200
+
+  # Extractor — title/authors/DOI/abstract from PDF first page, and the
+  # target-claims list. luna, not mini: cheaper per token (see note at top)
+  # and the phase wants specificity, not judgement.
+  extractor:
+    provider: openai-compatible
+    model: gpt-5.6-luna
+    temperature: 0.0
+    max_tokens: 800
+
+phases:
+  author:           {role: author}
+  evolve:           {role: author}
+  debug:            {role: author, temperature: 0.2}
+  critic:           {role: critic}
+  classifier:       {role: classifier}
+  short_name:       {role: proposer, max_tokens: 220}
+  keywords:         {role: proposer}
+  link_generation:  {role: judge, max_tokens: 1200}
+  memory_evolution: {role: judge, max_tokens: 3000}
+  synthesis_judge:  {role: judge}
+  eval_judge:       {role: judge}
+  reconcile:        {role: extractor}
+  # Structured extraction, not synthesis — the author phase consumes this as a
+  # coverage checklist. Was {role: judge}, which sent a transcription-shaped
+  # task to the top tier: 32K input tokens across a 4-paper batch, 41% of the
+  # terra bill. The role is what costs money; max_tokens is only a ceiling
+  # (you are billed for tokens emitted, ~1.3K observed), so it stays generous
+  # — a truncated claims list silently strips the author's coverage checklist.
+  target_claims:    {role: extractor, max_tokens: 8000}
+  claim_support:    {role: judge}

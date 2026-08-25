@@ -60,7 +60,7 @@ def _clear_negotiation_cache():
 
 def _http_error(body: str, code: int = 400) -> urllib.error.HTTPError:
     return urllib.error.HTTPError(
-        url="http://x/v1/chat/completions", code=code, msg="Bad Request",
+        url="https://x.invalid/v1/chat/completions", code=code, msg="Bad Request",
         hdrs=None, fp=io.BytesIO(body.encode("utf-8")),
     )
 
@@ -95,7 +95,7 @@ def _call(monkeypatch, fake, **kw):
     return llm.call_openai_compatible(
         model=kw.pop("model", "gpt-5.6-luna"),
         prompt="p",
-        base_url="http://x/v1",
+        base_url="https://x.invalid/v1",
         **kw,
     )
 

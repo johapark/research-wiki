@@ -1077,13 +1077,15 @@ bump `as_of:` in the same edit.
 
 Absolute cost is **config-dependent** — it rides on whichever
 `config/models.*.yaml` file `RW_MODELS_CONFIG` selects and that provider's
-token pricing. The current active default is `models.chatgpt.yaml`:
-`gpt-5.6-luna` drives every role. `gpt-5.4-mini` used to hold the
-deterministic short-output roles (classifier / extractor) as the cheap
-option, which it is not — mini is a 5.4-generation model and the 5.6 line cut
-prices, so it costs 3.75x luna per token with no offsetting quality
-argument. When no `config/models.yaml` is present the loader falls back to a
-hardcoded table in `agents/model_config.py` that mirrors this template.
+token pricing. The zero-config default is the hardcoded table in
+`agents/model_config.py`, where `gpt-5.6-luna` drives every role.
+`config/models.chatgpt.yaml` is an opt-in higher-fidelity OpenAI config:
+`gpt-5.6-terra` drives author / critic / judge and Luna drives the other
+roles, so it does **not** mirror the zero-config fallback. `gpt-5.4-mini`
+used to hold the deterministic short-output roles (classifier / extractor)
+as the cheap option, which it is not — mini is a 5.4-generation model and
+the 5.6 line cut prices, so it costs 3.75x luna per token with no offsetting
+quality argument.
 
 At the rates in `config/pricing.yaml` (per 1M tokens: `gpt-5.6-luna` $0.20 in
 / $1.20 out), a single-draft ingest runs
@@ -1110,7 +1112,7 @@ speed — that hasn't changed across model swaps.
 
 ### When to opt out of which phases
 
-- **`--use-stub`** — full offline / deterministic mode. No API calls. Use
+- **`agent ingest --stub`** — full offline / deterministic mode. No API calls. Use
   for harness tests and CI.
 - **`--no-llm-reconcile`** — skip the LLM metadata extractor (`gpt-5.6-luna`
   under the current default), fall back to the regex+S2 path. Use for
@@ -1199,10 +1201,10 @@ speed — that hasn't changed across model swaps.
 ## Provider setup in depth
 
 Companion to `README.md`'s Providers/Model-config tables, which cover the
-default path (`config/models.chatgpt.yaml` + `OPENAI_API_KEY`, nothing else
-to configure). This section is for the paths beyond that default: switching
-configs without copying, mixing providers per role, running fully local, and
-chat-relay for users with no API key at all.
+default path (`OPENAI_API_KEY` with no `config/models.yaml`; the built-in
+all-Luna table supplies routing). This section is for the paths beyond that
+default: switching configs without copying, mixing providers per role,
+running fully local, and chat-relay for users with no API key at all.
 
 ### Switching configs without copying (`RW_MODELS_CONFIG`)
 
@@ -1222,7 +1224,38 @@ Precedence: `RW_MODELS_CONFIG` → `config/models.yaml` → hardcoded defaults.
 marker when the env var is in effect), so "which config am I using?" is
 always answerable. Unlike `RW_LLM_PROVIDER` (which forces one provider
 across every phase and defeats per-role mixing), `RW_MODELS_CONFIG` selects
-a whole file that keeps its own per-role mixing.
+a whole file that keeps its own per-role mixing. An explicitly selected file
+must exist. Any selected file that exists — explicit or the implicit
+`config/models.yaml` — must parse and validate completely, including an
+unambiguous endpoint for every effective OpenAI-compatible route. Otherwise
+LLM work stops with environment exit code 2 instead of falling through to
+OpenAI or localhost. Only an absent implicit `config/models.yaml` enables the
+built-in all-Luna/OpenAI fallback.
+
+For a reusable profile that keeps its key and routing selection together, copy
+the env template. The global option must precede the command:
+
+```bash
+cp .env.template .env.litellm && chmod 600 .env.litellm
+# create the profile-specific config, then verify it
+researchwiki --env-file .env.litellm init
+researchwiki --env-file .env.litellm status
+researchwiki --env-file .env.litellm agent ingest inbox/paper.pdf
+```
+
+This loads only the named file, not the root `.env`, while already-exported
+shell variables still take precedence. Avoid plain `source .env.litellm`:
+dotenv's `KEY=value` assignments are not exported to the child CLI unless the
+shell is put into export-all mode. Running `init` through a named profile creates
+and selects `config/profiles/litellm.yaml`, copied from the chosen tracked
+template. Mutable profile configs are gitignored; tracked `config/models.*.yaml`
+templates and the checkout-global `config/models.yaml` remain untouched.
+
+Every explicit endpoint follows the same validation rule, whether it comes from
+YAML, `RW_LLM_BASE_URL`, or `ANTHROPIC_BASE_URL`: HTTP and HTTPS are accepted,
+including trusted LAN services. Credentials in the URL, whitespace or control
+characters, query strings, fragments, and invalid ports are rejected before
+provider preflight or an LLM request. Only use endpoints you trust.
 
 ### Pinning the state DB (`RESEARCHWIKI_DB_PATH`)
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 
+from ..errors import EnvironmentFailure
 from .model_config import PhaseNotRegistered
 
 
@@ -42,8 +43,10 @@ def parse_json_response(raw: str) -> dict | None:
 def run_llm_judge(*, phase: str, system: str, prompt: str, schema: dict | None = None) -> dict | None:
     """Call the configured LLM for `phase` and return the parsed JSON verdict.
 
-    Returns None on *runtime* failure (LLM unreachable, bad JSON) so callers can
-    treat "no verdict" uniformly rather than distinguishing error kinds.
+    Returns None on an untyped runtime failure or bad JSON so callers can treat
+    "no verdict" uniformly rather than distinguishing error kinds. Typed
+    `EnvironmentFailure` exceptions still propagate to the CLI funnel, which
+    reports them as exit 2 instead of silently skipping a phase.
 
     `PhaseNotRegistered` is deliberately excluded from that tolerance: an
     unregistered phase is a config/programming bug that no retry can fix, and
@@ -52,11 +55,15 @@ def run_llm_judge(*, phase: str, system: str, prompt: str, schema: dict | None =
     """
     try:
         from . import llm
+    except EnvironmentFailure:
+        raise
     except Exception:
         return None
     try:
         resp = llm.call(phase=phase, system=system, prompt=prompt, schema=schema)
     except PhaseNotRegistered:
+        raise
+    except EnvironmentFailure:
         raise
     except Exception:
         return None

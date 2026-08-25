@@ -94,7 +94,11 @@ def test_no_args_returns_1(capsys):
 
 def test_unknown_command_returns_1(capsys):
     assert cli.main(["no-such-command"]) == 1
-    assert "unknown command" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "unknown command" in err
+    assert f"Available: {', '.join(cli._entry_point_names(cli._discover_tasks()))}" in err
+    assert "claim-discover" not in err
+    assert "pair-dismissals" not in err
 
 
 def test_argparse_usage_error_remapped_to_1(fake_task, capsys):
@@ -140,6 +144,16 @@ def test_unimportable_task_module_returns_2(monkeypatch, capsys):
                         lambda: {"ghost": "module_that_does_not_exist"})
     assert cli.main(["ghost"]) == 2
     assert "cannot load task module" in capsys.readouterr().err
+
+
+def test_dispatchable_task_outside_a_wiki_remains_environment_error(
+    fake_task, tmp_path, capsys,
+):
+    fake_task(lambda argv: 0)
+    (tmp_path / "wiki").rmdir()
+
+    assert cli.main(["faketask"]) == 2
+    assert "no wiki/ directory" in capsys.readouterr().err
 
 
 # ---------- 3: internal bug ----------
@@ -356,3 +370,15 @@ def test_a_library_module_under_tasks_is_a_user_error_not_an_internal_bug():
     from researchwiki.__main__ import main
     for name in ("claim-discover", "pair-dismissals"):
         assert main([name]) == 1
+
+
+def test_a_library_module_is_still_a_user_error_outside_a_wiki(tmp_path, capsys):
+    """The cwd guard must not reclassify a phantom command as environment."""
+    (tmp_path / "wiki").rmdir()
+
+    for name in ("claim-discover", "pair-dismissals"):
+        assert cli.main([name]) == 1
+
+    err = capsys.readouterr().err
+    assert "unknown command" in err
+    assert "no wiki/ directory" not in err

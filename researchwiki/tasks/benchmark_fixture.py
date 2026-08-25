@@ -74,8 +74,8 @@ from ..paths import resolve_pdf, wiki_dir
 def _run_replicate_under_config(fixture: ContentFixture, *, config_path: str | None,
                                 n: int, use_llm: bool, verbose: bool):
     """Run replicate_score with RW_MODELS_CONFIG set (or unset for the
-    process default) and the model_config LRU cache cleared so the change
-    takes effect. Restores the prior env after the call."""
+    process default) and all model-routing caches cleared so the model,
+    endpoint, and ingest settings switch together. Restores the prior env."""
     import os
     from ..agents import model_config as _mc
     prior = os.environ.get("RW_MODELS_CONFIG")
@@ -84,14 +84,14 @@ def _run_replicate_under_config(fixture: ContentFixture, *, config_path: str | N
             os.environ.pop("RW_MODELS_CONFIG", None)
         else:
             os.environ["RW_MODELS_CONFIG"] = config_path
-        _mc._config.cache_clear()
+        _mc.clear_caches()
         return replicate_score(fixture, n=n, use_llm=use_llm, verbose=verbose)
     finally:
         if prior is None:
             os.environ.pop("RW_MODELS_CONFIG", None)
         else:
             os.environ["RW_MODELS_CONFIG"] = prior
-        _mc._config.cache_clear()
+        _mc.clear_caches()
 
 
 def _warn_if_judge_matches_author() -> None:

@@ -23,13 +23,13 @@ You can run any command directly, but most users won't. The CLI is a contract be
 
 First, **where are your papers now?** The two answers need different steps:
 
-- **Loose PDFs** — [Install](#install), pick a [provider](#providers), then [Your first ingest](#your-first-ingest-5-min-005).
+- **Loose PDFs** — [Install](#install), pick a [provider](#providers), then [Your first ingest](#your-first-ingest-5-min-001).
 - **Already in Zotero, Paperpile, Mendeley or ReadCube** — [Install](#install), pick a [provider](#providers), then [Import an existing library](#import-an-existing-library). You'll work from your manager's *export file*; you do not need to move PDFs into `inbox/` yourself.
 
 Then three ways to drive the setup itself — pick one:
 
 - **Talk to your LLM.** Clone, drop PDFs in `inbox/`, open the directory in Claude Code (or any agent that reads `CLAUDE.md` / `AGENTS.md`), say *"initialize this for me — I have N PDFs in inbox/."* The agent walks the steps in [`prompts/init.md`](./prompts/init.md).
-- **Run the wizard.** `researchwiki init` — interactive terminal wizard (provider → categories → dashboard → confirm). Prompts you for each decision and writes `.env`, plus `config/models.yaml` for any provider that needs one. It offers the same five providers as the table below and recommends OpenAI, which needs no config file at all.
+- **Run the wizard.** `researchwiki init` — interactive terminal wizard (provider → categories → dashboard → confirm). Prompts you for each decision and writes `.env`, plus `config/models.yaml` for any provider that needs one. With `researchwiki --env-file .env.NAME init`, it creates an isolated, gitignored `config/profiles/NAME.yaml` instead of editing a tracked template. It offers the same five providers as the table below and recommends OpenAI, which needs no config file at all.
 - **Do it manually.** The sub-sections below walk the same steps as a reference.
 
 Taxonomy comes from *your* papers: `researchwiki bootstrap-categories` derives categories from what's in `inbox/`, **not** the biology+ML defaults listed below. Importing a library instead? Either run it on a first `--limit` wave once those papers land, or let the per-paper classifier place them — see [Categories](#categories).
@@ -78,7 +78,7 @@ Run `researchwiki init --scaffold-only` afterwards to create the page-type dirs 
 
 ### Providers
 
-Set credentials/routing via a gitignored **`.env`** at the project root (loaded automatically every invocation — no `source` needed) or inline shell exports (which take precedence). Put your **API key** in `.env`; keep **`RW_LLM_BASE_URL`** as a session export, since it changes when you swap backends.
+Set credentials/routing via a gitignored **`.env`** at the project root (loaded automatically every invocation — no `source` needed) or inline shell exports (which take precedence). For isolated backend profiles, copy `.env.template` and select it explicitly with `researchwiki --env-file .env.NAME COMMAND`; `chmod 600` is recommended, and broader permissions produce a warning rather than blocking commands. Put your **API key** in the profile; keep the endpoint in the selected model config's `base_url:`. `RW_LLM_BASE_URL` is an ad-hoc override and wins over that config. HTTP and HTTPS endpoints are accepted; use only hosts you trust because the key and paper content are sent there.
 
 ```bash
 # .env
@@ -91,8 +91,8 @@ OPENAI_API_KEY="sk-..."                # OpenAI cloud (default, Bearer)
 | --- | --- | --- |
 | **OpenAI** (default) | Set `OPENAI_API_KEY`. With no `config/models.yaml` at all, every role runs on `gpt-5.6-luna` — nothing to copy. | ~$0.01/paper |
 | **Anthropic** | `cp config/models.anthropic.yaml config/models.yaml`, set `ANTHROPIC_API_KEY`. Routes to Sonnet 5 + Haiku 4.5. | ~$0.10/paper |
-| **Other OpenAI-compatible** (Gemini, Groq, OpenRouter, …) | `cp config/models.gemini.yaml config/models.yaml` (Gemini — ready-made) or `config/models.openai-compatible.yaml` (generic template), set `OPENAI_API_KEY` + `RW_LLM_BASE_URL`. | provider-dependent |
-| **Local LLM** (LM Studio / vLLM / llama.cpp / ollama) | Any OpenAI-compatible server. `provider: lmstudio` on a role; base URL defaults to `http://localhost:1234/v1` (override with `RW_LLM_BASE_URL`). [Details](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama). | ~free after download |
+| **Other OpenAI-compatible** (Gemini, Groq, OpenRouter, …) | Use `researchwiki init`, which asks for the endpoint and exact model IDs, or copy `config/models.gemini.yaml` (ready-made) / `config/models.openai-compatible.yaml` (edit `base_url:` and every `model:`). Set that provider's key as `OPENAI_API_KEY`. | provider-dependent |
+| **Local LLM** (LM Studio / vLLM / llama.cpp / ollama) | Any OpenAI-compatible server. `provider: lmstudio` on a role; `config/models.lmstudio.yaml` carries the default `http://localhost:1234/v1` endpoint (`RW_LLM_BASE_URL` remains an ad-hoc override). [Details](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama). | ~free after download |
 | **Chat-relay** (no API key/server) | `export RW_LLM_PROVIDER=chat-relay`; the chat agent in your terminal fills each prompt in `.llm-relay/pending/`. [Details](./WORKFLOW.md#chat-relay-subscription-users--no-api-key). | chat subscription |
 
 ### Model config
@@ -114,7 +114,7 @@ cp config/models.anthropic.yaml config/models.yaml   # or any other template
 
 **Which one?** For OpenAI, **copy nothing** — the built-in default runs every role on `gpt-5.6-luna` at ~$0.01/paper (measured mean over 13 ingests: 25.8K input / 3.5K output tokens), and in benchmarking it captured every critical headline claim with verbatim comparator figures. Copy `config/models.chatgpt.yaml` only if you want `gpt-5.6-terra` on the three quality-sensitive roles, which is ~7× dearer (~$0.07/paper, n=4) for a modest fidelity gain. For a **zero-cost cloud** start, use `config/models.gemini.yaml` — in our ingest history Gemini 3.5 Flash produced the highest-grading drafts of any free provider (mean claim-fidelity ≈ 0.80, edging Qwen's ≈ 0.78 and Solar's ≈ 0.75). Two caveats to weigh: the free tier is rate-limited (~5 requests/min — the config already serializes drafting to stay under it) and **Google may train on free-tier prompts/responses**, so for unpublished or confidential PDFs stay on OpenAI/Anthropic or the local path. For a **fully private, no-key** setup, use `config/models.lmstudio.yaml` with Qwen3.6-35B ([details](./WORKFLOW.md#local-llms-lm-studio--vllm--llamacpp--ollama)) — it trades a little fidelity for keeping every paper on your own hardware.
 
-With no `config/models.yaml` present, the loader falls back to a hardcoded table (`agents/model_config._FALLBACK_ROLES`) putting **every** role on `gpt-5.6-luna` — so the OpenAI default works with no copy at all (just set `OPENAI_API_KEY`). It is *not* a mirror of `models.chatgpt.yaml`, which upgrades three roles to `gpt-5.6-terra`. Deleting `config/models.yaml` resets you to this table.
+With no `config/models.yaml` present, the loader falls back to a hardcoded table (`agents/model_config._FALLBACK_ROLES`) putting **every** role on `gpt-5.6-luna` — so the OpenAI default works with no copy at all (just set `OPENAI_API_KEY`). It is *not* a mirror of `models.chatgpt.yaml`, which upgrades three roles to `gpt-5.6-terra`. Deleting `config/models.yaml` resets you to this table. Absence is the only fallback case: any selected file that exists must parse and validate completely, and every effective OpenAI-compatible route must have an unambiguous endpoint. A damaged or incomplete file stops with environment exit code 2 instead of silently changing provider or falling through to localhost/OpenAI.
 
 **Want to A/B backends, mix providers per role, run fully local, or use a chat subscription with no API key?** See [`WORKFLOW.md` → Provider setup in depth](./WORKFLOW.md#provider-setup-in-depth).
 
@@ -153,7 +153,7 @@ Drop a PDF in `inbox/` and say *"Ingest the paper I just dropped in `inbox/`."* 
 
 ### Import an existing library
 
-**Already have a library in Zotero, Paperpile, Mendeley or ReadCube?** Start here rather than with [Your first ingest](#your-first-ingest-5-min-005) — this is the path built for a corpus that already exists, and it skips the step where ingest is most likely to get metadata wrong.
+**Already have a library in Zotero, Paperpile, Mendeley or ReadCube?** Start here rather than with [Your first ingest](#your-first-ingest-5-min-001) — this is the path built for a corpus that already exists, and it skips the step where ingest is most likely to get metadata wrong.
 
 Export your library **as BibTeX or RIS** (those carry attachment paths; CSL-JSON doesn't, which costs you automatic PDF pairing), then say *"import my library"*. `researchwiki import` reads the export as authoritative metadata, pairs each record to its PDF, and reports what's importable **before** anything is spent — scanned PDFs with no text layer, preprints superseded by their published version, papers already in the wiki, the same DOI twice. Then it ingests in waves you control (`--limit 30`), feeding each paper its own DOI, title, authors and year instead of rediscovering them. Works without the PDFs too: you get back a deduplicated list of DOIs to go fetch.
 

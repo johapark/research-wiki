@@ -62,10 +62,13 @@ share/
 # hardcoded fallback — plus anthropic, gemini*, glm, gemma, lmstudio,
 # openai-compatible); `config/models.yaml` is the live copy a user selects by
 # `cp config/models.chatgpt.yaml config/models.yaml` and then edits (provider
-# swaps, per-role mixing). Prefer `RW_MODELS_CONFIG=models.<name>.yaml` to
-# switch backends without copying at all.
-# Gitignored so local A/B edits don't churn the repo or fight `git pull`.
+# swaps, per-role mixing). Tracked templates can still be selected read-only for
+# one-off runs; named profiles keep mutable copies under `config/profiles/`.
+# Gitignored so local edits don't churn the repo or fight `git pull`.
 config/models.yaml
+# Per-named-profile mutable routing configs created by `researchwiki init`.
+# Tracked `config/models.*.yaml` files remain immutable templates.
+config/profiles/
 
 # Ephemeral processing artifacts.
 # No trailing slash: on a machine that keeps this repo inside a synced folder

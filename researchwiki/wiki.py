@@ -17,6 +17,7 @@ from typing import Any
 import yaml
 
 from .paths import papers_dir, wiki_dir
+from .categories import PAGE_TYPE_DIRS
 
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -239,6 +240,17 @@ def read_wiki_papers() -> list[dict[str, str]]:
     """Return list of {stem, category, doi, title, year} dicts for each paper page."""
     papers: list[dict[str, str]] = []
     for p in read_pages(exclude_synthesis=True):
+        # DOI-bearing reference documents and commentaries are publications too,
+        # but callers of this helper audit *paper findings* specifically.  Keep
+        # the page-type boundary here so audit, preprint-check, and
+        # retraction-check cannot each drift into a different definition of a
+        # wiki paper. `Page.page_type` deliberately preserves the framework's
+        # legacy default inside content-category directories: a page missing
+        # `type:` behaves as a paper and is surfaced separately by lint's
+        # `missing_type` check. Structural dirs are never paper scope, even
+        # when a malformed legacy page there omits `type:`.
+        if p.category in PAGE_TYPE_DIRS or p.page_type != "paper":
+            continue
         doi = p.fm.get("doi")
         if not doi:
             continue

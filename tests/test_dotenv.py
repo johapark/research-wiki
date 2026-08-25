@@ -2,10 +2,34 @@
 
 from __future__ import annotations
 
+import pytest
+
 from researchwiki import __main__ as cli
+from researchwiki import env_profiles
 
 
 _LOAD_DOTENV = cli._load_dotenv
+
+
+@pytest.fixture(autouse=True)
+def _restore_loader_side_effects():
+    """The loader mutates os.environ directly; keep those writes test-local."""
+    sentinel = object()
+    keys = (
+        "OPENAI_API_KEY",
+        "RW_LLM_BASE_URL",
+        cli._ACTIVE_ENV_FILE_VAR,
+        env_profiles.DOTENV_PROVENANCE_VAR,
+    )
+    previous = {key: cli.os.environ.get(key, sentinel) for key in keys}
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is sentinel:
+                cli.os.environ.pop(key, None)
+            else:
+                cli.os.environ[key] = value
 
 
 def test_load_dotenv_accepts_export_and_environment_reference(tmp_path, monkeypatch):
