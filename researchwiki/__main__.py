@@ -13,6 +13,7 @@ import argparse
 import importlib
 import os
 import pkgutil
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -21,8 +22,16 @@ from . import __version__, tasks as _tasks
 from .errors import EnvironmentFailure
 
 
+_ENV_REFERENCE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
+
+
 def _load_dotenv() -> None:
-    """Load .env from the wiki root into os.environ (explicit vars take precedence)."""
+    """Load .env from the wiki root into os.environ (explicit vars take precedence).
+
+    Accept the common ``export NAME=value`` form as well as ``NAME=value``.
+    A value that consists solely of ``$NAME`` or ``${NAME}`` reuses an already
+    exported variable without copying its secret into the repository.
+    """
     env_file = Path.cwd() / ".env"
     if not env_file.exists():
         return
@@ -32,7 +41,15 @@ def _load_dotenv() -> None:
             continue
         key, _, val = line.partition("=")
         key = key.strip()
+        if key.startswith("export "):
+            key = key.removeprefix("export ").strip()
         val = val.strip().strip('"').strip("'")
+        reference = _ENV_REFERENCE.fullmatch(val)
+        if reference:
+            source = reference.group(1) or reference.group(2)
+            if source not in os.environ:
+                continue
+            val = os.environ[source]
         os.environ.setdefault(key, val)
 
 
