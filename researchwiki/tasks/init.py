@@ -30,6 +30,7 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
+from ..agents import model_config
 from ..categories import PAGE_TYPE_DIRS, content_categories
 from ..env_profiles import (
     ACTIVE_ENV_FILE_VAR,
@@ -182,7 +183,7 @@ def _env_updates_for_provider(
     elif provider == "openai-compatible":
         if api_key:
             u["OPENAI_API_KEY"] = api_key
-        # The wizard writes this endpoint into config/models.yaml. Keeping a
+        # The wizard writes this endpoint into the active models config. Keeping a
         # second global override in .env would unexpectedly defeat the next
         # named config the user selects.
     elif provider == "local":
@@ -236,11 +237,13 @@ def _remove_env_keys(path: Path, keys: set[str]) -> set[str]:
     return removed
 
 
-def _stale_routing_keys(provider: str) -> set[str]:
+def _stale_routing_keys(
+    provider: str, *, preserve_models_config: bool = False,
+) -> set[str]:
     """Global overrides that would defeat the provider just selected."""
-    # The wizard configures the canonical `config/models.yaml` (or the built-in
-    # no-file OpenAI fallback), so a named-config override always defeats it.
-    stale: set[str] = {"RW_MODELS_CONFIG"}
+    stale: set[str] = set()
+    if not preserve_models_config:
+        stale.add("RW_MODELS_CONFIG")
     if provider != "chat-relay":
         stale.add("RW_LLM_PROVIDER")
     # Local setup intentionally writes its chosen endpoint to this override.
@@ -302,9 +305,7 @@ def _valid_provider_base_url(value: str) -> bool:
         and not parsed.query
         and not parsed.fragment
     )
-    if not structurally_valid:
-        return False
-    return True
+    return structurally_valid
 
 
 def _effective_openai_base_url() -> str | None:
@@ -312,7 +313,6 @@ def _effective_openai_base_url() -> str | None:
     if os.environ.get("RW_LLM_BASE_URL"):
         return os.environ["RW_LLM_BASE_URL"]
     try:
-        from ..agents import model_config
         return model_config.base_url()
     except Exception:
         # An unavailable explicit config is precisely something `init` should
@@ -336,7 +336,6 @@ def _effective_provider(models_yaml: Path) -> tuple[str, str] | None:
         if not selected:
             return "unavailable", "RW_MODELS_CONFIG=''"
         try:
-            from ..agents import model_config
             selected_path = model_config.config_path()
         except Exception:
             selected_path = models_yaml.parent / selected
@@ -589,14 +588,20 @@ def _customize_openai_compatible_config(
 def _step_provider(root: Path) -> None:
     _header("Step 1 — LLM provider")
     config_dir = root / "config"
-    models_yaml = config_dir / "models.yaml"
+    default_models_yaml = config_dir / "models.yaml"
     env_path = _active_env_path(root)
     profile_before = snapshot_profile(env_path)
     require_private_credentials(profile_before)
+    selected_models_yaml = (
+        model_config.config_path()
+        if _profile_controls_env_key(env_path, "RW_MODELS_CONFIG")
+        else None
+    )
+    active_models_yaml = selected_models_yaml or default_models_yaml
     previous_base_url = _effective_openai_base_url()
     previous_anthropic_base_url = _effective_anthropic_base_url()
 
-    current = _effective_provider(models_yaml)
+    current = _effective_provider(active_models_yaml)
     if current:
         current_provider, source = current
         print(f"Effective provider is `{current_provider}` via {source}.")
@@ -701,6 +706,15 @@ def _step_provider(root: Path) -> None:
     elif provider == "chat-relay":
         print("Chat-relay needs no key. Read prompts/chat-relay.md for the relay protocol before your first ingest.")
 
+    # A profile-owned selector is part of that profile's identity. Reconfigure
+    # the selected file and keep the selector instead of silently switching to
+    # the checkout-global config. OpenAI's built-in route is the exception: it
+    # intentionally has no config file, so its selector must be removed.
+    preserve_models_config = selected_models_yaml is not None and provider != "openai"
+    models_yaml = (
+        selected_models_yaml if preserve_models_config else default_models_yaml
+    )
+
     prepared_template: str | None = None
     if provider == "openai-compatible":
         assert base_url and quality_model and utility_model
@@ -723,7 +737,9 @@ def _step_provider(root: Path) -> None:
                   "left unchanged.")
             return
 
-    stale_keys = _stale_routing_keys(provider)
+    stale_keys = _stale_routing_keys(
+        provider, preserve_models_config=preserve_models_config,
+    )
     updates = _env_updates_for_provider(provider, api_key=api_key, base_url=base_url)
     preview_text, _preview_removed = edit_profile_text(
         profile_before,
@@ -764,7 +780,7 @@ def _step_provider(root: Path) -> None:
         print("… Provider setup stopped — the existing routing was left unchanged.")
         return
     if provider == "openai-compatible":
-        print("Wrote the selected endpoint and model IDs to config/models.yaml.")
+        print(f"Wrote the selected endpoint and model IDs to {models_yaml}.")
 
     if remove_openai_key:
         print(f"Removed OPENAI_API_KEY from {env_path.name} for the local endpoint.")
@@ -793,7 +809,7 @@ def _write_models_config(
     *,
     template_contents: str | None = None,
 ) -> bool:
-    """Put `config/models.yaml` into the state the chosen provider needs.
+    """Put the active models config into the state the chosen provider needs.
 
     For every provider but OpenAI that means copying a template. For OpenAI it
     means the *absence* of the file, since the built-in fallback already routes
@@ -802,19 +818,24 @@ def _write_models_config(
     reports success for a provider the user didn't pick.
     """
     template_name = _template_for_provider(provider)
+    display_path = (
+        "config/models.yaml"
+        if models_yaml == config_dir / "models.yaml"
+        else str(models_yaml)
+    )
 
     if template_name is None:
         if not models_yaml.exists():
-            print("No config/models.yaml needed — the built-in defaults already "
+            print(f"No {display_path} needed — the built-in defaults already "
                   "route every role to OpenAI.")
             return True
-        if _confirm("Remove the existing config/models.yaml so the built-in "
+        if _confirm(f"Remove the existing {display_path} so the built-in "
                     "OpenAI defaults apply?", default=True):
             models_yaml.unlink()
-            print("Removed config/models.yaml — built-in OpenAI defaults now apply.")
+            print(f"Removed {display_path} — built-in OpenAI defaults now apply.")
             return True
         else:
-            print("⚠ Left config/models.yaml in place. It overrides this choice — "
+            print(f"⚠ Left {display_path} in place. It overrides this choice — "
                   "whatever providers it names are what will actually run.")
             return False
 
@@ -827,15 +848,15 @@ def _write_models_config(
     if contents is None:
         print(f"⚠ template {template} not found locally or in the installed "
               "package — skipping config copy. "
-              f"You'll need to create config/models.yaml by hand.")
+              f"You'll need to create {display_path} by hand.")
         return False
     if models_yaml.exists() and not _confirm(
-        f"Overwrite existing config/models.yaml with the {provider} template?", default=True
+        f"Overwrite existing {display_path} with the {provider} template?", default=True
     ):
-        print("Left config/models.yaml untouched.")
+        print(f"Left {display_path} untouched.")
         return False
     write_text_atomic(models_yaml, contents)
-    print(f"Wrote config/models.yaml from {template_name}.")
+    print(f"Wrote {display_path} from {template_name}.")
     return True
 
 
@@ -896,14 +917,13 @@ def _report_readiness(provider: str) -> None:
     the precise mix-up this step exists to catch.
     """
     try:
-        from ..agents import model_config as _mc
         from ..agents.llm import missing_provider_credentials
     except Exception:  # pragma: no cover - defensive; llm deps optional
         return
     # Use the public reset so warning latches and every present/future routing
     # cache move together; reaching into three private cached functions drifted
     # as soon as model_config gained another piece of cached state.
-    _mc.clear_caches()
+    model_config.clear_caches()
 
     problems = missing_provider_credentials()
     if not problems:

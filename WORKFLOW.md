@@ -1245,7 +1245,9 @@ researchwiki --env-file .env.litellm agent ingest inbox/paper.pdf
 This loads only the named file, not the root `.env`, while already-exported
 shell variables still take precedence. Avoid plain `source .env.litellm`:
 dotenv's `KEY=value` assignments are not exported to the child CLI unless the
-shell is put into export-all mode.
+shell is put into export-all mode. Running `init` through a named profile keeps
+its `RW_MODELS_CONFIG` selector and updates that selected config; it does not
+replace the checkout-global `config/models.yaml`.
 
 Every explicit endpoint follows the same validation rule, whether it comes from
 YAML, `RW_LLM_BASE_URL`, or `ANTHROPIC_BASE_URL`: HTTP and HTTPS are accepted,

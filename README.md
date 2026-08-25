@@ -29,7 +29,7 @@ First, **where are your papers now?** The two answers need different steps:
 Then three ways to drive the setup itself — pick one:
 
 - **Talk to your LLM.** Clone, drop PDFs in `inbox/`, open the directory in Claude Code (or any agent that reads `CLAUDE.md` / `AGENTS.md`), say *"initialize this for me — I have N PDFs in inbox/."* The agent walks the steps in [`prompts/init.md`](./prompts/init.md).
-- **Run the wizard.** `researchwiki init` — interactive terminal wizard (provider → categories → dashboard → confirm). Prompts you for each decision and writes `.env`, plus `config/models.yaml` for any provider that needs one. If you invoke it as `researchwiki --env-file .env.NAME init`, it updates that selected profile instead. It offers the same five providers as the table below and recommends OpenAI, which needs no config file at all.
+- **Run the wizard.** `researchwiki init` — interactive terminal wizard (provider → categories → dashboard → confirm). Prompts you for each decision and writes `.env`, plus `config/models.yaml` for any provider that needs one. With `researchwiki --env-file .env.NAME init`, it updates that profile and the config selected by its `RW_MODELS_CONFIG` instead. It offers the same five providers as the table below and recommends OpenAI, which needs no config file at all.
 - **Do it manually.** The sub-sections below walk the same steps as a reference.
 
 Taxonomy comes from *your* papers: `researchwiki bootstrap-categories` derives categories from what's in `inbox/`, **not** the biology+ML defaults listed below. Importing a library instead? Either run it on a first `--limit` wave once those papers land, or let the per-paper classifier place them — see [Categories](#categories).

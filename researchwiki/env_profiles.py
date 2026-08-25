@@ -360,14 +360,20 @@ def edit_profile_text(
 
 
 def _write_profile_bytes_atomic(path: Path, data: bytes) -> None:
-    """Replace ``path`` from a 0600 inode; never expose secret bytes as 0644."""
+    """Replace a profile target from a 0600 inode without replacing its symlink."""
     path = Path(path)
+    try:
+        destination = path.resolve(strict=True) if path.is_symlink() else path
+    except OSError as exc:
+        raise EnvProfileFailure(
+            f"cannot securely write env profile {path}: {exc}"
+        ) from exc
     tmp_path: Path | None = None
     fd = -1
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        destination.parent.mkdir(parents=True, exist_ok=True)
         fd, raw_tmp = tempfile.mkstemp(
-            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+            prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
         )
         tmp_path = Path(raw_tmp)
         os.fchmod(fd, 0o600)
@@ -378,7 +384,7 @@ def _write_profile_bytes_atomic(path: Path, data: bytes) -> None:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
+        os.replace(tmp_path, destination)
         tmp_path = None
     except OSError as exc:
         raise EnvProfileFailure(

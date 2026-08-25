@@ -134,6 +134,22 @@ def test_symlink_to_regular_profile_remains_supported(tmp_path):
     env_profiles.require_private_credentials(snapshot)
 
 
+@pytest.mark.skipif(os.name != "posix", reason="symlink semantics are POSIX-specific")
+def test_atomic_profile_write_preserves_symlink_and_updates_target(tmp_path):
+    target = tmp_path / "real-profile"
+    target.write_text('OPENAI_API_KEY="old"\n')
+    target.chmod(0o600)
+    profile = tmp_path / ".env.link"
+    profile.symlink_to(target.name)
+
+    env_profiles.write_profile_atomic(profile, 'OPENAI_API_KEY="new"\n')
+
+    assert profile.is_symlink()
+    assert str(profile.readlink()) == target.name
+    assert target.read_text() == 'OPENAI_API_KEY="new"\n'
+    assert target.stat().st_mode & 0o777 == 0o600
+
+
 def test_permission_check_uses_mode_from_the_inode_that_was_read(tmp_path):
     profile = tmp_path / ".env"
     profile.write_text('OPENAI_API_KEY="secret"\n')

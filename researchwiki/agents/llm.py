@@ -156,7 +156,7 @@ def is_real_mode_available() -> bool:
 # with this URL; vLLM / llama.cpp / ollama users can override via env.
 _DEFAULT_LOCAL_BASE_URL = "http://localhost:1234/v1"
 
-_OPENAI_COMPAT_PROVIDERS = frozenset({"openai-compatible", "lmstudio", "openai"})
+_OPENAI_COMPAT_PROVIDERS = model_config.OPENAI_COMPAT_PROVIDERS
 
 
 def _validated_anthropic_base_url() -> str | None:

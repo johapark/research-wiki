@@ -107,6 +107,9 @@ def test_stale_routing_keys_follow_provider_ownership():
     assert init._stale_routing_keys("chat-relay") == {
         "RW_MODELS_CONFIG", "RW_LLM_BASE_URL",
     }
+    assert init._stale_routing_keys(
+        "openai-compatible", preserve_models_config=True,
+    ) == {"RW_LLM_PROVIDER", "RW_LLM_BASE_URL"}
 
 
 def test_active_env_path_prefers_cli_selected_profile(tmp_path, monkeypatch):
@@ -649,6 +652,62 @@ def test_generic_reconfigure_replaces_selected_profile_key(
     assert 'base_url: "https://api.groq.com/openai/v1"' in models
     assert models.count('model: "llama-quality"') == 3
     assert models.count('model: "llama-fast"') == 3
+
+
+def test_generic_reconfigure_updates_profile_selected_config(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / "config"
+    config.mkdir()
+    selected = config / "models.profile.yaml"
+    selected.write_text(
+        "base_url: https://old.example/v1\n"
+        "roles:\n  author: {provider: openai-compatible, model: old}\n"
+    )
+    profile = tmp_path / ".env.provider"
+    profile.write_text(
+        'RW_MODELS_CONFIG="models.profile.yaml"\n'
+        'OPENAI_API_KEY="old-provider-secret"\n'
+    )
+    _mark_profile_owned(
+        monkeypatch,
+        profile,
+        RW_MODELS_CONFIG="models.profile.yaml",
+        OPENAI_API_KEY="old-provider-secret",
+    )
+    monkeypatch.delenv("RW_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("RW_LLM_BASE_URL", raising=False)
+    monkeypatch.setattr(init, "_effective_provider", lambda _models: None)
+    monkeypatch.setattr(
+        init, "_effective_openai_base_url", lambda: "https://old.example/v1"
+    )
+    monkeypatch.setattr(init, "_ask_choice", lambda _n: 1)
+    decisions = iter((False, True))
+    monkeypatch.setattr(
+        init, "_confirm", lambda *args, **kwargs: next(decisions)
+    )
+    _answers(
+        monkeypatch,
+        "http://10.212.23.212/v1",
+        "new-provider-secret",
+        "llama-quality",
+        "llama-fast",
+    )
+    monkeypatch.setattr(init, "_report_readiness", lambda _provider: None)
+    monkeypatch.setattr(init, "_warn_gitignore", lambda _root, _path: None)
+
+    init._step_provider(tmp_path)
+
+    profile_text = profile.read_text()
+    assert 'RW_MODELS_CONFIG="models.profile.yaml"' in profile_text
+    assert 'OPENAI_API_KEY="new-provider-secret"' in profile_text
+    assert os.environ["RW_MODELS_CONFIG"] == "models.profile.yaml"
+    assert not (config / "models.yaml").exists()
+    selected_text = selected.read_text()
+    assert 'base_url: "http://10.212.23.212/v1"' in selected_text
+    assert selected_text.count('model: "llama-quality"') == 3
+    assert selected_text.count('model: "llama-fast"') == 3
 
 
 def test_invalid_local_url_stops_before_config_write(tmp_path, monkeypatch, capsys):

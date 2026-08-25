@@ -119,6 +119,30 @@ def test_explicit_schema_errors_fail_closed(monkeypatch, tmp_path, body, message
         mc.validate_config()
 
 
+@pytest.mark.parametrize("body", [
+    "roles:\n  author: {provider: imaginary, model: m}\n",
+    (
+        "roles:\n  author: {provider: anthropic, model: m}\n"
+        "phases:\n  custom: {role: author, provider: imaginary}\n"
+    ),
+])
+def test_unsupported_config_provider_fails_validation(monkeypatch, tmp_path, body):
+    config = tmp_path / "models.invalid.yaml"
+    config.write_text(body, encoding="utf-8")
+    monkeypatch.setenv("RW_MODELS_CONFIG", str(config))
+
+    with pytest.raises(mc.ModelConfigUnavailable, match="unsupported provider"):
+        mc.validate_config()
+
+
+def test_unsupported_env_provider_fails_without_config(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RW_LLM_PROVIDER", "imaginary")
+
+    with pytest.raises(mc.ModelConfigUnavailable, match="RW_LLM_PROVIDER"):
+        mc.validate_config()
+
+
 def test_clear_caches_resets_all_routing_state(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     mc._config()

@@ -24,10 +24,9 @@ Any selected file that *exists* fails closed when unreadable, malformed, or
 schema-invalid; only absence of the implicit file enables zero-config fallback.
 This prevents a damaged profile from silently changing both model and endpoint.
 
-`provider` is forward-compatible. Today only "anthropic" is implemented in
-researchwiki/agents/llm.py. When a second provider is added (OpenAI,
-Ollama, etc.), this config schema doesn't change — just edit a role's
-`provider:` to point at it.
+`provider` is validated before preflight. Supported IDs are `anthropic`,
+`openai`, `openai-compatible`, `lmstudio`, and `chat-relay`; adding another
+transport requires registering it here and implementing dispatch in `llm.py`.
 """
 
 from __future__ import annotations
@@ -195,6 +194,8 @@ _ROLE_FIELDS = frozenset({
 })
 _PHASE_FIELDS = _ROLE_FIELDS | {"role"}
 _INGEST_FIELDS = frozenset({"n_drafts", "target_claims_max_chars"})
+OPENAI_COMPAT_PROVIDERS = frozenset({"openai-compatible", "lmstudio", "openai"})
+SUPPORTED_PROVIDERS = OPENAI_COMPAT_PROVIDERS | {"anthropic", "chat-relay"}
 
 
 def _schema_error(path: Path, detail: str) -> ModelConfigUnavailable:
@@ -272,6 +273,15 @@ def _validate_routing_fields(
             not isinstance(fields[name], str) or not fields[name].strip()
         ):
             raise _schema_error(path, f"{label}.{name} must be a non-empty string")
+    if "provider" in fields:
+        provider = canonical_provider_id(fields["provider"])
+        if provider not in SUPPORTED_PROVIDERS:
+            supported = ", ".join(sorted(SUPPORTED_PROVIDERS))
+            raise _schema_error(
+                path,
+                f"{label}.provider names unsupported provider {provider!r}; "
+                f"supported providers: {supported}",
+            )
     if "temperature" in fields:
         try:
             temperature = float(fields["temperature"])
@@ -438,24 +448,23 @@ def _load_routing_snapshot(
 
     # Provider env override is applied last by for_phase(), so include it when
     # deciding whether any *effective* role needs an OpenAI-compatible endpoint.
-    from .llm import _OPENAI_COMPAT_PROVIDERS
     forced_provider = canonical_provider_id(env_provider)
     if forced_provider:
         compat = (
             [f"role {name!r}" for name in sorted(roles)]
-            if forced_provider in _OPENAI_COMPAT_PROVIDERS else []
+            if forced_provider in OPENAI_COMPAT_PROVIDERS else []
         )
     else:
         compat_targets = {
             f"role {name!r}" for name, cfg in roles.items()
-            if canonical_provider_id(cfg.provider) in _OPENAI_COMPAT_PROVIDERS
+            if canonical_provider_id(cfg.provider) in OPENAI_COMPAT_PROVIDERS
         }
         for phase, spec in phases.items():
             role = roles[spec["role"]]
             provider = canonical_provider_id(
                 str(spec.get("provider", role.provider)),
             )
-            if provider in _OPENAI_COMPAT_PROVIDERS:
+            if provider in OPENAI_COMPAT_PROVIDERS:
                 compat_targets.add(f"phase {phase!r}")
         compat = sorted(compat_targets)
     if compat and configured_base_url is None and not env_base_url:
@@ -482,6 +491,12 @@ def _routing_snapshot() -> _RoutingSnapshot:
     if env_base_url:
         validate_env_base_url(env_base_url)
     env_provider = _env_provider_override()
+    if env_provider and env_provider not in SUPPORTED_PROVIDERS:
+        supported = ", ".join(sorted(SUPPORTED_PROVIDERS))
+        raise ModelConfigUnavailable(
+            f"RW_LLM_PROVIDER names unsupported provider {env_provider!r}; "
+            f"supported providers: {supported}"
+        )
     return _load_routing_snapshot(
         config_path(), override, env_base_url, env_provider,
     )
