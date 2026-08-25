@@ -131,7 +131,7 @@ def test_symlink_to_regular_profile_remains_supported(tmp_path):
     snapshot = env_profiles.snapshot_profile(profile)
 
     assert snapshot.text == 'OPENAI_API_KEY="secret"\n'
-    env_profiles.require_private_credentials(snapshot)
+    env_profiles.warn_permissive_credentials(snapshot)
 
 
 @pytest.mark.skipif(os.name != "posix", reason="symlink semantics are POSIX-specific")
@@ -150,18 +150,21 @@ def test_atomic_profile_write_preserves_symlink_and_updates_target(tmp_path):
     assert target.stat().st_mode & 0o777 == 0o600
 
 
-def test_permission_check_uses_mode_from_the_inode_that_was_read(tmp_path):
+def test_permission_warning_uses_mode_from_the_inode_that_was_read(
+    tmp_path, capsys,
+):
     profile = tmp_path / ".env"
     profile.write_text('OPENAI_API_KEY="secret"\n')
     profile.chmod(0o644)
 
     snapshot = env_profiles.snapshot_profile(profile)
     # A later path lookup now sees a different mode. The snapshot must keep the
-    # mode paired with the bytes it actually read and still fail closed.
+    # mode paired with the bytes it actually read and still warn.
     profile.chmod(0o600)
 
-    with pytest.raises(env_profiles.EnvProfileFailure, match="mode is 0644"):
-        env_profiles.require_private_credentials(snapshot)
+    env_profiles.warn_permissive_credentials(snapshot)
+
+    assert "mode is 0644" in capsys.readouterr().err
 
 
 def test_path_swap_during_fstat_still_reads_the_open_inode(tmp_path, monkeypatch):
@@ -296,14 +299,14 @@ def test_present_default_env_is_strict_and_applied_only_after_full_validation(
     assert "RW_MODELS_CONFIG" not in os.environ
 
 
-def test_loader_rejects_group_readable_credential_profile(fake_task, capsys):
+def test_loader_warns_for_group_readable_credential_profile(fake_task, capsys):
     root, _seen = fake_task
     profile = root / ".env"
     profile.write_text('OPENAI_API_KEY="secret"\n')
     profile.chmod(0o644)
 
-    assert cli.main(["faketask"]) == 2
+    assert cli.main(["faketask"]) == 0
     err = capsys.readouterr().err
     assert "mode is 0644" in err
     assert "chmod 600" in err
-    assert "OPENAI_API_KEY" not in os.environ
+    assert os.environ["OPENAI_API_KEY"] == "secret"

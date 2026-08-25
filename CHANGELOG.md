@@ -29,15 +29,16 @@ the reasoning behind any line below.
   `${NAME}` shell references; preserve shell-over-file precedence with
   provenance tracking, bind permission checks and bytes to one opened inode,
   and are atomically written from a 0600 inode without replacing profile
-  symlinks. Provider transitions
+  symlinks. Existing permissive credential files warn instead of blocking;
+  wizard writes still become `0600`. Provider transitions
   roll back the config and profile together, while inherited shell routing
   overrides stop setup before mutation. A missing
   explicit `RW_MODELS_CONFIG`, or any selected config that exists but is
   unreadable, malformed, schema-invalid, or lacks an unambiguous endpoint, is
   an environment error rather than a silent OpenAI/localhost fallback. The
-  setup wizard preserves a profile-owned `RW_MODELS_CONFIG` and updates that
-  selected file, rejects unsupported providers before preflight, validates
-  HTTP(S) endpoint structure, confirms key
+  setup wizard gives named profiles isolated gitignored configs under
+  `config/profiles/` rather than editing tracked templates, rejects unsupported
+  providers before preflight, validates HTTP(S) endpoint structure, confirms key
   reuse across endpoints, checks the actual credential profile against Git,
   and writes the exact model IDs selected by the user. The same URL policy now
   covers YAML, `RW_LLM_BASE_URL`, and `ANTHROPIC_BASE_URL` at status, preflight,

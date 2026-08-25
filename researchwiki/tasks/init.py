@@ -40,7 +40,6 @@ from ..env_profiles import (
     edit_profile_text,
     effective_assignment_value,
     parse_assignment,
-    require_private_credentials,
     snapshot_profile,
     write_profile_atomic,
 )
@@ -50,8 +49,10 @@ from ..package_resources import model_template_text
 from ..paths import ensure_scaffold, inbox_dir, wiki_dir, wiki_root
 from ._provider_setup import (
     choose_endpoint_api_key as _choose_endpoint_api_key,
+    provider_config_target as _provider_config_target,
     profile_controls_env_key as _profile_controls_env_key,
     same_endpoint as _same_endpoint,
+    stale_routing_keys as _stale_routing_keys,
 )
 
 # ── Provider wiring ──────────────────────────────────────────────────────────
@@ -235,27 +236,6 @@ def _remove_env_keys(path: Path, keys: set[str]) -> set[str]:
     if removed:
         write_profile_atomic(path, text)
     return removed
-
-
-def _stale_routing_keys(
-    provider: str, *, preserve_models_config: bool = False,
-) -> set[str]:
-    """Global overrides that would defeat the provider just selected."""
-    stale: set[str] = set()
-    if not preserve_models_config:
-        stale.add("RW_MODELS_CONFIG")
-    if provider != "chat-relay":
-        stale.add("RW_LLM_PROVIDER")
-    # Local setup intentionally writes its chosen endpoint to this override.
-    # Every cloud config either owns its endpoint or does not use this variable.
-    if provider != "local":
-        stale.add("RW_LLM_BASE_URL")
-    # The Anthropic SDK reads this independently of models.yaml. The menu's
-    # `anthropic` choice means Anthropic's official cloud, so a profile-owned
-    # compatibility endpoint must not survive and receive that provider's key.
-    if provider == "anthropic":
-        stale.add("ANTHROPIC_BASE_URL")
-    return stale
 
 
 def _active_env_path(root: Path) -> Path:
@@ -591,7 +571,6 @@ def _step_provider(root: Path) -> None:
     default_models_yaml = config_dir / "models.yaml"
     env_path = _active_env_path(root)
     profile_before = snapshot_profile(env_path)
-    require_private_credentials(profile_before)
     selected_models_yaml = (
         model_config.config_path()
         if _profile_controls_env_key(env_path, "RW_MODELS_CONFIG")
@@ -706,13 +685,17 @@ def _step_provider(root: Path) -> None:
     elif provider == "chat-relay":
         print("Chat-relay needs no key. Read prompts/chat-relay.md for the relay protocol before your first ingest.")
 
-    # A profile-owned selector is part of that profile's identity. Reconfigure
-    # the selected file and keep the selector instead of silently switching to
-    # the checkout-global config. OpenAI's built-in route is the exception: it
-    # intentionally has no config file, so its selector must be removed.
-    preserve_models_config = selected_models_yaml is not None and provider != "openai"
-    models_yaml = (
-        selected_models_yaml if preserve_models_config else default_models_yaml
+    named_profile = bool(os.environ.get(_ACTIVE_ENV_FILE_VAR)) and (
+        env_path.resolve() != (root / ".env").resolve()
+    )
+    models_yaml, preserve_models_config, replacement_selector = (
+        _provider_config_target(
+            root,
+            env_path,
+            selected_models_yaml,
+            provider=provider,
+            named_profile=named_profile,
+        )
     )
 
     prepared_template: str | None = None
@@ -741,6 +724,8 @@ def _step_provider(root: Path) -> None:
         provider, preserve_models_config=preserve_models_config,
     )
     updates = _env_updates_for_provider(provider, api_key=api_key, base_url=base_url)
+    if replacement_selector is not None:
+        updates["RW_MODELS_CONFIG"] = replacement_selector
     preview_text, _preview_removed = edit_profile_text(
         profile_before,
         updates=updates,
@@ -855,6 +840,7 @@ def _write_models_config(
     ):
         print(f"Left {display_path} untouched.")
         return False
+    models_yaml.parent.mkdir(parents=True, exist_ok=True)
     write_text_atomic(models_yaml, contents)
     print(f"Wrote {display_path} from {template_name}.")
     return True

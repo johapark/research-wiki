@@ -19,6 +19,7 @@ import json
 import os
 import re
 import stat
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -199,19 +200,18 @@ def credential_keys(snapshot: ProfileSnapshot) -> set[str]:
     return credential_keys_in_text(snapshot.text, path=snapshot.path)
 
 
-def require_private_credentials(snapshot: ProfileSnapshot) -> None:
-    """Fail closed when an existing secret profile is readable by other users."""
+def warn_permissive_credentials(snapshot: ProfileSnapshot) -> None:
+    """Warn when an existing secret profile is readable by other local users."""
     if not snapshot.existed or not credential_keys(snapshot) or os.name != "posix":
         return
     if snapshot.mode is None:  # defensive: an existing snapshot always has it
-        raise EnvProfileFailure(
-            f"cannot inspect env profile permissions {snapshot.path}: mode unavailable"
-        )
+        return
     mode = stat.S_IMODE(snapshot.mode)
     if mode & 0o077:
-        raise EnvProfileFailure(
-            f"env profile {snapshot.path} contains credentials but mode is "
-            f"{mode:04o}; run `chmod 600 {snapshot.path}` and retry"
+        print(
+            f"warning: env profile {snapshot.path} contains credentials but mode "
+            f"is {mode:04o}; run `chmod 600 {snapshot.path}` to restrict it",
+            file=sys.stderr,
         )
 
 
@@ -237,7 +237,7 @@ def load_profile(path: Path, *, required: bool) -> None:
                 f"env profile does not exist: {path} — fix --env-file or remove it"
             )
         return
-    require_private_credentials(snapshot)
+    warn_permissive_credentials(snapshot)
     assignments = parse_profile_text(
         snapshot.text, path=path, reject_duplicates=True
     )
@@ -459,7 +459,6 @@ def commit_profile_and_config(
     the same safety boundary to other SDK-controlled endpoints.
     """
     profile_before = snapshot_profile(env_path)
-    require_private_credentials(profile_before)
     final_removals = set(removals)
     if remove_openai_key:
         final_removals.add("OPENAI_API_KEY")

@@ -1232,12 +1232,13 @@ LLM work stops with environment exit code 2 instead of falling through to
 OpenAI or localhost. Only an absent implicit `config/models.yaml` enables the
 built-in all-Luna/OpenAI fallback.
 
-For a reusable profile that keeps its key and routing selection together, use
-the tracked template. The global option must precede the command:
+For a reusable profile that keeps its key and routing selection together, copy
+the env template. The global option must precede the command:
 
 ```bash
 cp .env.template .env.litellm && chmod 600 .env.litellm
-# edit .env.litellm, then verify the selected endpoint/config
+# create the profile-specific config, then verify it
+researchwiki --env-file .env.litellm init
 researchwiki --env-file .env.litellm status
 researchwiki --env-file .env.litellm agent ingest inbox/paper.pdf
 ```
@@ -1245,9 +1246,10 @@ researchwiki --env-file .env.litellm agent ingest inbox/paper.pdf
 This loads only the named file, not the root `.env`, while already-exported
 shell variables still take precedence. Avoid plain `source .env.litellm`:
 dotenv's `KEY=value` assignments are not exported to the child CLI unless the
-shell is put into export-all mode. Running `init` through a named profile keeps
-its `RW_MODELS_CONFIG` selector and updates that selected config; it does not
-replace the checkout-global `config/models.yaml`.
+shell is put into export-all mode. Running `init` through a named profile creates
+and selects `config/profiles/litellm.yaml`, copied from the chosen tracked
+template. Mutable profile configs are gitignored; tracked `config/models.*.yaml`
+templates and the checkout-global `config/models.yaml` remain untouched.
 
 Every explicit endpoint follows the same validation rule, whether it comes from
 YAML, `RW_LLM_BASE_URL`, or `ANTHROPIC_BASE_URL`: HTTP and HTTPS are accepted,

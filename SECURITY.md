@@ -31,8 +31,10 @@ LLM provider keys are read from the environment, typically via a local `.env`:
 - `ANTHROPIC_API_KEY` — Anthropic and Anthropic-compatible third parties
 
 `.env` and named `.env.*` profiles are gitignored and no key is committed.
-**Never commit one**, restrict each credential file with `chmod 600`, and
-prefer `git add <path>` over `git add -A` so a stray local file can't be swept
+**Never commit one**. Restrict credential files with `chmod 600`; broader POSIX
+permissions produce a warning, while profiles created or updated by the wizard
+are written as `0600`. Also prefer `git add <path>` over `git add -A` so a stray
+local file can't be swept
 in. Select a named profile explicitly with
 `researchwiki --env-file .env.NAME COMMAND`; this avoids accidentally loading
 the root profile for a different provider.

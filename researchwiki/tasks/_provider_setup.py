@@ -1,4 +1,4 @@
-"""Credential ownership decisions shared by the interactive provider wizard.
+"""Credential ownership and mutable-config decisions for the provider wizard.
 
 Kept separate from ``tasks.init`` because endpoint transitions are a security
 boundary of their own: an API key may follow a new host only after explicit
@@ -8,6 +8,7 @@ consent, and a shell-owned value cannot be replaced by editing a dotenv file.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -21,6 +22,60 @@ def profile_controls_env_key(env_path: Path, key: str) -> bool:
         and key in os.environ
         and effective_assignment_value(snapshot_profile(env_path), key) == os.environ[key]
     )
+
+
+def provider_config_target(
+    root: Path,
+    env_path: Path,
+    selected_path: Path | None,
+    *,
+    provider: str,
+    named_profile: bool,
+) -> tuple[Path, bool, str | None]:
+    """Choose a mutable config target without overwriting tracked templates.
+
+    Returns ``(path, preserve_selector, replacement_selector)``. Named profiles
+    get an isolated config under the gitignored ``config/profiles`` directory
+    when they currently select a tracked ``config/models.*.yaml`` template (or
+    no config at all). A user-selected config elsewhere remains authoritative.
+    """
+    default = root / "config" / "models.yaml"
+    if provider == "openai":
+        return default, False, None
+
+    config_dir = root / "config"
+    tracked_template = bool(
+        selected_path
+        and selected_path.parent.resolve() == config_dir.resolve()
+        and selected_path.name.startswith("models.")
+        and selected_path.name.endswith(".yaml")
+        and selected_path.name != "models.yaml"
+    )
+    if selected_path is not None and not tracked_template:
+        return selected_path, True, None
+    if not named_profile:
+        return default, False, None
+
+    name = env_path.name
+    label = name[5:] if name.startswith(".env.") else name.lstrip(".")
+    slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "profile"
+    target = config_dir / "profiles" / f"{slug}.yaml"
+    selector = target.relative_to(root).as_posix()
+    return target, True, selector
+
+
+def stale_routing_keys(
+    provider: str, *, preserve_models_config: bool = False,
+) -> set[str]:
+    """Environment overrides that would defeat the provider just selected."""
+    stale = set() if preserve_models_config else {"RW_MODELS_CONFIG"}
+    if provider != "chat-relay":
+        stale.add("RW_LLM_PROVIDER")
+    if provider != "local":
+        stale.add("RW_LLM_BASE_URL")
+    if provider == "anthropic":
+        stale.add("ANTHROPIC_BASE_URL")
+    return stale
 
 
 def same_endpoint(left: str | None, right: str | None) -> bool:

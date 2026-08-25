@@ -647,14 +647,16 @@ def test_generic_reconfigure_replaces_selected_profile_key(
 
     assert profile.read_text() == (
         'export OPENAI_API_KEY="new-provider-secret"\n'
+        'RW_MODELS_CONFIG="config/profiles/provider.yaml"\n'
     )
-    models = (config / "models.yaml").read_text()
+    assert not (config / "models.yaml").exists()
+    models = (config / "profiles" / "provider.yaml").read_text()
     assert 'base_url: "https://api.groq.com/openai/v1"' in models
     assert models.count('model: "llama-quality"') == 3
     assert models.count('model: "llama-fast"') == 3
 
 
-def test_generic_reconfigure_updates_profile_selected_config(
+def test_generic_reconfigure_migrates_tracked_template_to_profile_config(
     tmp_path, monkeypatch,
 ):
     monkeypatch.chdir(tmp_path)
@@ -700,14 +702,19 @@ def test_generic_reconfigure_updates_profile_selected_config(
     init._step_provider(tmp_path)
 
     profile_text = profile.read_text()
-    assert 'RW_MODELS_CONFIG="models.profile.yaml"' in profile_text
+    assert 'RW_MODELS_CONFIG="config/profiles/provider.yaml"' in profile_text
     assert 'OPENAI_API_KEY="new-provider-secret"' in profile_text
-    assert os.environ["RW_MODELS_CONFIG"] == "models.profile.yaml"
+    assert os.environ["RW_MODELS_CONFIG"] == "config/profiles/provider.yaml"
     assert not (config / "models.yaml").exists()
-    selected_text = selected.read_text()
-    assert 'base_url: "http://10.212.23.212/v1"' in selected_text
-    assert selected_text.count('model: "llama-quality"') == 3
-    assert selected_text.count('model: "llama-fast"') == 3
+    assert selected.read_text() == (
+        "base_url: https://old.example/v1\n"
+        "roles:\n  author: {provider: openai-compatible, model: old}\n"
+    )
+    profile_config = config / "profiles" / "provider.yaml"
+    profile_config_text = profile_config.read_text()
+    assert 'base_url: "http://10.212.23.212/v1"' in profile_config_text
+    assert profile_config_text.count('model: "llama-quality"') == 3
+    assert profile_config_text.count('model: "llama-fast"') == 3
 
 
 def test_invalid_local_url_stops_before_config_write(tmp_path, monkeypatch, capsys):
@@ -767,7 +774,11 @@ def test_local_reconfigure_removes_profile_key_before_readiness(
     assert "OPENAI_API_KEY" not in os.environ
     assert "OPENAI_API_KEY" not in profile.read_text()
     assert 'RW_LLM_BASE_URL="http://localhost:1234/v1"' in profile.read_text()
-    assert "provider: lmstudio" in (config / "models.yaml").read_text()
+    assert 'RW_MODELS_CONFIG="config/profiles/local.yaml"' in profile.read_text()
+    assert not (config / "models.yaml").exists()
+    assert "provider: lmstudio" in (
+        config / "profiles" / "local.yaml"
+    ).read_text()
 
 
 def test_non_editable_install_uses_bundled_template(tmp_path):
@@ -815,7 +826,11 @@ def test_anthropic_reselect_replaces_key_and_removes_profile_endpoint(
     assert 'ANTHROPIC_API_KEY="official-anthropic-secret"' in text
     assert "ANTHROPIC_BASE_URL" not in os.environ
     assert os.environ["ANTHROPIC_API_KEY"] == "official-anthropic-secret"
-    assert "provider: anthropic" in (config / "models.yaml").read_text()
+    assert 'RW_MODELS_CONFIG="config/profiles/provider.yaml"' in text
+    assert not (config / "models.yaml").exists()
+    assert "provider: anthropic" in (
+        config / "profiles" / "provider.yaml"
+    ).read_text()
 
 
 # ── _valid_slug ──────────────────────────────────────────────────────────────
@@ -944,20 +959,15 @@ def test_secure_env_write_fails_before_replace_when_fchmod_fails(
     assert list(tmp_path.glob(".*.tmp")) == []
 
 
-def test_init_rejects_existing_group_readable_credential_profile(
-    tmp_path, monkeypatch,
-):
+def test_init_rewrites_existing_group_readable_profile_as_private(tmp_path):
     profile = tmp_path / ".env"
     profile.write_text('OPENAI_API_KEY="secret"\n')
     profile.chmod(0o644)
-    monkeypatch.setattr(
-        init,
-        "_ask_choice",
-        lambda _n: pytest.fail("wizard must stop before the provider menu"),
-    )
 
-    with pytest.raises(EnvironmentFailure, match="chmod 600"):
-        init._step_provider(tmp_path)
+    init._upsert_env(profile, {"OPENAI_API_KEY": "updated"})
+
+    assert profile.read_text() == 'OPENAI_API_KEY="updated"\n'
+    assert profile.stat().st_mode & 0o777 == 0o600
 
 
 def test_provider_transaction_rolls_back_config_before_restoring_old_key(

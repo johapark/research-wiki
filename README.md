@@ -29,7 +29,7 @@ First, **where are your papers now?** The two answers need different steps:
 Then three ways to drive the setup itself — pick one:
 
 - **Talk to your LLM.** Clone, drop PDFs in `inbox/`, open the directory in Claude Code (or any agent that reads `CLAUDE.md` / `AGENTS.md`), say *"initialize this for me — I have N PDFs in inbox/."* The agent walks the steps in [`prompts/init.md`](./prompts/init.md).
-- **Run the wizard.** `researchwiki init` — interactive terminal wizard (provider → categories → dashboard → confirm). Prompts you for each decision and writes `.env`, plus `config/models.yaml` for any provider that needs one. With `researchwiki --env-file .env.NAME init`, it updates that profile and the config selected by its `RW_MODELS_CONFIG` instead. It offers the same five providers as the table below and recommends OpenAI, which needs no config file at all.
+- **Run the wizard.** `researchwiki init` — interactive terminal wizard (provider → categories → dashboard → confirm). Prompts you for each decision and writes `.env`, plus `config/models.yaml` for any provider that needs one. With `researchwiki --env-file .env.NAME init`, it creates an isolated, gitignored `config/profiles/NAME.yaml` instead of editing a tracked template. It offers the same five providers as the table below and recommends OpenAI, which needs no config file at all.
 - **Do it manually.** The sub-sections below walk the same steps as a reference.
 
 Taxonomy comes from *your* papers: `researchwiki bootstrap-categories` derives categories from what's in `inbox/`, **not** the biology+ML defaults listed below. Importing a library instead? Either run it on a first `--limit` wave once those papers land, or let the per-paper classifier place them — see [Categories](#categories).
@@ -78,7 +78,7 @@ Run `researchwiki init --scaffold-only` afterwards to create the page-type dirs 
 
 ### Providers
 
-Set credentials/routing via a gitignored **`.env`** at the project root (loaded automatically every invocation — no `source` needed) or inline shell exports (which take precedence). For isolated backend profiles, copy `.env.template`, run `chmod 600` on the copy, and select it explicitly with `researchwiki --env-file .env.NAME COMMAND`. Put your **API key** in the profile; keep the endpoint in the selected model config's `base_url:`. `RW_LLM_BASE_URL` is an ad-hoc override and wins over that config. HTTP and HTTPS endpoints are accepted; use only hosts you trust because the key and paper content are sent there.
+Set credentials/routing via a gitignored **`.env`** at the project root (loaded automatically every invocation — no `source` needed) or inline shell exports (which take precedence). For isolated backend profiles, copy `.env.template` and select it explicitly with `researchwiki --env-file .env.NAME COMMAND`; `chmod 600` is recommended, and broader permissions produce a warning rather than blocking commands. Put your **API key** in the profile; keep the endpoint in the selected model config's `base_url:`. `RW_LLM_BASE_URL` is an ad-hoc override and wins over that config. HTTP and HTTPS endpoints are accepted; use only hosts you trust because the key and paper content are sent there.
 
 ```bash
 # .env
