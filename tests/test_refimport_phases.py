@@ -95,25 +95,21 @@ def test_preflight_on_an_unidentifiable_file_exits_one(wiki, tmp_path, capsys):
     assert code == 1 and "cannot identify" in err
 
 
-def test_preflight_does_not_fail_on_a_broken_embedding_model(wiki, capsys, monkeypatch):
-    """Deliberate divergence from `migrate`, which hard-fails its preflight on
-    this. Parsing a .ris has no dependency on a 133 MB bi-encoder, and refusing
-    to read an export because a torch wheel is wrong blocks the phase a user
-    runs first — before they own any PDFs. `apply` is where it binds."""
-    monkeypatch.setattr(import_task, "_embedding_status",
-                        lambda: (False, "RuntimeError: _ARRAY_API not found"))
+def test_preflight_is_parse_only_and_does_not_probe_embeddings(wiki, capsys,
+                                                               monkeypatch):
+    monkeypatch.setattr(
+        import_task, "_embedding_status",
+        lambda: (_ for _ in ()).throw(AssertionError("embedding probe ran")),
+    )
     code, out, _ = run(["preflight", str(RIS)], capsys)
-    assert code == 0
-    assert "WARN unusable" in out and "re-grading the whole import" in out
+    assert code == 0 and "records            12" in out
 
 
-def test_preflight_probes_an_encode_not_just_construction(monkeypatch):
+def test_embedding_status_probes_an_encode_not_just_construction(monkeypatch):
     """`is_available()` only proves the model *constructs*; a torch/NumPy ABI
     mismatch loads fine, reports OK, and dies on the first real call. The probe
     must therefore reach `embed_texts`, which this asserts by failing there."""
-    import types
-
-    import researchwiki.index as index_pkg
+    from researchwiki.index import embeddings
 
     called = {}
 
@@ -121,8 +117,8 @@ def test_preflight_probes_an_encode_not_just_construction(monkeypatch):
         called["texts"] = texts
         raise RuntimeError("_ARRAY_API not found")
 
-    fake = types.SimpleNamespace(DEFAULT_MODEL="fake-model", embed_texts=boom)
-    monkeypatch.setattr(index_pkg, "embeddings", fake)
+    monkeypatch.setattr(embeddings, "DEFAULT_MODEL", "fake-model")
+    monkeypatch.setattr(embeddings, "embed_texts", boom)
 
     ok, detail = import_task._embedding_status()
     assert ok is False and "_ARRAY_API not found" in detail
@@ -130,17 +126,14 @@ def test_preflight_probes_an_encode_not_just_construction(monkeypatch):
 
 
 def test_embedding_probe_reports_the_model_and_dimension_on_success(monkeypatch):
-    import types
-
     import numpy as np
 
-    import researchwiki.index as index_pkg
+    from researchwiki.index import embeddings
 
-    fake = types.SimpleNamespace(
-        DEFAULT_MODEL="fake-model",
-        embed_texts=lambda texts: np.zeros((len(texts), 384)),
+    monkeypatch.setattr(embeddings, "DEFAULT_MODEL", "fake-model")
+    monkeypatch.setattr(
+        embeddings, "embed_texts", lambda texts: np.zeros((len(texts), 384))
     )
-    monkeypatch.setattr(index_pkg, "embeddings", fake)
     ok, detail = import_task._embedding_status()
     assert ok is True and "fake-model" in detail and "384d" in detail
 
@@ -230,6 +223,22 @@ def test_inspect_limit_caps_the_records_assessed(wiki, capsys):
     run(["inspect", str(RIS), "--limit", "3"], capsys)
     data = json.loads((latest_run_dir(wiki) / "manifest.json").read_text())
     assert len(data["items"]) == 3
+
+
+def test_inspect_limit_still_runs_corpus_wide_supersede_detection(wiki, tmp_path,
+                                                                  capsys):
+    export = tmp_path / "versions.ris"
+    export.write_text(
+        "TY  - JOUR\nID  - pre\nTI  - Same exact title\nAU  - Ada, A\n"
+        "PY  - 2025\nDO  - 10.1101/2025.01.01.1\nER  -\n\n"
+        "TY  - JOUR\nID  - pub\nTI  - Same exact title\nAU  - Ada, A\n"
+        "PY  - 2026\nDO  - 10.1234/published\nER  -\n",
+        encoding="utf-8",
+    )
+    _, out, _ = run(["inspect", str(export), "--limit", "1", "--json"], capsys)
+    item = json.loads(out)["items"][0]
+    assert item["key"] == "pre"
+    assert "superseded-by-journal" in item["reasons"]
 
 
 # ---------- inspect: the --json contract ----------

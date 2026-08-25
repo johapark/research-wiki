@@ -301,8 +301,7 @@ def test_apply_on_a_missing_run_returns_1(wiki, no_spend, capsys):
 
 def test_apply_hard_fails_when_the_embedding_model_is_unusable(wiki, monkeypatch,
                                                                capsys):
-    """Advisory in preflight/inspect, fatal here: this is the phase that grades,
-    and a BM25-only wave would need re-grading later."""
+    """Dry-run is advisory, but a real run must fail before copying anything."""
     from researchwiki.errors import EnvironmentFailure
     from researchwiki.tasks import _ingest_batch
     monkeypatch.setattr(_ingest_batch, "new_batch", lambda *a, **k: 0)
@@ -311,7 +310,20 @@ def test_apply_hard_fails_when_the_embedding_model_is_unusable(wiki, monkeypatch
     run = write_manifest(wiki, [rec(wiki)])
     with pytest.raises(EnvironmentFailure, match="embedding model"):
         import_task.main(["apply", "--run", str(run)])
+    assert list((wiki / "inbox").glob("*.pdf")) == []
     capsys.readouterr()
+
+
+def test_failed_dispatch_does_not_print_success_followups(wiki, monkeypatch, capsys):
+    from researchwiki.tasks import _ingest_batch
+    monkeypatch.setattr(_ingest_batch, "new_batch", lambda *a, **k: 1)
+    monkeypatch.setattr(import_task, "_embedding_status", lambda: (True, "fake"))
+    run = write_manifest(wiki, [rec(wiki)])
+
+    assert import_task.main(["apply", "--run", str(run)]) == 1
+    captured = capsys.readouterr()
+    assert "Next — free" not in captured.out
+    assert "Import wave failed" in captured.err
 
 
 # ---------- the verify phase ----------
@@ -346,6 +358,22 @@ def test_verify_distinguishes_sandboxed_from_missing(wiki, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["sandboxed"] == ["held-2024-a-paper"]
     assert out["not_imported"] == ["never-2024-a-paper"]
+
+
+def test_verify_matches_a_doi_only_record_to_its_sandbox_page(wiki, capsys):
+    held = rec(wiki, key="held", stem=None, doi="10.1234/doi-only")
+    run = write_manifest(wiki, [held])
+    sandbox = wiki / ".agent-output"
+    sandbox.mkdir()
+    (sandbox / "reconciled-2026-title-from-doi.md").write_text(
+        "---\ntitle: Reconciled\ntype: paper\ndoi: 10.1234/doi-only\n---\n",
+        encoding="utf-8",
+    )
+
+    import_task.main(["verify", "--run", str(run), "--json"])
+    out = json.loads(capsys.readouterr().out)
+    assert out["sandboxed"] == ["reconciled-2026-title-from-doi"]
+    assert out["not_imported"] == []
 
 
 def test_verify_only_counts_records_that_were_ready(wiki, capsys):
@@ -468,6 +496,20 @@ def test_the_leftover_is_found_under_the_uniquified_name(wiki):
     plan = plan_wave([r])
     assert plan.staged == []
     assert plan.already_staged[0]["staged_as"] == str(leftover)
+
+
+def test_apply_prints_frozen_metadata_for_an_already_staged_pdf(wiki, no_spend,
+                                                                capsys):
+    r = rec(wiki, doi="10.1234/preserved")
+    leftover = wiki / "inbox" / "paper.pdf"
+    leftover.write_bytes(Path(r["primary_pdf"]).read_bytes())
+    run = write_manifest(wiki, [r])
+
+    assert import_task.main(["apply", "--run", str(run)]) == 1
+    out = capsys.readouterr().out
+    assert "researchwiki agent ingest" in out
+    assert "--doi 10.1234/preserved" in out
+    assert "--title 'A paper about things'" in out
 
 
 def test_a_different_pdf_of_the_same_name_still_stages(wiki):

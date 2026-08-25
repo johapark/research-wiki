@@ -225,6 +225,34 @@ def _coverage(title: frozenset[str], text: frozenset[str]) -> float:
     return len(title & text) / len(title)
 
 
+def find_duplicate_doi_losers(items: list[ExportItem]) -> dict[int, ExportItem]:
+    """Map duplicate record ids to one deterministic survivor per DOI.
+
+    This runs before pairing so a sparse duplicate cannot consume the only PDF
+    merely because it appeared first in the export. The richest record wins;
+    the stable export key breaks ties.
+    """
+    groups: dict[str, list[ExportItem]] = {}
+    for item in items:
+        if item.has_usable_doi:
+            groups.setdefault(item.doi, []).append(item)
+
+    losers: dict[int, ExportItem] = {}
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        survivor = min(group, key=lambda item: (
+            -sum((bool(item.title), bool(item.authors), bool(item.year))),
+            -len(item.authors),
+            -len(item.title or ""),
+            item.key or "",
+        ))
+        for item in group:
+            if item is not survivor:
+                losers[id(item)] = survivor
+    return losers
+
+
 def build_pdf_index(pdf_root: Path) -> list[PdfFacts]:
     """One extraction pass over every PDF under `pdf_root`.
 
@@ -301,6 +329,13 @@ def pair_items(items: list[ExportItem], facts: list[PdfFacts], *,
     """
     pdf_root, export_dir = canonical(pdf_root), canonical(export_dir)
     pairings = {id(i): Pairing(item=i) for i in items}
+    duplicate_losers = find_duplicate_doi_losers(items)
+    active_items = [i for i in items if id(i) not in duplicate_losers]
+    declared_files = {id(i): list(i.declared_files) for i in active_items}
+    for loser_id, survivor in duplicate_losers.items():
+        for path in pairings[loser_id].item.declared_files:
+            if path not in declared_files[id(survivor)]:
+                declared_files[id(survivor)].append(path)
     taken: set[Path] = set()
 
     by_name: dict[str, list[Path]] = {}
@@ -315,9 +350,9 @@ def pair_items(items: list[ExportItem], facts: list[PdfFacts], *,
             by_doi.setdefault(f.doi.lower(), []).append(f)
 
     # Rung 1 — declared paths.
-    for item in items:
+    for item in active_items:
         p = pairings[id(item)]
-        for raw in item.declared_files:
+        for raw in declared_files[id(item)]:
             hit = _resolve_declared(raw, pdf_root, export_dir, by_name,
                                     by_canonical)
             if hit and hit not in taken:
@@ -328,7 +363,7 @@ def pair_items(items: list[ExportItem], facts: list[PdfFacts], *,
                     p.supplementary.append(hit)
 
     # Rung 2 — DOI printed in the PDF.
-    for item in items:
+    for item in active_items:
         p = pairings[id(item)]
         if p.primary is not None or not item.has_usable_doi:
             continue
@@ -362,7 +397,7 @@ def pair_items(items: list[ExportItem], facts: list[PdfFacts], *,
     # is fair; "rival 0.889" when the real contender scored 1.0 understates the
     # contest.
     per_pdf: dict[Path, list[tuple[float, int]]] = {}
-    for item in items:
+    for item in active_items:
         if pairings[id(item)].primary is not None or not item.title:
             continue
         it = _tokens(item.title)

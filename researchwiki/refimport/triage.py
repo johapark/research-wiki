@@ -18,7 +18,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..stems import derive_stem, strip_diacritics
-from .pair import TITLE_ACCEPT, TITLE_MARGIN, Pairing, PdfFacts
+from .pair import (
+    TITLE_ACCEPT,
+    TITLE_MARGIN,
+    Pairing,
+    PdfFacts,
+    find_duplicate_doi_losers,
+)
 from .parse import ExportItem
 
 READY, REVIEW, SKIP = "ready", "review", "skip"
@@ -174,6 +180,9 @@ def assess_all(items: list[ExportItem], pairings: list[Pairing],
     """
     known_dois = {k.lower(): v for k, v in (known_dois or {}).items()}
     superseded = find_superseded(items) if superseded is None else superseded
+    duplicate_losers = find_duplicate_doi_losers(
+        [item for item in items if id(item) not in superseded]
+    )
     by_item = {id(p.item): p for p in pairings}
     out: list[ItemAssessment] = []
 
@@ -192,6 +201,11 @@ def assess_all(items: list[ExportItem], pairings: list[Pairing],
         # --- identity and metadata ---
         if id(item) in superseded:
             a._flag(SKIP, "superseded-by-journal")
+
+        duplicate_survivor = duplicate_losers.get(id(item))
+        if duplicate_survivor is not None:
+            a.collision = {"kind": "duplicate-doi", "key": duplicate_survivor.key}
+            a._flag(SKIP, "duplicate-doi")
 
         if item.item_type in NON_PAPER_TYPES:
             a._flag(SKIP, "not-a-paper")
@@ -219,7 +233,7 @@ def assess_all(items: list[ExportItem], pairings: list[Pairing],
         # A superseded record is not being imported, so whether it has a file
         # is not a finding. Reporting `no-pdf` for it would also inflate the
         # fetch-list count with versions the user deliberately isn't importing.
-        if id(item) in superseded:
+        if id(item) in superseded or duplicate_survivor is not None:
             pass
         elif pairing.primary is None:
             a._flag(SKIP, "no-pdf")
@@ -245,59 +259,8 @@ def assess_all(items: list[ExportItem], pairings: list[Pairing],
         a.ingest_args = build_ingest_args(item, pairing)
         out.append(a)
 
-    # Order is load-bearing. Duplicate-DOI records almost always derive the same
-    # stem, so running the stem gate first would flag the survivor
-    # `stem-collision` against a record that is about to be skipped anyway —
-    # sending a clean import to review. Skipping the losers first drops them out
-    # of the `verdict == READY` filter the stem gate applies.
-    _flag_duplicate_dois(out)
     _flag_stem_collisions(out)
     return out
-
-
-def _flag_duplicate_dois(assessments: list[ItemAssessment]) -> None:
-    """Two importable records carrying the same DOI: keep one, skip the rest.
-
-    Unlike a stem collision, this is not a judgement. An identical DOI *is* the
-    same paper, so sending the whole group to review would fill the queue with
-    items that have nothing to adjudicate — the shape `find_superseded` already
-    settled the other way, choosing a survivor deliberately.
-
-    Nothing else catches it. `plan_wave` re-checks the wiki, not the manifest, so
-    two records for one DOI both dispatch in the same wave and the paper is
-    ingested twice. `_flag_stem_collisions` looks like it would cover the case
-    and does not: `derived_stem` is only set when title *and* year *and* authors
-    are present, so a DOI-bearing record missing its year has no stem and trips
-    no gate at all.
-
-    The survivor is chosen by a total order, never by input order — the same
-    reasoning `find_superseded` documents, that two exports of one library listed
-    their pairs in different orders and "first one wins" would import differently
-    from identical data. Most-complete record wins; `item.key` breaks ties.
-
-    DOIs arrive already lowercased from `parse._clean_doi`, so they are not
-    re-normalized here.
-    """
-    seen: dict[str, list[ItemAssessment]] = {}
-    for a in assessments:
-        if a.verdict == READY and a.item.has_usable_doi:
-            seen.setdefault(a.item.doi, []).append(a)
-
-    for doi, group in seen.items():
-        if len(group) < 2:
-            continue
-        group.sort(key=lambda a: (
-            a.pairing.primary is not None,      # a record with a file beats one without
-            bool(a.derived_stem),               # …then one that can name its page
-            len(a.item.authors or []),
-            a.item.year or 0,
-            [-ord(c) for c in (a.item.key or "")],   # ascending key, as a total order
-        ), reverse=True)
-        survivor, losers = group[0], group[1:]
-        for a in losers:
-            a._flag(SKIP, "duplicate-doi")
-            if a.collision is None:
-                a.collision = {"kind": "duplicate-doi", "key": survivor.item.key}
 
 
 def _flag_stem_collisions(assessments: list[ItemAssessment]) -> None:
@@ -365,9 +328,8 @@ def missing_pdf_fetch_list(assessments: list[ItemAssessment]) -> list[dict]:
     produces: without it, a metadata-only run reports "483 skipped" and nothing
     actionable. Emitted as plain DOIs so the list can be piped.
 
-    Deduplicated by DOI, because `_flag_duplicate_dois` cannot reach these: it is
-    gated on READY, and a record with no PDF is a skip. A metadata-only export
-    with the same paper twice would otherwise ask the user to fetch it twice.
+    Deduplicated by DOI as a final guard so a metadata-only export never asks
+    the user to fetch the same paper twice.
     """
     out = []
     seen: set[str] = set()

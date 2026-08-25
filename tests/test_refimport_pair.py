@@ -11,16 +11,17 @@ from pathlib import Path
 import pytest
 
 from researchwiki.refimport.pair import (
+    _SUPP_ANY_RE,
     TITLE_ACCEPT,
     Pairing,
     PdfFacts,
-    _SUPP_ANY_RE,
     _looks_supplementary,
     _tokens,
     build_pdf_index,
     pair_items,
 )
 from researchwiki.refimport.parse import ExportItem
+from researchwiki.refimport.triage import assess_all
 
 pypdfium2 = pytest.importorskip("pypdfium2")
 
@@ -115,6 +116,50 @@ def test_index_records_a_broken_pdf_instead_of_raising(pdf_root):
 
 def test_index_is_empty_for_a_missing_root(tmp_path):
     assert build_pdf_index(tmp_path / "nope") == []
+
+
+def test_duplicate_doi_survivor_is_order_independent_with_one_pdf(pdf_root):
+    """Pairing must not let the first duplicate consume the only PDF before
+    triage can select the richer record as the survivor."""
+    write_pdf(pdf_root / "paper.pdf", [
+        "Same paper title",
+        "doi:10.1234/duplicate",
+        "Ada Rich",
+    ] * 20)
+    sparse = ExportItem(key="z", item_type="article", doi="10.1234/duplicate")
+    rich = ExportItem(
+        key="a", item_type="article", title="Same paper title",
+        authors=["Ada Rich"], year=2024, doi="10.1234/duplicate",
+    )
+
+    survivors = []
+    for items in ([sparse, rich], [rich, sparse]):
+        facts = build_pdf_index(pdf_root)
+        pairings, _ = pair_items(items, facts, pdf_root=pdf_root,
+                                 export_dir=pdf_root)
+        out = assess_all(items, pairings, {f.path: f for f in facts})
+        survivors.append([a.item.key for a in out if a.verdict == "ready"])
+
+    assert survivors == [["a"], ["a"]]
+
+
+def test_duplicate_doi_survivor_inherits_declared_attachment(pdf_root):
+    write_pdf(pdf_root / "files" / "paper.pdf", ["Enough body text " * 30])
+    sparse = ExportItem(
+        key="z", item_type="article", doi="10.1234/duplicate",
+        declared_files=["files/paper.pdf"],
+    )
+    rich = ExportItem(
+        key="a", item_type="article", title="Same paper title",
+        authors=["Ada Rich"], year=2024, doi="10.1234/duplicate",
+    )
+
+    facts = build_pdf_index(pdf_root)
+    pairings, _ = pair_items([sparse, rich], facts, pdf_root=pdf_root,
+                             export_dir=pdf_root)
+    by_key = {p.item.key: p for p in pairings}
+    assert by_key["a"].primary == pdf_root / "files" / "paper.pdf"
+    assert by_key["z"].primary is None
 
 
 def test_chars_per_page_separates_a_scan_from_a_real_paper(pdf_root):

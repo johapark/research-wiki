@@ -296,8 +296,7 @@ def test_distinct_dois_are_untouched_by_the_dedup_gate():
 
 
 def test_the_fetch_list_asks_for_each_doi_once():
-    """`_flag_duplicate_dois` is READY-gated and a PDF-less record is a skip, so
-    the fetch list needs its own dedupe or it asks twice."""
+    """A metadata-only export should ask for each duplicated DOI once."""
     a = mk_item(key="a", title="Same paper", doi="10.1234/dup")
     b = mk_item(key="b", title="Same paper", doi="10.1234/dup")
     out = assess_all([a, b], [Pairing(item=a), Pairing(item=b)], {})

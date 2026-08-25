@@ -12,8 +12,8 @@
     researchwiki import apply --run <dir> --limit N     # copy + ingest a wave
     researchwiki import verify --run <dir>              # did it land?
 
-`preflight` and `inspect` cost **zero tokens** and write nothing outside their
-run directory; `apply` is the phase that spends and that writes pages.
+`preflight` writes nothing. `inspect` writes only its run directory; `apply` is
+the phase that spends and that writes pages.
 `inspect` is where the value is: it pairs records to PDFs, runs every gate, and
 writes a manifest plus a report you read *before* deciding what to import.
 
@@ -50,6 +50,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import shlex
 import sys
 from pathlib import Path
 
@@ -87,10 +88,9 @@ def _embedding_status() -> tuple[bool, str]:
     the trap that makes the distinction matter: a torch/NumPy ABI mismatch
     loads fine, prints OK, and dies on the first real call.
 
-    This is reported, never fatal, in these two phases. Parsing a `.ris` file
-    has no dependency on a 133 MB bi-encoder, and refusing to read an export
-    because a torch wheel is wrong would block the phase a user runs first —
-    before they own any PDFs at all. `apply` is where the dependency binds.
+    `preflight` and `inspect` deliberately never call this: parsing and pairing
+    have no dependency on a 133 MB bi-encoder. A dry-run reports the result as
+    advice; a real apply checks it before copying and fails if it is unusable.
     """
     try:
         from ..index import embeddings
@@ -137,13 +137,6 @@ def _run_preflight(args: argparse.Namespace) -> int:
               "       by the DOI printed in them, then by title. Point `inspect` at\n"
               "       whatever directory holds them.")
 
-    ok, detail = _embedding_status()
-    print(f"\n  embedding model    {'OK   ' + detail if ok else 'WARN unusable — ' + detail}")
-    if not ok:
-        print("       Not needed to inspect an export, but `agent ingest` grades\n"
-              "       against it and degrades to BM25-only without it — which would\n"
-              "       mean re-grading the whole import later. Fix before importing.")
-
     print(f"\nNext: `researchwiki import inspect {args.export!r} <pdf-root>`")
     return 0
 
@@ -174,9 +167,6 @@ def _run_inspect(args: argparse.Namespace) -> int:
     if not items:
         print(f"No records parsed from {export}. Nothing to inspect.", file=sys.stderr)
         return 1
-    if args.limit:
-        items = items[: args.limit]
-
     pdf_root = Path(args.pdf_root) if args.pdf_root else None
     if pdf_root is not None and not pdf_root.is_dir():
         # Exit 1, not 2: a mistyped argument, not a broken environment. Reported
@@ -214,6 +204,11 @@ def _run_inspect(args: argparse.Namespace) -> int:
         stem_exists=read_wiki_stems().__contains__,
         superseded=superseded,
     )
+    # `--limit` is a report/apply sample, not an identity boundary. Supersede
+    # detection, duplicate selection and title-rival scoring must see the full
+    # export or a sample can bless a pairing the complete run would reject.
+    if args.limit:
+        assessments = assessments[: args.limit]
     summary = summarize(assessments)
     fetch = missing_pdf_fetch_list(assessments)
     ref_docs = reference_doc_candidates(assessments)
@@ -384,9 +379,11 @@ def _run_apply(args: argparse.Namespace) -> int:
         print(f"{len(plan.already_staged)} record(s) already copied into inbox/ by an "
               f"earlier wave — not re-copied:")
         for rec in plan.already_staged[:10]:
-            print(f"    {rec['staged_as']}")
-        print("  Each is a real backlog entry: finish it with "
-              "`researchwiki agent ingest <that path>`, or delete it.")
+            command = ["researchwiki", "agent", "ingest", rec["staged_as"],
+                       *(rec.get("ingest_args") or [])]
+            print(f"    {shlex.join(command)}")
+        print("  Each is a real backlog entry: run the printed command to preserve "
+              "its import metadata, or delete it.")
     if plan.missing_pdf:
         print(f"{len(plan.missing_pdf)} record(s) lost their PDF since inspect:")
         for rec in plan.missing_pdf[:10]:
@@ -394,6 +391,24 @@ def _run_apply(args: argparse.Namespace) -> int:
     if not plan.staged:
         print("Nothing left to import from this manifest.", file=sys.stderr)
         return 1
+
+    # A real run must establish every environment precondition before copying.
+    # Otherwise an embedding failure leaves PDFs in inbox/, and the next apply
+    # treats them as already staged instead of dispatching their frozen metadata.
+    if not args.dry_run:
+        ok, detail = _embedding_status()
+        if not ok:
+            raise EnvironmentFailure(
+                f"the local embedding model is unusable ({detail}). `agent ingest` "
+                f"grades against it, and without it every claim in this wave would "
+                f"grade BM25-only and need re-grading later. See the install notes "
+                f"in prompts/migration-backfill.md."
+            )
+
+    # A preview is exactly where the user decides whether to spend the wave,
+    # and chat-relay batching stalls silently rather than failing.
+    from .agent import warn_if_chat_relay_batch
+    warn_if_chat_relay_batch()
 
     staged = stage(plan.staged, dry_run=args.dry_run)
     print(f"\n# import apply — {len(staged)} paper(s)"
@@ -406,13 +421,6 @@ def _run_apply(args: argparse.Namespace) -> int:
         print(f"  {path.name}")
         print(f"      agent ingest {' '.join(argv)}")
 
-    # Before the `--dry-run` return, not after: a preview is exactly where the
-    # user decides whether to spend the wave, and this pairing stalls silently
-    # rather than failing. `dispatch` reaches `_ingest_batch.new_batch` directly,
-    # so `agent ingest`'s own check never sees an import run.
-    from .agent import warn_if_chat_relay_batch
-    warn_if_chat_relay_batch()
-
     if args.dry_run:
         ok, detail = _embedding_status()
         if not ok:
@@ -422,25 +430,16 @@ def _run_apply(args: argparse.Namespace) -> int:
               f"{f' --limit {args.limit}' if args.limit else ''}`")
         return 0
 
-    # Checked here rather than at the top of the phase: `--dry-run` is
-    # documented as "copy nothing, spend nothing", and gating a preview on a
-    # 133 MB bi-encoder denied the argv inspection to exactly the user whose
-    # environment is broken. Fatal only for a real run, which is what grades.
-    ok, detail = _embedding_status()
-    if not ok:
-        raise EnvironmentFailure(
-            f"the local embedding model is unusable ({detail}). `agent ingest` "
-            f"grades against it, and without it every claim in this wave would "
-            f"grade BM25-only and need re-grading later. See the install notes "
-            f"in prompts/migration-backfill.md."
-        )
-
     code = dispatch(staged, workers=args.workers)
+    if code:
+        print("\nImport wave failed. Use the batch runner's resume command above; "
+              "success follow-ups were not run.", file=sys.stderr)
+        return code
 
     print("\nNext — free (no tokens):")
     print("  researchwiki db rebuild && researchwiki reindex")
-    print("  researchwiki lint --json     # zero_claim_papers MUST be 0")
     print("  researchwiki grade regression --missing-only --no-salience")
+    print(f"  researchwiki import verify --run {args.run}")
     print("\nThen, once you're happy with these pages:")
     print(f"  researchwiki import apply --run {args.run} --limit {args.limit or 30}")
     return code
@@ -479,7 +478,8 @@ def _run_verify(args: argparse.Namespace) -> int:
     import json as _json
 
     from ..refimport.manifest import open_run_dir
-    from ..wiki import read_wiki_dois, read_wiki_stems
+    from ..refimport.parse import clean_doi
+    from ..wiki import read_page, read_wiki_dois, read_wiki_stems
 
     try:
         run = open_run_dir(Path(args.run))
@@ -491,7 +491,15 @@ def _run_verify(args: argparse.Namespace) -> int:
     known_dois = {k.lower(): v for k, v in read_wiki_dois().items()}
     known_stems = read_wiki_stems()
     sandbox = Path(".agent-output")
-    sandboxed_stems = {p.stem for p in sandbox.glob("*.md")} if sandbox.is_dir() else set()
+    sandboxed_stems: set[str] = set()
+    sandboxed_dois: dict[str, str] = {}
+    if sandbox.is_dir():
+        for md in sandbox.glob("*.md"):
+            sandboxed_stems.add(md.stem)
+            page = read_page(md)
+            doi = clean_doi(page.str_field("doi")) if page is not None else None
+            if doi:
+                sandboxed_dois[doi] = md.stem
 
     landed, in_sandbox, missing = [], [], []
     for rec in data["items"]:
@@ -503,8 +511,10 @@ def _run_verify(args: argparse.Namespace) -> int:
             landed.append({**rec, "landed_as": known_dois[doi]})
         elif stem and stem in known_stems:
             landed.append({**rec, "landed_as": stem})
+        elif doi and doi in sandboxed_dois:
+            in_sandbox.append({**rec, "sandboxed_as": sandboxed_dois[doi]})
         elif stem and stem in sandboxed_stems:
-            in_sandbox.append(rec)
+            in_sandbox.append({**rec, "sandboxed_as": stem})
         else:
             missing.append(rec)
 
@@ -515,7 +525,7 @@ def _run_verify(args: argparse.Namespace) -> int:
             "run_dir": str(run.root),
             "ready": len(landed) + len(in_sandbox) + len(missing),
             "landed": [r["landed_as"] for r in landed],
-            "sandboxed": [r.get("derived_stem") for r in in_sandbox],
+            "sandboxed": [r["sandboxed_as"] for r in in_sandbox],
             "not_imported": [r.get("derived_stem") or r.get("key") for r in missing],
             "lint": lint,
         }, indent=2))
@@ -531,7 +541,7 @@ def _run_verify(args: argparse.Namespace) -> int:
     if in_sandbox:
         print("\n  Sandboxed — the gates held these back; review and promote by hand:")
         for rec in in_sandbox[:15]:
-            print(f"    .agent-output/{rec['derived_stem']}.md")
+            print(f"    .agent-output/{rec['sandboxed_as']}.md")
 
     if lint is None:
         print("\n  lint: no snapshot — nothing to lint yet, or lint itself "
