@@ -58,16 +58,17 @@ share/
 .pair-dismissals.json
 
 # Active LLM model config — per-user, mutable. Every `config/models.*.yaml`
-# template IS tracked (chatgpt — the default, mirrored by the zero-config
-# hardcoded fallback — plus anthropic, gemini*, glm, gemma, lmstudio,
+# template IS tracked (openai — the explicit all-Luna fallback, chatgpt — the
+# opt-in Terra/Luna split — plus anthropic, gemini*, glm, gemma, lmstudio,
 # openai-compatible); `config/models.yaml` is the live copy a user selects by
 # `cp config/models.chatgpt.yaml config/models.yaml` and then edits (provider
 # swaps, per-role mixing). Tracked templates can still be selected read-only for
-# one-off runs; named profiles keep mutable copies under `config/profiles/`.
+# one-off runs; custom backends may keep explicitly selected mutable configs
+# under `config/profiles/`.
 # Gitignored so local edits don't churn the repo or fight `git pull`.
 config/models.yaml
-# Per-named-profile mutable routing configs created by `researchwiki init`.
-# Tracked `config/models.*.yaml` files remain immutable templates.
+# Explicit mutable routing configs for custom OpenAI-compatible backends.
+# Known providers select tracked `config/models.*.yaml` templates directly.
 config/profiles/
 
 # Ephemeral processing artifacts.

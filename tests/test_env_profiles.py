@@ -77,6 +77,20 @@ def test_named_profile_is_loaded_instead_of_root_env(fake_task):
     )
 
 
+def test_explicit_profile_rejects_inherited_routing(fake_task, monkeypatch, capsys):
+    root, seen = fake_task
+    (root / ".env.chatgpt").write_text(
+        "RW_MODELS_CONFIG=models.chatgpt.yaml\n"
+    )
+    monkeypatch.setenv("RW_MODELS_CONFIG", "models.anthropic.yaml")
+
+    assert cli.main(["--env-file", ".env.chatgpt", "faketask"]) == 2
+    assert seen == {}
+    err = capsys.readouterr().err
+    assert "shadowed by parent-shell routing" in err
+    assert "RW_MODELS_CONFIG" in err
+
+
 def test_env_file_equals_form_and_export_syntax(fake_task):
     root, seen = fake_task
     (root / ".env.local").write_text(
@@ -85,6 +99,31 @@ def test_env_file_equals_form_and_export_syntax(fake_task):
 
     assert cli.main(["--env-file=.env.local", "faketask"]) == 0
     assert seen["config"] == "models.lmstudio.yaml"
+
+
+def test_unquoted_value_allows_an_inline_comment(fake_task):
+    root, seen = fake_task
+    (root / ".env.comment").write_text(
+        "RW_MODELS_CONFIG=models.chatgpt.yaml  # selected routing\n"
+    )
+
+    assert cli.main(["--env-file", ".env.comment", "faketask"]) == 0
+    assert seen["config"] == "models.chatgpt.yaml"
+
+
+def test_profile_writer_round_trips_escaped_values(tmp_path):
+    profile = tmp_path / ".env.roundtrip"
+    snapshot = env_profiles.snapshot_profile(profile)
+    expected = 'quote=" dollar=$ slash=\\ newline=\n'
+
+    text, _ = env_profiles.edit_profile_text(
+        snapshot, updates={"OPENAI_API_KEY": expected}
+    )
+    assignments = env_profiles.parse_profile_text(
+        text, path=profile, reject_duplicates=True
+    )
+
+    assert assignments[0].value == expected
 
 
 def test_missing_named_profile_is_environment_error(fake_task, capsys):

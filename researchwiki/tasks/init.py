@@ -21,7 +21,6 @@ to skip or reconfigure each.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -45,10 +44,10 @@ from ..env_profiles import (
 )
 from ..errors import EnvironmentFailure
 from ..fsatomic import write_text_atomic
-from ..package_resources import model_template_text
 from ..paths import ensure_scaffold, inbox_dir, wiki_dir, wiki_root
 from ._provider_setup import (
     choose_endpoint_api_key as _choose_endpoint_api_key,
+    customize_openai_compatible_text as _customize_openai_compatible_text,
     provider_config_target as _provider_config_target,
     profile_controls_env_key as _profile_controls_env_key,
     same_endpoint as _same_endpoint,
@@ -88,6 +87,16 @@ _TEMPLATE_BY_PROVIDER: dict[str, str | None] = {
     "openai": None,
     "anthropic": "models.anthropic.yaml",
     "openai-compatible": "models.openai-compatible.yaml",
+    "local": "models.lmstudio.yaml",
+    "chat-relay": "models.anthropic.yaml",
+}
+
+# A named profile must select a real file so it cannot fall through to, or
+# delete, the checkout-global ``config/models.yaml``. ``models.openai.yaml`` is
+# the explicit equivalent of the built-in all-Luna fallback.
+_NAMED_TEMPLATE_BY_PROVIDER: dict[str, str] = {
+    "openai": "models.openai.yaml",
+    "anthropic": "models.anthropic.yaml",
     "local": "models.lmstudio.yaml",
     "chat-relay": "models.anthropic.yaml",
 }
@@ -242,6 +251,23 @@ def _active_env_path(root: Path) -> Path:
     """The explicit profile loaded by the CLI, else the root ``.env``."""
     selected = os.environ.get(_ACTIVE_ENV_FILE_VAR)
     return Path(selected) if selected else root / ".env"
+
+
+def _resolve_models_config_path(root: Path, value: str) -> Path:
+    """Resolve an explicit config selection with model_config's path rules."""
+    path = Path(value).expanduser()
+    separator = os.sep in value or bool(os.altsep and os.altsep in value)
+    if path.is_absolute() or separator:
+        return path if path.is_absolute() else root / path
+    return root / "config" / path
+
+
+def model_template_text(config_dir: Path, template_name: str) -> str | None:
+    """Read one canonical template from the repository checkout."""
+    try:
+        return (config_dir / template_name).read_text(encoding="utf-8")
+    except OSError:
+        return None
 
 
 def _external_routing_keys(env_path: Path) -> set[str]:
@@ -489,82 +515,6 @@ def _current_provider(models_yaml: Path) -> str | None:
     return None
 
 
-def _customize_openai_compatible_text(
-    template_text: str,
-    *,
-    base_url: str,
-    quality_model: str,
-    utility_model: str,
-) -> str:
-    """Return a validated generic template customized for one real provider.
-
-    The checked-in template is a documented Gemini example. Copying it while
-    changing only the endpoint creates invalid pairs such as Groq + Gemini
-    model IDs, so the wizard must rewrite both halves of the routing decision.
-    Comments and per-role budgets stay intact; JSON strings are valid YAML
-    scalars and safely preserve model IDs containing punctuation. Validation is
-    deliberately in-memory so template drift cannot destroy an active config.
-    """
-    lines = template_text.splitlines()
-    out: list[str] = []
-    in_roles = False
-    current_role: str | None = None
-    replaced_url = False
-    replaced_roles: set[str] = set()
-    quality_roles = {"author", "critic", "judge"}
-    expected_roles = quality_roles | {"classifier", "proposer", "extractor"}
-
-    for raw in lines:
-        stripped = raw.strip()
-        if raw.startswith("base_url:"):
-            out.append(f"base_url: {json.dumps(base_url)}")
-            replaced_url = True
-            continue
-        if raw == "roles:":
-            in_roles = True
-            current_role = None
-            out.append(raw)
-            continue
-        if raw == "phases:":
-            in_roles = False
-            current_role = None
-            out.append(raw)
-            continue
-        if in_roles:
-            role_match = re.fullmatch(r"  ([a-z][a-z0-9_-]*):", raw)
-            if role_match:
-                current_role = role_match.group(1)
-            elif current_role and raw.startswith("    model:"):
-                model = quality_model if current_role in quality_roles else utility_model
-                out.append(f"    model: {json.dumps(model)}")
-                replaced_roles.add(current_role)
-                continue
-        out.append(raw)
-
-    if not replaced_url or not expected_roles.issubset(replaced_roles):
-        raise RuntimeError(
-            "models.openai-compatible.yaml is missing its base_url or expected role model fields"
-        )
-    return "\n".join(out).rstrip("\n") + "\n"
-
-
-def _customize_openai_compatible_config(
-    models_yaml: Path,
-    *,
-    base_url: str,
-    quality_model: str,
-    utility_model: str,
-) -> None:
-    """Atomically customize an existing template path (test/maintenance API)."""
-    contents = _customize_openai_compatible_text(
-        models_yaml.read_text(encoding="utf-8"),
-        base_url=base_url,
-        quality_model=quality_model,
-        utility_model=utility_model,
-    )
-    write_text_atomic(models_yaml, contents)
-
-
 def _step_provider(root: Path) -> None:
     _header("Step 1 — LLM provider")
     config_dir = root / "config"
@@ -688,15 +638,40 @@ def _step_provider(root: Path) -> None:
     named_profile = bool(os.environ.get(_ACTIVE_ENV_FILE_VAR)) and (
         env_path.resolve() != (root / ".env").resolve()
     )
-    models_yaml, preserve_models_config, replacement_selector = (
-        _provider_config_target(
-            root,
-            env_path,
-            selected_models_yaml,
-            provider=provider,
-            named_profile=named_profile,
+    requested_selector: str | None = None
+    if named_profile and provider == "openai-compatible":
+        selected_is_template = bool(
+            selected_models_yaml
+            and selected_models_yaml.parent.resolve() == config_dir.resolve()
+            and selected_models_yaml.name.startswith("models.")
+            and selected_models_yaml.name.endswith(".yaml")
+            and selected_models_yaml.name != "models.yaml"
         )
-    )
+        if selected_models_yaml is None or selected_is_template:
+            selection = _ask(
+                "Writable model config path for this custom backend",
+                default="config/profiles/custom.yaml",
+            )
+            selected_models_yaml = _resolve_models_config_path(root, selection)
+            try:
+                requested_selector = selected_models_yaml.relative_to(root).as_posix()
+            except ValueError:
+                requested_selector = str(selected_models_yaml)
+
+    try:
+        models_yaml, preserve_models_config, planned_selector, write_config = (
+            _provider_config_target(
+                root,
+                selected_models_yaml,
+                provider=provider,
+                named_profile=named_profile,
+                named_template=_NAMED_TEMPLATE_BY_PROVIDER.get(provider),
+            )
+        )
+    except ValueError as exc:
+        print(f"… Provider setup cancelled — {exc}.")
+        return
+    replacement_selector = planned_selector or requested_selector
 
     prepared_template: str | None = None
     if provider == "openai-compatible":
@@ -705,8 +680,8 @@ def _step_provider(root: Path) -> None:
         assert template_name is not None
         template_text = model_template_text(config_dir, template_name)
         if template_text is None:
-            print(f"⚠ template {config_dir / template_name} not found locally or "
-                  "in the installed package — the existing routing was left unchanged.")
+            print(f"⚠ template {config_dir / template_name} not found in this "
+                  "checkout — the existing routing was left unchanged.")
             return
         try:
             prepared_template = _customize_openai_compatible_text(
@@ -719,6 +694,20 @@ def _step_provider(root: Path) -> None:
             print(f"… Provider setup cancelled — {e}; the existing routing was "
                   "left unchanged.")
             return
+
+    if write_config:
+        def apply_models_config() -> bool:
+            return _write_models_config(
+                config_dir,
+                models_yaml,
+                provider,
+                template_contents=prepared_template,
+            )
+    else:
+        assert planned_selector is not None
+
+        def apply_models_config() -> bool:
+            return _ensure_named_template(config_dir, planned_selector)
 
     stale_keys = _stale_routing_keys(
         provider, preserve_models_config=preserve_models_config,
@@ -744,12 +733,7 @@ def _step_provider(root: Path) -> None:
 
     committed, removed_file, removed_process = commit_profile_and_config(
         config_path=models_yaml,
-        apply_config=lambda: _write_models_config(
-            config_dir,
-            models_yaml,
-            provider,
-            template_contents=prepared_template,
-        ),
+        apply_config=apply_models_config,
         env_path=env_path,
         updates=updates,
         removals=stale_keys,
@@ -831,8 +815,7 @@ def _write_models_config(
         else model_template_text(config_dir, template_name)
     )
     if contents is None:
-        print(f"⚠ template {template} not found locally or in the installed "
-              "package — skipping config copy. "
+        print(f"⚠ template {template} not found in this checkout — skipping config copy. "
               f"You'll need to create {display_path} by hand.")
         return False
     if models_yaml.exists() and not _confirm(
@@ -844,6 +827,15 @@ def _write_models_config(
     write_text_atomic(models_yaml, contents)
     print(f"Wrote {display_path} from {template_name}.")
     return True
+
+
+def _ensure_named_template(config_dir: Path, template_name: str) -> bool:
+    """Require the canonical named template in this repository checkout."""
+    target = config_dir / template_name
+    if target.is_file():
+        return True
+    print(f"⚠ template {target} is missing — routing was unchanged.")
+    return False
 
 
 def _warn_gitignore(root: Path, env_path: Path) -> bool:

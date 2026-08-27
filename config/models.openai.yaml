@@ -1,0 +1,41 @@
+# Explicit form of the built-in OpenAI routing used when config/models.yaml is
+# absent. Named env profiles select this file so choosing OpenAI never removes
+# or depends on the checkout-global config/models.yaml.
+#
+# Phase bindings come from the built-in defaults. Roles are explicit so status,
+# telemetry, and a repeated setup run identify this as OpenAI rather than an
+# anonymous compatible endpoint.
+
+base_url: https://api.openai.com/v1
+roles:
+  author:
+    provider: openai
+    model: gpt-5.6-luna
+    temperature: 0.5
+    max_tokens: 6000
+  critic:
+    provider: openai
+    model: gpt-5.6-luna
+    temperature: 0.3
+    max_tokens: 2500
+  judge:
+    provider: openai
+    model: gpt-5.6-luna
+    temperature: 0.2
+    max_tokens: 1500
+  classifier:
+    provider: openai
+    model: gpt-5.6-luna
+    temperature: 0.1
+    max_tokens: 200
+  proposer:
+    provider: openai
+    model: gpt-5.6-luna
+    temperature: 0.3
+    max_tokens: 200
+  extractor:
+    provider: openai
+    model: gpt-5.6-luna
+    temperature: 0.0
+    max_tokens: 800
+phases: {}

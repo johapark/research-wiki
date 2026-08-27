@@ -7,12 +7,81 @@ consent, and a shell-owned value cannot be replaced by editing a dotenv file.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
 from typing import Callable
 
 from ..env_profiles import effective_assignment_value, loaded_from_profile, snapshot_profile
+from ..fsatomic import write_text_atomic
+
+
+def customize_openai_compatible_text(
+    template_text: str,
+    *,
+    base_url: str,
+    quality_model: str,
+    utility_model: str,
+) -> str:
+    """Customize and structurally validate the generic compatible template."""
+    lines = template_text.splitlines()
+    out: list[str] = []
+    in_roles = False
+    current_role: str | None = None
+    replaced_url = False
+    replaced_roles: set[str] = set()
+    quality_roles = {"author", "critic", "judge"}
+    expected_roles = quality_roles | {"classifier", "proposer", "extractor"}
+
+    for raw in lines:
+        if raw.startswith("base_url:"):
+            out.append(f"base_url: {json.dumps(base_url)}")
+            replaced_url = True
+            continue
+        if raw == "roles:":
+            in_roles = True
+            current_role = None
+            out.append(raw)
+            continue
+        if raw == "phases:":
+            in_roles = False
+            current_role = None
+            out.append(raw)
+            continue
+        if in_roles:
+            role_match = re.fullmatch(r"  ([a-z][a-z0-9_-]*):", raw)
+            if role_match:
+                current_role = role_match.group(1)
+            elif current_role and raw.startswith("    model:"):
+                model = quality_model if current_role in quality_roles else utility_model
+                out.append(f"    model: {json.dumps(model)}")
+                replaced_roles.add(current_role)
+                continue
+        out.append(raw)
+
+    if not replaced_url or not expected_roles.issubset(replaced_roles):
+        raise RuntimeError(
+            "models.openai-compatible.yaml is missing its base_url or expected role model fields"
+        )
+    return "\n".join(out).rstrip("\n") + "\n"
+
+
+def customize_openai_compatible_config(
+    models_yaml: Path,
+    *,
+    base_url: str,
+    quality_model: str,
+    utility_model: str,
+) -> None:
+    """Atomically customize an existing template path."""
+    contents = customize_openai_compatible_text(
+        models_yaml.read_text(encoding="utf-8"),
+        base_url=base_url,
+        quality_model=quality_model,
+        utility_model=utility_model,
+    )
+    write_text_atomic(models_yaml, contents)
 
 
 def profile_controls_env_key(env_path: Path, key: str) -> bool:
@@ -26,22 +95,23 @@ def profile_controls_env_key(env_path: Path, key: str) -> bool:
 
 def provider_config_target(
     root: Path,
-    env_path: Path,
     selected_path: Path | None,
     *,
     provider: str,
     named_profile: bool,
-) -> tuple[Path, bool, str | None]:
+    named_template: str | None = None,
+) -> tuple[Path, bool, str | None, bool]:
     """Choose a mutable config target without overwriting tracked templates.
 
-    Returns ``(path, preserve_selector, replacement_selector)``. Named profiles
-    get an isolated config under the gitignored ``config/profiles`` directory
-    when they currently select a tracked ``config/models.*.yaml`` template (or
-    no config at all). A user-selected config elsewhere remains authoritative.
+    Returns ``(path, preserve_selector, replacement_selector, write_config)``.
+    A named profile selects an immutable provider template directly; it does
+    not derive a second filename from ``.env.NAME``. A custom compatible
+    backend must instead select an explicit writable config path. A
+    user-selected mutable config remains authoritative.
     """
     default = root / "config" / "models.yaml"
-    if provider == "openai":
-        return default, False, None
+    if not named_profile:
+        return default, False, None, True
 
     config_dir = root / "config"
     tracked_template = bool(
@@ -51,17 +121,18 @@ def provider_config_target(
         and selected_path.name.endswith(".yaml")
         and selected_path.name != "models.yaml"
     )
-    if selected_path is not None and not tracked_template:
-        return selected_path, True, None
-    if not named_profile:
-        return default, False, None
+    if provider == "openai-compatible":
+        if selected_path is None or tracked_template:
+            raise ValueError(
+                "a named profile using a custom OpenAI-compatible backend needs "
+                "an explicit writable model-config path"
+            )
+        return selected_path, True, None, True
 
-    name = env_path.name
-    label = name[5:] if name.startswith(".env.") else name.lstrip(".")
-    slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "profile"
-    target = config_dir / "profiles" / f"{slug}.yaml"
-    selector = target.relative_to(root).as_posix()
-    return target, True, selector
+    if named_template is None:
+        raise ValueError(f"no named-profile template is defined for {provider}")
+    target = config_dir / named_template
+    return target, True, named_template, False
 
 
 def stale_routing_keys(

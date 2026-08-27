@@ -97,14 +97,10 @@ exclude = ["tests*", "internal*", "wiki*"]
 # Bundle the English wordlist used by `pdf.py` for ligature repair so the
 # package works on any platform without an OS-provided `/usr/share/dict/words`.
 # `templates/graph.html` is the `visualize` renderer — it must ship, because the
-# command's whole promise is a self-contained page with no build step. Setup
-# resources are mirrored inside the package as well: a wheel has no repository
-# root, so `researchwiki init` needs these copies to configure a fresh wiki.
+# command's whole promise is a self-contained page with no build step.
 researchwiki = [
     "pdf/data/*.txt",
     "templates/*.html",
-    "resources/.env.template",
-    "resources/config/models.*.yaml",
 ]
 
 [tool.pytest.ini_options]

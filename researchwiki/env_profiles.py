@@ -1,11 +1,10 @@
-"""Strict dotenv profiles with origin tracking and secret-safe writes.
+"""Strict CLI env profiles with origin tracking and secret-safe writes.
 
-The CLI gives parent-shell variables precedence over a selected profile.  A
-setup wizard that later edits that profile therefore needs more than value
-equality to decide ownership: a shell value can be byte-for-byte identical to
-the file and still win again on the next invocation.  This module records the
-keys the loader itself inserted and exposes that provenance only as internal
-process metadata.
+Credentials exported by the parent shell take precedence over file values.
+An explicitly selected profile rejects inherited routing variables instead:
+``--env-file`` must select one unambiguous provider configuration. A setup
+wizard that later edits credentials still needs more than value equality to
+decide ownership, so this module records the keys the loader itself inserted.
 
 Profile writes use a 0600 temporary inode from creation through atomic replace.
 That closes the short 0644 window produced by a normal umask before a later
@@ -36,6 +35,12 @@ _ENV_REFERENCE_RE = re.compile(
     r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))"
 )
 _RESERVED_KEYS = frozenset({ACTIVE_ENV_FILE_VAR, DOTENV_PROVENANCE_VAR})
+_ROUTING_KEYS = frozenset({
+    "RW_MODELS_CONFIG",
+    "RW_LLM_PROVIDER",
+    "RW_LLM_BASE_URL",
+    "ANTHROPIC_BASE_URL",
+})
 CREDENTIAL_KEYS = frozenset({"OPENAI_API_KEY", "ANTHROPIC_API_KEY"})
 
 
@@ -82,13 +87,39 @@ def parse_assignment(raw: str, *, path: Path, line_no: int) -> Assignment | None
             f"invalid env profile {path}:{line_no}: {key} is reserved internally"
         )
     value = value.strip()
-    if value.startswith(("'", '"')):
-        quote = value[0]
-        if len(value) < 2 or not value.endswith(quote):
+    if value.startswith('"'):
+        try:
+            value, end = json.JSONDecoder().raw_decode(value)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise EnvProfileFailure(
+                f"invalid env profile {path}:{line_no}: unterminated quoted value "
+                "or invalid escape"
+            ) from exc
+        remainder = raw.partition("=")[2].strip()[end:].strip()
+        if remainder and not remainder.startswith("#"):
+            raise EnvProfileFailure(
+                f"invalid env profile {path}:{line_no}: trailing text after quoted value"
+            )
+        if not isinstance(value, str):
+            raise EnvProfileFailure(
+                f"invalid env profile {path}:{line_no}: value must be a string"
+            )
+    elif value.startswith("'"):
+        end = value.find("'", 1)
+        if end < 0:
             raise EnvProfileFailure(
                 f"invalid env profile {path}:{line_no}: unterminated quoted value"
             )
-        value = value[1:-1]
+        remainder = value[end + 1:].strip()
+        if remainder and not remainder.startswith("#"):
+            raise EnvProfileFailure(
+                f"invalid env profile {path}:{line_no}: trailing text after quoted value"
+            )
+        value = value[1:end]
+    else:
+        comment = re.search(r"\s+#", value)
+        if comment:
+            value = value[:comment.start()].rstrip()
     if "\0" in value:
         raise EnvProfileFailure(
             f"invalid env profile {path}:{line_no}: embedded null byte"
@@ -227,7 +258,7 @@ def _record_provenance(path: Path, keys: set[str]) -> None:
 
 
 def load_profile(path: Path, *, required: bool) -> None:
-    """Strictly validate then apply one profile with shell-first precedence."""
+    """Validate and apply one profile, rejecting explicit routing shadowing."""
     clear_loader_metadata()
     path = Path(path)
     snapshot = snapshot_profile(path, reject_duplicates=True)
@@ -241,6 +272,14 @@ def load_profile(path: Path, *, required: bool) -> None:
     assignments = parse_profile_text(
         snapshot.text, path=path, reject_duplicates=True
     )
+    if required:
+        inherited_routing = sorted(_ROUTING_KEYS & os.environ.keys())
+        if inherited_routing:
+            joined = ", ".join(inherited_routing)
+            raise EnvProfileFailure(
+                f"explicit env profile {path} is shadowed by parent-shell routing: "
+                f"{joined}; unset those variable(s) or put them in the selected profile"
+            )
     # References mean "already exported by the parent process", not "loaded
     # from an earlier line in this same file". Freezing the source environment
     # prevents a public profile-local alias from laundering literal credentials.
@@ -349,12 +388,13 @@ def edit_profile_text(
             if assignment.key in remaining:
                 prefix = "export " if assignment.exported else ""
                 out.append(
-                    f'{prefix}{assignment.key}="{remaining.pop(assignment.key)}"'
+                    f"{prefix}{assignment.key}="
+                    f"{json.dumps(remaining.pop(assignment.key), ensure_ascii=False)}"
                 )
             continue
         out.append(raw)
     for key, value in remaining.items():
-        out.append(f'{key}="{value}"')
+        out.append(f"{key}={json.dumps(value, ensure_ascii=False)}")
     text = "\n".join(out).rstrip("\n")
     return (text + "\n" if text else ""), removed
 

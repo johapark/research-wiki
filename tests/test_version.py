@@ -20,6 +20,7 @@ default, so a test would pass in CI for the wrong reason. That guard lives in
 from __future__ import annotations
 
 import re
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -96,6 +97,8 @@ def test_build_backend_resolves_the_dynamic_version():
     pytest.importorskip(
         "setuptools", reason="build backend not installed in this environment"
     )
+    if int(version("setuptools").split(".", 1)[0]) < 77:
+        pytest.skip("the project build-system contract requires setuptools>=77")
     from setuptools.config.pyprojecttoml import read_configuration
 
     resolved = read_configuration(str(PYPROJECT))["project"].get("version")

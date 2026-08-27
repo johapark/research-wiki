@@ -17,6 +17,15 @@ import pytest
 from researchwiki import env_profiles
 from researchwiki.errors import EnvironmentFailure
 from researchwiki.tasks import init
+from researchwiki.tasks import _provider_setup
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _install_template(config: Path, name: str) -> None:
+    """Give an isolated wizard test the template a real clone contains."""
+    (config / name).write_bytes((ROOT / "config" / name).read_bytes())
 
 
 # ── _template_for_provider / _env_updates_for_provider ───────────────────────
@@ -541,7 +550,7 @@ def test_generic_compatible_config_rewrites_endpoint_and_all_role_models(tmp_pat
         "  author: {role: author}\n"
     )
 
-    init._customize_openai_compatible_config(
+    _provider_setup.customize_openai_compatible_config(
         models,
         base_url="https://api.groq.com/openai/v1",
         quality_model="llama-quality",
@@ -618,6 +627,7 @@ def test_generic_reconfigure_replaces_selected_profile_key(
 ):
     config = tmp_path / "config"
     config.mkdir()
+    _install_template(config, "models.openai-compatible.yaml")
     profile = tmp_path / ".env.provider"
     profile.write_text('export OPENAI_API_KEY="old-provider-secret"\n')
 
@@ -639,6 +649,7 @@ def test_generic_reconfigure_replaces_selected_profile_key(
         "new-provider-secret",
         "llama-quality",
         "llama-fast",
+        "config/profiles/provider.yaml",
     )
     monkeypatch.setattr(init, "_report_readiness", lambda _provider: None)
     monkeypatch.setattr(init, "_warn_gitignore", lambda _root, _path: None)
@@ -656,12 +667,48 @@ def test_generic_reconfigure_replaces_selected_profile_key(
     assert models.count('model: "llama-fast"') == 3
 
 
+def test_named_openai_profile_never_removes_global_config(
+    tmp_path, monkeypatch,
+):
+    config = tmp_path / "config"
+    config.mkdir()
+    _install_template(config, "models.openai.yaml")
+    global_models = config / "models.yaml"
+    original = "roles:\n  author:\n    provider: anthropic\n"
+    global_models.write_text(original)
+    profile = tmp_path / ".env.openai"
+    profile.write_text("")
+    _mark_profile_owned(monkeypatch, profile)
+
+    for key in (
+        "OPENAI_API_KEY", "RW_LLM_PROVIDER", "RW_MODELS_CONFIG",
+        "RW_LLM_BASE_URL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(init, "_effective_provider", lambda _models: None)
+    monkeypatch.setattr(init, "_effective_openai_base_url", lambda: None)
+    monkeypatch.setattr(init, "_ask_choice", lambda _n: 0)
+    monkeypatch.setattr(init, "_confirm", lambda *args, **kwargs: False)
+    _answers(monkeypatch, "openai-secret")
+    monkeypatch.setattr(init, "_report_readiness", lambda _provider: None)
+    monkeypatch.setattr(init, "_warn_gitignore", lambda _root, _path: None)
+
+    init._step_provider(tmp_path)
+
+    assert global_models.read_text() == original
+    assert 'RW_MODELS_CONFIG="models.openai.yaml"' in profile.read_text()
+    assert 'OPENAI_API_KEY="openai-secret"' in profile.read_text()
+    assert (config / "models.openai.yaml").exists()
+    assert not (config / "profiles").exists()
+
+
 def test_generic_reconfigure_migrates_tracked_template_to_profile_config(
     tmp_path, monkeypatch,
 ):
     monkeypatch.chdir(tmp_path)
     config = tmp_path / "config"
     config.mkdir()
+    _install_template(config, "models.openai-compatible.yaml")
     selected = config / "models.profile.yaml"
     selected.write_text(
         "base_url: https://old.example/v1\n"
@@ -695,6 +742,7 @@ def test_generic_reconfigure_migrates_tracked_template_to_profile_config(
         "new-provider-secret",
         "llama-quality",
         "llama-fast",
+        "config/profiles/provider.yaml",
     )
     monkeypatch.setattr(init, "_report_readiness", lambda _provider: None)
     monkeypatch.setattr(init, "_warn_gitignore", lambda _root, _path: None)
@@ -740,6 +788,7 @@ def test_local_reconfigure_removes_profile_key_before_readiness(
 ):
     config = tmp_path / "config"
     config.mkdir()
+    _install_template(config, "models.lmstudio.yaml")
     profile = tmp_path / ".env.local"
     profile.write_text('export OPENAI_API_KEY="cloud-secret"\n')
 
@@ -774,23 +823,9 @@ def test_local_reconfigure_removes_profile_key_before_readiness(
     assert "OPENAI_API_KEY" not in os.environ
     assert "OPENAI_API_KEY" not in profile.read_text()
     assert 'RW_LLM_BASE_URL="http://localhost:1234/v1"' in profile.read_text()
-    assert 'RW_MODELS_CONFIG="config/profiles/local.yaml"' in profile.read_text()
+    assert 'RW_MODELS_CONFIG="models.lmstudio.yaml"' in profile.read_text()
     assert not (config / "models.yaml").exists()
-    assert "provider: lmstudio" in (
-        config / "profiles" / "local.yaml"
-    ).read_text()
-
-
-def test_non_editable_install_uses_bundled_template(tmp_path):
-    """A wheel has no repository-root ``config/`` template directory."""
-    cfg = tmp_path / "fresh-wiki" / "config"
-    cfg.mkdir(parents=True)
-    models = cfg / "models.yaml"
-
-    init._write_models_config(cfg, models, "local")
-
-    assert "base_url: http://localhost:1234/v1" in models.read_text()
-    assert "provider: lmstudio" in models.read_text()
+    assert not (config / "profiles").exists()
 
 
 def test_anthropic_reselect_replaces_key_and_removes_profile_endpoint(
@@ -798,6 +833,7 @@ def test_anthropic_reselect_replaces_key_and_removes_profile_endpoint(
 ):
     config = tmp_path / "config"
     config.mkdir()
+    _install_template(config, "models.anthropic.yaml")
     profile = tmp_path / ".env.provider"
     profile.write_text(
         'ANTHROPIC_BASE_URL="https://compat.example/anthropic"\n'
@@ -826,11 +862,9 @@ def test_anthropic_reselect_replaces_key_and_removes_profile_endpoint(
     assert 'ANTHROPIC_API_KEY="official-anthropic-secret"' in text
     assert "ANTHROPIC_BASE_URL" not in os.environ
     assert os.environ["ANTHROPIC_API_KEY"] == "official-anthropic-secret"
-    assert 'RW_MODELS_CONFIG="config/profiles/provider.yaml"' in text
+    assert 'RW_MODELS_CONFIG="models.anthropic.yaml"' in text
     assert not (config / "models.yaml").exists()
-    assert "provider: anthropic" in (
-        config / "profiles" / "provider.yaml"
-    ).read_text()
+    assert not (config / "profiles").exists()
 
 
 # ── _valid_slug ──────────────────────────────────────────────────────────────

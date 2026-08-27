@@ -35,10 +35,12 @@ def _load_dotenv(env_file: str | Path | None = None) -> None:
     With no argument, the historical ``<wiki root>/.env`` is optional.  An
     explicit path comes from ``--env-file`` and is therefore required: a typo
     must not silently fall back to the root ``.env`` and select a different LLM
-    backend.  Already-exported process variables keep precedence in both cases.
+    backend. Already-exported credentials keep precedence. An explicit profile
+    rejects inherited routing variables so its provider selection cannot be
+    silently shadowed; the optional root profile retains shell-first behavior.
 
-    ``export KEY=value`` is accepted as well as dotenv's plain ``KEY=value`` so
-    the same profile can still be sourced by a shell when desired.
+    ``export KEY=value`` is accepted as well as plain ``KEY=value`` for easy
+    migration, but this is a CLI profile grammar rather than a shell script.
     """
     explicit = env_file is not None
     path = Path(env_file).expanduser() if explicit else Path.cwd() / ".env"

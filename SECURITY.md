@@ -37,7 +37,9 @@ are written as `0600`. Also prefer `git add <path>` over `git add -A` so a stray
 local file can't be swept
 in. Select a named profile explicitly with
 `researchwiki --env-file .env.NAME COMMAND`; this avoids accidentally loading
-the root profile for a different provider.
+the root profile for a different provider. Explicit profiles also reject
+inherited routing variables (`RW_MODELS_CONFIG`, `RW_LLM_PROVIDER`, and endpoint
+overrides); put routing in the selected profile or unset it in the parent shell.
 
 ⚠️ **`RW_LLM_BASE_URL` and a model config's `base_url:` redirect where your key
 is sent.** The environment variable wins when both are present, and the key

@@ -1238,19 +1238,22 @@ the env template. The global option must precede the command:
 
 ```bash
 cp .env.template .env.litellm && chmod 600 .env.litellm
-# create the profile-specific config, then verify it
+# select provider routing, then verify it
 researchwiki --env-file .env.litellm init
 researchwiki --env-file .env.litellm status
 researchwiki --env-file .env.litellm agent ingest inbox/paper.pdf
 ```
 
-This loads only the named file, not the root `.env`, while already-exported
-shell variables still take precedence. Avoid plain `source .env.litellm`:
-dotenv's `KEY=value` assignments are not exported to the child CLI unless the
-shell is put into export-all mode. Running `init` through a named profile creates
-and selects `config/profiles/litellm.yaml`, copied from the chosen tracked
-template. Mutable profile configs are gitignored; tracked `config/models.*.yaml`
-templates and the checkout-global `config/models.yaml` remain untouched.
+This loads only the named file, not the root `.env`. Already-exported
+credentials still take precedence, but inherited routing variables are rejected
+so they cannot silently defeat the explicit profile selection. Treat the file
+as a CLI profile rather than a shell script; avoid plain `source
+.env.litellm`. Running `init` through a named profile selects the chosen tracked
+`config/models.*.yaml` template directly and leaves the checkout-global
+`config/models.yaml` untouched. A custom OpenAI-compatible backend instead asks
+for an explicit writable config path (for example
+`config/profiles/litellm.yaml`) because its endpoint and exact model IDs must be
+stored somewhere; the path is never inferred from the env filename.
 
 Every explicit endpoint follows the same validation rule, whether it comes from
 YAML, `RW_LLM_BASE_URL`, or `ANTHROPIC_BASE_URL`: HTTP and HTTPS are accepted,

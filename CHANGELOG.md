@@ -26,8 +26,8 @@ the reasoning behind any line below.
   `--env-file PATH` before a command, loads that profile instead of the root
   `.env`, and lets `init` update the selected profile. Profiles are parsed in
   full before use; accept a UTF-8 BOM, `export KEY=...`, and exact `$NAME` or
-  `${NAME}` shell references; preserve shell-over-file precedence with
-  provenance tracking, bind permission checks and bytes to one opened inode,
+  `${NAME}` shell references; preserve shell-over-file precedence for
+  credentials with provenance tracking, bind permission checks and bytes to one opened inode,
   and are atomically written from a 0600 inode without replacing profile
   symlinks. Existing permissive credential files warn instead of blocking;
   wizard writes still become `0600`. Provider transitions
@@ -36,18 +36,21 @@ the reasoning behind any line below.
   explicit `RW_MODELS_CONFIG`, or any selected config that exists but is
   unreadable, malformed, schema-invalid, or lacks an unambiguous endpoint, is
   an environment error rather than a silent OpenAI/localhost fallback. The
-  setup wizard gives named profiles isolated gitignored configs under
-  `config/profiles/` rather than editing tracked templates, rejects unsupported
-  providers before preflight, validates HTTP(S) endpoint structure, confirms key
+  setup wizard makes named profiles select known immutable templates directly;
+  custom compatible backends ask for an explicit writable config path rather
+  than deriving one from `.env.NAME`. Explicit profiles reject inherited routing
+  overrides, and named OpenAI setup never mutates checkout-global
+  `config/models.yaml`. The wizard rejects unsupported providers before
+  preflight, validates HTTP(S) endpoint structure, confirms key
   reuse across endpoints, checks the actual credential profile against Git,
   and writes the exact model IDs selected by the user. The same URL policy now
   covers YAML, `RW_LLM_BASE_URL`, and `ANTHROPIC_BASE_URL` at status, preflight,
   availability checks, and the final request path.
 
-- **Setup resources now survive wheel and source-distribution installs.** The
-  dotenv template and all eight model-routing templates ship as package data;
-  `researchwiki init` falls back to those bundled copies outside a checkout.
-  A local loopback `base_url:` in the selected YAML now also counts as a
+- **Setup is explicitly clone-first.** The root `.env.template` and
+  `config/models.*.yaml` files are the only setup-resource copies; standalone
+  wheel installs do not carry a partial second workspace. A local loopback
+  `base_url:` in the selected YAML now also counts as a
   synchronous-LLM signal without duplicating it in `RW_LLM_BASE_URL`. Package
   metadata now uses the SPDX license form supported by current setuptools.
 
