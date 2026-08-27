@@ -1,6 +1,6 @@
 # Research Wiki
 
-A local, markdown-first research wiki that compounds as you add papers. Drop PDFs into `inbox/`, ask your coding agent to ingest or analyze them, and browse the resulting knowledge base in Obsidian.
+A local, markdown-first research wiki that compounds as you add papers. Drop PDFs into `inbox/`, ask your chat agent to ingest or analyze them, and browse the resulting knowledge base in Obsidian.
 
 The agent operates the CLI for you: it reads the source PDF, writes and grades the page, connects related work, and keeps indexes current. [CLAUDE.md](./CLAUDE.md) and its `AGENTS.md` symlink contain the agent contract; [WORKFLOW.md](./WORKFLOW.md) is the detailed human reference.
 
@@ -9,9 +9,9 @@ The agent operates the CLI for you: it reads the source PDF, writes and grades t
 - **Grounded in local PDFs.** Wiki prose comes from your papers, not web summaries. Answers start from the wiki and return to the PDFs when more detail is needed.
 - **Claim-level verification.** Claims are graded against their source and exposed through durable `[[paper#claim]]` anchors. Cross-paper pages (syntheses, concepts, and ideas) are also checked for complete citations and source fidelity.
 - **Connected knowledge.** Citation-supported links, concept hubs, synthesis pages, claim relationships, and evolution proposals turn isolated summaries into a research map.
-- **Agent-operated ingestion.** Metadata reconciliation, naming, classification, drafting, grading, backlinking, indexing, and crash recovery run as one transactional workflow.
+- **Agent-operated workflows.** The agent coordinates ingestion, synthesis, verification, linking, indexing, and recovery through the CLI.
 - **Search and discovery.** BM25 and semantic search, citation/recommendation neighbors, gap detection, and an interactive graph help you find papers and missing literature.
-- **Portable and private by default.** Your wiki is plain Markdown, your library is gitignored, and the content directories can sync independently of the framework.
+- **Portable and local-first.** Your wiki is plain Markdown, your library is gitignored, and the content directories can sync independently of the framework.
 - **Provider-flexible.** Use OpenAI, Anthropic, Gemini, another OpenAI-compatible service, a local model, or chat relay; roles can use different providers.
 
 ## How it works
@@ -34,13 +34,13 @@ You can run `researchwiki` directly, but the intended interface is conversation 
 
 - Python 3.10+
 - Git
-- Access to an LLM through a supported provider, local model, or chat relay for ingestion, synthesis, grading, and other agent workflows
-- About 2 GB for the bundled semantic grader and its model cache
+- A shell-enabled chat agent (Claude Code, Codex, etc.)
+- Disk space for ML dependencies and the embedding model downloaded on first use
 
 ### Install
 
 ```bash
-git clone git@github.com:johapark/research-wiki.git
+git clone https://github.com/johapark/research-wiki.git
 cd research-wiki
 python3 -m venv ~/.venvs/research-wiki
 ~/.venvs/research-wiki/bin/pip install -e .
@@ -53,11 +53,12 @@ Setup is clone-first: the framework reads `config/`, prompts, and agent instruct
 
 ### Initialize
 
-Choose one:
+Choose one guided setup path:
 
-- Open the clone in Claude Code, Codex, Cursor, Aider, or another agent that reads `CLAUDE.md`/`AGENTS.md`, then say: **“Initialize this research wiki.”**
+- Open the clone in Claude Code, Codex, or another compatible shell-enabled chat agent, then say: **“Initialize this research wiki.”**
 - Run the interactive wizard: `researchwiki init`.
-- For directories only: `researchwiki init --scaffold-only`.
+
+Both paths configure the provider, create the wiki directories and dashboard, and set up the initial categories. For advanced manual setup, `researchwiki init --scaffold-only` creates only the directories; it does not configure a provider, dashboard, or content categories.
 
 No taxonomy is predefined. During setup, enter category names yourself (the default) or, with at least three PDFs in `inbox/`, let the agent propose them from your papers. As the corpus grows, the agent suggests useful category splits for your review; nothing changes automatically. `other/` is always available as the classifier’s abstention bucket.
 
@@ -69,16 +70,7 @@ For multiple PDFs, ask it to ingest the whole inbox in one batch. If your papers
 
 ## Providers
 
-Keep credentials and the selected model config in a dotenv profile. The model IDs, per-role providers, and compatible endpoint live in the selected `config/models.*.yaml` file.
-
-For the default profile, copy the template to the repository root. `.env` loads automatically, and variables already exported by the parent shell take precedence:
-
-```bash
-cp .env.template .env
-chmod 600 .env
-researchwiki init
-researchwiki status
-```
+Initialization configures the default provider, using the root `.env` for credentials and `config/models.yaml` when custom routing is needed. The root `.env` loads automatically; variables already exported by the parent shell take precedence.
 
 Use a named profile when you want several provider setups in one checkout. The global `--env-file` option must come before the command, and the named file must exist:
 
@@ -87,35 +79,24 @@ cp .env.template .env.openai
 chmod 600 .env.openai
 researchwiki --env-file .env.openai init
 researchwiki --env-file .env.openai status
-researchwiki --env-file .env.openai agent ingest inbox/paper.pdf
 ```
 
-A named profile replaces the root `.env`; it does not merge with it. Exported credentials may still supply the API key, but inherited routing variables (`RW_MODELS_CONFIG`, `RW_LLM_PROVIDER`, `RW_LLM_BASE_URL`, or `ANTHROPIC_BASE_URL`) are rejected so they cannot silently override the selected profile. Put routing settings in the named file instead, and treat it as a CLI dotenv profile rather than running `source .env.NAME`.
-
-`researchwiki --env-file .env.NAME init` writes the appropriate selector for OpenAI, Anthropic, local, and chat-relay setups directly into that profile. These known providers reuse the tracked config templates; the profile name does not create or imply another config filename. A custom OpenAI-compatible backend asks for an explicit writable path such as `config/profiles/litellm.yaml`, where it stores the endpoint and exact model IDs. The checkout-wide `config/models.yaml` remains unchanged when a named profile is used.
+A named profile replaces rather than merges with the root `.env`; use the same `--env-file` option for every command that should use it. Exported credentials may still supply its API key, but parent-shell routing variables are rejected. Put routing in the selected profile and do not `source` it as a shell script. Known providers reuse tracked `config/models.*.yaml` templates; custom OpenAI-compatible backends ask for an explicit writable config path.
 
 | Provider | Minimal setup |
 | --- | --- |
-| **OpenAI** | Set `OPENAI_API_KEY`; the root profile needs no config, while a named profile selects `models.openai.yaml`. |
+| **OpenAI** | Select OpenAI in `researchwiki init`; set `OPENAI_API_KEY`. |
 | **Anthropic** | Select Anthropic in `researchwiki init`; set `ANTHROPIC_API_KEY`. |
 | **Gemini** | Select Other OpenAI-compatible in `researchwiki init`; provide the Gemini endpoint, model IDs, and key. |
 | **Other OpenAI-compatible** | Select it in `researchwiki init`; provide the exact models, endpoint, and API key. |
-| **Local model** | Select Local LLM in `researchwiki init`; named profiles select `models.lmstudio.yaml`. |
-| **Chat relay** | Select Chat-relay in `researchwiki init`; it writes `RW_LLM_PROVIDER=chat-relay` into the active profile and needs no API key or server. |
+| **Local model** | Select Local LLM in `researchwiki init`; no API key is required. |
+| **Chat relay** | Select Chat-relay in `researchwiki init`; no API key or server is required. |
 
-For example, a reusable OpenAI profile can contain:
-
-```dotenv
-# .env.openai
-OPENAI_API_KEY="sk-..."
-RW_MODELS_CONFIG="models.openai.yaml"
-```
-
-`RW_MODELS_CONFIG` resolves a bare filename under `config/`; path-separated and absolute values are used verbatim. Keep persistent endpoints in that YAML. `RW_LLM_BASE_URL` is available as an ad-hoc endpoint override, while `RW_LLM_PROVIDER` is a global provider override that defeats per-role mixing and should normally be left unset (chat relay is the intentional exception). Explicit configs fail closed when missing, malformed, unsupported, or ambiguous. HTTP and HTTPS endpoints are accepted—use only hosts you trust because the API key and paper content are sent there. Mode `0600` is recommended for env files; broader permissions warn but do not block execution. Model roles, mixed-provider routing, local setup, and provider-specific caveats are documented in [Provider setup in depth](./WORKFLOW.md#provider-setup-in-depth).
+`RW_MODELS_CONFIG` selects a model config without defeating its per-role routing; `RW_LLM_PROVIDER` globally overrides every role and should normally remain unset. Keep credentials in mode-`0600` dotenv files and use only endpoints you trust. Model roles, endpoint precedence, profile isolation, local setup, and provider-specific caveats are documented in [Provider setup in depth](./WORKFLOW.md#provider-setup-in-depth).
 
 ## Organizing and browsing the wiki
 
-Open `wiki/` as an [Obsidian](https://obsidian.md/) vault and start at `views.md`. Enable the Dataview community plugin to render its live tables; without it, every page remains ordinary readable Markdown.
+Open the directory containing both `wiki/` and `papers/` as an [Obsidian](https://obsidian.md/) vault—normally the repository root—and start at `wiki/views.md`. This keeps each page's source-PDF link inside the vault. Enable the Dataview community plugin to render the dashboard's live tables; without it, every page remains ordinary readable Markdown.
 
 | Location | Purpose |
 | --- | --- |
@@ -130,7 +111,7 @@ Open `wiki/` as an [Obsidian](https://obsidian.md/) vault and start at `views.md
 
 Paper pages are generated from PDFs. Commentary pages are explicitly attributed and carry no findings of their own. Synthesis and concept pages are strictly grounded; idea pages allow marked model priors only in their design sections. See [CLAUDE.md](./CLAUDE.md) for the full page contracts.
 
-Useful discovery commands include `search`, `neighbors`, `candidates synthesis`, `candidates concepts`, and `claim-graph`. `researchwiki visualize` writes a self-contained interactive graph to `output/graph.html`.
+Useful discovery commands include `researchwiki search`, `researchwiki neighbors`, `researchwiki candidates synthesis`, `researchwiki candidates concepts`, and `researchwiki claim-graph`. `researchwiki visualize` writes a self-contained interactive graph to `output/graph.html`.
 
 ## Import and export
 
@@ -154,27 +135,24 @@ The durable library consists of three directories:
 - `papers/` — canonical PDFs and supplementary files
 - `inbox/` — the ingest backlog
 
-> **Tip:** keep the Git checkout outside your synced folder. Put these three directories under iCloud, Dropbox, Drive, Syncthing, or a similar service, then symlink them into the checkout. This is the layout used by the project author.
+> **Tip:** keep the Git checkout outside your synced folder. Put these three directories under iCloud, Dropbox, Drive, Syncthing, or a similar service, then symlink them into the checkout.
 
-For a fresh checkout:
+For a new installation, follow the [Install](#install) steps through virtual-environment activation. Before initialization, link the empty content directories into that checkout:
 
 ```bash
 SYNC="$HOME/<your-synced-folder>/research-wiki"
 mkdir -p "$SYNC"/{wiki,papers,inbox}
-
-git clone git@github.com:johapark/research-wiki.git ~/src/research-wiki
-cd ~/src/research-wiki
 for d in wiki papers inbox; do ln -s "$SYNC/$d" "$d"; done
 
-researchwiki init --scaffold-only
+researchwiki init
 ```
 
-This keeps `.git/`, virtual environments, SQLite, and derived indexes out of the sync service. Open `$SYNC/wiki` as an Obsidian vault; keep `$SYNC/wiki` and `$SYNC/papers` as siblings so PDF links resolve.
+This keeps `.git/`, virtual environments, SQLite, and derived indexes out of the sync service. Open `$SYNC` as the Obsidian vault so its sibling `wiki/` and `papers/` directories—and therefore PDF links—remain inside the vault.
 
 On each additional computer:
 
-1. Clone the same Git revision and install the package.
-2. Create a local `.env` with that machine’s credentials and model routing.
+1. Clone the same Git revision and follow the [Install](#install) steps.
+2. Create a machine-local dotenv profile (`.env` or `.env.NAME`) with its credentials and model routing.
 3. Link the same three synced directories.
 4. Wait for sync to finish, then rebuild local derived state:
 
@@ -188,9 +166,9 @@ Do **not** sync the state DB or cache/index directories. Avoid ingesting or edit
 
 ## Data, privacy, and validation
 
-Git tracks the framework: `researchwiki/`, `prompts/`, config templates, tests, and documentation. Your `wiki/`, `papers/`, `inbox/`, local model config, databases, and caches are gitignored.
+Git tracks the framework: `researchwiki/`, `prompts/`, config templates, tests, and documentation. Your `wiki/`, `papers/`, `inbox/`, dotenv profiles, active/custom model configs, databases, and caches are gitignored.
 
-Ingestion sends extracted paper text to the configured LLM provider unless you use a local model. See [SECURITY.md](./SECURITY.md) for the data-flow surface.
+Cloud-backed model workflows may send prompts, extracted PDF text, and wiki content to the configured provider. Use a local model to keep those calls on your machine. See [SECURITY.md](./SECURITY.md) for the complete data-flow surface.
 
 For contribution and test guidance, see [CONTRIBUTING.md](./CONTRIBUTING.md). For the complete CLI walkthrough and recovery procedures, see [WORKFLOW.md](./WORKFLOW.md).
 
