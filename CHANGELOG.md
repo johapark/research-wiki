@@ -32,10 +32,10 @@ the reasoning behind any line below.
   `--since` date rejects known older publication dates but allows undated
   sources). The write-once artifacts provide drift checks but cannot verify what the host
   harness actually opened. Discovery-only quarantine avoids storing excerpts,
-  findings, briefs, or other research prose.
-  `report` renders only an inert source ledger. Runs expose the small lifecycle
-  (`requested`, `recorded`, `invalid`) through `list` / `show`; requested or
-  invalid handoffs surface in `status`.
+  findings, briefs, or other research prose. `show` displays the same cached
+  receipt and manifest on demand without minting a second Markdown report.
+  Runs expose the small lifecycle (`requested`, `recorded`, `invalid`) through
+  `list` / `show`; requested or invalid handoffs surface in `status`.
 
 - **`researchwiki scout` is now the canonical structured citation-discovery
   command.** Bare `scout` and `scout citations` run the existing Semantic

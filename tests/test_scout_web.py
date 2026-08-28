@@ -10,14 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from researchwiki.scouting import web, web_cli, web_report
+from researchwiki.scouting import web, web_cli
 
 
 @pytest.fixture
 def scout_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in ("wiki", "papers", "inbox"):
         (tmp_path / name).mkdir()
-    monkeypatch.setattr(web_report, "wiki_root", lambda: tmp_path)
     monkeypatch.setattr(web, "scout_cache_dir", lambda: tmp_path / ".scout-cache")
     return tmp_path
 
@@ -99,6 +98,8 @@ def test_request_is_bounded_quarantined_and_provenance_only(scout_root: Path):
     {"domains": ["localhost"]},
     {"domains": ["intranet"]},
     {"domains": ["127.0.0.1"]},
+    {"domains": ["127.1"]},
+    {"domains": ["0x7f.0.0.1"]},
     {"domains": ["https://example.org/path"]},
     {"since": "yesterday"},
 ])
@@ -154,6 +155,9 @@ def test_receipt_normalizes_deduplicates_and_hashes_sources(scout_root: Path):
     "http://intranet/page",
     "https://bad_host.example/page",
     "http://127.0.0.1/page",
+    "http://127.1/page",
+    "http://0177.0.0.1/page",
+    "http://0x7f.0.0.1/page",
     "http://169.254.169.254/latest/meta-data",
     "https://user:secret@example.org/page",
 ])
@@ -255,6 +259,14 @@ def test_receipt_rejects_unknown_top_level_fields(scout_root: Path):
         web.accept_submission(request["run_id"], receipt)
 
 
+def test_receipt_requires_an_integer_schema_version(scout_root: Path):
+    request, _ = _request(scout_root)
+    receipt = _receipt(request["run_id"])
+    receipt["schema_version"] = 2.0
+    with pytest.raises(web.ScoutInputError, match="schema_version"):
+        web.accept_submission(request["run_id"], receipt)
+
+
 def test_receipt_is_idempotent_and_immutable(scout_root: Path):
     request, _ = _request(scout_root)
     receipt = _receipt(request["run_id"])
@@ -296,7 +308,9 @@ def test_equivalent_duplicate_order_has_one_receipt_identity(scout_root: Path):
     }]
 
 
-def test_report_is_an_inert_source_ledger_without_research_prose(scout_root: Path):
+def test_show_loads_cached_result_without_creating_a_second_artifact(
+    scout_root: Path,
+):
     request, _ = _request(scout_root)
     web.accept_submission(
         request["run_id"], _receipt(request["run_id"], [
@@ -305,26 +319,28 @@ def test_report_is_an_inert_source_ledger_without_research_prose(scout_root: Pat
         ]), recorded_at="2026-08-27T12:02:00Z"
     )
 
-    text, path, summary = web.render_report(request["run_id"])
+    run = web.load_run(request["run_id"])
 
-    assert "DISCOVERY ONLY — NOT WIKI EVIDENCE" in text
-    assert "native answer is not stored here" in text
-    assert "&lt;script&gt;unsafe&lt;/script&gt;" in text
-    assert "<script>" not in text
-    assert "harness-reported opened" in text
-    assert "search result only; page not opened" in text
-    assert "## Research brief" not in text
-    assert path == scout_root / "output" / "scout" / request["run_id"] / "report.md"
-    assert summary["source_count"] == 2
-    assert summary["fetched_count"] == 1
-    assert "deliverable" not in summary
+    assert run["state"] == "recorded"
+    assert run["query"] == request["query"]
+    cached = run["cached_result"]
+    assert cached["manifest"]["source_count"] == 2
+    assert cached["manifest"]["fetched_count"] == 1
+    assert cached["receipt"]["evidence_class"] == "discovery-only"
+    assert {source["title"] for source in cached["receipt"]["sources"]} == {
+        None, "<script>unsafe</script>",
+    }
+    assert "deliverable" not in json.dumps(run)
+    assert not (scout_root / "output").exists()
     assert all(
         not any((scout_root / name).iterdir())
         for name in ("wiki", "papers", "inbox")
     )
 
 
-def test_report_marks_undated_since_sources_as_unverified(scout_root: Path):
+def test_show_marks_undated_since_sources_as_unverified(
+    scout_root: Path, capsys: pytest.CaptureFixture[str],
+):
     request, _ = _request(scout_root, since="2026-01-01")
     web.accept_submission(
         request["run_id"], _receipt(request["run_id"], [
@@ -332,12 +348,13 @@ def test_report_marks_undated_since_sources_as_unverified(scout_root: Path):
             _source("https://example.net/dated", fetched=False, published_at="2026-02-01"),
         ]), recorded_at="2026-08-27T12:02:00Z"
     )
-    text, _, _ = web.render_report(request["run_id"])
-    assert "Since bound: 2026-01-01" in text
-    assert "(1 dated; 1 without a publication date)" in text
+    assert web_cli.main(["show", request["run_id"]]) == 0
+    text = capsys.readouterr().out
+    assert "date-unverified" in text
+    assert "2026-02-01" in text
 
 
-def test_report_detects_receipt_and_manifest_tampering(scout_root: Path):
+def test_show_detects_receipt_and_manifest_tampering(scout_root: Path):
     request, _ = _request(scout_root)
     _, manifest_path = web.accept_submission(
         request["run_id"], _receipt(request["run_id"]),
@@ -346,7 +363,7 @@ def test_report_detects_receipt_and_manifest_tampering(scout_root: Path):
     receipt_path = manifest_path.with_name("receipt.json")
     receipt_path.write_text(receipt_path.read_text() + " ", encoding="utf-8")
     with pytest.raises(web.ScoutInputError, match="manifest hash"):
-        web.render_report(request["run_id"])
+        web.load_run(request["run_id"])
 
     recorded = json.loads(receipt_path.read_text())
     receipt_path.write_text(json.dumps(recorded, indent=2), encoding="utf-8")
@@ -354,7 +371,7 @@ def test_report_detects_receipt_and_manifest_tampering(scout_root: Path):
     manifest["source_count"] = 99
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(web.ScoutInputError, match="source_count"):
-        web.render_report(request["run_id"])
+        web.load_run(request["run_id"])
 
 
 def test_schema_one_request_is_rejected(scout_root: Path):
@@ -393,10 +410,31 @@ def test_recorded_manifest_rejects_unknown_fields(scout_root: Path):
     assert row["state"] == "invalid"
     assert "unsupported fields: brief" in row["error"]
     with pytest.raises(web.ScoutInputError, match="unsupported fields: brief"):
-        web.render_report(request["run_id"])
+        web.load_run(request["run_id"])
 
 
-def test_run_lifecycle_is_resumable_and_detects_a_stale_report(scout_root: Path):
+@pytest.mark.parametrize(("field", "value"), [
+    ("schema_version", 2.0),
+    ("source_count", True),
+    ("fetched_count", 1.0),
+])
+def test_recorded_manifest_requires_exact_scalar_types(
+    scout_root: Path, field: str, value: object,
+):
+    request, _ = _request(scout_root)
+    _, manifest_path = web.accept_submission(
+        request["run_id"], _receipt(request["run_id"]),
+        recorded_at="2026-08-27T12:02:00Z",
+    )
+    changed = json.loads(manifest_path.read_text())
+    changed[field] = value
+    manifest_path.write_text(json.dumps(changed), encoding="utf-8")
+
+    with pytest.raises(web.ScoutInputError):
+        web.load_run(request["run_id"])
+
+
+def test_run_lifecycle_is_resumable_from_one_cached_result(scout_root: Path):
     request, _ = _request(scout_root)
     row = web.inspect_run(request["run_id"])
     assert row["state"] == "requested"
@@ -411,11 +449,9 @@ def test_run_lifecycle_is_resumable_and_detects_a_stale_report(scout_root: Path)
     assert row["state"] == "recorded"
     assert row["source_count"] == 1
     assert row["next_command"] is None
-
-    _, report_path, _ = web.render_report(request["run_id"])
-    assert web.inspect_run(request["run_id"])["state"] == "recorded"
-    report_path.write_text(report_path.read_text() + "manual drift\n", encoding="utf-8")
-    assert web.inspect_run(request["run_id"])["state"] == "recorded"
+    run = web.load_run(request["run_id"])
+    assert run["cached_result"]["receipt"]["sources"][0]["fetched"] is True
+    assert not (scout_root / "output").exists()
 
 
 def test_list_runs_filters_states_and_reports_invalid_artifacts(scout_root: Path):
@@ -473,31 +509,21 @@ def test_unreadable_run_artifact_is_one_invalid_row_not_a_dashboard_failure(
         web.list_runs()
 
 
-def test_report_renders_urls_inert_but_still_copy_pasteable(scout_root: Path):
-    """A validated URL can still carry Markdown link syntax in its query.
-
-    The `- URL:` line took only `html.escape`, so `[x](evil)` inside a URL
-    rendered as a link to somewhere else. It now takes the narrow URL escaper,
-    which neutralizes link/emphasis/code constructs while leaving `&` and `.`
-    alone so the URL survives a copy-paste.
-    """
+def test_show_returns_cached_urls_verbatim_without_markdown_rendering(
+    scout_root: Path, capsys: pytest.CaptureFixture[str],
+):
     request, _ = _request(scout_root, max_results=2, max_fetches=0)
     hostile = "https://example.com/a?q=[click](https://phish.example)&r=1_2"
     web.record_sources(
         request["run_id"], harness="test-harness", snippet_urls=[hostile],
         recorded_at="2026-08-27T14:00:00Z",
     )
-    text, _, _ = web_report.render_report(request["run_id"])
-
-    # No live link construct survives...
-    assert "[click](https://phish.example)" not in text
-    assert r"\[click\]\(https://phish.example\)" in text
-    # ...while the characters a reader needs to reconstruct the URL do.
-    assert "?q=" in text and "&r=1" in text
-    assert "example.com/a" in text
+    assert web_cli.main(["show", request["run_id"], "--json"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["cached_result"]["receipt"]["sources"][0]["url"] == hostile
 
 
-def test_run_and_report_directories_must_not_be_symlinks(scout_root: Path):
+def test_run_directories_must_not_be_symlinks(scout_root: Path):
     external = scout_root / "external-run"
     external.mkdir()
     (external / "request.json").write_text("{}", encoding="utf-8")
@@ -507,11 +533,6 @@ def test_run_and_report_directories_must_not_be_symlinks(scout_root: Path):
     run_dir.symlink_to(external, target_is_directory=True)
     with pytest.raises(web.ScoutInputError, match="must not be a symlink"):
         web.load_request(run_id)
-
-    output = scout_root / "output"
-    output.symlink_to(external, target_is_directory=True)
-    with pytest.raises(web.ScoutInputError, match="must not be symlinks"):
-        web_report.report_path("safe-run")
 
 
 def test_cli_supports_shorthand_record_show_list_and_stdin_receipts(
@@ -527,13 +548,25 @@ def test_cli_supports_shorthand_record_show_list_and_stdin_receipts(
     assert "deliverable" not in created
 
     assert web_cli.main(["show", created["run_id"], "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["run_id"] == created["run_id"]
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["run_id"] == created["run_id"]
+    assert shown["state"] == "requested"
+    assert shown["cached_result"] is None
 
     assert web_cli.main([
         "record", created["run_id"], "--harness", "codex-web",
         "--fetched", "https://example.org/opened", "--json"
     ]) == 0
     assert json.loads(capsys.readouterr().out)["source_count"] == 1
+    assert web_cli.main(["show", created["run_id"], "--json"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["state"] == "recorded"
+    assert shown["cached_result"]["receipt"]["sources"] == [{
+        "url": "https://example.org/opened",
+        "fetched": True,
+        "title": None,
+        "published_at": None,
+    }]
     assert web_cli.main(["list", "--state", "recorded", "--json"]) == 0
     listing = json.loads(capsys.readouterr().out)
     assert [row["run_id"] for row in listing["runs"]] == [created["run_id"]]
@@ -545,6 +578,15 @@ def test_cli_supports_shorthand_record_show_list_and_stdin_receipts(
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_receipt(second["run_id"]))))
     assert web_cli.main(["accept", second["run_id"], "-", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["source_count"] == 1
+
+
+def test_removed_report_action_points_to_cached_show(
+    scout_root: Path, capsys: pytest.CaptureFixture[str],
+):
+    request, _ = _request(scout_root)
+    assert web_cli.main(["report", request["run_id"]]) == 1
+    assert "use `show <run-id>`" in capsys.readouterr().err
+    assert web.list_runs()[0]["run_id"] == request["run_id"]
 
 
 def test_status_surfaces_resumable_web_scout_work(scout_root: Path, monkeypatch, capsys):

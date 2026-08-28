@@ -855,17 +855,16 @@ receipt from a file or stdin. Both validate the request's source/fetch/domain
 bounds on the submitted receipt and reject research prose. A `--since` bound
 rejects known older publication dates but leaves undated sources explicitly
 unverified; the tools cannot verify
-the host agent's actual search/fetch behavior. `report` renders an optional
-source ledger.
-Artifacts stay under `.scout-cache/` and `output/scout/`, marked
-`discovery-only`; neither location
+the host agent's actual search/fetch behavior. `show` displays the cached
+receipt and manifest on demand without generating a separate report.
+Artifacts stay under `.scout-cache/`, marked `discovery-only`; that cache never
 feeds page authoring, claims, indexes, or `[[wikilink]]` generation. A lead
 becomes corpus evidence only after its PDF enters the normal ingest path. See
 [`prompts/scout-web.md`](./prompts/scout-web.md).
 
 The handoff is crash- and host-resumable. `scout web list` reports `requested`,
-`recorded`, and `invalid` states; `show <run-id>
---json` re-emits the exact request for a new agent session. `accept <run-id> -`
+`recorded`, and `invalid` states; `show <run-id> --json` re-emits the exact
+request and includes the cached receipt/manifest once recorded. `accept <run-id> -`
 reads the minimal receipt from stdin, so hosts need no shared Python SDK or
 provider adapter. The conversational answer is the research deliverable; the
 receipt is only a durable provenance boundary. `status` counts unfinished or
@@ -983,7 +982,6 @@ researchwiki/
 ├── scouting/
 │   ├── citations.py        # Structured S2 citation edges + corpus-gap report
 │   ├── web.py              # Bounded request + result/brief validation + lifecycle
-│   ├── web_report.py       # Deterministic inert report renderer
 │   └── web_cli.py          # Provider-neutral agent-handoff CLI; no network client
 ├── concepts/               # Concept-hub surfacing + scaffold + reciprocal linking
 ├── claim_graph/            # Content-addressed claim identity + edge cache
@@ -1085,10 +1083,9 @@ The wiki has clear canonicalness:
 - **`.s2-cache/`, `.crossref-cache/`, `.web-cache/`** are external-API
   responses. Gitignored. Built lazily.
 - **`.scout-cache/`** holds write-once request/receipt/manifest artifacts from
-  agent-native web scouting; `output/scout/` holds their rendered reports.
-  Both are gitignored, discovery-only, and deliberately separate from
-  `.web-cache/` (the structured-API cache). They are not DB or indexing inputs.
-  Deleting them does not affect the corpus, but loses that run's provenance;
+  agent-native web scouting. It is gitignored, discovery-only, and deliberately
+  separate from `.web-cache/` (the structured-API cache). It is not a DB or
+  indexing input. Deleting it does not affect the corpus, but loses run provenance;
   reproducing it requires a new web-scout run rather than a local rebuild.
 - **`.ingest/`** is per-attempt transient state (digests, evolution
   proposals). Cleared as you act on them.
@@ -1511,11 +1508,10 @@ researchwiki lint --fix                              #    consistency report; --
 researchwiki scout > /tmp/scout.md                   #    structured citation scouting (Semantic Scholar)
 researchwiki scout web request "protein design 2026" --json  # CLI performs no search
 researchwiki scout web list                                  # resume local handoffs after a crash/session change
-researchwiki scout web show <run-id> --json                  # exact request contract for the active agent
+researchwiki scout web show <run-id> --json                  # exact request + cached result when recorded
 researchwiki scout web record <run-id> --harness codex-web --fetched https://example.org/page
 # with a request --since bound, add --published-at URL YYYY-MM-DD where known
 researchwiki scout web accept <run-id> receipt.json          # optional JSON form; use - for stdin
-researchwiki scout web report <run-id>                       # optional source ledger under output/scout/
 
 researchwiki visualize --open                         # 10. corpus → output/graph.html (self-contained)
 researchwiki export --format bibtex > refs.bib        # 11. corpus → bibliography (published pages only)
@@ -1546,7 +1542,7 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `status` | Dashboard: counts, density, orphans, inbox/web-scout backlog, index health, pending proposals, 7-day cost. |
 | `lint [--fix] [--cross-paper]` | Orphans, broken/missing wikilinks (auto-fixable), stale syntheses, missing keywords/DOIs, year drift, stale proposals. All local except `--cross-paper`, which opts into the LLM contradiction judge over high-cosine claim pairs; `--cross-paper-max-pairs 0` sizes that pool for zero calls, and every verdict is recorded so a repeat run only judges what the last one missed. |
 | `scout [citations]` | Structured Semantic Scholar scouting: cross-wiki citation edges, recommendations, and shared external references. Bare `scout` defaults to `citations`; `audit` is a deprecated alias. |
-| `scout web <request\|list\|show\|record\|accept\|report>` | Provider-neutral handoff to the active chat agent's native web-search harness. The CLI makes no network calls and stores no research prose. The agent answers conversationally with native citations, then `record` persists only harness + URLs + opened-vs-snippet status; `accept … -` is the minimal JSON alternative. Requests are bounded, resumable, write-once after recording, quarantined, and discovery-only. `report` is an optional source ledger. See `prompts/scout-web.md`. |
+| `scout web <request\|list\|show\|record\|accept>` | Provider-neutral handoff to the active chat agent's native web-search harness. The CLI makes no network calls and stores no research prose. The agent answers conversationally with native citations, then `record` persists only harness + URLs + opened-vs-snippet status; `accept … -` is the minimal JSON alternative. Requests are bounded, resumable, write-once after recording, quarantined, and discovery-only. `show` reads the cached result without creating a report. See `prompts/scout-web.md`. |
 | `retraction-check`, `preprint-check`, `orcid-lookup` | Structured PubMed / bioRxiv / ORCID queries. |
 | `claims "<query>" [--k N]` | Grounded-citation search over the pre-graded claims table (atomic bullets + `[[stem#slug]]` citation anchors + support scores). |
 | `pdf-search <stem> "<query>" [--k N]` | BM25 inside one paper's PDF chunks — pull an exact number/passage the page didn't quote. |

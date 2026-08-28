@@ -7,7 +7,6 @@ import json
 import sys
 from pathlib import Path
 
-from ..log import log
 from . import web
 
 
@@ -36,7 +35,7 @@ def _print_recorded(manifest: dict, path: Path, *, as_json: bool) -> int:
     else:
         print(f"Recorded {manifest['source_count']} discovery-only source(s).")
         print(f"Manifest: {path}")
-        print(f"Optional ledger: researchwiki scout web report {manifest['run_id']}")
+        print(f"Inspect cache: researchwiki scout web show {manifest['run_id']}")
     return 0
 
 
@@ -67,26 +66,36 @@ def _accept(args) -> int:
     return _print_recorded(manifest, path, as_json=args.as_json)
 
 
-def _report(args) -> int:
-    text, path, summary = web.render_report(args.run_id)
-    if args.as_json:
-        print(json.dumps(summary, indent=2))
-    else:
-        print(text, end="")
-        log(f"source ledger written: {path}", tag="scout")
-    return 0
-
-
 def _show(args) -> int:
-    request, path = web.load_request(args.run_id)
+    run = web.load_run(args.run_id)
     if args.as_json:
-        print(json.dumps({**request, "request_path": str(path)}, indent=2))
+        print(json.dumps(run, indent=2))
     else:
-        print(f"Run:      {request['run_id']}")
-        print(f"Query:    {request['query']}")
-        print(f"Created:  {request['created_at']}")
-        print(f"Bounds:   {json.dumps(request['constraints'], ensure_ascii=False)}")
-        print(f"Artifact: {path}")
+        print(f"Run:      {run['run_id']}")
+        print(f"State:    {run['state']}")
+        print(f"Query:    {run['query']}")
+        print(f"Created:  {run['created_at']}")
+        print(f"Bounds:   {json.dumps(run['constraints'], ensure_ascii=False)}")
+        print(f"Request:  {run['request_path']}")
+        cached = run["cached_result"]
+        if cached is None:
+            print("Cached result: none — this request is awaiting the agent")
+            return 0
+        receipt = cached["receipt"]
+        manifest = cached["manifest"]
+        print(f"Recorded: {receipt['recorded_at']}")
+        print(f"Harness:  {receipt['harness']}")
+        print(
+            f"Sources:  {manifest['source_count']} "
+            f"({manifest['fetched_count']} harness-reported opened)"
+        )
+        for source in receipt["sources"]:
+            access = "opened" if source["fetched"] else "search-only"
+            published = source.get("published_at") or "date-unverified"
+            title = f" — {source['title']}" if source.get("title") else ""
+            print(f"  - [{access}; {published}] {source['url']}{title}")
+        print(f"Receipt:  {cached['receipt_path']}")
+        print(f"Manifest: {cached['manifest_path']}")
     return 0
 
 
@@ -155,12 +164,9 @@ def _parser() -> argparse.ArgumentParser:
     accept.add_argument("--json", dest="as_json", action="store_true")
     accept.set_defaults(func=_accept)
 
-    report = subs.add_parser("report", help="Render the source receipt as Markdown.")
-    report.add_argument("run_id")
-    report.add_argument("--json", dest="as_json", action="store_true")
-    report.set_defaults(func=_report)
-
-    show = subs.add_parser("show", help="Show a request so another agent can resume it.")
+    show = subs.add_parser(
+        "show", help="Show a request and its cached result, when recorded."
+    )
     show.add_argument("run_id")
     show.add_argument("--json", dest="as_json", action="store_true")
     show.set_defaults(func=_show)
@@ -174,8 +180,18 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str]) -> int:
     # Friendly shorthand: `scout web "query"` means `scout web request "query"`.
+    # Keep the removed report action reserved so an old invocation fails with a
+    # useful message instead of silently creating a new request for the query
+    # "report".
+    if argv and argv[0] == "report":
+        print(
+            "researchwiki scout web: `report` was removed; use `show <run-id>` "
+            "to inspect the cached result",
+            file=sys.stderr,
+        )
+        return 1
     actions = {
-        "request", "record", "accept", "report", "show", "list", "-h", "--help"
+        "request", "record", "accept", "show", "list", "-h", "--help"
     }
     if argv and argv[0] not in actions:
         argv = ["request", *argv]

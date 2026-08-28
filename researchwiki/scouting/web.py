@@ -49,6 +49,7 @@ _MANIFEST_FIELDS = {
 
 _RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_LEGACY_IPV4_LABEL_RE = re.compile(r"(?:0x[0-9a-f]+|[0-9]+)", re.IGNORECASE)
 
 
 def _receipt_contract() -> dict:
@@ -142,6 +143,12 @@ def _normalize_domain(raw: str) -> str:
         raise ScoutInputError(f"non-public IP address is not allowed: {raw!r}")
     if address is None:
         labels = value.split(".")
+        # URL clients still accept legacy shortened/octal/hex IPv4 spellings
+        # that `ipaddress.ip_address()` deliberately rejects. Treating those as
+        # DNS names lets values such as `127.1` or `0x7f.0.0.1` pass this check
+        # even though browsers/curl resolve them to loopback.
+        if labels and all(_LEGACY_IPV4_LABEL_RE.fullmatch(label) for label in labels):
+            raise ScoutInputError(f"non-canonical IP address is not allowed: {raw!r}")
         if len(labels) < 2 or any(
             not label
             or len(label) > 63
@@ -291,7 +298,7 @@ def _artifact_sha256(path: Path, *, label: str) -> str:
 
 def _validate_request_document(request: dict, *, run_id: str) -> None:
     version = request.get("schema_version")
-    if version != SCHEMA_VERSION:
+    if type(version) is not int or version != SCHEMA_VERSION:
         raise ScoutInputError("unsupported scout request schema_version")
     unexpected = sorted(set(request) - _REQUEST_FIELDS)
     missing = sorted(_REQUEST_FIELDS - set(request))
@@ -470,7 +477,8 @@ def accept_submission(
     request, request_path = load_request(run_id)
     if not isinstance(incoming, dict):
         raise ScoutInputError("scout receipt must be a JSON object")
-    if incoming.get("schema_version") != SCHEMA_VERSION:
+    incoming_version = incoming.get("schema_version")
+    if type(incoming_version) is not int or incoming_version != SCHEMA_VERSION:
         raise ScoutInputError(f"scout receipt schema_version must be {SCHEMA_VERSION}")
     if incoming.get("run_id") != run_id:
         raise ScoutInputError("receipt run_id does not match the request")
@@ -637,7 +645,8 @@ def record_sources(
 
 
 def _validate_recorded_documents(request: dict, receipt: dict, manifest: dict) -> None:
-    if receipt.get("schema_version") != SCHEMA_VERSION:
+    receipt_version = receipt.get("schema_version")
+    if type(receipt_version) is not int or receipt_version != SCHEMA_VERSION:
         raise ScoutInputError("unsupported recorded-receipt schema_version")
     if receipt.get("evidence_class") != "discovery-only":
         raise ScoutInputError("recorded scout receipt must remain discovery-only")
@@ -678,10 +687,12 @@ def _validate_recorded_documents(request: dict, receipt: dict, manifest: dict) -
         if missing_manifest:
             details.append("missing fields: " + ", ".join(missing_manifest))
         raise ScoutInputError("invalid scout manifest schema (" + "; ".join(details) + ")")
-    if manifest.get("schema_version") != SCHEMA_VERSION:
+    manifest_version = manifest.get("schema_version")
+    if type(manifest_version) is not int or manifest_version != SCHEMA_VERSION:
         raise ScoutInputError("unsupported scout manifest schema_version")
     for field, value in expected.items():
-        if manifest.get(field) != value:
+        actual = manifest.get(field)
+        if type(actual) is not type(value) or actual != value:
             raise ScoutInputError(f"scout manifest disagrees on {field}")
     dropped = manifest.get("duplicates_dropped")
     if isinstance(dropped, bool) or not isinstance(dropped, int) or dropped < 0:
@@ -711,11 +722,41 @@ def _load_recorded(run_id: str) -> tuple[dict, dict, dict]:
     return request, receipt, manifest
 
 
-def render_report(run_id: str) -> tuple[str, Path, dict]:
-    """Compatibility wrapper for the focused source-ledger renderer."""
-    from .web_report import render_report as _render_report
+def load_run(run_id: str) -> dict:
+    """Load one request and its cached discovery result, when recorded.
 
-    return _render_report(run_id)
+    The request remains top-level so ``show --json`` is still a directly usable
+    handoff for a resumed agent.  Once the run is recorded, ``cached_result``
+    exposes the exact receipt and manifest already stored under
+    ``.scout-cache/``; no second rendered artifact is created.
+    """
+    request, request_path = load_request(run_id)
+    directory = _run_dir(run_id)
+    receipt_path = directory / "receipt.json"
+    manifest_path = directory / "manifest.json"
+    receipt_exists = receipt_path.exists()
+    manifest_exists = manifest_path.exists()
+    if receipt_exists != manifest_exists:
+        raise ScoutInputError("recorded receipt and manifest are incomplete")
+
+    out = {
+        **request,
+        "state": "requested",
+        "request_path": str(request_path),
+        "cached_result": None,
+    }
+    if not receipt_exists:
+        return out
+
+    _recorded_request, receipt, manifest = _load_recorded(run_id)
+    out["state"] = "recorded"
+    out["cached_result"] = {
+        "receipt": receipt,
+        "manifest": manifest,
+        "receipt_path": str(receipt_path),
+        "manifest_path": str(manifest_path),
+    }
+    return out
 
 
 def inspect_run(run_id: str) -> dict:
@@ -731,21 +772,16 @@ def inspect_run(run_id: str) -> dict:
         "error": None,
     }
     try:
-        request, _ = load_request(rid)
-        row["query"] = request["query"]
-        row["created_at"] = request["created_at"]
-        directory = _run_dir(rid)
-        receipt_exists = (directory / "receipt.json").exists()
-        manifest_exists = (directory / "manifest.json").exists()
-        if receipt_exists != manifest_exists:
-            raise ScoutInputError("recorded receipt and manifest are incomplete")
-        if not receipt_exists:
+        run = load_run(rid)
+        row["query"] = run["query"]
+        row["created_at"] = run["created_at"]
+        if run["state"] == "requested":
             row["state"] = "requested"
             row["next_command"] = f"researchwiki scout web show {rid} --json"
             return row
 
-        _recorded_request, _receipt, manifest = _load_recorded(rid)
-        row["source_count"] = manifest["source_count"]
+        cached_result = run["cached_result"]
+        row["source_count"] = cached_result["manifest"]["source_count"]
         row["state"] = "recorded"
         return row
     except (ScoutInputError, ScoutStorageUnavailable) as exc:
