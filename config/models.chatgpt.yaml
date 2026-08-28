@@ -86,5 +86,5 @@ phases:
   # terra bill. The role is what costs money; max_tokens is only a ceiling
   # (you are billed for tokens emitted, ~1.3K observed), so it stays generous
   # — a truncated claims list silently strips the author's coverage checklist.
-  target_claims:    {role: extractor, max_tokens: 8000}
+  target_claims:    {role: extractor, max_tokens: 4000}
   claim_support:    {role: judge}

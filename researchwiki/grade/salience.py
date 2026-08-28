@@ -241,6 +241,7 @@ def _abstract_is_prose(text: str, sentences: list[str]) -> bool:
 @dataclass
 class SalienceReport:
     n_anchors: int
+    n_anchor_sources: int          # distinct structural sources represented
     salience_score: float | None     # None when n_anchors == 0; else 0..1
     n_match: int
     n_partial: int
@@ -441,10 +442,18 @@ def score_salience(
         + len(fixture.capabilities)
         + len(fixture.limitations)
     )
+    source_prefixes = set()
+    for _, item in fixture.all_items():
+        prefix = item.id.split("-", 1)[0]
+        # Lead/tail are both Discussion; keep source diversity structural,
+        # not an artifact of how many anchors one section emitted.
+        source_prefixes.add("discussion" if prefix == "discussion" else prefix)
+    n_anchor_sources = len(source_prefixes)
 
     if n_anchors == 0:
         return SalienceReport(
             n_anchors=0,
+            n_anchor_sources=0,
             salience_score=None,
             n_match=0, n_partial=0, n_miss=0,
             per_axis={},
@@ -464,6 +473,7 @@ def score_salience(
 
     return SalienceReport(
         n_anchors=n_anchors,
+        n_anchor_sources=n_anchor_sources,
         salience_score=report.overall_weighted_recall,
         n_match=n_match,
         n_partial=n_partial,

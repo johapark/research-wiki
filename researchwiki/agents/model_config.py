@@ -183,7 +183,7 @@ _FALLBACK_PHASES: dict[str, dict] = {
     "cross_paper_judge": {"role": "judge", "temperature": 0.0, "max_tokens": 400},
     "claim_overlap_judge": {"role": "judge", "temperature": 0.0, "max_tokens": 400},
     "reconcile":         {"role": "extractor"},
-    "target_claims":     {"role": "extractor", "max_tokens": 2500},
+    "target_claims":     {"role": "extractor", "max_tokens": 4000},
     "claim_support":     {"role": "judge"},
 }
 

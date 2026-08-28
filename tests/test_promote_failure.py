@@ -23,6 +23,7 @@ import pytest
 
 from researchwiki.agents import promote as promote_mod
 from researchwiki.agents import runner
+from researchwiki.agents import budget
 from researchwiki.agents.context import Context, PromoteFailed
 
 
@@ -140,6 +141,49 @@ def test_successful_promote_is_unaffected(ctx, commit_env, monkeypatch, tmp_path
     assert out == page
     commits = [r for r in commit_env if r.get("role") == "commit"]
     assert commits[0]["decision"] == "committed-to-wiki"
+
+
+def test_post_promote_optional_llm_respects_budget_but_maintenance_finishes(
+    ctx, commit_env, monkeypatch, tmp_path,
+):
+    """Promotion is irreversible, but that must not turn memory evolution into
+    an unbudgeted call. Exhaustion skips it while required grading completes."""
+    page = tmp_path / "page.md"
+    monkeypatch.setattr(promote_mod, "promote_to_wiki", lambda **kw:
+                        promote_mod.PromotionResult(
+                            promoted=True, wiki_path=page,
+                            pdf_path=tmp_path / "p.pdf", category="compbio",
+                            index_updated=True, log_appended=True))
+    tracker = budget.BudgetTracker(budget.IngestBudget(max_tokens=100))
+    ctx.budget_tracker = tracker
+    grade_calls = []
+    monkeypatch.setattr(
+        "researchwiki.agents.runner_support.write_iteration",
+        lambda **kw: commit_env.append(kw) or 1,
+    )
+
+    def exhaust_during_optional_phase(*args, **kwargs):
+        assert not tracker.suspended, "optional LLM phase must still be budgeted"
+        raise budget.BudgetExhausted(
+            "tokens", 100, 101, {"model_calls": 3, "tokens": 90},
+        )
+
+    monkeypatch.setattr(runner.phases, "evolve_memory", exhaust_during_optional_phase)
+    monkeypatch.setattr(
+        runner.phases, "persist_grades", lambda *a, **k: grade_calls.append(True)
+    )
+
+    out = runner._phase_commit(ctx, conn=None)
+
+    assert out == page
+    assert grade_calls == [True]
+    assert tracker.suspended
+    skipped = [
+        row for row in commit_env
+        if row.get("role") == "memory_evolve" and row.get("decision") == "skipped"
+    ]
+    assert len(skipped) == 1
+    assert "budget exhausted" in skipped[0]["decision_reason"]
 
 
 def test_cli_maps_promote_failure_to_exit_2(monkeypatch, capsys, tmp_path):

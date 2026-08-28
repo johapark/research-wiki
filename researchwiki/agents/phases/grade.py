@@ -111,6 +111,7 @@ def grade_draft(
     sal = report.salience
     salience_score = sal.salience_score if sal is not None else None
     n_anchors = sal.n_anchors if sal is not None else 0
+    n_anchor_sources = sal.n_anchor_sources if sal is not None else 0
     n_anchors_matched = sal.n_match if sal is not None else 0
     n_anchors_missed = sal.n_miss if sal is not None else 0
     # The missed anchors themselves — not just the count. Without these the
@@ -154,6 +155,7 @@ def grade_draft(
         "semantic_available": report.semantic_available,
         "salience_score": salience_score,
         "n_anchors": n_anchors,
+        "n_anchor_sources": n_anchor_sources,
         "n_anchors_matched": n_anchors_matched,
         "n_anchors_missed": n_anchors_missed,
         "missed_anchors": missed_anchors,
@@ -221,6 +223,7 @@ def _score_target_claims(
         "limitation": [],
     }
     claim_by_id = {}
+    location_families: set[str] = set()
     for position, claim in enumerate(claims):
         claim_type = getattr(claim, "type", "")
         importance = getattr(claim, "importance", "normal")
@@ -228,13 +231,17 @@ def _score_target_claims(
         if claim_type not in axes or importance not in IMPORTANCE_WEIGHTS or not content:
             continue
         item_id = f"target-{position:03d}"
+        location = getattr(claim, "location", None)
         axes[claim_type].append(FixtureItem(
             id=item_id,
             importance=importance,
             verbalization=content,
-            location=getattr(claim, "location", None),
+            location=location,
         ))
         claim_by_id[item_id] = claim
+        family = _location_family(location)
+        if family:
+            location_families.add(family)
 
     n_valid = len(claim_by_id)
     if not n_valid:
@@ -277,7 +284,7 @@ def _score_target_claims(
             "location": getattr(claim, "location", None),
         })
 
-    return {
+    result = {
         "target_claim_score": report.overall_weighted_recall,
         "n_target_claims": n_valid,
         "n_target_claims_matched": sum(v.verdict == "match" for v in verdicts),
@@ -293,3 +300,28 @@ def _score_target_claims(
         "normal_target_claim_recall": tier_recall["normal"],
         "missed_target_claims": misses,
     }
+    # Preserve legacy/full confidence when the extractor supplied no usable
+    # locations at all; a present value means the diversity was measurable.
+    if location_families:
+        result["n_target_claim_sources"] = len(location_families)
+    return result
+
+
+def _location_family(location: str | None) -> str | None:
+    """Normalize free-form claim locations to structural source families."""
+    value = (location or "").strip().lower()
+    if not value:
+        return None
+    families = (
+        ("abstract", ("abstract",)),
+        ("introduction", ("introduction", "background")),
+        ("methods", ("method", "methodology", "approach")),
+        ("results", ("result", "experiment", "evaluation")),
+        ("discussion", ("discussion", "conclusion", "limitation")),
+        ("figures", ("figure", "fig.", "table")),
+        ("supplement", ("extended data", "supplement", "appendix")),
+    )
+    for family, needles in families:
+        if any(needle in value for needle in needles):
+            return family
+    return "other"
