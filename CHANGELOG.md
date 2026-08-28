@@ -80,6 +80,37 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- **Semantic Scholar batch metadata could be attributed to the wrong paper.**
+  The `/paper/batch` response is positional, but the cache key hashed
+  `sorted(chunk)` while the request sent the caller's original DOI order — so a
+  cache file written by one caller could be replayed against another caller's
+  ordering and map each record onto the wrong DOI. Requests are now sorted and
+  deduped so wire order, cache identity, and response mapping are the same
+  sequence, and the file name moved to `s2_batch_v2__*` because a pre-v2 array
+  cannot reveal the order that produced it and is therefore unsafe to replay.
+  A successful v2 batch also overwrites each DOI's per-paper cache entry rather
+  than only filling a missing one, since an earlier replay may have written
+  another paper's record there.
+
+  **Action for existing checkouts:** old `s2_batch__*.json` files are now
+  ignored (delete them at leisure), but per-DOI entries a bad replay already
+  poisoned are indistinguishable from good ones and are only repaired when that
+  DOI appears in a later batch. A one-time `researchwiki scout --refresh-cache`
+  (bare, i.e. DAYS=0), or clearing `.s2-cache/`, forces the correction;
+  otherwise `ingest` and `neighbors` may read a stale entry until the next scout
+  run covers it.
+
+- **Ambiguous DOIs no longer inflate the citation graph.** When two wiki pages
+  carried the same DOI, the DOI-to-stem map silently resolved to whichever page
+  was visited last, attributing that page's citation edges to an arbitrary
+  winner. Such DOIs are now reported as `duplicate_dois` in the JSON contract,
+  their edges are skipped, and the affected stems are excluded from the
+  aggregate denominator instead of being counted under a guess.
+
+- **Citation-scout snapshots are written atomically.** The `.s2-cache/audit-{date}.json`
+  snapshot used a plain write, so an interrupted run could leave a truncated
+  file that `lint`'s P2 anchor cross-reference would then read as authoritative.
+
 - **Reference-manager imports now keep identity decisions deterministic and
   retries safe.** Duplicate-DOI records choose their metadata-complete survivor
   before competing for a PDF while retaining attachment paths from duplicates;

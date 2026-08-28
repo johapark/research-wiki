@@ -5,8 +5,9 @@
 ❌ Don't use: for structured issue lists (use `lint`). Not a search tool.
 
 Fast (no network calls) — reads only local YAML frontmatter, wiki page text,
-and `inbox/` / `.ingest/` filesystem state. For structured citation scouting
-(which does make Semantic Scholar calls) run `researchwiki scout`.
+and `inbox/` / `.ingest/` / `.scout-cache/` filesystem state. For structured
+citation scouting (which does make Semantic Scholar calls) run
+`researchwiki scout`.
 
 Exit code: 0 for a report; 2 when an explicitly selected environment/config is unusable.
 """
@@ -443,8 +444,9 @@ def main(argv: list[str]) -> int:
     inbox_files = _pending_pdfs(inbox_dir())
     ingest_files = _pending_digests(ingest_dir())
     # Local, resumable agent handoffs. `list_runs` performs no network access
-    # and turns malformed run artifacts into explicit `invalid` rows rather
-    # than letting one broken directory hide the rest of the queue.
+    # and turns a broken run into an explicit `invalid` row rather than letting
+    # it hide the rest of the queue — covering unreadable artifacts as well as
+    # malformed ones, so one bad receipt cannot exit this dashboard with 2.
     from ..scouting.web import list_runs as _list_web_scout_runs
     web_scout_runs = _list_web_scout_runs()
     failed = _failed_parsing_entries(wiki_pages)
@@ -563,8 +565,12 @@ def main(argv: list[str]) -> int:
         print(f"    ... ({len(ingest_files) - 5} more)")
     web_awaiting_agent = [r for r in web_scout_runs if r["state"] == "requested"]
     web_invalid = [r for r in web_scout_runs if r["state"] == "invalid"]
-    print(f"  web-scout runs awaiting agent:  {len(web_awaiting_agent)}")
+    # Printed only when there is something to act on. A permanent
+    # `web-scout runs awaiting agent: 0` would spend a row of the one-screen
+    # dashboard on a subsystem most corpora never touch — the same reason every
+    # other opportunity signal here is threshold-gated rather than always-on.
     if web_awaiting_agent:
+        print(f"  web-scout runs awaiting agent:  {len(web_awaiting_agent)}")
         for row in web_awaiting_agent[:5]:
             print(f"    - [{row['state']}] {row['run_id']}")
         pending_total = len(web_awaiting_agent)

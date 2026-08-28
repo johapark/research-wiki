@@ -439,6 +439,64 @@ def test_list_runs_filters_states_and_reports_invalid_artifacts(scout_root: Path
         web.list_runs(state="pending")
 
 
+def test_unreadable_run_artifact_is_one_invalid_row_not_a_dashboard_failure(
+    scout_root: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """An unreadable artifact must not take `status` down with exit 2.
+
+    `inspect_run` caught only ScoutInputError, so malformed JSON degraded to an
+    `invalid` row while a permission error or undecodable byte — both
+    ScoutStorageUnavailable — propagated out of `list_runs` and aborted the
+    whole dashboard over a subsystem the corpus may never have used.
+    """
+    healthy, _ = web.create_request(
+        "healthy request", run_id="20260827-healthy-dddddddd",
+        created_at="2026-08-27T13:00:00Z",
+    )
+    broken, broken_path = web.create_request(
+        "unreadable request", run_id="20260827-unreadable-eeeeeeee",
+        created_at="2026-08-27T12:00:00Z",
+    )
+    broken_path.write_bytes(b"\xff\xfe not utf-8")
+
+    rows = web.list_runs()
+    assert [row["run_id"] for row in rows] == [healthy["run_id"], broken["run_id"]]
+    assert [row["state"] for row in rows] == ["requested", "invalid"]
+    assert rows[1]["error"]
+
+    # Enumerating the runs directory at all is a different failure class: that
+    # one is genuinely environmental and still surfaces.
+    monkeypatch.setattr(
+        Path, "iterdir", lambda self: (_ for _ in ()).throw(PermissionError("denied")),
+    )
+    with pytest.raises(web.ScoutStorageUnavailable):
+        web.list_runs()
+
+
+def test_report_renders_urls_inert_but_still_copy_pasteable(scout_root: Path):
+    """A validated URL can still carry Markdown link syntax in its query.
+
+    The `- URL:` line took only `html.escape`, so `[x](evil)` inside a URL
+    rendered as a link to somewhere else. It now takes the narrow URL escaper,
+    which neutralizes link/emphasis/code constructs while leaving `&` and `.`
+    alone so the URL survives a copy-paste.
+    """
+    request, _ = _request(scout_root, max_results=2, max_fetches=0)
+    hostile = "https://example.com/a?q=[click](https://phish.example)&r=1_2"
+    web.record_sources(
+        request["run_id"], harness="test-harness", snippet_urls=[hostile],
+        recorded_at="2026-08-27T14:00:00Z",
+    )
+    text, _, _ = web_report.render_report(request["run_id"])
+
+    # No live link construct survives...
+    assert "[click](https://phish.example)" not in text
+    assert r"\[click\]\(https://phish.example\)" in text
+    # ...while the characters a reader needs to reconstruct the URL do.
+    assert "?q=" in text and "&r=1" in text
+    assert "example.com/a" in text
+
+
 def test_run_and_report_directories_must_not_be_symlinks(scout_root: Path):
     external = scout_root / "external-run"
     external.mkdir()

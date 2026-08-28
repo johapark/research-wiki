@@ -748,7 +748,16 @@ def inspect_run(run_id: str) -> dict:
         row["source_count"] = manifest["source_count"]
         row["state"] = "recorded"
         return row
-    except ScoutInputError as exc:
+    except (ScoutInputError, ScoutStorageUnavailable) as exc:
+        # Storage failures degrade to an `invalid` row rather than propagating.
+        # `status` inspects every run directory, so a single unreadable or
+        # undecodable artifact — a permission error, a truncated write — would
+        # otherwise abort the whole dashboard with an environment exit over a
+        # subsystem the corpus may never have used. Catching only
+        # ScoutInputError left exactly that gap: malformed JSON downgraded
+        # cleanly, an unreadable file did not. `list_runs` still raises if the
+        # runs directory itself cannot be enumerated, which is a real
+        # environment failure rather than one bad run.
         row["error"] = str(exc)
         return row
 

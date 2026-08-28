@@ -17,6 +17,22 @@ def markdown_text(value: object) -> str:
     return re.sub(r"([\\`*_{}\[\]()<>#+\-.!|])", r"\\\1", escaped)
 
 
+# Constructs that can restructure a line from inside a URL: link and image
+# brackets, code spans, autolink angles, emphasis runs, and the escape
+# character itself. Deliberately narrower than `markdown_text`: `.`, `-`, `+`,
+# `#` and `|` cannot open a construct mid-line here (there are no tables in
+# this ledger), and `html.escape` is skipped entirely because CommonMark
+# renders `\<` as a literal `<` — so HTML still cannot be injected, while `&`
+# survives, and every second query string contains one. A source ledger exists
+# to make URLs copy-pasteable, so escaping is kept to what safety requires.
+_URL_MD_SPECIALS = re.compile(r"([\\`*_\[\]()<>])")
+
+
+def markdown_url(value: object) -> str:
+    """Render a validated source URL inert in Markdown, still copy-pasteable."""
+    return _URL_MD_SPECIALS.sub(r"\\\1", str(value))
+
+
 def report_text(request: dict, receipt: dict, manifest: dict) -> str:
     lines = [
         "# Web Scout — Source Ledger",
@@ -49,11 +65,18 @@ def report_text(request: dict, receipt: dict, manifest: dict) -> str:
     if not sources:
         lines.extend(["_No sources recorded._", ""])
     for number, source in enumerate(sources, start=1):
-        title = source.get("title") or source["url"]
+        # Both fields are agent-supplied and equally untrusted; they differ only
+        # in what they are for. The heading is display text, so a title takes
+        # the full escape. The URL line is the artifact a reader copies, so it
+        # takes the narrow one — and it previously took neither, leaving a
+        # validated-but-attacker-shaped URL able to render as a link to
+        # somewhere else entirely.
+        title = source.get("title")
+        heading = markdown_text(title) if title else markdown_url(source["url"])
         lines.extend([
-            f"### {number}. {markdown_text(title)}",
+            f"### {number}. {heading}",
             "",
-            f"- URL: {html.escape(source['url'], quote=True)}",
+            f"- URL: {markdown_url(source['url'])}",
             "- Access: " + (
                 "harness-reported opened" if source["fetched"]
                 else "search result only; page not opened"
