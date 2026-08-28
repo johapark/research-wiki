@@ -84,7 +84,9 @@ phases:
   # coverage checklist. Was {role: judge}, which sent a transcription-shaped
   # task to the top tier: 32K input tokens across a 4-paper batch, 41% of the
   # terra bill. The role is what costs money; max_tokens is only a ceiling
-  # (you are billed for tokens emitted, ~1.3K observed), so it stays generous
-  # — a truncated claims list silently strips the author's coverage checklist.
+  # (you are billed for tokens emitted, ~1.3K observed). 4000 is ~3x observed
+  # — headroom for a long claims list without the dead ceiling 8000 gave, and
+  # a truncated list silently strips the author's coverage checklist, so do
+  # not trim this toward the observed figure.
   target_claims:    {role: extractor, max_tokens: 4000}
   claim_support:    {role: judge}

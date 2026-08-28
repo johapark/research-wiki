@@ -308,7 +308,17 @@ def _score_target_claims(
 
 
 def _location_family(location: str | None) -> str | None:
-    """Normalize free-form claim locations to structural source families."""
+    """Normalize a free-form claim location to a structural source family.
+
+    Returns None when the location is absent *or* names no recognizable
+    structure, which are treated identically on purpose. An earlier `other`
+    bucket counted the unrecognizable case as one measurable family, and that
+    inverted the incentive: an extractor emitting vague locations ("p. 4") was
+    scored 0.5x by `target_claim_confidence`, while one omitting the field
+    entirely kept full confidence — supplying weaker provenance cost more than
+    supplying none. The multiplier is meant to reward spread across the paper's
+    structure, so a location it cannot place must not count as spread.
+    """
     value = (location or "").strip().lower()
     if not value:
         return None
@@ -324,4 +334,4 @@ def _location_family(location: str | None) -> str | None:
     for family, needles in families:
         if any(needle in value for needle in needles):
             return family
-    return "other"
+    return None

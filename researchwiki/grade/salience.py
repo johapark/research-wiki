@@ -442,12 +442,12 @@ def score_salience(
         + len(fixture.capabilities)
         + len(fixture.limitations)
     )
-    source_prefixes = set()
-    for _, item in fixture.all_items():
-        prefix = item.id.split("-", 1)[0]
-        # Lead/tail are both Discussion; keep source diversity structural,
-        # not an artifact of how many anchors one section emitted.
-        source_prefixes.add("discussion" if prefix == "discussion" else prefix)
+    # `split("-", 1)` is itself what collapses a section's anchor variants:
+    # `discussion-lead-0` and `discussion-tail-0` both reduce to `discussion`,
+    # so diversity stays structural rather than counting how many anchors one
+    # section happened to emit. An explicit re-map of `discussion` used to sit
+    # here and could never fire for that reason.
+    source_prefixes = {item.id.split("-", 1)[0] for _, item in fixture.all_items()}
     n_anchor_sources = len(source_prefixes)
 
     if n_anchors == 0:

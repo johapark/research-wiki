@@ -89,7 +89,26 @@ class SectionHealth:
 def assess_section_health(
     text: str, sections: dict[str, str] | None = None,
 ) -> SectionHealth:
-    """Diagnose section extraction without another PDF read or model call."""
+    """Diagnose section extraction without another PDF read or model call.
+
+    The two reasons are deliberately asymmetric. ``no_findings_section`` fires
+    alone, because not knowing where a paper's findings are is itself the
+    defect the fallback exists for. ``dominant_introduction`` requires
+    ``len(core) < 2`` to corroborate, because a large Introduction is only
+    suspicious when little else parsed.
+
+    A consequence worth knowing before "fixing" it: venues whose findings live
+    under headings this parser does not carry take the stratified path on
+    *every* ingest. Scientific Data descriptors are the clear case — they head
+    their findings ``Data Records`` / ``Technical Validation`` and replace
+    ``Introduction`` with ``Background & Summary``, so ``core`` comes back as
+    ``("methods",)`` alone. That is the intended outcome rather than a
+    misfire: the curated excerpts for such a paper would carry abstract plus
+    methods and silently omit its results, while evenly spaced strata cover
+    them. No benchmark fixture currently exercises this shape (the one
+    ``dataset`` fixture was withdrawn for licensing), so the behavior rests on
+    this reasoning rather than on a scored run.
+    """
     text = text or ""
     if not text.strip():
         return SectionHealth(False, ("empty_text",), (), 0.0)
