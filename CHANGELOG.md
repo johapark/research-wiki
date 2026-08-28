@@ -25,9 +25,16 @@ the reasoning behind any line below.
 - **Agent-native web scouting now has a provider-neutral handoff contract.**
   `researchwiki scout web request` emits a bounded, versioned request for the
   active chat agent's own web-search harness. The agent keeps its native
-  conversational answer and citations; `record` stores only harness + source
-  URLs + opened-vs-snippet status, while `accept` validates the same schema-2
-  receipt from JSON with optional title/date metadata. Public HTTP(S),
+  conversational answer and citations; `record` stores only harness +
+  `discovery_method` + source URLs + opened-vs-snippet status, while `accept`
+  validates the same schema-3 receipt from JSON with optional title/date
+  metadata. `discovery_method` is required and declares how the URLs were found
+  — `search`, `fetch-only` (the harness could open a page but had no search
+  tool, so its URLs came from model priors), or `user-provided-url` (the
+  operator supplied them, so no discovery happened). The two searchless modes
+  reject `--snippet` sources, because a search hit nobody opened cannot exist
+  where nothing searched; without the field a fetch-only run was
+  indistinguishable from a search-driven one. Public HTTP(S),
   domain/fetch/source bounds are validated on the submitted receipt (a
   `--since` date rejects known older publication dates but allows undated
   sources). The write-once artifacts provide drift checks but cannot verify what the host
@@ -35,7 +42,10 @@ the reasoning behind any line below.
   findings, briefs, or other research prose. `show` displays the same cached
   receipt and manifest on demand without minting a second Markdown report.
   Runs expose the small lifecycle (`requested`, `recorded`, `invalid`) through
-  `list` / `show`; requested or invalid handoffs surface in `status`.
+  `list` / `show`; requested or invalid handoffs surface in `status`. A run
+  whose agent work never happened stays `requested` — `prompts/scout-web.md`
+  § Orphaned runs documents that, and why closing one with a zero-source
+  receipt is wrong (zero sources means *searched and found nothing*).
 
 - **`researchwiki scout` is now the canonical structured citation-discovery
   command.** Bare `scout` and `scout citations` run the existing Semantic

@@ -10,10 +10,23 @@ the wiki.
   the active chat agent uses its own web-search harness.
 - The agent's normal conversational answer, with the host's native citations,
   is the research deliverable. Do not force that answer into a CLI schema.
-- The repository retains only a minimal source receipt: harness name, URL,
-  whether the harness claims to have opened the page, and optional
-  title/publication date. It accepts no excerpts, findings, briefs, confidence
-  labels, or other research prose.
+- The repository retains only a minimal source receipt: harness name,
+  `discovery_method`, URL, whether the harness claims to have opened the page,
+  and optional title/publication date. It accepts no excerpts, findings,
+  briefs, confidence labels, or other research prose.
+- `discovery_method` is required and states **how the URLs were found**, not
+  what they say. Three values, all self-attested:
+
+  | Value | Meaning |
+  |---|---|
+  | `search` | The harness ran a real web search. |
+  | `fetch-only` | The harness could open a page but had no search tool, so the URLs came from model priors. |
+  | `user-provided-url` | The operator supplied the URLs; no discovery happened. |
+
+  The two searchless modes forbid `--snippet` / `fetched: false` sources: a
+  search hit you declined to open cannot exist when nothing searched. Pick the
+  value describing what actually happened — a `fetch-only` run recorded as
+  `search` is the one falsehood this field exists to prevent.
 - Every recorded source remains **discovery-only**. Never copy or paraphrase the
   answer or cached result into `wiki/`, insert it into the claims DB, or use it
   to justify a `[[wikilink]]`. Obtain and ingest the underlying PDF first.
@@ -52,14 +65,16 @@ lifecycle state. `researchwiki status` surfaces requested and invalid runs under
 
 2. Use the chat agent's native web-search tool and answer the user normally. If
   the agent has no web-search capability, say so; do not silently install a
-  provider or add a raw HTTP client. A URL is marked `fetched` only when the
-  harness claims to have opened the page. A search result that was not opened
-  is a `snippet` source.
+  provider or add a raw HTTP client, and do not substitute a fetch tool against
+  a search engine's results page. See *Orphaned runs* below for what to do with
+  the request. A URL is marked `fetched` only when the harness claims to have
+  opened the page. A search result that was not opened is a `snippet` source.
 
 3. Record the sources. The simplest path requires no JSON:
 
    ```bash
    researchwiki scout web record <run-id> --harness codex-web \
+     --discovery-method search \
      --fetched https://example.org/opened-page \
      --snippet https://example.net/search-result
    ```
@@ -74,9 +89,10 @@ lifecycle state. `researchwiki status` surfaces requested and invalid runs under
 
    ```json
    {
-     "schema_version": 2,
+     "schema_version": 3,
      "run_id": "<run-id>",
      "harness": "codex-web",
+     "discovery_method": "search",
      "sources": [
        {
          "url": "https://example.org/opened-page",
@@ -113,6 +129,49 @@ lifecycle state. `researchwiki status` surfaces requested and invalid runs under
    distinguishes opened pages from search-only results. It creates no formal
    report and does not reproduce the agent's research prose. The cache is
    gitignored and separate from the structured-metadata API caches.
+
+## Orphaned runs
+
+A request whose agent work never happened is **orphaned**. The usual cause is a
+host with no web-search tool (the request was created before the gap was known),
+but an interrupted session or a scope change does it too.
+
+**Leave it `requested`.** That is the correct resting state: the queue exists to
+be resumed, `status` keeps it visible under *Workflow state*, and any host can
+pick it up later from `show <run-id> --json`.
+
+**Never close an orphan with a zero-source receipt.** Recording zero sources is
+valid — it means *the harness searched and found nothing worth keeping* — so
+using it for *never searched* destroys the distinction permanently, and the
+receipt is write-once. If a search genuinely returned nothing, record zero
+sources with the `search` method and say so in the answer.
+
+Do not paper over a missing search harness. Specifically, do not:
+
+- point a fetch tool at a search engine's results page (that is installing a
+  search provider by the back door);
+- fetch URLs recalled from model priors and record them as `search`;
+- invent a URL, title, or date to fill the receipt. `fetched: true` asserts the
+  harness opened *that* page.
+
+When the host has fetch but no search, the honest options are:
+
+- **Leave the run orphaned** and resume it from a search-capable host. Preferred
+  when the point was broad discovery.
+- **Ask the user for URLs**, fetch exactly those (no transitive links), and
+  record with `--discovery-method user-provided-url`. This is the CLAUDE.md
+  user-provided-URL exception, and it is a first-class run — bounded, honest,
+  and still discovery-only.
+- **Record with `--discovery-method fetch-only`** if you did open prior-derived
+  URLs. Legitimate, but say plainly in the answer that no search ran, so the
+  thin coverage is not mistaken for a thin field. Expect this mode to surface
+  mostly well-known work already in the corpus; check with `researchwiki search`
+  before offering it as a lead.
+
+Name the harness for what it was (`claude-code-webfetch`, not a generic label)
+so the artifact is legible months later. A run can also just be abandoned:
+delete its directory under `.scout-cache/web/runs/<run-id>/`. The cache is
+gitignored and holds no evidence, so nothing is lost.
 
 ## Reporting
 

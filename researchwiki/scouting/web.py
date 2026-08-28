@@ -21,7 +21,7 @@ from ..fsatomic import exclusive_lock, file_sha256, write_json_atomic
 from ..paths import scout_cache_dir
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_MAX_RESULTS = 20
 DEFAULT_MAX_FETCHES = 10
 HARD_MAX_RESULTS = 100
@@ -33,6 +33,17 @@ MAX_HARNESS_CHARS = 100
 MAX_DOMAINS = 20
 RUN_STATES = ("requested", "recorded", "invalid")
 
+# How the recorded URLs were found. This is the host agent's self-attestation
+# about its own capability, not something the CLI can verify — but stating it
+# keeps a run that never searched from being indistinguishable from one that
+# did. `fetch-only` is a harness that can open a page but has no search tool,
+# so its URLs come from model priors; `user-provided-url` is the operator
+# handing over the URLs, where no discovery happened at all.
+DISCOVERY_METHODS = ("search", "fetch-only", "user-provided-url")
+# Neither searchless mode can produce a search result, so a `fetched: false`
+# source — "a search hit I did not open" — cannot exist under them.
+_SEARCHLESS_METHODS = frozenset({"fetch-only", "user-provided-url"})
+
 _REQUEST_FIELDS = {
     "schema_version", "run_id", "mode", "query", "created_at",
     "evidence_class", "constraints", "receipt_contract",
@@ -43,8 +54,15 @@ _CONSTRAINT_FIELDS = {
 }
 _MANIFEST_FIELDS = {
     "schema_version", "run_id", "status", "evidence_class", "recorded_at",
-    "harness", "source_count", "fetched_count", "duplicates_dropped",
-    "request_sha256", "receipt_sha256",
+    "harness", "discovery_method", "source_count", "fetched_count",
+    "duplicates_dropped", "request_sha256", "receipt_sha256",
+}
+_RECEIPT_FIELDS = {
+    "schema_version", "run_id", "harness", "discovery_method", "sources",
+}
+_RECORDED_RECEIPT_FIELDS = {
+    "schema_version", "run_id", "evidence_class", "recorded_at", "harness",
+    "discovery_method", "sources",
 }
 
 _RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
@@ -54,16 +72,38 @@ _LEGACY_IPV4_LABEL_RE = re.compile(r"(?:0x[0-9a-f]+|[0-9]+)", re.IGNORECASE)
 
 def _receipt_contract() -> dict:
     return {
-        "required_top_level": ["schema_version", "run_id", "harness", "sources"],
+        "required_top_level": [
+            "schema_version", "run_id", "harness", "discovery_method", "sources",
+        ],
         "required_per_source": ["url", "fetched"],
         "optional_per_source": ["title", "published_at"],
+        "discovery_methods": list(DISCOVERY_METHODS),
         "notes": [
             "Return conversational research through the host agent, not this receipt.",
             "Record only provenance here; research prose is not accepted or stored.",
             "fetched=true is the host harness's assertion that it opened the page.",
+            "discovery_method states how the URLs were found, not what they say.",
+            "Under fetch-only or user-provided-url every source must be fetched.",
             "A source remains discovery-only until its underlying PDF is ingested.",
         ],
     }
+
+
+def _validate_discovery_method(value, *, sources: list[dict]) -> str:
+    """Check the declared discovery mode and that the sources can support it."""
+    if value not in DISCOVERY_METHODS:
+        raise ScoutInputError(
+            "discovery_method must be one of: " + ", ".join(DISCOVERY_METHODS)
+        )
+    if value in _SEARCHLESS_METHODS:
+        unopened = [source["url"] for source in sources if not source["fetched"]]
+        if unopened:
+            raise ScoutInputError(
+                f"discovery_method {value!r} performed no search, so it cannot "
+                "report search-only sources; these were never opened: "
+                + ", ".join(unopened)
+            )
+    return value
 
 
 class ScoutInputError(ValueError):
@@ -299,7 +339,11 @@ def _artifact_sha256(path: Path, *, label: str) -> str:
 def _validate_request_document(request: dict, *, run_id: str) -> None:
     version = request.get("schema_version")
     if type(version) is not int or version != SCHEMA_VERSION:
-        raise ScoutInputError("unsupported scout request schema_version")
+        raise ScoutInputError(
+            f"unsupported scout request schema_version {version!r} "
+            f"(expected {SCHEMA_VERSION}); create a new request rather than "
+            "editing this one"
+        )
     unexpected = sorted(set(request) - _REQUEST_FIELDS)
     missing = sorted(_REQUEST_FIELDS - set(request))
     if unexpected or missing:
@@ -489,9 +533,7 @@ def accept_submission(
             "research prose is not part of a source receipt; remove: "
             + ", ".join(present_prose)
         )
-    unexpected = sorted(
-        set(incoming) - {"schema_version", "run_id", "harness", "sources"}
-    )
+    unexpected = sorted(set(incoming) - _RECEIPT_FIELDS)
     if unexpected:
         raise ScoutInputError(
             "unsupported source-receipt fields: " + ", ".join(unexpected)
@@ -501,6 +543,9 @@ def accept_submission(
     )
     sources, duplicates = _normalize_sources(
         incoming.get("sources"), request=request
+    )
+    discovery_method = _validate_discovery_method(
+        incoming.get("discovery_method"), sources=sources
     )
     fetched_count = sum(1 for source in sources if source["fetched"])
 
@@ -532,6 +577,7 @@ def accept_submission(
                 "evidence_class": "discovery-only",
                 "recorded_at": now,
                 "harness": harness,
+                "discovery_method": discovery_method,
                 "sources": sources,
             }
             if existing_receipt is not None:
@@ -567,6 +613,7 @@ def accept_submission(
                 "evidence_class": "discovery-only",
                 "recorded_at": now,
                 "harness": harness,
+                "discovery_method": discovery_method,
                 "source_count": len(sources),
                 "fetched_count": fetched_count,
                 "duplicates_dropped": duplicates,
@@ -596,6 +643,7 @@ def record_sources(
     run_id: str,
     *,
     harness: str,
+    discovery_method: str,
     fetched_urls: list[str] | None = None,
     snippet_urls: list[str] | None = None,
     published_at: dict[str, str] | None = None,
@@ -638,6 +686,7 @@ def record_sources(
             "schema_version": SCHEMA_VERSION,
             "run_id": run_id,
             "harness": harness,
+            "discovery_method": discovery_method,
             "sources": sources,
         },
         recorded_at=recorded_at,
@@ -647,15 +696,13 @@ def record_sources(
 def _validate_recorded_documents(request: dict, receipt: dict, manifest: dict) -> None:
     receipt_version = receipt.get("schema_version")
     if type(receipt_version) is not int or receipt_version != SCHEMA_VERSION:
-        raise ScoutInputError("unsupported recorded-receipt schema_version")
+        raise ScoutInputError(
+            f"unsupported recorded-receipt schema_version {receipt_version!r} "
+            f"(expected {SCHEMA_VERSION})"
+        )
     if receipt.get("evidence_class") != "discovery-only":
         raise ScoutInputError("recorded scout receipt must remain discovery-only")
-    unexpected = sorted(
-        set(receipt) - {
-            "schema_version", "run_id", "evidence_class", "recorded_at",
-            "harness", "sources",
-        }
-    )
+    unexpected = sorted(set(receipt) - _RECORDED_RECEIPT_FIELDS)
     if unexpected:
         raise ScoutInputError(
             "recorded scout receipt has unsupported fields: " + ", ".join(unexpected)
@@ -669,12 +716,16 @@ def _validate_recorded_documents(request: dict, receipt: dict, manifest: dict) -
     )
     if duplicates or receipt.get("sources") != sources:
         raise ScoutInputError("recorded scout sources are not normalized")
+    discovery_method = _validate_discovery_method(
+        receipt.get("discovery_method"), sources=sources
+    )
     fetched_count = sum(1 for source in sources if source["fetched"])
     expected = {
         "status": "recorded",
         "evidence_class": "discovery-only",
         "recorded_at": recorded_at,
         "harness": harness,
+        "discovery_method": discovery_method,
         "source_count": len(sources),
         "fetched_count": fetched_count,
     }
@@ -768,6 +819,7 @@ def inspect_run(run_id: str) -> dict:
         "query": None,
         "created_at": None,
         "source_count": None,
+        "discovery_method": None,
         "next_command": None,
         "error": None,
     }
@@ -782,6 +834,7 @@ def inspect_run(run_id: str) -> dict:
 
         cached_result = run["cached_result"]
         row["source_count"] = cached_result["manifest"]["source_count"]
+        row["discovery_method"] = cached_result["manifest"]["discovery_method"]
         row["state"] = "recorded"
         return row
     except (ScoutInputError, ScoutStorageUnavailable) as exc:

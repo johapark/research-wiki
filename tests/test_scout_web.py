@@ -45,11 +45,17 @@ def _source(
     return source
 
 
-def _receipt(run_id: str, sources: list[dict] | None = None) -> dict:
+def _receipt(
+    run_id: str,
+    sources: list[dict] | None = None,
+    *,
+    discovery_method: str = "search",
+) -> dict:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "run_id": run_id,
         "harness": "agent-native-web",
+        "discovery_method": discovery_method,
         "sources": [_source()] if sources is None else sources,
     }
 
@@ -73,7 +79,7 @@ def test_request_is_bounded_quarantined_and_provenance_only(scout_root: Path):
         scout_root / ".scout-cache" / "web" / "runs"
         / request["run_id"] / "request.json"
     )
-    assert request["schema_version"] == 2
+    assert request["schema_version"] == 3
     assert request["evidence_class"] == "discovery-only"
     assert request["constraints"] == {
         "max_results": 8,
@@ -210,6 +216,7 @@ def test_record_flags_can_supply_since_dates(scout_root: Path):
     manifest, _ = web.record_sources(
         request["run_id"],
         harness="codex-web",
+        discovery_method="search",
         fetched_urls=["https://example.org/story#section"],
         published_at={"https://example.org/story": "2026-08-20"},
     )
@@ -221,6 +228,7 @@ def test_record_flags_can_supply_since_dates(scout_root: Path):
     )
     assert web_cli.main([
         "record", second["run_id"], "--harness", "codex-web",
+        "--discovery-method", "search",
         "--fetched", "https://example.org/story",
         "--published-at", "https://example.org/story", "2026-08-20", "--json",
     ]) == 0
@@ -262,7 +270,7 @@ def test_receipt_rejects_unknown_top_level_fields(scout_root: Path):
 def test_receipt_requires_an_integer_schema_version(scout_root: Path):
     request, _ = _request(scout_root)
     receipt = _receipt(request["run_id"])
-    receipt["schema_version"] = 2.0
+    receipt["schema_version"] = 3.0
     with pytest.raises(web.ScoutInputError, match="schema_version"):
         web.accept_submission(request["run_id"], receipt)
 
@@ -414,7 +422,7 @@ def test_recorded_manifest_rejects_unknown_fields(scout_root: Path):
 
 
 @pytest.mark.parametrize(("field", "value"), [
-    ("schema_version", 2.0),
+    ("schema_version", 3.0),
     ("source_count", True),
     ("fetched_count", 1.0),
 ])
@@ -441,7 +449,7 @@ def test_run_lifecycle_is_resumable_from_one_cached_result(scout_root: Path):
     assert "scout web show" in row["next_command"]
 
     web.record_sources(
-        request["run_id"], harness="codex-web",
+        request["run_id"], harness="codex-web", discovery_method="search",
         fetched_urls=["https://example.org/story"],
         recorded_at="2026-08-27T12:02:00Z",
     )
@@ -515,7 +523,8 @@ def test_show_returns_cached_urls_verbatim_without_markdown_rendering(
     request, _ = _request(scout_root, max_results=2, max_fetches=0)
     hostile = "https://example.com/a?q=[click](https://phish.example)&r=1_2"
     web.record_sources(
-        request["run_id"], harness="test-harness", snippet_urls=[hostile],
+        request["run_id"], harness="test-harness", discovery_method="search",
+        snippet_urls=[hostile],
         recorded_at="2026-08-27T14:00:00Z",
     )
     assert web_cli.main(["show", request["run_id"], "--json"]) == 0
@@ -555,6 +564,7 @@ def test_cli_supports_shorthand_record_show_list_and_stdin_receipts(
 
     assert web_cli.main([
         "record", created["run_id"], "--harness", "codex-web",
+        "--discovery-method", "user-provided-url",
         "--fetched", "https://example.org/opened", "--json"
     ]) == 0
     assert json.loads(capsys.readouterr().out)["source_count"] == 1
@@ -602,3 +612,105 @@ def test_status_surfaces_resumable_web_scout_work(scout_root: Path, monkeypatch,
     assert "web-scout runs awaiting agent:  1" in output
     assert f"[requested] {request['run_id']}" in output
     assert "resume with `researchwiki scout web list`" in output
+
+
+@pytest.mark.parametrize("method", web.DISCOVERY_METHODS)
+def test_receipt_records_each_discovery_method(scout_root: Path, method: str):
+    request, _ = _request(scout_root)
+    manifest, _ = web.accept_submission(
+        request["run_id"],
+        _receipt(request["run_id"], discovery_method=method),
+        recorded_at="2026-08-27T12:01:00Z",
+    )
+    assert manifest["discovery_method"] == method
+    run = web.load_run(request["run_id"])
+    assert run["cached_result"]["receipt"]["discovery_method"] == method
+    # `list`/`status` read the method off the manifest, without opening the receipt.
+    assert web.inspect_run(request["run_id"])["discovery_method"] == method
+
+
+def test_receipt_requires_a_known_discovery_method(scout_root: Path):
+    request, _ = _request(scout_root)
+    for bad in (None, "", "guessed", "SEARCH", True, 3, ["search"]):
+        receipt = _receipt(request["run_id"])
+        receipt["discovery_method"] = bad
+        with pytest.raises(web.ScoutInputError, match="discovery_method must be one of"):
+            web.accept_submission(request["run_id"], receipt)
+    missing = _receipt(request["run_id"])
+    del missing["discovery_method"]
+    with pytest.raises(web.ScoutInputError, match="discovery_method must be one of"):
+        web.accept_submission(request["run_id"], missing)
+
+
+@pytest.mark.parametrize("method", ["fetch-only", "user-provided-url"])
+def test_searchless_methods_cannot_report_search_only_sources(
+    scout_root: Path, method: str
+):
+    """A harness that never searched has no search hits it declined to open."""
+    request, _ = _request(scout_root)
+    receipt = _receipt(
+        request["run_id"],
+        [_source(fetched=True), _source("https://example.net/hit", fetched=False)],
+        discovery_method=method,
+    )
+    with pytest.raises(web.ScoutInputError, match="cannot report search-only sources"):
+        web.accept_submission(request["run_id"], receipt)
+    # The same sources are legitimate for a harness that did search.
+    manifest, _ = web.accept_submission(
+        request["run_id"],
+        _receipt(
+            request["run_id"],
+            [_source(fetched=True), _source("https://example.net/hit", fetched=False)],
+            discovery_method="search",
+        ),
+        recorded_at="2026-08-27T12:01:00Z",
+    )
+    assert manifest["source_count"] == 2
+    assert manifest["fetched_count"] == 1
+
+
+def test_user_provided_url_run_records_without_a_search_harness(scout_root: Path):
+    """The CLAUDE.md user-provided-URL case: no search, operator supplies the URL."""
+    request, _ = _request(scout_root)
+    manifest, _ = web.record_sources(
+        request["run_id"],
+        harness="claude-code-webfetch",
+        discovery_method="user-provided-url",
+        fetched_urls=["https://example.org/handed-over"],
+        recorded_at="2026-08-27T12:03:00Z",
+    )
+    assert manifest["discovery_method"] == "user-provided-url"
+    assert manifest["source_count"] == manifest["fetched_count"] == 1
+    # Still quarantined: a user-supplied URL is no more citable than a search hit.
+    assert manifest["evidence_class"] == "discovery-only"
+
+
+def test_schema_two_receipt_is_rejected(scout_root: Path):
+    request, _ = _request(scout_root)
+    legacy = _receipt(request["run_id"])
+    legacy["schema_version"] = 2
+    del legacy["discovery_method"]
+    with pytest.raises(web.ScoutInputError, match="schema_version must be 3"):
+        web.accept_submission(request["run_id"], legacy)
+
+
+def test_recorded_receipt_cannot_drop_or_contradict_its_discovery_method(
+    scout_root: Path,
+):
+    """Tampering with a recorded artifact's method is caught on read, like harness."""
+    request, _ = _request(scout_root)
+    web.accept_submission(
+        request["run_id"],
+        _receipt(request["run_id"], discovery_method="fetch-only"),
+        recorded_at="2026-08-27T12:01:00Z",
+    )
+    receipt_path = (
+        scout_root / ".scout-cache" / "web" / "runs" / request["run_id"] / "receipt.json"
+    )
+    recorded = json.loads(receipt_path.read_text())
+    recorded["discovery_method"] = "search"
+    receipt_path.write_text(json.dumps(recorded, indent=2), encoding="utf-8")
+    # The manifest still says fetch-only, so the disagreement is caught by
+    # the schema check ahead of the hash check, naming the field.
+    with pytest.raises(web.ScoutInputError, match="disagrees on discovery_method"):
+        web.load_run(request["run_id"])

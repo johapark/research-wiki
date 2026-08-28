@@ -25,7 +25,15 @@ def _request(args) -> int:
         print(f"Request artifact: {path}")
         print("Use the chat agent's native web-search harness for the answer.")
         print("Then record the URLs it used with:")
-        print(f"  researchwiki scout web record {request['run_id']} --harness NAME ...")
+        print(
+            f"  researchwiki scout web record {request['run_id']} "
+            "--harness NAME --discovery-method search ..."
+        )
+        print(
+            "  (--discovery-method: "
+            + " | ".join(web.DISCOVERY_METHODS)
+            + " — state how the URLs were found)"
+        )
     return 0
 
 
@@ -47,6 +55,7 @@ def _record(args) -> int:
     manifest, path = web.record_sources(
         args.run_id,
         harness=args.harness,
+        discovery_method=args.discovery_method,
         fetched_urls=args.fetched,
         snippet_urls=args.snippet,
         published_at=published_at,
@@ -85,6 +94,7 @@ def _show(args) -> int:
         manifest = cached["manifest"]
         print(f"Recorded: {receipt['recorded_at']}")
         print(f"Harness:  {receipt['harness']}")
+        print(f"Found by: {receipt['discovery_method']}")
         print(
             f"Sources:  {manifest['source_count']} "
             f"({manifest['fetched_count']} harness-reported opened)"
@@ -118,6 +128,8 @@ def _list(args) -> int:
             f"{row['run_id']}"
         )
         print(f"{'':<40}{query}")
+        if row.get("discovery_method"):
+            print(f"{'':<40}found by: {row['discovery_method']}")
         if row.get("next_command"):
             print(f"{'':<40}→ {row['next_command']}")
     return 0
@@ -148,8 +160,19 @@ def _parser() -> argparse.ArgumentParser:
     )
     record.add_argument("run_id")
     record.add_argument("--harness", required=True)
+    record.add_argument(
+        "--discovery-method", required=True, choices=web.DISCOVERY_METHODS,
+        help=(
+            "How the URLs were found: 'search' ran a web search; 'fetch-only' "
+            "could open pages but had no search tool; 'user-provided-url' means "
+            "the operator supplied them. The searchless modes forbid --snippet."
+        ),
+    )
     record.add_argument("--fetched", action="append", default=[], metavar="URL")
-    record.add_argument("--snippet", action="append", default=[], metavar="URL")
+    record.add_argument(
+        "--snippet", action="append", default=[], metavar="URL",
+        help="A search result that was NOT opened. Requires --discovery-method search.",
+    )
     record.add_argument(
         "--published-at", action="append", nargs=2, default=[],
         metavar=("URL", "YYYY-MM-DD"),
