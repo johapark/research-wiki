@@ -68,9 +68,14 @@ class BudgetTracker:
         self.suspended = False
 
     def suspend(self) -> None:
-        """Stop enforcing after an irreversible promotion has landed."""
+        """Pause enforcement around required post-promotion maintenance."""
         with self._lock:
             self.suspended = True
+
+    def resume(self) -> None:
+        """Re-arm enforcement for bounded optional post-promotion work."""
+        with self._lock:
+            self.suspended = False
 
     def snapshot(self) -> dict:
         with self._lock:

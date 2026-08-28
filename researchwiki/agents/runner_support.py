@@ -73,12 +73,14 @@ def record_revision_decision(ctx, conn, draft, *, operator: str,
 
 def record_timed_subphase(ctx, conn, *, role: str, started: float,
                           decision: str = "observed", reason: str = "",
-                          writer=write_iteration) -> None:
+                          writer=write_iteration, suspend_budget: bool = False) -> None:
     """Append a nested commit-subphase duration event.
 
     These rows make commit internals visible; reports mark them nested so they
     are never added to the parent commit timer when computing attempt totals.
     """
+    if suspend_budget and ctx.budget_tracker is not None:
+        ctx.budget_tracker.suspend()
     ctx.next_iter()
     writer(
         attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,
@@ -219,13 +221,15 @@ def phase_target_claims(ctx, conn):
 
 
 def run_post_promote_memory_evolution(ctx, conn, *, source_key: str) -> None:
-    """Run optional memory evolution under budget, then release maintenance.
+    """Re-arm the budget for optional memory evolution, then pause it again.
 
     A promoted page is already canonical, so exhaustion here is a recorded
     optional skip rather than a terminal partial-ingest failure. Required
-    indexing and grade persistence run after this helper with enforcement
-    suspended so the paper cannot remain half-maintained.
+    maintenance runs with enforcement suspended so the paper cannot remain
+    half-maintained when promotion itself crosses the wall deadline.
     """
+    if ctx.budget_tracker is not None:
+        ctx.budget_tracker.resume()
     try:
         ctx.next_iter()
         phases.evolve_memory(ctx, conn, source_key=source_key)

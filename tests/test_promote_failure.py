@@ -186,6 +186,56 @@ def test_post_promote_optional_llm_respects_budget_but_maintenance_finishes(
     assert "budget exhausted" in skipped[0]["decision_reason"]
 
 
+def test_expired_wall_after_promote_skips_optional_work_but_finishes_maintenance(
+    ctx, commit_env, monkeypatch, tmp_path,
+):
+    """Crossing the wall deadline during irreversible promotion must not turn
+    the already-landed page into a terminal partial failure."""
+    page = tmp_path / "page.md"
+    tracker = budget.BudgetTracker(budget.IngestBudget(max_wall_seconds=1))
+    ctx.budget_tracker = tracker
+
+    def promote_and_expire(**kwargs):
+        tracker.started -= 2
+        return promote_mod.PromotionResult(
+            promoted=True, wiki_path=page, pdf_path=tmp_path / "p.pdf",
+            category="compbio", index_updated=True, log_appended=True,
+        )
+
+    index_calls = []
+    memory_calls = []
+    grade_calls = []
+    monkeypatch.setattr(promote_mod, "promote_to_wiki", promote_and_expire)
+    monkeypatch.setattr(
+        runner, "update_indexes_after_promotion",
+        lambda result: index_calls.append(result.wiki_path),
+    )
+    monkeypatch.setattr(
+        runner.phases, "evolve_memory", lambda *a, **k: memory_calls.append(True)
+    )
+    monkeypatch.setattr(
+        runner.phases, "persist_grades", lambda *a, **k: grade_calls.append(True)
+    )
+    monkeypatch.setattr(
+        "researchwiki.agents.runner_support.write_iteration",
+        lambda **kw: commit_env.append(kw) or 1,
+    )
+
+    out = runner._phase_commit(ctx, conn=None)
+
+    assert out == page
+    assert index_calls == [page]
+    assert memory_calls == []
+    assert grade_calls == [True]
+    assert tracker.suspended
+    skipped = [
+        row for row in commit_env
+        if row.get("role") == "memory_evolve" and row.get("decision") == "skipped"
+    ]
+    assert len(skipped) == 1
+    assert skipped[0]["gate_metrics"]["budget_dimension"] == "wall_seconds"
+
+
 def test_cli_maps_promote_failure_to_exit_2(monkeypatch, capsys, tmp_path):
     """Exit 2 = environment error, which `_should_retry` treats as retryable:
     the user deletes the duplicate, the retry then works."""

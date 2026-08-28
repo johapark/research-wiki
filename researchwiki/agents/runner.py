@@ -1021,21 +1021,20 @@ def _phase_commit(ctx: Context, conn) -> Path:
 
         # Promotion moves the PDF and writes several canonical files. Required
         # local maintenance below must complete, but the optional memory-
-        # evolution LLM call still belongs to this ingest's budget. Enforcement
-        # stays active until that optional phase has either run or skipped.
+        # evolution LLM call still belongs to this ingest's budget. Pause the
+        # guard now so a wall deadline crossed during promotion cannot abort
+        # telemetry, supplementary staging, indexing, or grade persistence;
+        # the memory-evolution helper re-arms it only around that optional work.
         #
         # INVARIANT for every step between here and that call — subphase
         # logging, the pdf-upgrade record, supplementary staging, incremental
         # indexing: none of them may reach a provider. They run with the guard
-        # still armed, so a model call added among them would raise
-        # BudgetExhausted on an already-promoted paper and be recorded as a
-        # terminal partial failure. Local embedding work never reserves, which
-        # is why indexing is safe here; anything genuinely metered belongs
-        # after `run_post_promote_memory_evolution`, which releases the guard.
+        # paused; anything genuinely metered belongs inside
+        # `run_post_promote_memory_evolution`, which briefly re-arms it.
         record_timed_subphase(
             ctx, conn, role="promote", started=promote_t0,
             decision="promoted", reason=f"category={result.category}",
-            writer=write_iteration,
+            writer=write_iteration, suspend_budget=True,
         )
 
         if result.pdf_upgrade:
