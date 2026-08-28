@@ -95,7 +95,7 @@ LLM-reconcile is on by default since R3, so most overrides are cold paths now.
 
 ## No-DOI-by-design papers
 
-NeurIPS posters, workshop papers, internal tech reports, OpenReview-only entries with no DOI: declare `no_doi_reason: "<short why>"` in YAML. Lint's `missing_doi` and audit's no-DOI WARN skip these. **Don't** set this for papers that DO have a DOI you haven't found yet.
+NeurIPS posters, workshop papers, internal tech reports, OpenReview-only entries with no DOI: declare `no_doi_reason: "<short why>"` in YAML. Lint's `missing_doi` and scout's no-DOI warning skip these. **Don't** set this for papers that DO have a DOI you haven't found yet.
 
 ## Notes
 

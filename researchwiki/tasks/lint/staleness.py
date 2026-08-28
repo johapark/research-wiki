@@ -233,7 +233,7 @@ def find_stale_by_audit_count(
     """Pages with a cached `wiki_papers_at_audit:` value that's drifted.
 
     Threshold: max(5 papers, 20% of cached) delta. Signals "time to re-run
-    `researchwiki audit` and re-merge the suggested-additions output."
+    `researchwiki scout` and re-merge the suggested-additions output."
     """
     paper_count = sum(1 for md in pages if md.parent.name not in ("synthesis", "references", "concepts"))
     out: list[tuple[Path, int, int]] = []

@@ -1,8 +1,8 @@
 """Cross-reference between `wiki/synthesis/suggested-additions.md` (the
-human-curated audit gap-list) and the latest cached audit JSON.
+human-curated citation-scout gap list) and its latest cached JSON.
 
 `p2_entries_with_anchor_hits` surfaces DOIs listed under `## Priority 2`
-of suggested-additions.md that now appear in the latest cached audit's
+of suggested-additions.md that now appear in the latest cached scout's
 `shared_citation_anchors` — a signal the entry's count or category
 profile has shifted and might warrant a status change. Descriptive
 only; the LLM decides whether to move, re-annotate, or leave entries.
@@ -22,7 +22,7 @@ _P2_DOI_RE = re.compile(r"\b(10\.\d{4,}/[^\s)\]]+)", re.IGNORECASE)
 
 def find_p2_anchor_hits(pages: list[Path]) -> list[dict]:
     """Surface DOIs listed under `## Priority 2` in suggested-additions.md
-    that now appear in the latest cached audit's shared_citation_anchors.
+    that now appear in the latest cached scout's shared_citation_anchors.
 
     Silent no-op (returns []) if no audit cache is present, no
     suggested-additions.md exists, or the cache file is malformed.

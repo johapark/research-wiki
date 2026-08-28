@@ -35,7 +35,7 @@ REC_FIELDS = "title,year,externalIds,venue,citationCount"
 # failure so re-runs don't re-fetch and re-suffer the retry-backoff cost
 # (~6-10s per stale DOI). Recognized on read and turned back into a None
 # return. The TTL bounds the silence so a paper S2 hadn't indexed yet
-# auto-recovers on the next audit past the deadline.
+# auto-recovers on the next citation-scout run past the deadline.
 _NEG_KEY = "_negative_cached"
 _NEG_AT = "_cached_at"
 _NEG_STATUS = "_status"
@@ -58,7 +58,7 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
         self.retries = retries
         self._log_tag = log_tag
         # `negative_ttl_days` — how long a 404 sentinel stays valid before
-        # the provider re-fetches. Default 30d; user-tunable per audit run.
+        # the provider re-fetches. Default 30d; user-tunable per scout run.
         self.negative_ttl_days = negative_ttl_days
         # `force_refresh_days` — when set, BOTH positive and negative caches
         # older than this are bypassed for this run. None = honor caches as
@@ -95,7 +95,7 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
 
         Negative-cache TTL: a sentinel older than `negative_ttl_days` is
         ignored even without a force-refresh, so a paper S2 didn't index yet
-        auto-recovers on the next audit past the deadline.
+        auto-recovers on the next citation-scout run past the deadline.
         """
         data = read_json(cache)
         if data is None:
@@ -340,11 +340,18 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
         calls return immediately from cache without network requests.
         """
         result: dict[str, ScholarlyArticle] = {}
-        for start in range(0, len(dois), 500):
-            chunk = dois[start : start + 500]
+        # The batch response is positional.  Use the same deterministic order
+        # for the request, cache identity, and response mapping so a cache made
+        # by one caller cannot be replayed against another caller's DOI order.
+        ordered_dois = sorted(set(dois))
+        for start in range(0, len(ordered_dois), 500):
+            chunk = ordered_dois[start : start + 500]
             url = f"{S2_BASE}/paper/batch?fields={DETAIL_FIELDS}"
-            key = hashlib.md5("|".join(sorted(chunk)).encode()).hexdigest()
-            cache_path = s2_cache_dir() / f"s2_batch__{key}.json"
+            # v2 invalidates positional arrays written before requests were
+            # sorted; those files cannot reveal the DOI order that produced
+            # them and therefore are unsafe to replay.
+            key = hashlib.md5(("v2|" + "|".join(chunk)).encode()).hexdigest()
+            cache_path = s2_cache_dir() / f"s2_batch_v2__{key}.json"
             items = self._post_fetch(url, {"ids": [f"DOI:{d}" for d in chunk]}, cache_path)
             if not items or not isinstance(items, list):
                 continue
@@ -359,8 +366,10 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
                     f"?fields={DETAIL_FIELDS}"
                 )
                 per_cache = self._cache_path(per_url)
-                if not per_cache.exists():
-                    write_json_atomic(per_cache, item)
+                # A pre-v2 batch replay may have populated this DOI's cache
+                # with another paper's positional result.  A successful v2
+                # batch is authoritative and repairs that stale entry.
+                write_json_atomic(per_cache, item)
         return result
 
     # ---------- helpers ----------

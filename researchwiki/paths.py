@@ -223,6 +223,16 @@ def web_cache_dir() -> Path:
     return wiki_root() / ".web-cache"
 
 
+def scout_cache_dir() -> Path:
+    """Quarantined web-scout handoff artifacts (`.scout-cache/`).
+
+    Deliberately separate from `.web-cache/`, whose contents come only from the
+    structured-metadata API whitelist. Scout receipts are provenance only and
+    must never be mistaken for wiki evidence.
+    """
+    return wiki_root() / ".scout-cache"
+
+
 def search_index_dir() -> Path:
     return wiki_root() / ".tantivy-index"
 

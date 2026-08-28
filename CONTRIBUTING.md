@@ -177,7 +177,7 @@ internal, and renaming a function is a PATCH. What consumers actually depend on:
 |---|---|
 | CLI | Removing or renaming a command or flag |
 | Exit codes | Changing what a code means (see the table in CLAUDE.md) |
-| `--json` contracts | **Removing a key** — agents parse `lint --json`, `search --json`, `audit --json`. Adding one is MINOR |
+| `--json` contracts | **Removing a key** — agents parse `lint --json`, `search --json`, `scout --json` (and its deprecated `audit --json` alias). `scout web` artifacts are separately versioned with `schema_version`; incompatible schema changes require a new version. Adding one is MINOR |
 | Page frontmatter | Removing or repurposing a field the CLAUDE.md contract specifies |
 | Phase-role strings | `db/iterations.VALID_ROLES` and the `phase=`/`role=` keys — never rename these at all; `ingest_iterations` is the one table `db rebuild` can't regenerate |
 

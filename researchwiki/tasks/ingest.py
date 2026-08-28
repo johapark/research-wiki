@@ -115,7 +115,7 @@ tags: []
         f"- {c['wikilink']} — DOI {c['doi']} ({c['year']}): {c['title'][:120]}"
         for c in incoming
     ]
-    incoming_block = "\n".join(incoming_lines) if incoming_lines else "(none — no wiki paper in the audit currently cites this one)"
+    incoming_block = "\n".join(incoming_lines) if incoming_lines else "(none — no wiki paper in the citation scout currently cites this one)"
 
     # Recommendations (skip papers already in wiki)
     wiki_dois = read_wiki_dois()

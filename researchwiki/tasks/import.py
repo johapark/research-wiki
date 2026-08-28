@@ -560,7 +560,7 @@ def _run_verify(args: argparse.Namespace) -> int:
     # that, and it is the difference between a pile of pages and a wiki.
     print("\n  Wiring the new pages into the graph (each is free or cheap):")
     print("    researchwiki claim-overlap --backlog --dry-run   # reciprocal links")
-    print("    researchwiki audit --json                        # citation-graph gaps")
+    print("    researchwiki scout --json                        # citation-graph gaps")
     print("    researchwiki candidates concepts --bridges       # cross-category hubs")
     print("    researchwiki candidates synthesis                # dense clusters")
     return 0

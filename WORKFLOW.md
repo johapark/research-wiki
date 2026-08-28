@@ -795,7 +795,7 @@ Three commands cover the maintenance loop:
 |---|---|---|
 | `researchwiki status` | Run after every ingest session | Local only, sub-second |
 | `researchwiki lint` (or `--json`) | Weekly, or after batch ingests | Local only, sub-second |
-| `researchwiki audit` | After batch ingests, or weekly | Calls Semantic Scholar — minutes for hundreds of papers |
+| `researchwiki scout` | After batch ingests, or weekly | Calls Semantic Scholar — minutes for hundreds of papers |
 
 `status` is the dashboard. After the recent updates it includes:
 
@@ -838,10 +838,38 @@ is local and sub-second, and we keep the LLM cost out of the default
 path. `lint --json` exposes every category as a structured field for
 downstream tooling.
 
-`audit` calls Semantic Scholar to verify the citation graph: every
-`[[wikilink]]` should be backed by a real citation either way, and
-high-citation papers OUTSIDE the wiki that are cited by ≥2 wiki papers
-get flagged as ingest candidates.
+`scout` calls Semantic Scholar to reconstruct cross-wiki citation edges and
+surface recommendations plus shared external references as ingest candidates.
+It reads structured metadata only and does not validate every existing
+`[[wikilink]]`. `scout citations` is the explicit spelling, and `audit` remains
+a deprecated compatibility alias.
+
+`scout web` is deliberately a different protocol. The executable creates a
+bounded JSON request, but performs no network access: the active chat agent uses
+whatever native web-search harness its host provides and returns its answer in
+the host's normal conversational format with native citations. The CLI stores
+only a minimal self-attested receipt: harness, discovery method, URL, whether
+the harness claims to have opened the page, and optional title/date. `record`
+avoids JSON entirely;
+`accept` validates the same
+receipt from a file or stdin. Both validate the request's source/fetch/domain
+bounds on the submitted receipt and reject research prose. A `--since` bound
+rejects known older publication dates but leaves undated sources explicitly
+unverified; the tools cannot verify
+the host agent's actual search/fetch behavior. `show` displays the cached
+receipt and manifest on demand without generating a separate report.
+Artifacts stay under `.scout-cache/`, marked `discovery-only`; that cache never
+feeds page authoring, claims, indexes, or `[[wikilink]]` generation. A lead
+becomes corpus evidence only after its PDF enters the normal ingest path. See
+[`prompts/scout-web.md`](./prompts/scout-web.md).
+
+The handoff is crash- and host-resumable. `scout web list` reports `requested`,
+`recorded`, and `invalid` states; `show <run-id> --json` re-emits the exact
+request and includes the cached receipt/manifest once recorded. `accept <run-id> -`
+reads the minimal receipt from stdin, so hosts need no shared Python SDK or
+provider adapter. The conversational answer is the research deliverable; the
+receipt is only a durable provenance boundary. `status` counts unfinished or
+invalid runs in *Workflow state*.
 
 ---
 
@@ -950,7 +978,12 @@ researchwiki/
 │   │                       #     for a synthesis/idea page's topic_seed
 │   ├── benchmark_fixture.py #  Hand-curated-fixture benchmark
 │   ├── evolve.py           #   Standalone memory-evolution proposals
-│   ├── search.py reindex.py status.py lint.py audit.py claims.py pdf_search.py ...
+│   ├── search.py reindex.py status.py scout.py claims.py pdf_search.py ...
+│   ├── audit.py            #   Deprecated alias for scout citations
+├── scouting/
+│   ├── citations.py        # Structured S2 citation edges + corpus-gap report
+│   ├── web.py              # Bounded request + result/brief validation + lifecycle
+│   └── web_cli.py          # Provider-neutral agent-handoff CLI; no network client
 ├── concepts/               # Concept-hub surfacing + scaffold + reciprocal linking
 ├── claim_graph/            # Content-addressed claim identity + edge cache
 ├── synthesis_candidates/   # Detect paper clusters lacking a synthesis page
@@ -1050,6 +1083,11 @@ The wiki has clear canonicalness:
   Gitignored. Built lazily on first grade call per paper.
 - **`.s2-cache/`, `.crossref-cache/`, `.web-cache/`** are external-API
   responses. Gitignored. Built lazily.
+- **`.scout-cache/`** holds write-once request/receipt/manifest artifacts from
+  agent-native web scouting. It is gitignored, discovery-only, and deliberately
+  separate from `.web-cache/` (the structured-API cache). It is not a DB or
+  indexing input. Deleting it does not affect the corpus, but loses run provenance;
+  reproducing it requires a new web-scout run rather than a local rebuild.
 - **`.ingest/`** is per-attempt transient state (digests, evolution
   proposals). Cleared as you act on them.
 
@@ -1468,7 +1506,13 @@ researchwiki attach compbio/some-stem ~/Downloads/Methods.pdf              # 8. 
 
 researchwiki status                                  # 9. health: index, costs, pending proposals
 researchwiki lint --fix                              #    consistency report; --fix auto-inserts back-links
-researchwiki audit > /tmp/audit.md                   #    citation-graph audit (Semantic Scholar)
+researchwiki scout > /tmp/scout.md                   #    structured citation scouting (Semantic Scholar)
+researchwiki scout web request "protein design 2026" --json  # CLI performs no search
+researchwiki scout web list                                  # resume local handoffs after a crash/session change
+researchwiki scout web show <run-id> --json                  # exact request + cached result when recorded
+researchwiki scout web record <run-id> --harness codex-web --discovery-method search --fetched https://example.org/page
+# with a request --since bound, add --published-at URL YYYY-MM-DD where known
+researchwiki scout web accept <run-id> receipt.json          # optional JSON form; use - for stdin
 
 researchwiki visualize --open                         # 10. corpus → output/graph.html (self-contained)
 researchwiki export --format bibtex > refs.bib        # 11. corpus → bibliography (published pages only)
@@ -1496,9 +1540,10 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `candidates <concepts\|synthesis\|pairs>` | Surface opportunity signals: un-scaffolded concept hubs (concepts), uncovered paper clusters warranting a synthesis page (synthesis), or cross-paper claim pairs sitting below the auto-link threshold (pairs). Concepts/pairs are local; synthesis is a local preview unless `--judge` opts into configured-model scope checks, and writes artifacts only with `--write-proposals`. Each pair prints an exact `claim-overlap --pair` review command. `--decline A B --reason` suppresses a pair permanently. See *Bottom-up discovery* above. |
 | `reindex [--no-semantic]` | Rebuild Tantivy + semantic index from `wiki/`. |
 | `search "<query>" [--mode ...]` or `--like <stem>` | Hybrid retrieval (RRF over BM25 + semantic) by default. |
-| `status` | Dashboard: counts, density, orphans, backlog, index health, pending proposals, 7-day cost. |
+| `status` | Dashboard: counts, density, orphans, inbox/web-scout backlog, index health, pending proposals, 7-day cost. |
 | `lint [--fix] [--cross-paper]` | Orphans, broken/missing wikilinks (auto-fixable), stale syntheses, missing keywords/DOIs, year drift, stale proposals. All local except `--cross-paper`, which opts into the LLM contradiction judge over high-cosine claim pairs; `--cross-paper-max-pairs 0` sizes that pool for zero calls, and every verdict is recorded so a repeat run only judges what the last one missed. |
-| `audit` | Citation-graph audit vs Semantic Scholar: wikilinks without a real citation, and vice versa. |
+| `scout [citations]` | Structured Semantic Scholar scouting: cross-wiki citation edges, recommendations, and shared external references. Bare `scout` defaults to `citations`; `audit` is a deprecated alias. |
+| `scout web <request\|list\|show\|record\|accept>` | Provider-neutral handoff to the active chat agent's native web-search harness. The CLI makes no network calls and stores no research prose. The agent answers conversationally with native citations, then `record` persists only harness + discovery method + URLs + opened-vs-snippet status; `accept … -` is the minimal JSON alternative. Requests are bounded, resumable, write-once after recording, quarantined, and discovery-only. `show` reads the cached result without creating a report. See `prompts/scout-web.md`. |
 | `retraction-check`, `preprint-check`, `orcid-lookup` | Structured PubMed / bioRxiv / ORCID queries. |
 | `claims "<query>" [--k N]` | Grounded-citation search over the pre-graded claims table (atomic bullets + `[[stem#slug]]` citation anchors + support scores). |
 | `pdf-search <stem> "<query>" [--k N]` | BM25 inside one paper's PDF chunks — pull an exact number/passage the page didn't quote. |
@@ -1539,7 +1584,7 @@ so an Obsidian vault opened there can browse it).
 | Writing a manuscript from wiki papers | `researchwiki export --format bibtex --out refs.bib`, then `\cite{<page-stem>}` |
 | A paper page yields no citable claims | `researchwiki lint --json \| jq .zero_claim_papers` — almost always non-canonical H2 headings |
 | Want to find synthesis pages affected by a recent paper | `researchwiki evolve <category/stem>` |
-| Want to know what to ingest next | `researchwiki audit --json` |
+| Want to know what to ingest next | `researchwiki scout --json` |
 | Want to find pages with sparse keywords | `researchwiki lint --json \| jq .missing_keywords` |
 | Want to know how much you've spent ingesting lately | `researchwiki status` (last section) |
 | Got curious whether your wiki has anything on X | `researchwiki search "X"` (or `--like` from a page) |

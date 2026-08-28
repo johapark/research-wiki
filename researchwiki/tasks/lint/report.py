@@ -241,11 +241,11 @@ def _emit_prose(**kw) -> int:
     print()
 
     stale_by_audit_count = kw["stale_by_audit_count"]
-    print(f"## Stale by audit count — pages with cached paper count drift ≥ threshold ({len(stale_by_audit_count)})")
+    print(f"## Stale by citation-scout count — pages with cached paper count drift ≥ threshold ({len(stale_by_audit_count)})")
     if stale_by_audit_count:
         for md, cached, current in stale_by_audit_count:
             print(f"- **{page_key(md)}** — `wiki_papers_at_audit: {cached}` → current is {current} "
-                  f"(+{current - cached}). Re-run `researchwiki audit` and merge.")
+                  f"(+{current - cached}). Re-run `researchwiki scout` and merge.")
     else:
         print("_none — all pages with `wiki_papers_at_audit` are within drift tolerance._")
     print()
@@ -254,7 +254,7 @@ def _emit_prose(**kw) -> int:
     print(f"## Priority-2 entries surfaced in audit anchors ({len(p2_anchor_hits)})")
     if p2_anchor_hits:
         print("_DOIs listed under suggested-additions.md §Priority 2 that now appear in the latest "
-              "cached audit's `shared_citation_anchors`. Informational — the LLM decides whether "
+              "cached citation scout's `shared_citation_anchors`. Informational — the LLM decides whether "
               "to move, re-annotate, or leave these entries._")
         print()
         for hit in p2_anchor_hits:
@@ -262,9 +262,9 @@ def _emit_prose(**kw) -> int:
             title = (hit["title"] or "(no title)")[:80]
             print(f"- `{hit['doi']}` — {hit['current_count']}× [{cats}] — {title}")
     elif not list((s2_cache_dir() / ".").glob("audit-*.json")):
-        print("_no cached audit snapshot found — run `researchwiki audit --json` first to populate `.s2-cache/audit-{date}.json`._")
+        print("_no cached citation-scout snapshot found — run `researchwiki scout --json` first to populate the legacy `.s2-cache/audit-{date}.json` contract._")
     else:
-        print("_none — no P2 DOIs intersect the latest audit's anchor list._")
+        print("_none — no P2 DOIs intersect the latest citation scout's anchor list._")
     print()
 
     stale_proposals = kw["stale_proposals"]
@@ -284,7 +284,7 @@ def _emit_prose(**kw) -> int:
     print(f"## Paper pages missing DOI ({len(missing_doi)})")
     if missing_doi:
         print("Pages with `type: paper` but no `doi:` value (or DOI is "
-              "`TODO`/`none`). Without a DOI, audit / preprint-check / "
+              "`TODO`/`none`). Without a DOI, scout / preprint-check / "
               "retraction-check can't reach S2 or PubMed for this page, "
               "and the provenance audit terminates here.")
         for k in missing_doi[:20]:

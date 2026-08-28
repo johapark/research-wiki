@@ -80,6 +80,7 @@ config/profiles/
 .s2-cache
 .crossref-cache
 .web-cache
+.scout-cache
 .tantivy-index
 .grade-cache
 .semantic-cache

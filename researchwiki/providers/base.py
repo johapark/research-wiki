@@ -20,7 +20,7 @@ from typing import Any
 class ScholarlyArticle:
     """Common DTO for paper metadata returned by any provider.
 
-    Fields mirror the subset that `ingest.py` and `audit.py` actually consume.
+    Fields mirror the subset that ingest and citation scouting actually consume.
     `raw` keeps the original provider response for debugging.
     """
 
@@ -48,6 +48,7 @@ class ScholarlyDatabaseProvider(ABC):
       * Required: `name`, `get_by_doi`, `search_by_title`.
       * Recommended: `get_references`, `get_citations`, `get_recommendations`
         (return `[]` if the provider does not support them).
+      * Optional: `get_batch_metadata` (return `{}` if unsupported).
     """
 
     @property
@@ -77,3 +78,7 @@ class ScholarlyDatabaseProvider(ABC):
     def get_recommendations(self, article: ScholarlyArticle) -> list[ScholarlyArticle]:
         """Return recommended related papers. Default: unsupported → []."""
         return []
+
+    def get_batch_metadata(self, dois: list[str]) -> dict[str, ScholarlyArticle]:
+        """Best-effort batch metadata lookup; default is unsupported."""
+        return {}
