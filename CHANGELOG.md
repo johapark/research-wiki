@@ -29,12 +29,11 @@ the reasoning behind any line below.
   `discovery_method` + source URLs + opened-vs-snippet status, while `accept`
   validates the same schema-3 receipt from JSON with optional title/date
   metadata. `discovery_method` is required and declares how the URLs were found
-  — `search`, `fetch-only` (the harness could open a page but had no search
-  tool, so its URLs came from model priors), or `user-provided-url` (the
-  operator supplied them, so no discovery happened). The two searchless modes
-  reject `--snippet` sources, because a search hit nobody opened cannot exist
-  where nothing searched; without the field a fetch-only run was
-  indistinguishable from a search-driven one. Public HTTP(S),
+  — `search`, or `user-provided-url` (the operator supplied the exact URLs, so
+  no discovery happened). The user-provided mode requires at least one opened
+  source and rejects `--snippet`; model-prior URLs are intentionally not a mode
+  because Rule 1 authorizes native search or exact URLs supplied by the user.
+  Public HTTP(S),
   domain/fetch/source bounds are validated on the submitted receipt (a
   `--since` date rejects known older publication dates but allows undated
   sources). The write-once artifacts provide drift checks but cannot verify what the host

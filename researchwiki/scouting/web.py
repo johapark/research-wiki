@@ -35,14 +35,11 @@ RUN_STATES = ("requested", "recorded", "invalid")
 
 # How the recorded URLs were found. This is the host agent's self-attestation
 # about its own capability, not something the CLI can verify — but stating it
-# keeps a run that never searched from being indistinguishable from one that
-# did. `fetch-only` is a harness that can open a page but has no search tool,
-# so its URLs come from model priors; `user-provided-url` is the operator
-# handing over the URLs, where no discovery happened at all.
-DISCOVERY_METHODS = ("search", "fetch-only", "user-provided-url")
-# Neither searchless mode can produce a search result, so a `fetched: false`
-# source — "a search hit I did not open" — cannot exist under them.
-_SEARCHLESS_METHODS = frozenset({"fetch-only", "user-provided-url"})
+# keeps a user-supplied exact-URL fetch from being mistaken for broad search.
+# Model-prior URLs are intentionally not a mode: Rule 1 authorizes native web
+# search or an exact URL supplied by the user, not arbitrary agent-recalled URLs.
+DISCOVERY_METHODS = ("search", "user-provided-url")
+_SEARCHLESS_METHODS = frozenset({"user-provided-url"})
 
 _REQUEST_FIELDS = {
     "schema_version", "run_id", "mode", "query", "created_at",
@@ -83,7 +80,10 @@ def _receipt_contract() -> dict:
             "Record only provenance here; research prose is not accepted or stored.",
             "fetched=true is the host harness's assertion that it opened the page.",
             "discovery_method states how the URLs were found, not what they say.",
-            "Under fetch-only or user-provided-url every source must be fetched.",
+            (
+                "Under user-provided-url at least one source is required and "
+                "all must be fetched."
+            ),
             "A source remains discovery-only until its underlying PDF is ingested.",
         ],
     }
@@ -96,6 +96,10 @@ def _validate_discovery_method(value, *, sources: list[dict]) -> str:
             "discovery_method must be one of: " + ", ".join(DISCOVERY_METHODS)
         )
     if value in _SEARCHLESS_METHODS:
+        if not sources:
+            raise ScoutInputError(
+                f"discovery_method {value!r} requires at least one opened source"
+            )
         unopened = [source["url"] for source in sources if not source["fetched"]]
         if unopened:
             raise ScoutInputError(

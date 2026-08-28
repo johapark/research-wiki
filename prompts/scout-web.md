@@ -20,13 +20,12 @@ the wiki.
   | Value | Meaning |
   |---|---|
   | `search` | The harness ran a real web search. |
-  | `fetch-only` | The harness could open a page but had no search tool, so the URLs came from model priors. |
   | `user-provided-url` | The operator supplied the URLs; no discovery happened. |
 
-  The two searchless modes forbid `--snippet` / `fetched: false` sources: a
-  search hit you declined to open cannot exist when nothing searched. Pick the
-  value describing what actually happened — a `fetch-only` run recorded as
-  `search` is the one falsehood this field exists to prevent.
+  `user-provided-url` requires at least one opened source and forbids
+  `--snippet` / `fetched: false`: a search hit you declined to open cannot exist
+  when nothing searched. Model-prior URLs are not an allowed mode; Rule 1
+  authorizes native search or an exact URL supplied by the user.
 - Every recorded source remains **discovery-only**. Never copy or paraphrase the
   answer or cached result into `wiki/`, insert it into the claims DB, or use it
   to justify a `[[wikilink]]`. Obtain and ingest the underlying PDF first.
@@ -79,7 +78,8 @@ lifecycle state. `researchwiki status` surfaces requested and invalid runs under
      --snippet https://example.net/search-result
    ```
 
-   Repeat either URL flag as needed. Recording zero sources is valid.
+   Repeat either URL flag as needed. Recording zero sources is valid only for
+   `search`, where it means the search found nothing worth retaining.
    If a request uses `--since`, attach dates where the source provides them (or
    use the JSON form below): `--published-at https://example.org/opened-page
    2026-08-20`. Sources without a publication date remain valid but are marked
@@ -162,11 +162,9 @@ When the host has fetch but no search, the honest options are:
   record with `--discovery-method user-provided-url`. This is the CLAUDE.md
   user-provided-URL exception, and it is a first-class run — bounded, honest,
   and still discovery-only.
-- **Record with `--discovery-method fetch-only`** if you did open prior-derived
-  URLs. Legitimate, but say plainly in the answer that no search ran, so the
-  thin coverage is not mistaken for a thin field. Expect this mode to surface
-  mostly well-known work already in the corpus; check with `researchwiki search`
-  before offering it as a lead.
+
+Do not fetch agent-recalled URLs as a substitute for search. The
+user-provided-URL exception explicitly does not apply to URLs the agent generated.
 
 Name the harness for what it was (`claude-code-webfetch`, not a generic label)
 so the artifact is legible months later. A run can also just be abandoned:

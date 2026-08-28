@@ -631,7 +631,7 @@ def test_receipt_records_each_discovery_method(scout_root: Path, method: str):
 
 def test_receipt_requires_a_known_discovery_method(scout_root: Path):
     request, _ = _request(scout_root)
-    for bad in (None, "", "guessed", "SEARCH", True, 3, ["search"]):
+    for bad in (None, "", "guessed", "fetch-only", "SEARCH", True, 3, ["search"]):
         receipt = _receipt(request["run_id"])
         receipt["discovery_method"] = bad
         with pytest.raises(web.ScoutInputError, match="discovery_method must be one of"):
@@ -642,16 +642,13 @@ def test_receipt_requires_a_known_discovery_method(scout_root: Path):
         web.accept_submission(request["run_id"], missing)
 
 
-@pytest.mark.parametrize("method", ["fetch-only", "user-provided-url"])
-def test_searchless_methods_cannot_report_search_only_sources(
-    scout_root: Path, method: str
-):
+def test_user_provided_urls_cannot_report_search_only_sources(scout_root: Path):
     """A harness that never searched has no search hits it declined to open."""
     request, _ = _request(scout_root)
     receipt = _receipt(
         request["run_id"],
         [_source(fetched=True), _source("https://example.net/hit", fetched=False)],
-        discovery_method=method,
+        discovery_method="user-provided-url",
     )
     with pytest.raises(web.ScoutInputError, match="cannot report search-only sources"):
         web.accept_submission(request["run_id"], receipt)
@@ -667,6 +664,22 @@ def test_searchless_methods_cannot_report_search_only_sources(
     )
     assert manifest["source_count"] == 2
     assert manifest["fetched_count"] == 1
+
+
+def test_user_provided_url_requires_at_least_one_opened_source(scout_root: Path):
+    request, _ = _request(scout_root)
+    with pytest.raises(web.ScoutInputError, match="requires at least one opened source"):
+        web.accept_submission(
+            request["run_id"],
+            _receipt(request["run_id"], [], discovery_method="user-provided-url"),
+        )
+    # A genuine search that found nothing remains a valid completed run.
+    manifest, _ = web.accept_submission(
+        request["run_id"],
+        _receipt(request["run_id"], [], discovery_method="search"),
+        recorded_at="2026-08-27T12:01:00Z",
+    )
+    assert manifest["source_count"] == 0
 
 
 def test_user_provided_url_run_records_without_a_search_harness(scout_root: Path):
@@ -701,7 +714,7 @@ def test_recorded_receipt_cannot_drop_or_contradict_its_discovery_method(
     request, _ = _request(scout_root)
     web.accept_submission(
         request["run_id"],
-        _receipt(request["run_id"], discovery_method="fetch-only"),
+        _receipt(request["run_id"], discovery_method="user-provided-url"),
         recorded_at="2026-08-27T12:01:00Z",
     )
     receipt_path = (
@@ -710,7 +723,7 @@ def test_recorded_receipt_cannot_drop_or_contradict_its_discovery_method(
     recorded = json.loads(receipt_path.read_text())
     recorded["discovery_method"] = "search"
     receipt_path.write_text(json.dumps(recorded, indent=2), encoding="utf-8")
-    # The manifest still says fetch-only, so the disagreement is caught by
+    # The manifest still says user-provided-url, so the disagreement is caught by
     # the schema check ahead of the hash check, naming the field.
     with pytest.raises(web.ScoutInputError, match="disagrees on discovery_method"):
         web.load_run(request["run_id"])

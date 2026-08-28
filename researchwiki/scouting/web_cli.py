@@ -163,9 +163,9 @@ def _parser() -> argparse.ArgumentParser:
     record.add_argument(
         "--discovery-method", required=True, choices=web.DISCOVERY_METHODS,
         help=(
-            "How the URLs were found: 'search' ran a web search; 'fetch-only' "
-            "could open pages but had no search tool; 'user-provided-url' means "
-            "the operator supplied them. The searchless modes forbid --snippet."
+            "How the URLs were found: 'search' ran a web search; "
+            "'user-provided-url' means the operator supplied them. The latter "
+            "requires at least one --fetched URL and forbids --snippet."
         ),
     )
     record.add_argument("--fetched", action="append", default=[], metavar="URL")

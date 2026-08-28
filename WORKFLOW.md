@@ -848,8 +848,9 @@ a deprecated compatibility alias.
 bounded JSON request, but performs no network access: the active chat agent uses
 whatever native web-search harness its host provides and returns its answer in
 the host's normal conversational format with native citations. The CLI stores
-only a minimal self-attested receipt: harness, URL, whether the harness claims
-to have opened the page, and optional title/date. `record` avoids JSON entirely;
+only a minimal self-attested receipt: harness, discovery method, URL, whether
+the harness claims to have opened the page, and optional title/date. `record`
+avoids JSON entirely;
 `accept` validates the same
 receipt from a file or stdin. Both validate the request's source/fetch/domain
 bounds on the submitted receipt and reject research prose. A `--since` bound
@@ -1509,7 +1510,7 @@ researchwiki scout > /tmp/scout.md                   #    structured citation sc
 researchwiki scout web request "protein design 2026" --json  # CLI performs no search
 researchwiki scout web list                                  # resume local handoffs after a crash/session change
 researchwiki scout web show <run-id> --json                  # exact request + cached result when recorded
-researchwiki scout web record <run-id> --harness codex-web --fetched https://example.org/page
+researchwiki scout web record <run-id> --harness codex-web --discovery-method search --fetched https://example.org/page
 # with a request --since bound, add --published-at URL YYYY-MM-DD where known
 researchwiki scout web accept <run-id> receipt.json          # optional JSON form; use - for stdin
 
@@ -1542,7 +1543,7 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `status` | Dashboard: counts, density, orphans, inbox/web-scout backlog, index health, pending proposals, 7-day cost. |
 | `lint [--fix] [--cross-paper]` | Orphans, broken/missing wikilinks (auto-fixable), stale syntheses, missing keywords/DOIs, year drift, stale proposals. All local except `--cross-paper`, which opts into the LLM contradiction judge over high-cosine claim pairs; `--cross-paper-max-pairs 0` sizes that pool for zero calls, and every verdict is recorded so a repeat run only judges what the last one missed. |
 | `scout [citations]` | Structured Semantic Scholar scouting: cross-wiki citation edges, recommendations, and shared external references. Bare `scout` defaults to `citations`; `audit` is a deprecated alias. |
-| `scout web <request\|list\|show\|record\|accept>` | Provider-neutral handoff to the active chat agent's native web-search harness. The CLI makes no network calls and stores no research prose. The agent answers conversationally with native citations, then `record` persists only harness + URLs + opened-vs-snippet status; `accept … -` is the minimal JSON alternative. Requests are bounded, resumable, write-once after recording, quarantined, and discovery-only. `show` reads the cached result without creating a report. See `prompts/scout-web.md`. |
+| `scout web <request\|list\|show\|record\|accept>` | Provider-neutral handoff to the active chat agent's native web-search harness. The CLI makes no network calls and stores no research prose. The agent answers conversationally with native citations, then `record` persists only harness + discovery method + URLs + opened-vs-snippet status; `accept … -` is the minimal JSON alternative. Requests are bounded, resumable, write-once after recording, quarantined, and discovery-only. `show` reads the cached result without creating a report. See `prompts/scout-web.md`. |
 | `retraction-check`, `preprint-check`, `orcid-lookup` | Structured PubMed / bioRxiv / ORCID queries. |
 | `claims "<query>" [--k N]` | Grounded-citation search over the pre-graded claims table (atomic bullets + `[[stem#slug]]` citation anchors + support scores). |
 | `pdf-search <stem> "<query>" [--k N]` | BM25 inside one paper's PDF chunks — pull an exact number/passage the page didn't quote. |
