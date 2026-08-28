@@ -4,10 +4,10 @@ query: "human genome sequencing and analysis methods"
 k: 10
 notes: |
   Discriminates the two bundled genomics methods (variant calling +
-  assembly) from the non-genomics bundled papers (single-cell annotation,
-  clinical trial, MRI dataset). A retrieval that surfaces the MRI or TB
-  papers on this query is confusing lexical proximity ("methods",
-  "analysis") with the domain the query actually asks for.
+  assembly) from the non-genomics bundled papers (single-cell annotation
+  and a clinical trial). A retrieval that surfaces the TB paper on this
+  query is confusing lexical proximity ("methods", "analysis") with the
+  domain the query actually asks for.
 
 expected_pages:
   - paper_stem: muslu-2026-variantmedium-sensitive-and-generalizable-somatic
@@ -22,5 +22,3 @@ must_not_appear:
     rationale: "Single-cell RNA type annotation; not DNA sequencing or genome analysis."
   - paper_stem: fonseca-2026-adjunctive-ibuprofen-in-pre-extensively-drug-resistant
     rationale: "TB clinical trial with no sequencing method."
-  - paper_stem: nohel-2026-beamster-brain-metastases-segmentation-for-stereotactic
-    rationale: "MRI imaging dataset, unrelated to genome sequencing."
