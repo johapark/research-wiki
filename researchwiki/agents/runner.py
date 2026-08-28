@@ -35,6 +35,7 @@ from .runner_support import (
     phase_reconcile as _phase_reconcile,
     phase_target_claims as _phase_target_claims,
     record_revision_decision,
+    run_post_promote_memory_evolution,
     record_timed_subphase,
     usage_costs,
     warn_thin_extraction as _warn_thin_extraction,
@@ -178,7 +179,7 @@ def run_ingest(
         ctx.sections = sections
         ctx.pdf_full_text = full_text
         log(f"extract → sections={list(sections.keys())}", tag="agent")
-        _warn_thin_extraction(sections)
+        _warn_thin_extraction(sections, full_text)
 
         # Phase 2.4: target-claims extraction (L3) — structured list of
         # claims the page should preserve. Surfaces a coverage target the
@@ -1018,17 +1019,22 @@ def _phase_commit(ctx: Context, conn) -> Path:
                 warnings=result.warnings,
             )
 
-        # Promotion moves the PDF and writes several canonical files. Once it
-        # succeeds, a wall/token stop must not interrupt supplementary staging,
-        # indexing, or grade persistence and leave a half-landed paper. Budgets
-        # therefore cover work through the promotion gate; post-promotion
-        # maintenance completes unbudgeted.
-        if ctx.budget_tracker is not None:
-            ctx.budget_tracker.suspend()
+        # Promotion moves the PDF and writes several canonical files. Required
+        # local maintenance below must complete, but the optional memory-
+        # evolution LLM call still belongs to this ingest's budget. Pause the
+        # guard now so a wall deadline crossed during promotion cannot abort
+        # telemetry, supplementary staging, indexing, or grade persistence;
+        # the memory-evolution helper re-arms it only around that optional work.
+        #
+        # INVARIANT for every step between here and that call — subphase
+        # logging, the pdf-upgrade record, supplementary staging, incremental
+        # indexing: none of them may reach a provider. They run with the guard
+        # paused; anything genuinely metered belongs inside
+        # `run_post_promote_memory_evolution`, which briefly re-arms it.
         record_timed_subphase(
             ctx, conn, role="promote", started=promote_t0,
             decision="promoted", reason=f"category={result.category}",
-            writer=write_iteration,
+            writer=write_iteration, suspend_budget=True,
         )
 
         if result.pdf_upgrade:
@@ -1088,12 +1094,12 @@ def _phase_commit(ctx: Context, conn) -> Path:
             reason="incremental page and claim indexes", writer=write_iteration,
         )
 
-        # Memory evolution: now that the new page is on disk, ask whether
-        # any neighboring synthesis pages need updating.
-        # Cosine prefilter inside skips zero-signal candidates so the cost
-        # bill stays bounded (~$0.04 worst-case per ingest).
-        ctx.next_iter()
-        phases.evolve_memory(ctx, conn, source_key=f"{result.category}/{ctx.paper_stem}")
+        # Memory evolution: now that the new page is on disk, ask whether any
+        # neighboring synthesis pages need updating. It is optional and must
+        # not escape a user-supplied budget merely because promotion landed.
+        run_post_promote_memory_evolution(
+            ctx, conn, source_key=f"{result.category}/{ctx.paper_stem}"
+        )
 
         # Coverage grading: score the just-committed page's claims against
         # its source PDF and write the per-claim signal back into the DB.

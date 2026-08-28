@@ -120,6 +120,11 @@ the reasoning behind any line below.
   snapshot used a plain write, so an interrupted run could leave a truncated
   file that `lint`'s P2 anchor cross-reference would then read as authoritative.
 
+- **Post-promotion wall-budget exhaustion no longer leaves a promoted paper
+  half-maintained.** Required telemetry, supplementary staging, indexing, and
+  grade persistence run with enforcement paused, while optional memory
+  evolution briefly re-arms the same tracker and records exhaustion as a skip.
+
 - **Reference-manager imports now keep identity decisions deterministic and
   retries safe.** Duplicate-DOI records choose their metadata-complete survivor
   before competing for a PDF while retaining attachment paths from duplicates;

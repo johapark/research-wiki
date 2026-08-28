@@ -16,6 +16,7 @@ from researchwiki.agents.phases.target_claims import (
     TargetClaim,
     TargetClaimsOutput,
 )
+from researchwiki.agents.phases.draft import _build_author_prompt
 
 BIG = 120_000
 
@@ -88,3 +89,29 @@ def test_critical_render_header_demands_verbatim_numbers():
     block = render_for_author_prompt(out)
     assert "verbatim" in block.lower() and "numeric" in block.lower()
     assert "0.918" in block
+
+
+def _unhealthy_paper() -> str:
+    """No findings heading; a giant Introduction pushes the result to EOF."""
+    return (
+        "Abstract\nWe present a ranker.\n\n"
+        "Introduction\n" + "background-only prose. " * 2200
+        + "\nLATE_RESULT GenRec reduces the token budget to one third.\n"
+        "References\nREFERENCE_DECOY should never reach a prompt.\n"
+    )
+
+
+def test_unhealthy_target_context_is_stratified_not_head_only():
+    prompt = _build_prompt({"title": "X"}, {}, _unhealthy_paper(), 6000)
+    assert "document-stratified fallback" in prompt
+    assert "LATE_RESULT" in prompt
+    assert "REFERENCE_DECOY" not in prompt
+
+
+def test_unhealthy_author_context_is_stratified_not_head_only():
+    prompt = _build_author_prompt(
+        {"title": "X"}, {}, [], pdf_full_text=_unhealthy_paper(),
+    )
+    assert "document-stratified fallback" in prompt
+    assert "LATE_RESULT" in prompt
+    assert "REFERENCE_DECOY" not in prompt

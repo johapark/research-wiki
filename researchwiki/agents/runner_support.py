@@ -73,12 +73,14 @@ def record_revision_decision(ctx, conn, draft, *, operator: str,
 
 def record_timed_subphase(ctx, conn, *, role: str, started: float,
                           decision: str = "observed", reason: str = "",
-                          writer=write_iteration) -> None:
+                          writer=write_iteration, suspend_budget: bool = False) -> None:
     """Append a nested commit-subphase duration event.
 
     These rows make commit internals visible; reports mark them nested so they
     are never added to the parent commit timer when computing attempt totals.
     """
+    if suspend_budget and ctx.budget_tracker is not None:
+        ctx.budget_tracker.suspend()
     ctx.next_iter()
     writer(
         attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,
@@ -128,7 +130,19 @@ def keyword_body_gaps(keywords: list[str], body_text: str) -> list[str]:
 _FINDING_SECTIONS = ("results", "discussion", "conclusion", "findings")
 
 
-def warn_thin_extraction(sections: dict) -> None:
+def warn_thin_extraction(sections: dict, full_text: str | None = None) -> None:
+    if full_text:
+        from ..pdf.sections import assess_section_health
+        health = assess_section_health(full_text, sections)
+        if not health.healthy:
+            log(
+                "extract ⚠ unhealthy section structure "
+                f"({', '.join(health.reasons)}; "
+                f"intro={health.introduction_fraction:.0%}) — using "
+                "document-stratified prompt fallback",
+                tag="agent",
+            )
+            return
     names = {str(key).lower() for key in (sections or {})}
     if not names:
         log("extract ⚠ no sections recovered at all — the page will rest on the "
@@ -161,12 +175,15 @@ def phase_extract(ctx, conn):
     t0 = time.monotonic()
     sections, full_text = phases.extract_sections(ctx.pdf_path)
     elapsed_ms = int((time.monotonic() - t0) * 1000)
+    from ..pdf.sections import assess_section_health
+    health = assess_section_health(full_text, sections)
     write_iteration(
         attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,
         pdf_filename=ctx.pdf_filename, iteration=ctx.iteration, role="extract",
         decision="observed",
         decision_reason=(f"extracted in {elapsed_ms}ms; sections={list(sections)}; "
-                         f"full_text_chars={len(full_text)}"),
+                         f"full_text_chars={len(full_text)}; "
+                         f"healthy={health.healthy}; reasons={list(health.reasons)}"),
         duration_ms=elapsed_ms, conn=conn,
     )
     return sections, full_text
@@ -201,3 +218,34 @@ def phase_target_claims(ctx, conn):
         conn=conn,
     )
     return out
+
+
+def run_post_promote_memory_evolution(ctx, conn, *, source_key: str) -> None:
+    """Re-arm the budget for optional memory evolution, then pause it again.
+
+    A promoted page is already canonical, so exhaustion here is a recorded
+    optional skip rather than a terminal partial-ingest failure. Required
+    maintenance runs with enforcement suspended so the paper cannot remain
+    half-maintained when promotion itself crosses the wall deadline.
+    """
+    if ctx.budget_tracker is not None:
+        ctx.budget_tracker.resume()
+    try:
+        ctx.next_iter()
+        phases.evolve_memory(ctx, conn, source_key=source_key)
+    except BudgetExhausted as exc:
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.suspend()
+        ctx.next_iter()
+        write_iteration(
+            attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,
+            pdf_filename=ctx.pdf_filename, iteration=ctx.iteration,
+            role="memory_evolve", decision="skipped",
+            decision_reason=f"post-promotion budget exhausted: {exc}",
+            gate_metrics={"budget_dimension": exc.dimension, **exc.snapshot},
+            conn=conn,
+        )
+        log(f"evolve   → skipped ({exc})", tag="agent")
+    finally:
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.suspend()

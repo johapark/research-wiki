@@ -23,6 +23,7 @@ Two extractors:
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 # Optional leading prefix tolerated on every section heading: an outline
 # number ("1. Introduction"), a line number ("26 Abstract", "44 Introduction"
@@ -31,12 +32,22 @@ import re
 # missed line-numbered Nature/Science preview formats.
 _LINE_PREFIX = r"(?:\d+[.\s]\s*)?"
 
+# A recognized heading may carry a descriptive subtitle on the same line:
+# ``6 Discussion: LLM-Native Recommendation`` is common in ML papers.  Keep
+# this suffix narrow (a real separator and one line only) so body sentences
+# beginning with a section word do not become boundaries.
+_HEADING_SUBTITLE = r"(?:\s*(?::|[—–])\s*[^\n]{1,120})?"
+
 SECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # Many Nature-family papers omit the Abstract header entirely; the
     # fallback path in `extract_abstract` handles those.
     ("abstract", re.compile(rf"(?im)^\s*{_LINE_PREFIX}abstract\s*$")),
     ("introduction", re.compile(rf"(?im)^\s*{_LINE_PREFIX}(introduction|background)\s*$")),
-    ("methods", re.compile(rf"(?im)^\s*{_LINE_PREFIX}(materials\s+and\s+methods|methods?|experimental\s+procedures?)\s*$")),
+    ("methods", re.compile(
+        rf"(?im)^\s*{_LINE_PREFIX}"
+        rf"(materials\s+and\s+methods|methods?|methodology|"
+        rf"experimental\s+procedures?){_HEADING_SUBTITLE}\s*$"
+    )),
     # `experiments` and friends are aliased onto `results` rather than given
     # their own key: ML/arXiv papers head their quantitative section
     # "9 Experiments" / "Empirical Evaluation" where a Nature-family paper
@@ -47,12 +58,121 @@ SECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # name, a paper with both headings still anchors on whichever comes first.
     ("results", re.compile(
         rf"(?im)^\s*{_LINE_PREFIX}"
-        r"(results?|experiments?|experimental\s+results|"
-        r"empirical\s+(?:results|evaluation|study)|evaluation)\s*$"
+        r"(results?|experiments?|experiments?\s*(?:&|and)\s*results?|"
+        r"experimental\s+results|empirical\s+(?:results|evaluation|study)|"
+        rf"evaluation){_HEADING_SUBTITLE}\s*$"
     )),
-    ("discussion", re.compile(rf"(?im)^\s*{_LINE_PREFIX}(discussion|conclusions?)\s*$")),
+    ("discussion", re.compile(
+        rf"(?im)^\s*{_LINE_PREFIX}(discussion|conclusions?)"
+        rf"{_HEADING_SUBTITLE}\s*$"
+    )),
     ("references", re.compile(rf"(?im)^\s*{_LINE_PREFIX}(references|bibliography)\s*$")),
 ]
+
+
+@dataclass(frozen=True)
+class SectionHealth:
+    """Structural quality of a PDF-text section parse.
+
+    ``healthy`` means at least one findings-bearing section was recovered and
+    no single Introduction block consumed most of the substantive document.
+    An unhealthy parse is not an ingest failure; it tells prompt assembly to
+    use a document-stratified raw fallback instead of trusting the headings.
+    """
+
+    healthy: bool
+    reasons: tuple[str, ...]
+    core_sections: tuple[str, ...]
+    introduction_fraction: float
+
+
+def assess_section_health(
+    text: str, sections: dict[str, str] | None = None,
+) -> SectionHealth:
+    """Diagnose section extraction without another PDF read or model call.
+
+    The two reasons are deliberately asymmetric. ``no_findings_section`` fires
+    alone, because not knowing where a paper's findings are is itself the
+    defect the fallback exists for. ``dominant_introduction`` requires
+    ``len(core) < 2`` to corroborate, because a large Introduction is only
+    suspicious when little else parsed.
+
+    A consequence worth knowing before "fixing" it: venues whose findings live
+    under headings this parser does not carry take the stratified path on
+    *every* ingest. Scientific Data descriptors are the clear case — they head
+    their findings ``Data Records`` / ``Technical Validation`` and replace
+    ``Introduction`` with ``Background & Summary``, so ``core`` comes back as
+    ``("methods",)`` alone. That is the intended outcome rather than a
+    misfire: the curated excerpts for such a paper would carry abstract plus
+    methods and silently omit its results, while evenly spaced strata cover
+    them. No benchmark fixture currently exercises this shape (the one
+    ``dataset`` fixture was withdrawn for licensing), so the behavior rests on
+    this reasoning rather than on a scored run.
+    """
+    text = text or ""
+    if not text.strip():
+        return SectionHealth(False, ("empty_text",), (), 0.0)
+
+    # Work from spans, not ``anchor_sections``: health needs boundaries only,
+    # so re-running abstract/caption extraction for every parallel author draft
+    # would be wasted work. Callers often pass a 4K-capped section dict, while
+    # spans still reveal a 40K Introduction block accurately.
+    spans = section_spans(text)
+    span_by_name = {name: (start, end) for start, end, name in spans}
+    available = set(span_by_name) | set(sections or {})
+    core = tuple(k for k in ("methods", "results", "discussion") if k in available)
+    reasons: list[str] = []
+    if not any(k in core for k in ("results", "discussion")):
+        reasons.append("no_findings_section")
+
+    substantive_len = len(text)
+    for start, _, name in spans:
+        if name == "references":
+            substantive_len = start
+            break
+    intro_span = span_by_name.get("introduction")
+    intro_len = (
+        intro_span[1] - intro_span[0]
+        if intro_span is not None else len((sections or {}).get("introduction", ""))
+    )
+    intro_fraction = intro_len / max(1, substantive_len)
+    if intro_fraction >= 0.60 and len(core) < 2:
+        reasons.append("dominant_introduction")
+
+    return SectionHealth(not reasons, tuple(reasons), core, intro_fraction)
+
+
+def stratified_text_sample(text: str, budget: int, *, strata: int = 5) -> str:
+    """Sample the substantive document from evenly spaced character strata.
+
+    This is the fallback for structurally unhealthy extraction.  It avoids the
+    old ``text[:budget]`` failure, where a long Introduction hid all later
+    experiments, while remaining deterministic and allocation-free apart from
+    the returned string.  References are clipped when their heading is known.
+    """
+    if budget <= 0 or not text:
+        return ""
+
+    substantive = text
+    for start, _, name in section_spans(text):
+        if name == "references":
+            substantive = text[:start]
+            break
+    if len(substantive) <= budget:
+        return substantive
+
+    strata = max(2, min(strata, budget // 200 if budget >= 400 else 2))
+    window = max(1, budget // strata)
+    max_start = max(0, len(substantive) - window)
+    starts = [round(i * max_start / (strata - 1)) for i in range(strata)]
+    chunks: list[str] = []
+    for i, start in enumerate(starts):
+        end = min(len(substantive), start + window)
+        chunk = substantive[start:end].strip()
+        chunks.append(
+            f"[document stratum {i + 1}/{strata}; chars {start}:{end}]\n{chunk}"
+        )
+    return "\n\n".join(chunks)
 
 # Caption-start regex. Matches Nature-family pipe-style captions:
 #   "Fig. 1 | Folddisco's workflow ..."

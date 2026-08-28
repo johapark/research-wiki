@@ -26,5 +26,3 @@ must_not_appear:
     rationale: "Genome assembly, no LLM component."
   - paper_stem: fonseca-2026-adjunctive-ibuprofen-in-pre-extensively-drug-resistant
     rationale: "Clinical trial, no LLM component."
-  - paper_stem: nohel-2026-beamster-brain-metastases-segmentation-for-stereotactic
-    rationale: "MRI dataset, no LLM component."
