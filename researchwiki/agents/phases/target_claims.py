@@ -360,8 +360,6 @@ def _build_prompt(
     """Assemble the extraction prompt: the whole substantive paper (references
     excluded) up to `max_chars`, priority-trimmed so Results/Discussion/captions
     survive when a long paper overflows the budget."""
-    rich = _rich_sections(sections, pdf_full_text, cap=max_chars)
-    included = _allocate(rich, max_chars)
     parts = [
         "# Paper metadata",
         f"- Title: {metadata.get('title') or 'unknown'}",
@@ -371,6 +369,23 @@ def _build_prompt(
         f"- Type: {metadata.get('paper_type') or 'research'}",
         "",
     ]
+    if pdf_full_text:
+        from ...pdf.sections import assess_section_health, stratified_text_sample
+        health = assess_section_health(pdf_full_text, sections)
+        if not health.healthy:
+            parts.extend([
+                "# Full PDF text (document-stratified fallback — section extraction unhealthy)",
+                f"# Extraction-health reasons: {', '.join(health.reasons)}",
+                "# References are excluded when their boundary is detectable.",
+                stratified_text_sample(pdf_full_text, max_chars),
+                "",
+                "---",
+                "Output the structured target-claims list now.",
+            ])
+            return "\n".join(parts)
+
+    rich = _rich_sections(sections, pdf_full_text, cap=max_chars)
+    included = _allocate(rich, max_chars)
     # First-page preamble as insurance when the abstract header wasn't detected
     # (Nature-family papers often omit it); small, kept outside the budget.
     if not included.get("abstract") and metadata.get("pdf_text_preview"):

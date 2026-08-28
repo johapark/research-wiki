@@ -160,6 +160,7 @@ def test_score_salience_zero_anchors_returns_none_score():
     r = score_salience("stem", "", {}, "page body content")
     assert isinstance(r, SalienceReport)
     assert r.n_anchors == 0
+    assert r.n_anchor_sources == 0
     assert r.salience_score is None
     assert r.missed_anchors == []
 
@@ -181,6 +182,7 @@ def test_score_salience_full_match():
     )
     r = score_salience("stem", "", sections, page_body)
     assert r.n_anchors == 2
+    assert r.n_anchor_sources == 1
     assert r.salience_score is not None and r.salience_score > 0.5
     assert r.n_match >= 1
 

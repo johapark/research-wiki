@@ -10,8 +10,10 @@ fallback (largest paragraph before introduction), and the empty case.
 
 from researchwiki.pdf.sections import (
     anchor_sections,
+    assess_section_health,
     extract_abstract,
     extract_caption_blocks,
+    stratified_text_sample,
 )
 
 
@@ -167,3 +169,53 @@ def test_abstract_returns_empty_when_pre_intro_paragraphs_too_short():
         "Introduction\n\nMain body...\n"
     )
     assert extract_abstract(body) == ""
+
+
+# ── ML-paper heading variants and extraction health ─────────────────
+
+
+def test_titled_numbered_ml_sections_are_real_boundaries():
+    """GenRec-shaped headings must not leave the rest of the paper inside
+    Introduction merely because the headings carry aliases or subtitles."""
+    body = (
+        "Abstract\nWe introduce a recommendation ranker.\n\n"
+        "1 Introduction\n" + "background sentence. " * 200 + "\n\n"
+        "4 Methodology\nMETHODMARK verbalizes interaction histories.\n\n"
+        "5 Experiments & Results\nRESULTMARK improves NDCG by 7.5%.\n\n"
+        "6 Discussion: LLM-Native Recommendation\n"
+        "DISCUSSIONMARK describes deployment trade-offs.\n\n"
+        "References\n1. A cited work.\n"
+    )
+    sections = anchor_sections(body, max_chars=len(body))
+
+    assert "METHODMARK" in sections["methods"]
+    assert "RESULTMARK" in sections["results"]
+    assert "DISCUSSIONMARK" in sections["discussion"]
+    assert "METHODMARK" not in sections["introduction"]
+    assert assess_section_health(body, sections).healthy
+
+
+def test_dominant_introduction_without_findings_is_unhealthy():
+    body = (
+        "Abstract\nA short abstract.\n\n"
+        "1 Introduction\n" + "background sentence. " * 1000 + "\n\n"
+        "References\n1. A cited work.\n"
+    )
+    health = assess_section_health(body, anchor_sections(body))
+    assert not health.healthy
+    assert "no_findings_section" in health.reasons
+    assert "dominant_introduction" in health.reasons
+
+
+def test_stratified_fallback_reaches_late_results_and_drops_references():
+    body = (
+        "FRONTMARK " + "front filler. " * 400
+        + "MIDDLEMARK " + "middle filler. " * 400
+        + "late filler. " * 400 + "LATERESULT 0.918\n"
+        + "\nReferences\nREFERENCEDECOY 0.404\n"
+    )
+    sample = stratified_text_sample(body, 3000, strata=5)
+    assert "FRONTMARK" in sample
+    assert "LATERESULT 0.918" in sample
+    assert "REFERENCEDECOY" not in sample
+    assert "document stratum 5/5" in sample

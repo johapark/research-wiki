@@ -119,7 +119,7 @@ personal library. Never commit them, and stage named paths (`git add <path>`)
 rather than `git add -A`.
 
 If you add a benchmark fixture PDF under `benchmark-fixtures/pdfs/`, it **must**
-be openly licensed (the existing five are CC-BY-4.0) and recorded with full
+be openly licensed (the existing four are CC-BY-4.0) and recorded with full
 attribution in `benchmark-fixtures/LICENSES.md`. Do not add publisher PDFs that
 aren't redistributable.
 

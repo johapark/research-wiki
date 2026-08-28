@@ -304,6 +304,13 @@ def test_salience_confidence_is_clamped():
     assert salience_confidence({"n_anchors": 5}) == 0.5
 
 
+def test_abstract_only_salience_is_source_diluted():
+    broad = {"n_anchors": ANCHOR_CONFIDENCE_FULL, "n_anchor_sources": 2}
+    abstract_only = {"n_anchors": ANCHOR_CONFIDENCE_FULL, "n_anchor_sources": 1}
+    assert salience_confidence(broad) == 1.0
+    assert salience_confidence(abstract_only) == 0.5
+
+
 def test_zero_anchor_confidence_falls_back_to_fidelity():
     """conf 0 zeroes the salience weight; the blend must not divide by zero."""
     q = combined_quality({"semantic_score": 0.80, "salience_score": 0.20,
@@ -350,6 +357,15 @@ def test_thin_target_claim_set_is_confidence_diluted():
     thick = {**thin, "n_target_claims": TARGET_CONFIDENCE_FULL}
     assert combined_quality(thin) > combined_quality(thick)
     assert target_claim_confidence(thin) == 1 / TARGET_CONFIDENCE_FULL
+
+
+def test_single_location_target_claims_are_source_diluted():
+    broad = {"n_target_claims": TARGET_CONFIDENCE_FULL,
+             "n_target_claim_sources": 2}
+    one_section = {"n_target_claims": TARGET_CONFIDENCE_FULL,
+                   "n_target_claim_sources": 1}
+    assert target_claim_confidence(broad) == 1.0
+    assert target_claim_confidence(one_section) == 0.5
 
 
 def test_missing_target_axis_preserves_previous_two_axis_result():

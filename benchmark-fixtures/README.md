@@ -2,7 +2,7 @@
 
 Hand-curated fixtures that score the `researchwiki agent ingest` pipeline. Each fixture pairs a paper PDF with a structured YAML declaring what a thorough wiki page **should** capture: headline claims, capabilities, limitations, related-paper links.
 
-The harness is **portable**: five CC-BY-4.0 OA papers are committed under `pdfs/` so anyone with a fresh clone can run every benchmark without a pre-existing corpus. Attribution: see [`LICENSES.md`](./LICENSES.md).
+The harness is **portable**: four CC-BY-4.0 OA papers are committed under `pdfs/` so anyone with a fresh clone can run every benchmark without a pre-existing corpus. Attribution: see [`LICENSES.md`](./LICENSES.md).
 
 ```
 benchmark-fixtures/
@@ -69,7 +69,6 @@ researchwiki benchmark-fixture <stem> --repeat 5 --llm   # ~$0.93/fixture; meanÂ
 | zhang-2026-mga-a-tool-for-haplotype-mixed | method-with-benchmarks | Genome Biology | genome assembly |
 | li-2026-schilda-hierarchical-integration-of-llm | method-with-benchmarks | PLoS Comp Bio | single-cell annotation |
 | fonseca-2026-adjunctive-ibuprofen-in-pre-extensively-drug-resistant | clinical-trial | Nat Comms | tuberculosis phase IIA |
-| nohel-2026-beamster-brain-metastases-segmentation-for-stereotactic | dataset | Sci Data | brain-mets MRI dataset |
 
 Content-coverage fixtures declare `published_at:` for automatic contamination flagging by the scorer.
 

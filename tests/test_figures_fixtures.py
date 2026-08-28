@@ -6,7 +6,7 @@ pinned. This file covers what those cannot: that real PDFs parse, that caption
 detection survives four different venue typesetting styles, and that a render
 produces a decodable PNG of the right shape.
 
-The five PDFs under `benchmark-fixtures/pdfs/` are tracked in git and CC-BY-4.0
+The four PDFs under `benchmark-fixtures/pdfs/` are tracked in git and CC-BY-4.0
 (see `benchmark-fixtures/LICENSES.md`), so this runs in any clone — unlike
 `papers/`, which is gitignored and commonly a symlink into a personal vault.
 They were added for ingest benchmarking; nothing else was using them as a test
@@ -15,7 +15,6 @@ corpus, and they happen to span exactly the caption styles that matter:
     fonseca  `Figure 1- Title` / `Figure 2 - Title`  (hyphen, ± leading space)
     li       `Fig 1. Title`                          (PLOS)
     muslu    `Fig. 1 Title`                          (BMC, no separator at all)
-    nohel    `Figure 1: Title`                       (preprint)
     zhang    `Fig. 1 Title` + `Table 1 Title`
 
 Counts are pinned exactly, so this fails in both directions: a regression that
@@ -51,8 +50,6 @@ EXPECTED = {
         (1, 1, "The scHilda framework"),
     "muslu-2026-variantmedium-sensitive-and-generalizable-somatic":
         (6, 1, "Overview of VariantMedium workflow"),
-    "nohel-2026-beamster-brain-metastases-segmentation-for-stereotactic":
-        (3, 1, "Graphical Abstract"),
     "zhang-2026-mga-a-tool-for-haplotype-mixed":
         (5, 3, "The MGA workflow"),
 }
@@ -153,7 +150,7 @@ def test_cli_lists_then_renders_into_the_cache(tmp_path, monkeypatch, capsys):
     from researchwiki import paths
     from researchwiki.tasks import figures as cli
 
-    stem = "nohel-2026-beamster-brain-metastases-segmentation-for-stereotactic"
+    stem = "zhang-2026-mga-a-tool-for-haplotype-mixed"
     monkeypatch.setattr(paths, "wiki_root", lambda: tmp_path)
     monkeypatch.setattr(cli, "figures_cache_dir", lambda: tmp_path / ".figures-cache")
     monkeypatch.setattr(cli, "resolve_pdf", lambda s: _pdf(s))

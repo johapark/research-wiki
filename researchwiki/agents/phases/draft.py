@@ -225,22 +225,35 @@ def _build_author_prompt(
         # Budget: 30K chars. The Anthropic input window is large enough to
         # hold the full PDF for most papers, but capping bounds cost and
         # latency for ~50–100-page outliers (textbooks, very long reviews).
-        # Cap is applied as a head-of-document slice — papers' headline
-        # claims live in the front half; appendices/extended references in
-        # the back. ED figures sit between, and Brief Communications fit
-        # entirely under 30K. Revisit if a fixture surfaces a back-of-paper
-        # claim that gets truncated.
+        # Healthy parses use the established head-of-document slice because
+        # the labeled excerpts separately surface Results/Discussion. When
+        # those boundaries are unhealthy, evenly spaced document strata use
+        # the same budget so late findings cannot disappear behind a giant
+        # Introduction. Brief Communications usually fit entirely under 30K.
         FULL_PDF_BUDGET = 30_000
+        from ...pdf.sections import assess_section_health, stratified_text_sample
+        health = assess_section_health(pdf_full_text, sections)
         truncated_note = ""
         body = pdf_full_text
-        if len(body) > FULL_PDF_BUDGET:
+        context_label = "# Full PDF text (supplementary context — search this for ANY"
+        if not health.healthy:
+            body = stratified_text_sample(pdf_full_text, FULL_PDF_BUDGET)
+            context_label = (
+                "# Full PDF text (document-stratified fallback because section "
+                "extraction was unhealthy — search this for ANY"
+            )
+            truncated_note = (
+                f"\n[extraction-health: {', '.join(health.reasons)}; "
+                "references excluded when detectable]"
+            )
+        elif len(body) > FULL_PDF_BUDGET:
             body = body[:FULL_PDF_BUDGET]
             truncated_note = (
                 f"\n[truncated at {FULL_PDF_BUDGET} chars; "
                 f"full PDF is {len(pdf_full_text)} chars]"
             )
         parts.extend([
-            "# Full PDF text (supplementary context — search this for ANY",
+            context_label,
             "# numeric claim, figure-caption content, Extended Data figure",
             "# results, or detail not present in the curated excerpts above.",
             "# The excerpts above are anchored at section headings; this is",

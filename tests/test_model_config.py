@@ -65,6 +65,16 @@ def test_fallback_when_yaml_missing(tmp_path, monkeypatch):
     assert cfg.reasoning_effort is None
 
 
+def test_fallback_target_claims_reservation_matches_observed_output_band(
+    tmp_path, monkeypatch,
+):
+    """The default must leave headroom above the observed ~2.7K p95 without
+    reserving the former 8K ceiling against every aggregate token budget."""
+    monkeypatch.setattr(model_config, "wiki_root", lambda: tmp_path)
+    cfg = model_config.for_phase("target_claims")
+    assert cfg.max_tokens == 4000
+
+
 def test_fallback_roles_have_reasoning_effort_none():
     """Every hardcoded fallback role defaults reasoning_effort to None.
 

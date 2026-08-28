@@ -68,10 +68,11 @@ TARGET_WEIGHT = 0.5
 # toward fidelity instead of swinging selection at full strength.
 ANCHOR_CONFIDENCE_FULL = 10
 TARGET_CONFIDENCE_FULL = 5
+SOURCE_CONFIDENCE_FULL = 2
 
 
 def salience_confidence(scores: dict) -> float:
-    """Weight multiplier for the salience axis, from its anchor count.
+    """Weight multiplier from anchor count and structural-source diversity.
 
     A *missing* `n_anchors` means "unknown", not "zero": callers that predate
     the key (and hand-built score dicts in tests) get full confidence, so
@@ -82,11 +83,18 @@ def salience_confidence(scores: dict) -> float:
     n = scores.get("n_anchors")
     if n is None:
         return 1.0
-    return min(1.0, max(0.0, float(n) / ANCHOR_CONFIDENCE_FULL))
+    count_confidence = min(1.0, max(0.0, float(n) / ANCHOR_CONFIDENCE_FULL))
+    sources = scores.get("n_anchor_sources")
+    if sources is None:
+        return count_confidence
+    source_confidence = min(
+        1.0, max(0.0, float(sources) / SOURCE_CONFIDENCE_FULL)
+    )
+    return count_confidence * source_confidence
 
 
 def target_claim_confidence(scores: dict) -> float:
-    """Weight multiplier for target-claim recall, from valid claim count.
+    """Weight multiplier from valid-claim count and location diversity.
 
     Five claims is enough for full confidence because the extraction prompt
     reserves roughly 3–6 critical claims for a paper's load-bearing core. As
@@ -95,7 +103,14 @@ def target_claim_confidence(scores: dict) -> float:
     n = scores.get("n_target_claims")
     if n is None:
         return 1.0
-    return min(1.0, max(0.0, float(n) / TARGET_CONFIDENCE_FULL))
+    count_confidence = min(1.0, max(0.0, float(n) / TARGET_CONFIDENCE_FULL))
+    sources = scores.get("n_target_claim_sources")
+    if sources is None:
+        return count_confidence
+    source_confidence = min(
+        1.0, max(0.0, float(sources) / SOURCE_CONFIDENCE_FULL)
+    )
+    return count_confidence * source_confidence
 
 
 def combined_quality(scores: dict) -> float | None:

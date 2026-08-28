@@ -241,6 +241,7 @@ def _abstract_is_prose(text: str, sentences: list[str]) -> bool:
 @dataclass
 class SalienceReport:
     n_anchors: int
+    n_anchor_sources: int          # distinct structural sources represented
     salience_score: float | None     # None when n_anchors == 0; else 0..1
     n_match: int
     n_partial: int
@@ -441,10 +442,18 @@ def score_salience(
         + len(fixture.capabilities)
         + len(fixture.limitations)
     )
+    # `split("-", 1)` is itself what collapses a section's anchor variants:
+    # `discussion-lead-0` and `discussion-tail-0` both reduce to `discussion`,
+    # so diversity stays structural rather than counting how many anchors one
+    # section happened to emit. An explicit re-map of `discussion` used to sit
+    # here and could never fire for that reason.
+    source_prefixes = {item.id.split("-", 1)[0] for _, item in fixture.all_items()}
+    n_anchor_sources = len(source_prefixes)
 
     if n_anchors == 0:
         return SalienceReport(
             n_anchors=0,
+            n_anchor_sources=0,
             salience_score=None,
             n_match=0, n_partial=0, n_miss=0,
             per_axis={},
@@ -464,6 +473,7 @@ def score_salience(
 
     return SalienceReport(
         n_anchors=n_anchors,
+        n_anchor_sources=n_anchor_sources,
         salience_score=report.overall_weighted_recall,
         n_match=n_match,
         n_partial=n_partial,
