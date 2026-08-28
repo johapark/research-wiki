@@ -1,15 +1,19 @@
 """Phase functions for the ingest agent state machine.
 
-Each phase is a pure function — it takes inputs, returns outputs. Persistence
-to ingest_iterations happens in `runner.py` wrappers, never inside these
-functions. This separation keeps phases unit-testable and the framework
-auditable.
+Each phase has an explicit input/output boundary. Persistence to
+`ingest_iterations` happens in `runner.py` wrappers, never inside these
+functions. Individual phases may still call providers or LLMs and populate
+sandbox files or derived caches; the boundary makes them unit-testable and the
+framework auditable without claiming functional purity.
 
-Phases (in order), by the function that implements each:
+Phases (in execution order), by the function that implements each (some are
+invoked through a runner wrapper rather than re-exported here):
   reconcile_metadata : DOI / title / year / venue from PDF + S2
   extract_sections   : section extractor (reuses tasks.ingest helpers)
+  extract_target_claims : paper-wide, importance-weighted coverage targets
+  crosslink_candidates / propose_crosslinks : source-supported Related Papers
   author             : LLM call producing a wiki-page draft
-  grade_draft        : Phase 1 grader on the draft (BM25 + bi-encoder semantic)
+  grade_draft        : fidelity + salience + target-claim recall on the draft
   tournament         : pick the highest-scored draft (deterministic argmax)
   critic             : translate grader flags into actionable revision notes
   evolve             : revise the winning draft based on critic notes
@@ -22,8 +26,8 @@ keys, and log tags are unchanged ("reconcile", "extract", "grade", "commit", …
 those are persisted/user-facing identifiers, deliberately decoupled from the
 Python function names.
 
-Files in this package mirror the phase grouping. Public names re-exported
-here so callers can keep `from .phases import X` style imports.
+Files in this package mirror the phase grouping. Reusable public names are
+re-exported here so callers can keep `from .phases import X` style imports.
 
 **Naming convention — phase functions are `verb_object`, modules are topics.**
 `reconcile.py` defines `reconcile_metadata()`, `grade.py` defines `grade_draft()`,

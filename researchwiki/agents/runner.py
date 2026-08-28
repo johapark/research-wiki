@@ -975,13 +975,12 @@ def _phase_commit(ctx: Context, conn) -> Path:
         if gate.warnings:
             result.warnings.extend(gate.warnings)
 
-        # Promote is not transactional: the page + its DB row land before the
-        # PDF move, and every step after that can fail independently. When one
-        # does, `promote_to_wiki` returns `promoted=False` rather than raising.
-        # Reading that flag is what stops a half-landed paper being recorded as
-        # `committed-to-wiki` and exiting 0 — the shape a duplicate PDF in a
-        # batch produced deterministically, since `_move_pdf` refuses a stem
-        # collision that isn't a journal upgrade.
+        # Promote is file-transactional through the mutation journal, but it
+        # reports an in-process failure by returning `promoted=False` rather
+        # than raising. Reading that flag is what stops a rolled-back paper from
+        # being recorded as `committed-to-wiki` and exiting 0 — the shape a
+        # duplicate PDF in a batch produced deterministically, since `_move_pdf`
+        # refuses a stem collision that isn't a journal upgrade.
         #
         # Record the failure, then raise: the iteration row has to exist before
         # the exception unwinds, because `run_ingest`'s `finally` closes `conn`.

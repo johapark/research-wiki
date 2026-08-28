@@ -13,7 +13,13 @@ python3 -m venv ~/.venvs/research-wiki                    # outside the repo —
 ~/.venvs/research-wiki/bin/python -m pytest -q            # green before you change anything
 ```
 
-**The venv goes outside the checkout.** A venv is ~34,000 files, and this one carries ~2 GB of platform-specific pins. In-repo `.venv/` is gitignored so git doesn't care — but if the tree is ever synced it becomes ~96% of the sync load, and the daemon starts losing races against your own writes: a stale `.git/index` reporting every tracked file as modified, `<name> 2.py` conflict copies of files you just edited. Venvs also bake absolute paths into `bin/`, so relocating one later means recreating it.
+**The venv goes outside the checkout.** A venv is tens of thousands of files,
+and this one carries roughly 2 GB of platform-specific wheels and installed
+packages. In-repo `.venv/` is gitignored so git doesn't care — but if the tree
+is ever synced it dominates the sync load, and the daemon starts losing races
+against your own writes: a stale `.git/index` reporting every tracked file as
+modified, `<name> 2.py` conflict copies of files you just edited. Venvs also bake
+absolute paths into `bin/`, so relocating one later means recreating it.
 
 **If you sync `wiki/` and `papers/`** (iCloud/Dropbox — the maintainer does), also keep the checkout itself *outside* the synced folder and symlink those two dirs in. Both are gitignored, so git and the sync service have disjoint jobs and neither has to carry the other's content. See [`prompts/migration-backfill.md`](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder) § *Keep the checkout out of the synced folder*.
 
@@ -35,8 +41,8 @@ which is not the zero-config path.
 ## Tests
 
 **The suite is hermetic and must stay that way**: no network calls, no LLM calls,
-no model downloads. That's what keeps it a few seconds and lets CI run without
-secrets. CI runs it on Python 3.10 / 3.11 / 3.12.
+no model downloads. That keeps it fast enough for routine local runs and lets CI
+run without secrets. CI runs it on Python 3.10 / 3.11 / 3.12.
 
 When touching an LLM path, monkeypatch `llm.call` (see
 `tests/test_llm_retry.py`, `tests/test_keywords_parse_failure.py`) or use the

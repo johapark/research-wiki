@@ -13,15 +13,18 @@ If `README.md` describes the destination, this doc describes the journey.
 
 You drop research-paper PDFs into `inbox/`. An LLM authors a wiki page for
 each one (Summary, Key Contributions, Methodology, Results, Limitations,
-Related Papers). A four-axis grader scores the page — **fidelity** (per-claim
-BM25 + bi-encoder cosine against the source PDF), **salience-recall**
-(synthetic anchors extracted from the PDF's abstract / figure captions /
-results lead-ins, checked against the page), **coherence** (page-shape
-contract — required sections, word count, bullet density), and **grounding**
-(every claim-shaped unit carries a `[[wikilink]]` or `[^id]` citation). The
-ingest agent's tournament selects the winning draft via a combined
-fidelity-plus-salience scalar; coherence and numeric drift form the
-lexicographic tail. New ingests then trigger evolution proposals against
+Related Papers). The paper-page grader measures **fidelity** (per-claim BM25 +
+bi-encoder cosine against the source PDF), **salience-recall** (synthetic
+anchors extracted from the PDF's abstract / figure captions / results lead-ins,
+checked against the page), **target-claim recall** (importance-weighted claims
+extracted paper-wide before authoring), and **coherence** (page-shape contract —
+required sections, word count, bullet density). When `-n 2+` enables a real
+tournament, the winner is selected by a confidence-weighted blend of fidelity,
+salience, and target-claim recall; coherence and numeric drift form the
+lexicographic tail. The default is one draft, so selection is a no-op. Citation
+**grounding** is a separate structural gate for synthesis, idea, and concept
+pages, paired with `grade synthesis`; paper-page claims are graded directly
+against their own PDF. New ingests then trigger evolution proposals against
 neighboring synthesis pages — when paper P arrives, the framework asks an
 LLM whether existing synthesis pages should be edited in
 light of P, and writes structured proposals to
@@ -46,33 +49,32 @@ inbox/raw-paper.pdf
 │                   (LLM extractor on first 1-2 pages → Semantic      │
 │                    Scholar lookup → Crossref + regex fallbacks)     │
 │  2. extract       PDF → introduction / methods / results sections   │
-│  3. crosslinks    citation-graph candidates ∪ semantic-KNN         │
-│                   candidates → LLM-judged topical list              │
-│  4. author × N    parallel drafts at differing temperatures         │
-│  5. grade × N     fidelity (BM25 + bi-encoder cosine) per claim     │
+│  3. target claims PDF → importance-weighted coverage checklist      │
+│  4. crosslinks    citation-graph candidates ∪ semantic-KNN         │
+│                   candidates → strict source-engagement judgment    │
+│  5. author × N    1 draft by default; -n 2+ enables a tournament    │
+│  6. grade × N     fidelity (BM25 + bi-encoder cosine) per claim     │
 │                   + salience-recall (PDF anchors → fixture →        │
-│                   token-overlap + cosine) + coherence (structural   │
-│                   conformance)                                      │
-│  6. tournament    deterministic argmax on combined-quality scalar   │
-│                   (0.5·semantic + 0.5·salience, each axis bucketed  │
-│                   to 0.01 first, salience down-weighted when its    │
-│                   anchor count is thin); tail axes coherence →      │
-│                   drift → coverage → bm25                           │
-│  7. critic        translate weak-claim flags into revision notes,   │
+│                   token-overlap + cosine) + target-claim recall     │
+│                   + coherence (structural conformance)               │
+│  7. tournament    deterministic argmax; three primary axes bucketed │
+│                   to 0.01 and confidence-weighted by denominator;   │
+│                   tail: coherence → drift → coverage → BM25         │
+│  8. critic        translate weak-claim flags into revision notes,   │
 │                   plus triage of uncovered critical PDF anchors     │
 │                   (recall gaps; ≥2 eligible fires the loop alone)   │
-│  8. evolve        revise the winning draft against critic notes;    │
-│                   keep iff combined-quality improves (the same      │
-│                   primary scalar; salience-only gains accepted)     │
-│  9. (debug)       repair structural-gate failures if any            │
-│ 10. promote       move PDF → papers/{stem}.pdf,                     │
+│  9. evolve        revise the winning draft against critic notes;    │
+│                   keep only under the evolve fitness lens           │
+│ 10. (debug)       repair structural-gate failures if any            │
+│ 11. metadata      HANDLE/HOOK from author trailer + keyword call    │
+│ 12. promote       move PDF → papers/{stem}.pdf,                     │
 │                   write wiki/{category}/{stem}.md,                  │
 │                   add back-links, append to index.md and log.md     │
-│ 11. shortname     LLM proposes a 1–4 word handle for the index entry│
-│ 12. keywords      LLM proposes 5–10 retrieval tokens for YAML       │
-│ 13. memory evolve KNN against existing synthesis                    │
+│ 13. index         upsert changed pages into BM25 + semantic indexes │
+│ 14. memory evolve KNN against existing synthesis                    │
 │                   pages → per-neighbor LLM judgment → proposals     │
 │                   written to .ingest/{stem}-evolution-proposals/    │
+│ 15. persist grade write promoted-page claim grades to state DB      │
 └────────────────────────────────────────────────────────────────────┘
         │
         ▼
@@ -82,9 +84,11 @@ wiki/{category}/{stem}.md             # the new wiki page
 ingest_iterations table               # per-phase audit trail in state DB
 ```
 
-Each phase is a pure function over the previous phases' outputs.
-Persistence to the `ingest_iterations` table happens in thin runner
-wrappers, never inside the phase functions.
+Phase logic is separated from `ingest_iterations` persistence: thin runner
+wrappers write the audit rows rather than the phase functions themselves.
+Phases are otherwise effectful — they may call providers or LLMs and populate
+sandbox files and derived caches — so they are testable boundaries, not pure
+functions in the functional-programming sense.
 
 ---
 
@@ -93,8 +97,8 @@ wrappers, never inside the phase functions.
 Here's what an ingest looks like when you run it. The excerpts below are from a
 real run on `kim-2026-structural-motif-search-across-the-protein` (Folddisco) —
 values taken from that attempt's `ingest_iterations` rows, not hand-crafted. The
-run predates the `sal`/`coh` columns in the grade line, so those two axes are
-absent from the excerpt and documented separately below.
+run predates the `sal`/`target`/`coh` columns in the grade line, so those signals
+are absent from the excerpt and documented separately below.
 
 ### 1. Drop a PDF
 
@@ -143,14 +147,16 @@ You'll see something like (excerpted, real output from a recent ingest):
 [agent] evolve     → no actionable proposals (knn=8 above_thr=6 judged=6 actionable=0)
 ```
 
-A current grade line carries four axes: `sem` is the page-level mean of per-claim
-bi-encoder cosines (fidelity); `sal` is salience-recall against the PDF-anchor
-synthetic fixture; `coh` is the structural-conformance score (0..1, sum of
-weights of passing checks); `bm25` is the page-level mean of per-claim top-1
-BM25 retrieval scores. The tournament keys on `combined-quality = 0.5·sem +
-0.5·sal` — so a draft with low semantic but high salience can beat a
-high-semantic-low-salience peer if the combined number wins. The lexicographic
-tail (coherence → -drift → n_graded → bm25 → weakest_score) decides ties.
+A current grade line prints `sem`, the page-level mean of per-claim bi-encoder
+cosines (fidelity); `sal`, salience-recall against the PDF-anchor synthetic
+fixture; `target`, importance-weighted recall against the paper-wide target
+claims; `coh`, the structural-conformance score (0..1, sum of weights of passing
+checks); and `bm25`, the page-level mean of per-claim top-1 BM25 retrieval
+scores. `combined-quality` is the normalized blend of every available primary
+axis (`sem`, `sal`, `target`). Salience reaches full confidence at 10 anchors;
+target-claim recall reaches it at 5 extracted claims; thin denominators reduce
+that axis's weight before renormalization. The lexicographic tail (coherence →
+-drift → n_graded → bm25 → weakest_score) decides primary-score ties.
 
 The run above is a tie broken by that tail, which is the case worth seeing: both
 drafts scored `sem=0.77`, so the primary scalar could not separate them, and the
@@ -158,7 +164,7 @@ winner was the draft that graded more claims (15 vs 12) at a higher BM25 (15.4 v
 12.1). A tournament outcome that looks arbitrary on the primary axis usually isn't
 — check the tail before assuming the selection is noise.
 
-Two details of that blend matter when you're reading a tournament outcome that
+Three details of that blend matter when you're reading a tournament outcome that
 looks wrong:
 
 - **Each axis is rounded to 0.01 before blending**, not the blend afterwards.
@@ -174,6 +180,9 @@ looks wrong:
   of historical drafts had fewer than 10 anchors and 2% fewer than 5, where the
   score is a ratio over too small a denominator to swing selection at full
   strength; those dilute toward fidelity instead.
+- **Target-claim recall is confidence-weighted by `n_target_claims`**, ramping
+  to full weight at 5. When target extraction fails or is absent on a legacy
+  row, the axis is omitted and the prior fidelity/salience behavior is retained.
 
 `salience_score` values are **not comparable across the 2026-07 abstract-anchor
 guards** (below) — the guards changed the denominator, so `insights` history
@@ -811,8 +820,9 @@ Pending evolution proposals: 1 dir(s), 1 total file(s)
 Ingest cost (last 7 days):
   attempts:           11
   total tokens:       603K input + 108K output
+  prompt cache:       210K read + 18K written (included in input)
   mean per attempt:   65K tokens
-  estimated cost:     $1.91  (rates as of 2026-08-03; upper bound — ignores prompt-cache hits)
+  estimated cost:     $1.74  (rates as of 2026-08-03; 3 legacy calls lack cache detail)
     claude-haiku-4-5-20251001     300K in,      15K out
     claude-sonnet-5            304K in,      92K out
 ```
@@ -824,13 +834,15 @@ counts as $0.00 — correct for a local backend, so `status` separately names an
 the bill.
 
 `lint` reports orphans, broken wikilinks, missing back-links, stale
-syntheses (by mtime, by content via topic-seed search, and by audit-count
+syntheses (by source ingest date, by content via topic-seed search, and by audit-count
 drift), missing keywords, missing DOIs, stem↔YAML year drift, stale
 evolution proposals (≥7 days old), concept candidates, page-type
 mismatches, invalid YAML frontmatter, and supplementary-file consistency
-(missing-on-disk + orphaned files in `papers/{stem}.supp/`). Pass `--fix`
-to auto-insert missing back-links (the only auto-fix; everything else
-needs human judgment). Pass `--cross-paper` to opt into the
+(missing-on-disk + orphaned files in `papers/{stem}.supp/`). Pass `--fix` for
+the deterministic repairs: insert missing back-links, recover blank
+`ingested_at` / `author_model` fields from ingest telemetry when available, and
+reconcile structured-DB drift. Findings requiring inference remain review
+queues. Pass `--cross-paper` to opt into the
 LLM-call-heavy cross-paper contradiction check: claim pairs across
 different papers at high embedding cosine are sent to a judge that flags
 numeric or directional disagreements. Off by default — the bulk of lint
@@ -889,6 +901,7 @@ researchwiki/
 │   ├── pdf_chunks.py       #   Per-PDF Tantivy chunk index + chunk embeddings
 │   ├── pages_bm25.py       #   Wiki-page BM25 index (Tantivy)
 │   ├── pages_semantic.py   #   Wiki-page dense embedding store
+│   ├── incremental.py      #   Locked per-page BM25 + semantic upserts after ingest
 │   ├── graph.py            #   Weighted paper-graph edges + modularity clustering
 │   └── types.py            #   Document, SearchHit, SearchBackend ABC
 ├── search/                 # Query orchestration over index/
@@ -932,9 +945,9 @@ researchwiki/
 │   │                       #     Research Highlight / News & Views as type: paper)
 │   ├── context.py          #   Shared phase Context (each phase reads/writes it)
 │   ├── fitness.py          #   Tournament + improvement-rule lenses;
-│   │                       #     `combined_quality` = 0.5·semantic + 0.5·salience,
-│   │                       #     salience down-weighted below 10 anchors; selection
-│   │                       #     quantizes each axis to 0.01 before blending
+│   │                       #     `combined_quality` blends semantic + salience +
+│   │                       #     target-claim recall; recall axes are confidence-
+│   │                       #     weighted, then quantized to 0.01 for selection
 │   ├── llm.py              #   LLM API wrapper (provider-routed; real + stub)
 │   ├── model_config.py     #   Per-role model assignments from config/models.*.yaml
 │   ├── relay.py            #   chat-relay provider client
@@ -1109,10 +1122,13 @@ dated build IDs the APIs return resolve to their family — the estimator used t
 key on bare family names and silently priced those at $0.00. Time-boxed rates are
 expressed with `until:` (Sonnet 5's introductory pricing lapses 2026-08-31).
 
-Every printed figure is an **upper bound**: `ingest_iterations` records only
-input/output totals, and a prompt-cache hit costs 0.1× input, so runs with
-`cache_prompt=True` really cost less than shown. To refresh, correct the rates and
-bump `as_of:` in the same edit.
+New `ingest_iterations` rows record cache-read/write subsets of total input.
+Reports apply the verified Anthropic cache multipliers from the pricing table;
+legacy rows keep unknown cache detail and are priced conservatively at the base
+input rate rather than guessed. The figures remain estimates because the table
+does not model batch discounts, long-context surcharges, fast mode, data
+residency, or server-side tools. To refresh, correct the rates and bump `as_of:`
+in the same edit.
 
 Absolute cost is **config-dependent** — it rides on whichever
 `config/models.*.yaml` file `RW_MODELS_CONFIG` selects and that provider's
@@ -1495,7 +1511,7 @@ researchwiki synthesize --title "CRISPR off-target strategies" \
     --slug crispr-off-target-strategies --topic-seed "CRISPR off-target prediction" \
     --papers cgt/smith-2024-... cgt/jones-2025-...   # 3. scaffold a synthesis page (idea pages are manual)
 
-researchwiki reindex                                 # 4. rebuild Tantivy + semantic index (~10s)
+researchwiki reindex                                 # 4. full recovery after manual edits/index warnings; agent ingest upserts incrementally
 
 researchwiki search "CRISPR off-target"              # 5. hybrid (BM25 + semantic RRF); --mode bm25|semantic
 researchwiki search --like compbio/smith-2024-...    #    See-Also on a page; --see-also adds 2 related/hit
@@ -1527,7 +1543,7 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 
 | Command | Purpose |
 |---|---|
-| `agent ingest <pdf> [--supplementary <f>...]` | Full pipeline: reconcile → extract → crosslink → parallel-author → grade → critic/evolve/debug → promote → propose evolutions. Provider API key required (`OPENAI_API_KEY` by default). |
+| `agent ingest <pdf> [--supplementary <f>...]` | Full pipeline: reconcile → extract target claims → crosslink → author (1 draft by default; `-n 2+` for a tournament) → grade → critic/evolve/debug → promote → incrementally index → propose evolutions → persist grades. Optional per-PDF limits: `--max-model-calls`, `--max-tokens`, `--max-cost-usd`, `--max-wall-seconds`. Provider API key required (`OPENAI_API_KEY` by default). |
 | `ingest <pdf>... [--category] [--supplementary]` | Digest-only (no LLM authoring): DOI, S2 metadata, stem, crosslinks, anchoring → `.ingest/{stem}-digest.md`. Author the page yourself. |
 | `attach <category/stem> <file>` | Attach a supplementary file to an existing page; copies into `papers/{stem}.supp/`, updates YAML. |
 | `neighbors <doi-or-stem>` | S2 citation-graph neighbors. `--mode references\|citations\|recommendations\|all`, `--year`, `--needs-ingest`. Structured fields only. |
@@ -1566,8 +1582,10 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `figures <stem> [--figure N]` | List a paper's figure captions, or render one page to `.figures-cache/` to read when the evidence is in the figure rather than the prose. Captions are free; render one page at a time — a PNG costs context in proportion to its pixel area. |
 | `insights [--days N] [--json]` | Analytics over the ingest telemetry log: draft quality + cost by model, section difficulty, token spend by role, draft decisions. Read-only, no LLM. |
 
-Every operation appends a parseable entry to `wiki/log.md` (inside `wiki/`
-so an Obsidian vault opened there can browse it).
+Content mutations such as ingest, attach, synthesize, concept scaffolding, and
+remove append parseable entries to `wiki/log.md` (inside `wiki/` so an Obsidian
+vault opened there can browse it). Read-only inspection commands do not append
+history merely because they were run.
 
 ---
 

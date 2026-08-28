@@ -264,9 +264,59 @@ def test_gleaning_suppressed_yields_no_candidates(monkeypatch):
 
 
 def test_gleaning_still_runs_when_citations_were_available(monkeypatch):
-    """Suppression must be conditional — the recall pass is otherwise wanted."""
+    """Suppression is conditional; a second strict evidence pass is allowed."""
     out = _judge(monkeypatch, allow_gleaning=True)
     assert [c.wikilink for c in out] == ["compbio/g"]
+
+
+def test_first_pass_borderline_verdict_does_not_become_a_link(monkeypatch):
+    """Semantic adjacency is a proposal signal, never durable link evidence."""
+    hit = _Hit("compbio/h0")
+    monkeypatch.setattr(crosslinks, "_build_judge_prompt", lambda *a, **k: "P")
+    monkeypatch.setattr(
+        crosslinks, "_parse_judge_response",
+        lambda _text: [{
+            "wikilink": hit.key,
+            "verdict": "borderline",
+            "rationale": "same problem, different method",
+        }],
+    )
+    monkeypatch.setattr(
+        crosslinks.llm, "call",
+        lambda *a, **k: type("R", (), {"text": "{}"})(),
+    )
+
+    assert crosslinks._judge_candidates({}, {}, [hit]) == []
+
+
+def test_gleaning_borderline_verdict_does_not_become_a_link(monkeypatch):
+    """The recall pass must use the same source-supported threshold as pass 1."""
+    hit = _Hit("compbio/h0")
+    monkeypatch.setattr(crosslinks, "_build_gleaning_prompt", lambda *a, **k: "P")
+    monkeypatch.setattr(
+        crosslinks, "_parse_judge_response",
+        lambda _text: [{
+            "wikilink": hit.key,
+            "verdict": "borderline",
+            "rationale": "plausible but uncertain",
+        }],
+    )
+    monkeypatch.setattr(
+        crosslinks.llm, "call",
+        lambda *a, **k: type("R", (), {"text": "{}"})(),
+    )
+
+    assert crosslinks._gleaning_pass(
+        {}, {}, [hit], [hit.key], {hit.key: hit},
+    ) == []
+
+
+def test_judge_schema_cannot_request_a_speculative_link():
+    verdict = (
+        crosslinks._JUDGE_SCHEMA["properties"]["verdicts"]["items"]
+        ["properties"]["verdict"]
+    )
+    assert verdict["enum"] == ["topical", "none"]
 
 
 def test_crosslink_candidates_reports_unresolved_citation_graph(monkeypatch):
@@ -339,7 +389,7 @@ def test_topical_candidates_skip_stale_semantic_rows(monkeypatch, tmp_path):
         {"title": "New paper"}, {}, use_stub=True,
     )
 
-    assert [candidate.wikilink for candidate in out] == ["compbio/present"]
+    assert out == [], "stub similarity cannot perform source-engagement verification"
 
 
 def test_judge_prompt_tolerates_candidate_removed_during_prompt_build(

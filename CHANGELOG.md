@@ -125,6 +125,14 @@ the reasoning behind any line below.
   grade persistence run with enforcement paused, while optional memory
   evolution briefly re-arms the same tracker and records exhaustion as a skip.
 
+- **Semantic neighbors can no longer become Related-Papers links on adjacency
+  alone.** The link-generation judge now requires explicit build-on/contrast
+  evidence in the supplied source-grounded excerpts; the second-pass gleaning
+  step uses the same bar, `borderline` is no longer an accepted schema verdict,
+  and stub mode emits no semantic links because it cannot perform that judgment.
+  This brings the ingest path back into line with the repository's
+  source-supported cross-link contract.
+
 - **Reference-manager imports now keep identity decisions deterministic and
   retries safe.** Duplicate-DOI records choose their metadata-complete survivor
   before competing for a PDF while retaining attachment paths from duplicates;

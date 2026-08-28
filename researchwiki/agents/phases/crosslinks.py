@@ -4,11 +4,11 @@
 *verified* whitelist of [[wikilinks]] sourced from the citation graph
 (S2 references / citations, Crossref refs, PDF DOI scan).
 
-`propose_crosslinks` runs alongside it: semantic-KNN against the
-wiki page index produces *topical* candidates the citation graph misses
-(e.g. independent contemporaneous work, papers using a different proxy for
-the same idea), then a single LLM judge call confirms each is a real
-relationship rather than a coincidence of vocabulary.
+`propose_crosslinks` runs alongside it: semantic-KNN against the wiki page
+index nominates candidates the citation graph misses, then a strict LLM judge
+keeps only source-supported engagement — the supplied paper excerpts must
+explicitly build on or contrast the candidate. Shared topic/problem alone is
+not linkable under the repository's cross-link contract.
 
 `verify_crosslinks` runs at commit time to strip any [[wikilink]] the author
 wrote that wasn't on the whitelist or whose target page is missing — the
@@ -41,7 +41,8 @@ class CrosslinkCandidate:
     The candidate's `kind` records the discovered direction:
       - 'cited_by_source'   — source paper cites this wiki page (PDF-ref or S2 /references)
       - 'cites_source'      — wiki page cites the source paper (S2 /citations)
-      - 'topical'           — semantic-KNN match confirmed by LLM
+      - 'topical'           — legacy token for an LLM-confirmed, source-supported
+                              build-on/contrast relationship
 
     `relationship` is populated only for `topical` candidates — a one-line
     LLM-provided rationale that the author phase can use as the bullet text
@@ -49,15 +50,17 @@ class CrosslinkCandidate:
     the author phase generates its own one-liner from paper context.
 
     Only candidates with `verified=True` are passed to the author phase as
-    safe-to-use [[wikilinks]]. The commit phase strips any wikilink the
-    author writes that isn't in the verified candidate list.
+    safe-to-use [[wikilinks]]. Here "verified" means citation-graph evidence or
+    a strict source-engagement judgment over PDF-grounded excerpts — never
+    semantic similarity alone. The commit phase strips any wikilink the author
+    writes that isn't in the verified candidate list.
     """
     doi: str
     wikilink: str           # 'category/stem' (no [[]] wrapper)
     kind: str
     title: str
     year: int | str | None
-    verified: bool          # True iff cross-checked against an authoritative source
+    verified: bool          # True iff citation-backed or source-engagement judged
     relationship: str = ""  # LLM-provided one-liner for `topical` candidates
 
 
@@ -258,14 +261,14 @@ def propose_crosslinks(
     exclude_keys: frozenset[str] = frozenset(),
     allow_gleaning: bool = True,
 ) -> list[CrosslinkCandidate]:
-    """Find topical crosslink candidates the citation graph misses.
+    """Find source-supported crosslink candidates the citation graph misses.
 
     Pipeline (A-Mem Link Generation analog):
       1. Embed the new paper's title + summary excerpt (semantic page index).
       2. Top-k semantic neighbors among existing paper-type pages.
-      3. Single LLM call judges each: real relationship vs. coincidental
-         vocabulary overlap. Verdicts kept: `topical` (with one-line rationale).
-         Dropped: `none`.
+      3. Single LLM call judges each against source/candidate excerpts. Keep only
+         explicit build-on/contrast relationships; shared topic, task, or
+         vocabulary is `none`.
 
     Returns CrosslinkCandidate list with `kind="topical"`, `verified=True`,
     and `relationship` populated. Caller unions these with the citation-graph
@@ -277,9 +280,8 @@ def propose_crosslinks(
 
     `allow_gleaning=False` disables the second-chance pass. Pass it when the
     citation graph came back unresolved (see `crosslink_candidates`'s `stats`):
-    gleaning re-opens candidates pass 1 already rejected, and doing that with
-    no citation evidence anywhere in the run is how topical adjacency gets
-    promoted into a Related Papers bullet.
+    without structural evidence, re-opening candidates rejected in pass 1
+    adds model pressure without adding source evidence.
     """
     if not semantic_pages.index_exists():
         return []
@@ -311,19 +313,9 @@ def propose_crosslinks(
         return []
 
     if use_stub:
-        # Stub mode (offline tests): accept the top-3 with placeholder rationale.
-        return [
-            CrosslinkCandidate(
-                doi="",
-                wikilink=h.key,
-                kind="topical",
-                title=h.title,
-                year=None,
-                verified=True,
-                relationship=f"semantic neighbor (cos={h.score:.2f}); review",
-            )
-            for h in hits[:3]
-        ]
+        # Similarity only nominates candidates; the stub cannot perform the
+        # source-engagement judgment required to turn one into a wikilink.
+        return []
 
     judged = _judge_candidates(
         metadata, sections, hits, allow_gleaning=allow_gleaning
@@ -345,13 +337,10 @@ def _judge_candidates(
     related work. A 1.5K-token prompt covering 8 candidates beats 8 separate
     400-token calls.
 
-    Pass 2 — gleaning, GraphRAG-style. When pass 1 was strict-recall (≤2
-    topical kept and ≥3 dropped as 'none'), re-ask: *"of the dropped
-    candidates, were any borderline that you'd want flagged for the author?"*
-    Reports show single-pass entity extraction misses ~50% of true positives
-    in similar settings (Edge 2024); a single gleaning round catches most of
-    them at ~$0.003 marginal cost. Capped at one round so the call count
-    stays bounded.
+    Pass 2 — one strict recall pass. When pass 1 kept ≤2 and rejected ≥3,
+    re-check whether it overlooked explicit build-on/contrast evidence. The
+    acceptance bar does not move: speculative or merely adjacent candidates
+    remain unlinked. Capped at one round so the call count stays bounded.
     """
     block = _build_judge_prompt(metadata, sections, hits)
     try:
@@ -377,7 +366,7 @@ def _judge_candidates(
         verdict_kind = (v.get("verdict") or "").strip().lower()
         if key not in by_key:
             continue
-        if verdict_kind == "none":
+        if verdict_kind != "topical":
             rejected_keys.append(key)
             continue
         h = by_key[key]
@@ -392,10 +381,9 @@ def _judge_candidates(
         ))
         promoted_keys.add(key)
 
-    # Gleaning: when recall looks low, give the LLM one more chance to flag
-    # borderline cases it dropped. Skip if the first pass already accepted
-    # most candidates (precision was the constraint, not recall) or if there
-    # are too few rejections to be worth a second call.
+    # Gleaning: when recall looks low, give the LLM one more chance to find
+    # explicit engagement evidence it overlooked. The second pass has the same
+    # precision bar; it cannot promote borderline adjacency.
     if not allow_gleaning:
         log(f"gleaning suppressed (citation graph unresolved; pass-1: "
             f"{len(out)} topical, {len(rejected_keys)} rejected)",
@@ -428,10 +416,9 @@ def _gleaning_pass(
 ) -> list[CrosslinkCandidate]:
     """Re-prompt the judge on its rejected candidates only.
 
-    The intent isn't to overrule pass 1 — strict precision is desirable —
-    but to catch the failure mode where a borderline-topical neighbor got
-    rejected with no rationale and the author never sees it. Pass 2's
-    bar is *"flag for author review"*, not *"absolutely cite"*.
+    The intent isn't to lower pass 1's bar, but to catch explicit build-on or
+    contrast evidence that was overlooked. Both passes authorize a durable
+    wikilink, so both must meet the same source-supported threshold.
     """
     if not rejected_keys:
         return []
@@ -456,7 +443,7 @@ def _gleaning_pass(
     for v in _parse_judge_response(resp.text):
         key = v.get("wikilink")
         verdict_kind = (v.get("verdict") or "").strip().lower()
-        if key not in by_key or verdict_kind not in ("topical", "borderline"):
+        if key not in by_key or verdict_kind != "topical":
             continue
         h = by_key[key]
         rationale = (v.get("rationale") or "").strip()[:200]
@@ -478,7 +465,9 @@ def _gleaning_pass(
 # JSON Schema for the crosslink judge envelope (used by both _judge_candidates
 # and _gleaning_pass). Honored by chat-relay; ignored by other providers.
 # `verdict` is enum-constrained because downstream code matches against
-# specific lowercase strings.
+# specific lowercase strings. There is deliberately no "borderline" value:
+# speculative relationships may be reported elsewhere, but may not become
+# durable Related-Papers wikilinks.
 _JUDGE_SCHEMA = {
     "type": "object",
     "required": ["verdicts"],
@@ -491,7 +480,7 @@ _JUDGE_SCHEMA = {
                 "properties": {
                     "wikilink": {"type": "string"},
                     "verdict":  {"type": "string",
-                                 "enum": ["topical", "borderline", "none"]},
+                                 "enum": ["topical", "none"]},
                     "rationale": {"type": ["string", "null"]},
                 },
             },
@@ -506,11 +495,13 @@ wiki pages that semantically resemble it, decide which pairings represent
 a real intellectual relationship versus coincidental vocabulary overlap.
 
 For each candidate, output one of:
-  - "topical" — the new paper genuinely builds on, contrasts with, or solves
-    the same problem as the candidate. Provide a 12-25 word rationale that
-    a wiki author could paste verbatim into a Related Papers bullet.
-  - "none" — the resemblance is superficial (same field, different problem;
-    same words, different meaning). No rationale needed.
+  - "topical" — compatibility label for an EXPLICIT source-supported
+    relationship: the new-paper excerpts show that it builds on or contrasts
+    the candidate's named method, result, or claim. Provide a 12-25 word
+    rationale naming that evidence.
+  - "none" — no explicit engagement is supported. This includes merely solving
+    the same problem, using similar methods independently, sharing a field, or
+    resembling the candidate only semantically. No rationale needed.
 
 Be strict. False positives waste an author's time and dilute the wiki's
 cross-link signal. When in doubt, return "none".
@@ -527,22 +518,16 @@ You are reviewing your own previous verdicts on candidate wiki cross-links.
 The shortlist below is the subset you marked "none" on the first pass — i.e.
 candidates you rejected as superficial.
 
-The first pass was strict by design (better to under-flag than dilute the
-wiki). This pass is the safety net: of the rejected candidates, are any
-borderline cases worth surfacing to the author *for review* — papers where
-the relationship is plausible but uncertain, or topical adjacency that
-warrants a one-line mention even with caveat?
+The first pass was strict by design (better to under-link than dilute the
+wiki). This pass is a recall check: did it overlook explicit evidence in the
+provided excerpts that the new paper builds on or contrasts a candidate?
 
 For each candidate, output one of:
-  - "topical" — on reflection, the relationship is real and worth a citation.
-    Use this when the first pass was too strict.
-  - "borderline" — the resemblance is non-trivial but the connection is
-    speculative (e.g., same problem area, different methodology). Worth
-    flagging for the author to decide. Provide a rationale that names the
-    uncertainty (e.g., "shares the off-target prediction goal but uses
-    different features — author should check whether to cite").
-  - "none" — your original verdict stands; the resemblance really is
-    superficial.
+  - "topical" — compatibility label for explicit build-on/contrast evidence
+    the first pass missed. Name that evidence in the rationale.
+  - "none" — the original verdict stands. Plausible, uncertain, same-problem,
+    or topically adjacent relationships remain `none` because this output can
+    become a durable wikilink.
 
 Most candidates will stay "none". Promote one or two if the case is solid.
 False promotions reverse the value of the strict first pass.
@@ -550,7 +535,6 @@ False promotions reverse the value of the strict first pass.
 Output JSON only, shape:
 {"verdicts": [
   {"wikilink": "category/stem", "verdict": "topical", "rationale": "..."},
-  {"wikilink": "category/stem", "verdict": "borderline", "rationale": "..."},
   {"wikilink": "category/stem", "verdict": "none"}
 ]}
 """
@@ -568,7 +552,7 @@ def _build_gleaning_prompt(metadata: dict, sections: dict, rejected_hits: list) 
         "Results excerpt:",
         (sections or {}).get("results", "")[:600],
         "",
-        "# Previously-rejected candidates — review these for borderline cases",
+        "# Previously-rejected candidates — re-check for explicit engagement",
     ]
     for h in rejected_hits:
         page = _candidate_page(h)
