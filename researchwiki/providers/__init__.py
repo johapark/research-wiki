@@ -28,6 +28,6 @@ def get_default_provider(
 
     `force_refresh_days` is forwarded to the provider's cache reader. None
     (default) honors caches as written; 0 busts everything; N>0 bypasses
-    entries older than N days. Used by `audit --refresh-cache`.
+    entries older than N days. Used by `scout --refresh-cache`.
     """
     return SemanticScholarProvider(log_tag=log_tag, force_refresh_days=force_refresh_days)

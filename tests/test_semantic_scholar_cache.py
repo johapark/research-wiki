@@ -216,3 +216,40 @@ def test_default_ttl_is_documented(tmp_cache):
     assert DEFAULT_NEG_TTL_DAYS == 30
     provider = SemanticScholarProvider()
     assert provider.negative_ttl_days == 30
+
+
+def test_batch_cache_identity_and_positional_mapping_use_one_doi_order(
+    tmp_cache, monkeypatch
+):
+    provider = SemanticScholarProvider()
+    cached: dict[Path, list[dict]] = {}
+    payload_orders: list[list[str]] = []
+    cache_names: list[str] = []
+
+    def fake_post_fetch(url, payload, cache_path):
+        payload_orders.append(list(payload["ids"]))
+        cache_names.append(cache_path.name)
+        if cache_path not in cached:
+            cached[cache_path] = [
+                {
+                    "title": paper_id,
+                    "externalIds": {"DOI": paper_id.removeprefix("DOI:")},
+                }
+                for paper_id in payload["ids"]
+            ]
+        return cached[cache_path]
+
+    monkeypatch.setattr(provider, "_post_fetch", fake_post_fetch)
+
+    first = provider.get_batch_metadata(["10.2/b", "10.1/a"])
+    second = provider.get_batch_metadata(["10.1/a", "10.2/b"])
+
+    assert payload_orders == [
+        ["DOI:10.1/a", "DOI:10.2/b"],
+        ["DOI:10.1/a", "DOI:10.2/b"],
+    ]
+    assert all(name.startswith("s2_batch_v2__") for name in cache_names)
+    assert first["10.1/a"].title == "DOI:10.1/a"
+    assert first["10.2/b"].title == "DOI:10.2/b"
+    assert second["10.1/a"].title == "DOI:10.1/a"
+    assert second["10.2/b"].title == "DOI:10.2/b"

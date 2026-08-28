@@ -92,7 +92,7 @@ def read_page(md: Path) -> Page | None:
     Returns None only when the file has no frontmatter block at all (no leading
     `---` fence) — i.e. it isn't a wiki page. A present-but-malformed YAML block
     yields a Page with `fm={}` rather than None, so a single typo never silently
-    drops the page from search / audit / lint (which flag the bad YAML
+    drops the page from search / scout / lint (which flag the bad YAML
     separately via `invalid_frontmatter`).
     """
     text = md.read_text(encoding="utf-8")

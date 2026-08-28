@@ -1,12 +1,12 @@
 """One-screen health check of the local wiki state.
 
 ✅ Use when: you want a quick snapshot (paper counts, cross-link density,
-   orphans, inbox backlog, recent additions). Safe to run at any time.
+   orphans, inbox/web-scout backlog, recent additions). Safe to run at any time.
 ❌ Don't use: for structured issue lists (use `lint`). Not a search tool.
 
 Fast (no network calls) — reads only local YAML frontmatter, wiki page text,
-and `inbox/` / `.ingest/` filesystem state. For a full citation-graph audit
-(which does make Semantic Scholar calls) run `researchwiki audit`.
+and `inbox/` / `.ingest/` filesystem state. For structured citation scouting
+(which does make Semantic Scholar calls) run `researchwiki scout`.
 
 Exit code: 0 for a report; 2 when an explicitly selected environment/config is unusable.
 """
@@ -442,6 +442,11 @@ def main(argv: list[str]) -> int:
 
     inbox_files = _pending_pdfs(inbox_dir())
     ingest_files = _pending_digests(ingest_dir())
+    # Local, resumable agent handoffs. `list_runs` performs no network access
+    # and turns malformed run artifacts into explicit `invalid` rows rather
+    # than letting one broken directory hide the rest of the queue.
+    from ..scouting.web import list_runs as _list_web_scout_runs
+    web_scout_runs = _list_web_scout_runs()
     failed = _failed_parsing_entries(wiki_pages)
     # A PDF in `papers/` that no page claims. Belongs beside the other two
     # counters above rather than only in `lint`: this is workflow state, not a
@@ -556,6 +561,20 @@ def main(argv: list[str]) -> int:
         print(f"    - {f.name}")
     if len(ingest_files) > 5:
         print(f"    ... ({len(ingest_files) - 5} more)")
+    web_awaiting_agent = [r for r in web_scout_runs if r["state"] == "requested"]
+    web_invalid = [r for r in web_scout_runs if r["state"] == "invalid"]
+    print(f"  web-scout runs awaiting agent:  {len(web_awaiting_agent)}")
+    if web_awaiting_agent:
+        for row in web_awaiting_agent[:5]:
+            print(f"    - [{row['state']}] {row['run_id']}")
+        pending_total = len(web_awaiting_agent)
+        if pending_total > 5:
+            print(f"    ... ({pending_total - 5} more)")
+        print("    → resume with `researchwiki scout web list`")
+    if web_invalid:
+        print(f"  invalid web-scout runs:          {len(web_invalid)}")
+        for row in web_invalid[:5]:
+            print(f"    - {row['run_id']}: {row['error']}")
 
     # Interrupted multi-file mutations. Reported, never drained — `status` is
     # read-only, and the next ingest rolls these back on its own.
@@ -758,7 +777,7 @@ def main(argv: list[str]) -> int:
               "(`researchwiki candidates concepts --bridges`)")
         print()
 
-    print("For the full citation-graph report run: researchwiki audit")
+    print("For the full citation-scout report run: researchwiki scout")
     return 0
 
 

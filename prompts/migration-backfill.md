@@ -305,7 +305,7 @@ Migrated pages arrive with no relationship to the existing corpus:
 
 ```bash
 researchwiki claim-overlap <stem>          # per new stem; LLM-judged reciprocal links
-researchwiki audit --json                  # S2 citation graph → missing cross-links
+researchwiki scout --json                  # S2 citation graph → missing cross-links
 researchwiki candidates concepts --bridges # new pages may complete a bridge concept
 ```
 

@@ -22,6 +22,30 @@ the reasoning behind any line below.
 
 ### Added
 
+- **Agent-native web scouting now has a provider-neutral handoff contract.**
+  `researchwiki scout web request` emits a bounded, versioned request for the
+  active chat agent's own web-search harness. The agent keeps its native
+  conversational answer and citations; `record` stores only harness + source
+  URLs + opened-vs-snippet status, while `accept` validates the same schema-2
+  receipt from JSON with optional title/date metadata. Public HTTP(S),
+  domain/fetch/source bounds are validated on the submitted receipt (a
+  `--since` date rejects known older publication dates but allows undated
+  sources). The write-once artifacts provide drift checks but cannot verify what the host
+  harness actually opened. Discovery-only quarantine avoids storing excerpts,
+  findings, briefs, or other research prose.
+  `report` renders only an inert source ledger. Runs expose the small lifecycle
+  (`requested`, `recorded`, `invalid`) through `list` / `show`; requested or
+  invalid handoffs surface in `status`.
+
+- **`researchwiki scout` is now the canonical structured citation-discovery
+  command.** Bare `scout` and `scout citations` run the existing Semantic
+  Scholar graph report; `researchwiki audit` remains as a deprecated alias.
+  The published JSON keys, legacy `.s2-cache/audit-{date}.json` snapshots, and
+  `wiki_papers_at_audit` refresh marker remain unchanged so existing agents and
+  curated suggested-additions pages keep working during the compatibility
+  window. Web research remains a distinct `scout web` handoff rather than a
+  behavior change to citation scouting.
+
 - **Dotenv profiles and model routing now fail closed.** The CLI accepts
   `--env-file PATH` before a command, loads that profile instead of the root
   `.env`, and lets `init` update the selected profile. Profiles are parsed in
@@ -67,8 +91,8 @@ the reasoning behind any line below.
 
 - **Paper-scoped provider checks no longer count DOI-bearing books or
   commentaries as papers.** `read_wiki_papers()` now enforces the page-type
-  boundary shared by `audit`, `preprint-check --all`, and
-  `retraction-check --all`. On a mixed corpus the leak could make audit's
+  boundary shared by `scout`, `preprint-check --all`, and
+  `retraction-check --all`. On a mixed corpus the leak could make scout's
   `papers_skipped_no_doi` count negative (the live corpus reported `-6`) and
   send reference documents through paper-only external lookups. Structural
   page-type directories are excluded even when a malformed legacy page omits

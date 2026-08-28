@@ -118,7 +118,7 @@ The graph view should render paper ↔ paper relationships, not the scaffolding 
 Files to exclude:
 
 - **Wiki root bookkeeping** — `index.md` (catalogs every paper), `log.md` (mentions every stem in ingest entries), `views.md` (Dataview blocks list every paper).
-- **Workflow prompts** — everything under `prompts/` (init, ingest-digest, idea-page-author, recategorize, recovery, lookups, cross-link-discovery, share-page, export-bibliography, audit-refresh, plus system prompts). Reference docs about how to run the framework; not corpus content.
+- **Workflow prompts** — everything under `prompts/` (init, ingest-digest, idea-page-author, recategorize, recovery, lookups, cross-link-discovery, share-page, export-bibliography, scout-refresh, scout-web, plus system prompts). Reference docs about how to run the framework; not corpus content.
 - **Benchmark harness** — everything under `benchmark-fixtures/` (fixture YAMLs, README, PLAN, CALIBRATION, LICENSES, retrieval/README). Test infrastructure, not knowledge.
 - **Test fixtures** — everything under `tests/` (HALLUCINATED grader-test pages). Deliberately-wrong pages used for grader-regression testing.
 - **Root repo docs** — `CLAUDE.md`, `README.md`, `AGENTS.md`, `WORKFLOW.md`. Project instructions and READMEs.

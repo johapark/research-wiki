@@ -6,7 +6,8 @@ informational. Run `researchwiki --help` for the canonical set.
   - ingest     — PDF → wiki-ready digest pipeline
   - agent      — full agentic ingest (LLM author + grader gate + promote)
   - attach     — attach a supplementary file to an existing wiki page
-  - audit      — citation-graph audit across all current wiki papers (needs S2)
+  - scout      — structured citation scouting, plus agent-native web handoffs
+  - audit      — deprecated alias for `scout citations`
   - status     — one-screen local health check (no network)
   - synthesize — scaffold entity / concept / synthesis / comparison pages
   - lint       — deeper local consistency checks (orphans, broken links, stale syntheses)

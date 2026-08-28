@@ -38,7 +38,7 @@ Every inserted link is marked `(auto-added; refine)` so the LLM knows to
 rewrite the one-liner on the next ingest/query pass.
 
 For citation-graph gap-finding (cross-links that exist in S2 but not in the
-wiki), run `researchwiki audit` instead — that one needs network.
+wiki), run `researchwiki scout` instead — that one needs network.
 
 Exit code: 0 always (lint reports findings; issues found are not failures).
 """
@@ -311,4 +311,3 @@ def main(argv: list[str]) -> int:
         cross_paper_stats=cross_paper_stats,
         fix_applied=args.fix, fix_written=fix_written,
     )
-

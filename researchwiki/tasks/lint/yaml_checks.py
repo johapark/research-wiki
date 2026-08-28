@@ -237,7 +237,7 @@ def _is_root_bookkeeping(md: Path) -> bool:
 def find_missing_doi(pages: list[Path], pages_fm: dict[Path, dict]) -> list[str]:
     """Paper-type pages without a DOI value (or DOI is `TODO`/`none`).
 
-    Without a DOI, audit/preprint-check/retraction-check can't query
+    Without a DOI, scout/preprint-check/retraction-check can't query
     S2 or PubMed for this page, and any provenance trail terminates.
     Skip synthesis/reference pages (no DOI by design), explicit
     `doi: TODO` placeholders (the digest path emits these for offline
