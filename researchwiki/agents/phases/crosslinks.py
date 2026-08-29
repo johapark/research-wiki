@@ -546,12 +546,7 @@ def _build_gleaning_prompt(metadata: dict, sections: dict, rejected_hits: list) 
         f"Title: {metadata.get('title') or 'unknown'}",
         f"Year:  {metadata.get('year') or 'unknown'}",
         "",
-        "Summary excerpt (PDF first page):",
-        (metadata.get("pdf_text_preview") or "")[:1200],
-        "",
-        "Results excerpt:",
-        (sections or {}).get("results", "")[:600],
-        "",
+        *_source_excerpt_blocks(metadata, sections),
         "# Previously-rejected candidates — re-check for explicit engagement",
     ]
     for h in rejected_hits:
@@ -571,15 +566,7 @@ def _build_judge_prompt(metadata: dict, sections: dict, hits: list) -> str:
         f"Title: {metadata.get('title') or 'unknown'}",
         f"Year:  {metadata.get('year') or 'unknown'}",
         "",
-        "Summary excerpt (PDF first page):",
-        (metadata.get("pdf_text_preview") or "")[:1200],
-        "",
-        "Methods excerpt:",
-        (sections or {}).get("methods", "")[:600],
-        "",
-        "Results excerpt:",
-        (sections or {}).get("results", "")[:600],
-        "",
+        *_source_excerpt_blocks(metadata, sections),
         "# Candidate wiki pages (top semantic neighbors)",
     ]
     for h in hits:
@@ -591,6 +578,32 @@ def _build_judge_prompt(metadata: dict, sections: dict, hits: list) -> str:
     parts.append("Output JSON per the system prompt. One verdict per "
                  "candidate. No prose outside the JSON.")
     return "\n".join(parts)
+
+
+def _source_excerpt_blocks(metadata: dict, sections: dict) -> list[str]:
+    """Render the same PDF-grounded context for both judge passes.
+
+    Explicit engagement most often appears in the introduction or discussion,
+    while methods and results establish what was actually reused or contrasted.
+    Keeping both passes on one helper prevents the recall pass from judging with
+    a thinner evidence window than the initial pass.
+    """
+    sections = sections or {}
+    sources = (
+        ("Summary excerpt (PDF first page):",
+         metadata.get("pdf_text_preview") or "", 1200),
+        ("Introduction excerpt:", sections.get("introduction") or "", 800),
+        ("Methods excerpt:", sections.get("methods") or "", 600),
+        ("Results excerpt:", sections.get("results") or "", 600),
+        ("Discussion excerpt:", sections.get("discussion") or "", 800),
+    )
+    parts: list[str] = []
+    for label, text, limit in sources:
+        excerpt = text.strip()
+        if not excerpt:
+            continue
+        parts.extend((label, excerpt[:limit], ""))
+    return parts
 
 
 def _candidate_page(hit):

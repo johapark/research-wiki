@@ -401,3 +401,26 @@ def test_judge_prompt_tolerates_candidate_removed_during_prompt_build(
 
     assert "# Candidate wiki pages" in prompt
     assert "compbio/gone" not in prompt
+
+
+@pytest.mark.parametrize(
+    "builder",
+    [crosslinks._build_judge_prompt, crosslinks._build_gleaning_prompt],
+)
+def test_semantic_judges_receive_relationship_bearing_source_sections(builder):
+    """Both passes see the sections most likely to state build-on/contrast links."""
+    metadata = {"pdf_text_preview": "Abstract context."}
+    sections = {
+        "introduction": "We build on the candidate's graph construction.",
+        "methods": "We retained its graph normalization.",
+        "results": "The extension improved recall.",
+        "discussion": "Unlike the candidate, we support cyclic graphs.",
+    }
+
+    prompt = builder(metadata, sections, [])
+
+    assert "Summary excerpt (PDF first page):\nAbstract context." in prompt
+    assert "Introduction excerpt:\nWe build on" in prompt
+    assert "Methods excerpt:\nWe retained" in prompt
+    assert "Results excerpt:\nThe extension" in prompt
+    assert "Discussion excerpt:\nUnlike the candidate" in prompt
