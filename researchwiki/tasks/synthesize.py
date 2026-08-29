@@ -223,10 +223,9 @@ def _template(
     if seed_line:
         yaml.append(seed_line)
     yaml.append(f"generated_at: {today}")
-    # `author_model:` is set by the conversational author (Claude) when filling
-    # in prose. Stamped as TODO here so the field is structurally present and
-    # the author has to consciously fill it. Mirrors the auto-stamped value on
-    # paper pages (promote.py:_build_frontmatter).
+    # `author_model:` is set by the conversational author when filling in
+    # prose. Stamped as TODO here so lint forces the author to replace it with
+    # the exact model id; a scaffold cannot know which model will complete it.
     yaml.append('author_model: "TODO"  # the LLM model that authored this synthesis (e.g. claude-sonnet-4-6, claude-opus-4-7); fill on save')
     yaml.append("tags: [synthesis]")
     evidence_section = evidence_block.rstrip() + "\n\n" if evidence_block else (

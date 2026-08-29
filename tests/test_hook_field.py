@@ -373,10 +373,10 @@ def test_the_whole_frontmatter_block_parses_with_a_colon_venue():
 
 # --- author_model: provenance for the page's own prose -----------------------
 #
-# Scoped deliberately to pages the pipeline wrote (`ingested_at:` present).
-# The field is optional by contract and 31 of 120 corpus pages predate it, so an
-# unscoped check would bury 11 real gaps under legacy noise. These tests pin the
-# scope, because widening it is the tempting and wrong change.
+# Non-idea authored pages require a real model id. Idea pages are intentionally
+# exempt because they are living documents that may be revised by several
+# authors/models; legacy paper pages without an ingest stamp remain out of scope
+# because their provenance cannot be recovered honestly.
 
 def test_missing_author_model_flags_an_ingested_page_without_one(tmp_wiki):
     _mkpage(tmp_wiki, "genomics/a-2026-x",
@@ -399,14 +399,22 @@ def test_a_page_predating_the_pipeline_is_out_of_scope(tmp_wiki):
     assert find_missing_author_model(*_walk(tmp_wiki)) == []
 
 
-@pytest.mark.parametrize("ptype", ["synthesis", "idea", "concept", "whitepaper", "guidance"])
-def test_only_paper_pages_are_in_scope(tmp_wiki, ptype):
-    """Reference docs take the field on the manual path where it is genuinely
-    optional, and the synthesis/idea scaffolds emit `author_model: "TODO"` for a
-    human to fill rather than guaranteeing a value."""
+@pytest.mark.parametrize("ptype", ["synthesis", "concept", "whitepaper", "guidance", "protocol", "book"])
+def test_authored_non_idea_pages_are_in_scope(tmp_wiki, ptype):
     _mkpage(tmp_wiki, f"genomics/p-2026-{ptype}",
-            f"type: {ptype}\ntitle: P\ningested_at: 2026-06-16T23:32:46")
+            f"type: {ptype}\ntitle: P")
+    assert find_missing_author_model(*_walk(tmp_wiki)) == [f"genomics/p-2026-{ptype}"]
+
+
+def test_idea_pages_are_exempt(tmp_wiki):
+    _mkpage(tmp_wiki, "ideas/living-idea", "type: idea\ntitle: I")
     assert find_missing_author_model(*_walk(tmp_wiki)) == []
+
+
+def test_placeholder_author_model_counts_as_missing(tmp_wiki):
+    _mkpage(tmp_wiki, "synthesis/a-topic",
+            'type: synthesis\ntitle: S\nauthor_model: "TODO"')
+    assert find_missing_author_model(*_walk(tmp_wiki)) == ["synthesis/a-topic"]
 
 
 def test_an_empty_author_model_counts_as_missing(tmp_wiki):

@@ -75,6 +75,7 @@ def test_new_proposal_renders_a_valid_synthesize_invocation(tmp_path, monkeypatc
     assert synthesize.main(argv[2:]) == 0
     written = (tmp_path / "wiki/synthesis/exact-topic.md").read_text()
     assert "category: [ai]" in written
+    assert 'author_model: "TODO"' in written
     assert 'topic_seed: "Exact \'topic\'"' in written
 
 

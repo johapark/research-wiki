@@ -331,6 +331,7 @@ def test_template_bridge_shape():
     # blockquote was dropped (Obsidian Live Preview renders the
     # skip-grounding HTML comments as literal text).
     assert "concept_thesis: |" in out
+    assert 'author_model: "TODO"' in out
     assert "> **Thesis.**" not in out
 
 

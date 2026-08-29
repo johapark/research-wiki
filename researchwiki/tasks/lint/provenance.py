@@ -180,9 +180,10 @@ class Survey:
 def survey() -> Survey:
     """Paper pages missing either field, split by whether the log can supply it.
 
-    Scoped to `type: paper` for the same reason `lint`'s `missing_author_model`
-    is: reference docs take `author_model` on the manual path where it is
-    optional, and the synthesis/idea scaffolds write `TODO` for a human.
+    Scoped to telemetry-backed `paper` and `commentary` pages. Reference,
+    synthesis, and concept pages are authored outside the ingest telemetry path
+    and must be completed manually; idea pages intentionally do not require the
+    field.
 
     `has_telemetry` is False when the log holds no committed ingest at all, which
     is the migrated-wiki case: every candidate then lands in `no_telemetry` and
@@ -193,7 +194,7 @@ def survey() -> Survey:
     out = Survey(has_telemetry=bool(log))
 
     for page in read_pages():
-        if page.page_type != "paper":
+        if page.page_type not in ("paper", "commentary"):
             continue
         missing = [f for f in ("ingested_at", "author_model")
                    if not page.str_field(f).strip()]

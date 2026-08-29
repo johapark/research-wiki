@@ -220,6 +220,10 @@ DOI alone is a sufficient override, and reconcile resolves the rest.
 - **Books and guidance documents.** Those are `wiki/references/` pages written
   by hand (CLAUDE.md → Page Types §3), not ingested.
 
+Every manually written reference page must set `author_model:` to the exact
+model identifier that authored its prose (for example `gpt-5.6-luna`). Do not
+leave a placeholder or provider name; `researchwiki lint` checks this field.
+
 ---
 
 ## Why pages carry no import-provenance field

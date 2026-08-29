@@ -9,7 +9,7 @@ flags a structural mismatch.
   - missing_keywords: paper page with fewer than MIN_KEYWORDS keywords
   - missing_hook: catalog page with no `hook:` gloss
   - hook_too_long: `hook:` past its page type's advisory ceiling
-  - missing_author_model: agent-ingested paper page with no `author_model:`
+  - missing_author_model: authored non-idea page with no usable `author_model:`
 """
 
 from __future__ import annotations
@@ -465,7 +465,7 @@ def find_venue_suspect(
 def find_missing_author_model(
     pages: list[Path], pages_fm: dict[Path, dict],
 ) -> list[str]:
-    """Agent-ingested paper pages with no `author_model:`.
+    """Authored non-idea pages with no usable `author_model:`.
 
     `author_model` names the LLM that wrote a page's prose, and it is the *only*
     field that does: `okfexport._actor_for` reads it alone to build OKF's
@@ -473,28 +473,24 @@ def find_missing_author_model(
     rather than inventing an actor. A page missing it therefore ships with no
     provenance for its own text.
 
-    **Scoped to pages that should have it, which is the entire point.** The
-    field is documented as optional, and 31 of this corpus's 120 pages predate
-    it or came from another framework — flagging those would bury the signal
-    under legacy noise and train the reader to ignore this check. The scope is
-    therefore pages that carry `ingested_at:`, i.e. pages some version of the
-    ingest pipeline wrote. `promote._build_frontmatter` emits both fields in the
-    same call, so on an agent-written page they either both appear or the run
-    predates `author_model` — and in the second case the page is old enough that
-    `ingested_at` is usually absent too.
+    The scope is intentional: all authored non-idea page types whose contracts
+    require provenance, with legacy paper pages excluded when they lack an
+    `ingested_at:` stamp because their model cannot be recovered honestly.
 
-    Restricted to `type: paper` for the same reason: reference docs take the
-    field on the manual whitepaper path where it is genuinely optional, and
-    synthesis/idea/concept pages are authored conversationally, where the
-    scaffolds emit `author_model: "TODO"` for a human to fill rather than
-    guaranteeing a value.
+    The check covers `paper` and `commentary` pages carrying `ingested_at:`
+    (legacy pages without that stamp stay out of scope), plus every
+    `synthesis`, `concept`, and reference page. `idea` pages are deliberately
+    exempt: they are living design documents and may be revised repeatedly by
+    a person or different models, so one frontmatter author would be
+    misleading. Root bookkeeping pages are also exempt. `TODO`, `TBD`, and
+    similar placeholders count as missing; merely having a YAML key is not
+    provenance.
 
-    Repaired by `lint --fix`, which recovers the value from the `ingest_iterations`
-    telemetry log rather than deriving it — see `lint.provenance`. That is the
-    only honest source: nothing else on disk records which model wrote prose, so
-    a page the log never saw (migrated or hand-written) stays listed here and is
-    left alone, for the same reason the OKF exporter omits the `generated` block
-    instead of fabricating one.
+    Repaired by `lint --fix` only for telemetry-backed paper/commentary pages,
+    which recovers the value from `ingest_iterations` rather than deriving it —
+    see `lint.provenance`. Hand-authored reference, synthesis, and concept
+    pages stay listed for manual completion; nothing on disk can prove which
+    model wrote them after the fact.
     """
     out: list[str] = []
     for md in pages:
@@ -502,11 +498,13 @@ def find_missing_author_model(
             continue
         fm = pages_fm.get(md, {})
         ptype = str(fm.get("type") or "paper").strip().strip("\"'")
-        if ptype != "paper":
+        if ptype in ("paper", "commentary"):
+            if not str(fm.get("ingested_at") or "").strip():
+                continue  # legacy page; not recoverable by this check
+        elif ptype not in ("synthesis", "concept", *REFERENCE_TYPES):
             continue
-        if not str(fm.get("ingested_at") or "").strip():
-            continue        # predates the pipeline; not this check's business
-        if not str(fm.get("author_model") or "").strip():
+        model = str(fm.get("author_model") or "").strip().strip("\"'").lower()
+        if model in {"", "todo", "tbd", "unknown", "none", "null", "exact-model-id"}:
             out.append(page_key(md))
     out.sort()
     return out

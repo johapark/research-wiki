@@ -2,6 +2,10 @@
 
 Trigger: when writing a new idea page (`wiki/ideas/<slug>.md`) or substantially editing an existing one (rewriting Opportunities/Plans, adding new design components, regenerating from a deeper conversation). Use this alongside CLAUDE.md §4 — that's the canonical reference; this file walks the actual authoring workflow.
 
+Idea pages intentionally omit `author_model:`. They are living design documents
+that may be revised repeatedly by a person or different models; record the
+page's evolution through `generated_at:` and git history instead.
+
 ## Section contract
 
 Every idea page has five H2 sections in this order (CLAUDE.md §4):

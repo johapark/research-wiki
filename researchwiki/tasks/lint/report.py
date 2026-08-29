@@ -358,14 +358,12 @@ def _emit_prose(**kw) -> int:
 
     missing_author_model = kw["missing_author_model"]
     if missing_author_model:
-        print(f"## Ingested pages missing `author_model:` ({len(missing_author_model)})")
-        print("Paper pages carrying `ingested_at:` but no `author_model:` — the "
-              "only field naming which LLM wrote the prose. Without it an OKF "
-              "export omits the page's whole `generated` block rather than "
-              "inventing an actor, so the page ships with no provenance. Pages "
-              "predating the pipeline are out of scope. `lint --fix` recovers "
-              "these from the ingest log; a page the log never saw (migrated or "
-              "hand-written) has nothing to recover and is left alone.")
+        print(f"## Non-idea pages missing `author_model:` ({len(missing_author_model)})")
+        print("Authored paper/commentary, synthesis, concept, and reference pages "
+              "must name the exact model that wrote their prose. Idea pages are "
+              "intentionally exempt because they evolve over time. `lint --fix` "
+              "recovers only telemetry-backed paper/commentary pages; hand-authored "
+              "reference, synthesis, and concept pages need a manual value.")
         for key in missing_author_model[:20]:
             print(f"- {key}")
         if len(missing_author_model) > 20:

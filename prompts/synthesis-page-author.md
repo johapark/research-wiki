@@ -5,6 +5,16 @@ prose sections of **idea** / **concept** pages. Governs how footnote citations
 are written so they read cleanly, click through in Obsidian, and pass
 `grade synthesis`.
 
+## Frontmatter provenance
+
+Synthesis pages must carry `author_model:` in YAML. Use the exact model
+identifier that wrote the current page (for example `gpt-5.6-luna`), quoted as
+a string; never leave `TODO`, a provider name, or a generic label.
+`researchwiki synthesize` emits a placeholder because the scaffold cannot know
+which model will fill the prose; replace it before committing. Idea pages are
+the deliberate exception because they are living documents and do not carry
+`author_model:`.
+
 ## The format: one footnote per source paper
 
 - **Marker** — id the footnote by the paper, not the claim: `[^memgpt]`,

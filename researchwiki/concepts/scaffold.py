@@ -174,6 +174,7 @@ def _template(
         thesis_indented,
         f"concept_span: {span}",
         f"generated_at: {today}",
+        'author_model: "TODO"  # replace with the exact model id that fills this hub',
         f'topic_seed: "{term.replace(chr(34), chr(39))}"',
     ]
     # topic_seed_aliases: only emitted when non-empty. Downstream hooks
