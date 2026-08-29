@@ -48,6 +48,8 @@ These apply to every response, including synthesis pages.
 
 **Corollary — flag adjacent gaps.** After a substantive cross-paper answer with partial coverage, close with a concrete "What's missing" line (specific paper types, not vague topics) and ask user to drop PDFs in `inbox/`. Skip when coverage is comprehensive.
 
+**Corollary — retrieve proportionally.** For factual corpus questions, use the *Query* router below: start with the cheapest path that can ground the answer, reuse evidence already loaded in the conversation, and escalate only when coverage or confidence requires it. Do not mechanically call every index for every question.
+
 **Corollary — ground through the claims DB.** Wiki pages are truth (Rule 2); the **claims DB is the grounding layer**. Before authoring any page with factual claims (synthesis, idea, filed query), `researchwiki claims "<topic>"` (or `--by-stem <stem>`) is the **first stop** — pre-graded units anchored to paper + section, scored against the PDF. Cite at the claim level with `[[stem#claim_slug]]` anchors (durable, content-addressed — a slug like `kc-9f3a2b1c` survives `db rebuild` and its identity is verified by `check-grounding`); the `claims` CLI prints the exact citation form to copy. Fall back to bare `[[stem]]` when the paragraph refers to the paper as a whole. On prose-heavy pages, use **academic footnotes** — one per source paper, `[^id]: [[category/stem]]` at bottom (exact form + grading gotcha in [`prompts/synthesis-page-author.md`](./prompts/synthesis-page-author.md)). Paper-page *Related Papers* stay inline `[[wikilink]]`. **In markdown tables**, footnotes don't render — use bare `[[stem]]` (or `Short-name [[stem]]`), never `[[stem\|alias]]`. **Never write `claim_id:NNN`** (legacy row-id form; `check-grounding` still tolerates it on old pages, but no current tool emits it — row ids are `AUTOINCREMENT` and reassigned on `db rebuild`, so cite the slug instead). Verify synthesis + idea pages with **both** gates, both must exit 0:
 - `researchwiki check-grounding <page>` — structural (every claim carries a citation)
 - `researchwiki grade synthesis <page>` — fidelity (each cited claim holds in the paper it cites)
@@ -434,15 +436,30 @@ Follow [`prompts/recategorize.md`](./prompts/recategorize.md). Directory is cano
 
 When asked to benchmark/test an LLM by ingesting a `benchmark-fixtures/` paper: **always `agent ingest … --force-sandbox`** (writes to `.agent-output/`, never promotes to `wiki/` or touches `index.md`), select the config under test with an inline `RW_MODELS_CONFIG=` override, judge `.agent-output/<stem>.md` against `benchmark-fixtures/<stem>.yaml`. Full procedure + the mandatory `db rebuild && reindex` cleanup (if you ever promote by mistake) in [`prompts/benchmark-run.md`](./prompts/benchmark-run.md).
 
-### Query — ask a cross-paper question and file the answer back
+### Query — answer from the corpus; file only when asked
 
-1. Answer from `wiki/` first. `researchwiki claims "<topic>"` is the **first stop** for factual claims (pre-graded, BM25+semantic-scored). Each hit prints its `[[stem#claim_slug]]` citation form — copy that directly into prose. `researchwiki search` for page-level discovery.
+Research answers are **read-only by default**. Do not create or update a synthesis, idea, concept, paper page, index, or log merely because the answer is non-trivial; persist it only when the user explicitly asks to file/save the result.
 
-   **Structural/bibliometric questions go to the DB.** Corpus counts/filters — "how many cgt papers from 2024?", "which lack a DOI?", "everything in *Nature*" — via `researchwiki db papers [--year/--category/--page-type/--no-doi/--venue/--author/--status] [--count] [--json]` or `researchwiki db query "SELECT …"` for ad-hoc. Ingest telemetry — model quality/cost, hardest sections, token spend, phase distributions, attempt wall time, and exact per-step timings — goes through `researchwiki insights`; do not bypass that interface with `db query`.
-2. Insufficient (Rule 3): re-read PDFs; update paper pages if worth keeping. `researchwiki pdf-search <stem> "<query>"` for a raw passage. When the evidence is *in a figure* — the passage says "see Fig. 4" and Fig. 4 is where the number lives — `researchwiki figures <stem>` lists captions (free, and often answers it), and `--figure N` renders that one page to `.figures-cache/` for you to `Read`. Render one page, only when the caption doesn't settle it: the PNG costs context in proportion to its pixel area.
-3. No paper covers it (Rule 4): say so.
-4. Cite facts with `[[wikilink]]`; mention sections in prose.
-5. Non-trivial cross-paper → create a synthesis page. **This is how the wiki compounds.**
+Use the **minimum sufficient retrieval** path:
+
+| User question shape | First path | Escalate only when needed |
+|---|---|---|
+| Known single paper | Read its wiki page; `researchwiki claims --by-stem <stem>` for claim-level facts | `pdf-search` / PDF for missing detail |
+| Direct factual topic | `researchwiki claims "<query>"` | `search --mode auto` for broader page discovery |
+| Comparison, landscape, or "what does the wiki have?" | `researchwiki search "<query>" --mode auto` | Topic claims, then `claims --by-stem` for load-bearing papers |
+| Corpus count/filter | `researchwiki db papers …` | `researchwiki db query "SELECT …"` for ad-hoc structure |
+| Ingest quality/cost/timing | `researchwiki insights …` | Its JSON mode; never ad-hoc SQL |
+| Follow-up within the same scope | Reuse already loaded pages and claims | Retrieve again only when scope changes or evidence is insufficient |
+
+Use both page search and claims retrieval for substantive cross-paper synthesis, where search supplies recall and claims supply precise grounding — **not** as a ritual for every factual question.
+
+If the first path is empty or suspicious, that is not proof that the corpus has no paper: use the complementary path and one sensible reformulation. If an index/DB error or stale state is plausible, inspect `researchwiki status` and fall back to direct `wiki/` reading/search rather than translating retrieval failure into corpus absence. Only then apply Rule 4.
+
+When wiki/claim evidence is insufficient but a relevant paper exists, follow Rule 3: `researchwiki pdf-search <stem> "<query>"` for a raw passage, or re-read the PDF. When the evidence is *in a figure* — the passage says "see Fig. 4" and Fig. 4 is where the number lives — `researchwiki figures <stem>` lists captions (free, and often answers it), and `--figure N` renders that one page to `.figures-cache/` for you to `Read`. Render one page only when the caption does not settle it. A client without PDF access must name that limitation; it must not claim the corpus lacks a paper.
+
+Cite factual claims with the exact `[[stem#claim_slug]]` emitted by `claims`; use a bare `[[category/stem]]` when referring to the paper as a whole, and mention PDF sections in prose.
+
+When the user **does explicitly ask to file** a non-trivial cross-paper answer, create a synthesis page so the wiki compounds:
 
 | User question shape | Location |
 |---|---|

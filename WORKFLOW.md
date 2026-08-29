@@ -621,6 +621,16 @@ Full procedure and how to act on the report:
 
 ## Querying the wiki
 
+Conversational retrieval follows a **minimum sufficient retrieval** rule. A known
+paper starts from its page and `claims --by-stem`; a direct factual topic starts
+from `claims`; a broad comparison or landscape starts from hybrid `search` and
+then grounds load-bearing statements through claims. Follow-ups reuse evidence
+already loaded. Both retrieval surfaces are used together for substantive
+cross-paper synthesis, not mechanically for every question. Answers are read-only
+by default; a synthesis is written only when the user explicitly asks to file it.
+One empty query is not proof of corpus absence — try the complementary path and a
+sensible reformulation, and distinguish an index error from an empty corpus.
+
 Three retrieval modes via `researchwiki search`:
 
 ```bash

@@ -20,6 +20,15 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Changed
+
+- **Research-question retrieval is now proportional to the question.** Known-paper,
+  direct-fact, broad-comparison, structural, telemetry, and follow-up questions
+  each have a cheapest grounded first path; claims plus hybrid search are paired
+  only for substantive cross-paper synthesis. One empty retrieval no longer proves
+  corpus absence, and conversational answers remain read-only unless the user
+  explicitly asks to file them back into the wiki.
+
 ## [0.4.4] - 2026-08-28
 
 ### Added
