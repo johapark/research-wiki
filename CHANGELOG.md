@@ -20,6 +20,8 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-08-28
+
 ### Added
 
 - **Agent-native web scouting now has a provider-neutral handoff contract.**
@@ -1878,7 +1880,8 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/johapark/research-wiki/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/johapark/research-wiki/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/johapark/research-wiki/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/johapark/research-wiki/compare/v0.4.0...v0.4.1
