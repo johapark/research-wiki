@@ -43,6 +43,7 @@ from ..env_profiles import (
     write_profile_atomic,
 )
 from ..errors import EnvironmentFailure
+from .init_dashboard import VIEWS_MD_TEMPLATE
 from ..fsatomic import write_text_atomic
 from ..paths import ensure_scaffold, inbox_dir, wiki_dir, wiki_root
 from ._provider_setup import (
@@ -107,62 +108,6 @@ _ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com"
 _ACTIVE_ENV_FILE_VAR = ACTIVE_ENV_FILE_VAR
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-
-VIEWS_MD_TEMPLATE = """\
----
-title: "Wiki Dashboard — Recent Additions"
-type: dashboard
-tags: [dashboard, dataview]
----
-
-# Wiki Dashboard
-
-Live views of recent additions across the wiki. Rendered by the [Dataview](https://blacksmithgu.github.io/obsidian-dataview/) community plugin — **install and enable Dataview in Obsidian** for the tables below to render. On GitHub (or without the plugin) they show as inert code blocks.
-
-Sort keys are the YAML stamps (`ingested_at` / `generated_at`) only, and a page without one is excluded rather than ranked by a filesystem time. Birthtime is reset by back-link splicing and mtime moves on any edit, so either fallback ranks *recently touched* pages as *recently added* ones — one ingest splicing 12 reciprocal links would send 12 unrelated papers to the top. `researchwiki lint --fix` recovers real stamps from the ingest log where a run exists.
-
-## Recent papers (top 15)
-
-```dataview
-TABLE WITHOUT ID
-  link(file.link, default(short_name, title)) AS "Paper",
-  join(category, ", ") AS "Category",
-  year AS "Year",
-  dateformat(ingested_at, "yyyy-MM-dd") AS "Added"
-FROM ""
-WHERE type = "paper" AND ingested_at
-SORT ingested_at DESC
-LIMIT 15
-```
-
-## Recent synthesis pages (top 10)
-
-```dataview
-TABLE WITHOUT ID
-  file.link AS "Synthesis",
-  topic_seed AS "Topic seed",
-  dateformat(generated_at, "yyyy-MM-dd") AS "Updated"
-FROM ""
-WHERE type = "synthesis" AND generated_at
-SORT generated_at DESC
-LIMIT 10
-```
-
-## Recent ideas (top 5)
-
-```dataview
-TABLE WITHOUT ID
-  file.link AS "Idea",
-  verdict AS "Verdict",
-  status AS "Status",
-  dateformat(generated_at, "yyyy-MM-dd") AS "Filed"
-FROM ""
-WHERE type = "idea" AND generated_at
-SORT generated_at DESC
-LIMIT 5
-```
-"""
-
 
 # ── Pure helpers (unit-tested) ───────────────────────────────────────────────
 
@@ -1001,7 +946,7 @@ def _step_dashboard(root: Path) -> None:
         return
     wiki_dir().mkdir(parents=True, exist_ok=True)
     write_text_atomic(views, VIEWS_MD_TEMPLATE)
-    print("Wrote wiki/views.md (recent papers / synthesis / ideas).")
+    print("Wrote wiki/views.md (recent papers / ideas / synthesis / concepts).")
     print("It renders only inside Obsidian with the Dataview plugin enabled; on GitHub "
           "the blocks show as inert code.")
 

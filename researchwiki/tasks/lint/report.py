@@ -18,6 +18,12 @@ from ...paths import s2_cache_dir
 from .walk import page_key
 
 
+def _contract_json(violations: list[dict]) -> list[dict]:
+    """Serialize the shared page/kind/detail shape of advisory contracts."""
+    return [{"page": page_key(v["page"]), "kind": v["kind"], "detail": v["detail"]}
+            for v in violations]
+
+
 def _emit_json(**kw) -> int:
     out = {
         "pages_scanned": len(kw["pages"]),
@@ -90,14 +96,9 @@ def _emit_json(**kw) -> int:
         ],
         "orphan_prompts": kw["orphan_prompts"],
         "broken_prompt_pointers": kw["broken_prompt_pointers"],
-        "concept_contract_violations": [
-            {"page": page_key(v["page"]), "kind": v["kind"], "detail": v["detail"]}
-            for v in kw["concept_contract"]
-        ],
-        "idea_contract_violations": [
-            {"page": page_key(v["page"]), "kind": v["kind"], "detail": v["detail"]}
-            for v in kw["idea_contract"]
-        ],
+        "concept_contract_violations": _contract_json(kw["concept_contract"]),
+        "idea_contract_violations": _contract_json(kw["idea_contract"]),
+        "dashboard_contract_violations": _contract_json(kw["dashboard_contract"]),
         "ungraded_papers": kw["ungraded_papers"],
         "venue_suspect": kw["venue_suspect"],
         "none_placeholders": kw["none_placeholders"],
@@ -463,6 +464,16 @@ def _emit_prose(**kw) -> int:
                 print(f"    - `{kind}` — {detail}")
         if len(by_page) > 20:
             print(f"_... +{len(by_page) - 20} more pages_")
+        print()
+
+    dashboard_contract = kw["dashboard_contract"]
+    if dashboard_contract:
+        print(f"## Dashboard contract violations ({len(dashboard_contract)}, advisory)")
+        print("`wiki/views.md` has drifted from the dashboard's semantic contract. "
+              "Warn-only — custom prose and extra columns are allowed; these findings "
+              "cover table order, date sources, limits, and membership semantics.")
+        for violation in dashboard_contract:
+            print(f"- `{violation['kind']}` — {violation['detail']}")
         print()
 
     dangling_anchors = kw["dangling_anchors"]

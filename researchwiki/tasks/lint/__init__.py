@@ -19,6 +19,7 @@ focused and individually testable:
   staleness       — stale_synthesis, stale_by_content, audit_count, proposals
   audit_p2        — Priority-2 entries with audit anchor hits
   index_checks    — thin_index_text (what the embedder will see)
+  dashboard_contract — advisory semantic drift in wiki/views.md
   db_checks       — ungraded_papers, zero_claim_papers,
                     stems_missing_claim_overlap, duplicate_claim_sets,
                     db_drift
@@ -51,6 +52,7 @@ from ...wiki import read_page, strip_non_prose
 from .audit_p2 import find_p2_anchor_hits
 from .claim_anchors import find_dangling_claim_anchors
 from .concept_contract import find_concept_contract_violations
+from .dashboard_contract import find_dashboard_contract_violations
 from .idea_contract import find_idea_contract_violations
 from ...eval.pointers import broken as broken_prompt_pointers
 from ...eval.pointers import orphans as orphan_prompt_files
@@ -133,7 +135,8 @@ def main(argv: list[str]) -> int:
                              "duplicate_claim_sets, "
                              "dangling_claim_anchors, "
                              "concept_contract_violations, "
-                             "idea_contract_violations, orphan_prompts, "
+                             "idea_contract_violations, dashboard_contract_violations, "
+                             "orphan_prompts, "
                              "broken_prompt_pointers, db_drift, "
                              "cross_paper_contradictions, fix_applied.")
     args = parser.parse_args(argv)
@@ -211,6 +214,7 @@ def main(argv: list[str]) -> int:
     dangling_anchors = find_dangling_claim_anchors(pages_body)
     concept_contract = find_concept_contract_violations(pages, pages_body, pages_fm)
     idea_contract = find_idea_contract_violations(pages, pages_body, pages_fm)
+    dashboard_contract = find_dashboard_contract_violations()
     # Docs-layer reachability. Same class of check as broken_wikilinks, one
     # layer up: a prompt no CLAUDE.md pointer reaches is a procedure the agent
     # has no condition to read, and a pointer with no file sends it looking for
@@ -272,6 +276,7 @@ def main(argv: list[str]) -> int:
             dangling_anchors=dangling_anchors,
             concept_contract=concept_contract,
             idea_contract=idea_contract,
+            dashboard_contract=dashboard_contract,
             orphan_prompts=orphan_prompts,
             broken_prompt_pointers=broken_pointers,
             db_drift=db_drift, db_drift_fixed=db_drift_fixed,
@@ -304,6 +309,7 @@ def main(argv: list[str]) -> int:
         dangling_anchors=dangling_anchors,
         concept_contract=concept_contract,
         idea_contract=idea_contract,
+        dashboard_contract=dashboard_contract,
         orphan_prompts=orphan_prompts,
         broken_prompt_pointers=broken_pointers,
         db_drift=db_drift, db_drift_fixed=db_drift_fixed,

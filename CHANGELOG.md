@@ -29,6 +29,15 @@ the reasoning behind any line below.
   corpus absence, and conversational answers remain read-only unless the user
   explicitly asks to file them back into the wiki.
 
+- **The Obsidian dashboard now includes recent concept hubs and their member
+  count.** Members come from the concept's canonical `referenced_papers` spoke
+  registry. Synthesis remains a standard Dataview table without a member count,
+  avoiding duplicate frontmatter and any DataviewJS dependency. Recent paper
+  rows use the canonical stem as their link label and show Journal immediately
+  after Category; the top 10 Ideas appear before Synthesis in the dashboard flow.
+  Periodic `researchwiki lint` runs now report semantic dashboard drift as an
+  advisory finding while allowing custom prose and additional columns.
+
 ## [0.4.4] - 2026-08-28
 
 ### Added

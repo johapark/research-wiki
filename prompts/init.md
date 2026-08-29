@@ -82,32 +82,35 @@ Skip bootstrap *only* when:
 
 ## Step 4 — Scaffold the dashboard
 
-Create `wiki/views.md` — a [Dataview](https://blacksmithgu.github.io/obsidian-dataview/) dashboard surfacing recent additions (top 15 papers, top 10 synthesis pages, top 5 ideas). The file is static (the queries render against whatever pages exist), so generate it now regardless of whether any papers are ingested yet. Skip only if `wiki/views.md` already exists from a prior init.
+Create `wiki/views.md` — a [Dataview](https://blacksmithgu.github.io/obsidian-dataview/) dashboard surfacing recent additions in this order: top 15 papers, top 10 ideas, top 10 synthesis pages, top 10 concept hubs. The file is static (the queries render against whatever pages exist), so generate it now regardless of whether any papers are ingested yet. Skip only if `wiki/views.md` already exists from a prior init.
 
-Write the three `dataview` blocks filtering on `type` (`paper` / `synthesis` / `idea`) and sorting on the YAML stamps — `ingested_at` DESC for papers, `generated_at` DESC for synthesis and ideas. Filter on `type` rather than a folder-based `FROM` so the queries work whether the Obsidian vault is opened at `wiki/` or the repo root. Tell the user the tables render only inside Obsidian with the Dataview plugin enabled; on GitHub they appear as code blocks.
+Write four `dataview` blocks filtering on `type` in display order (`paper` / `idea` / `synthesis` / `concept`) and sorting on the YAML stamps — `ingested_at` DESC for papers, `generated_at` DESC for the other three. Filter on `type` rather than a folder-based `FROM` so the queries work whether the Obsidian vault is opened at `wiki/` or the repo root. Tell the user the tables render only inside Obsidian with the Dataview plugin enabled; on GitHub they appear as code blocks.
 
 **Never fall back to a filesystem time.** Do *not* write `default(ingested_at, file.ctime)` or `default(generated_at, file.mtime)`. Both fallbacks answer "when was this file last touched", not "when was this page added", and the two diverge routinely: back-link splicing rewrites a page and resets its **birthtime**, while **mtime** moves on any edit at all — the same reason `lint`'s staleness checks refuse mtime, and why provenance recovery refuses to treat a file timestamp as an ingest date. Observed failure: one ingest spliced 12 reciprocal back-links, and the 7 targets that had no `ingested_at` were stamped with the ingest second, so seven papers from 2017–2025 displaced the actual new paper at the top of *Recent papers*.
 
 Instead, require the stamp: `WHERE type = "paper" AND ingested_at`, and format it directly (`dateformat(ingested_at, "yyyy-MM-dd")`). A page with no recorded date is then excluded rather than mis-ranked — the honest outcome, since nothing on disk records when it was added. `researchwiki lint --fix` recovers real stamps from the `ingest_iterations` log where a run exists; migrated and hand-authored pages have nothing to recover and stay out of the table. Requiring the stamp also removes the `dateformat`/`default` nesting trap that the fallback created, where stamped pages rendered as Dataview date objects and unstamped ones as `yyyy-MM-dd` strings in the same column.
 
-*Recent papers (LIMIT 15, `WHERE type = "paper"`):*
+*Recent papers (LIMIT 15, `WHERE type = "paper" AND ingested_at`):*
 ```dataview
 TABLE WITHOUT ID
-  file.link as Page,
-  short_name as "Short name",
-  category[0] as Cat,
-  dateformat(ingested_at, "yyyy-MM-dd") as "Added"
+  link(file.link, file.name) AS "Stem",
+  join(category, ", ") AS "Category",
+  venue AS "Journal",
+  year AS "Year",
+  dateformat(ingested_at, "yyyy-MM-dd") AS "Added"
 FROM ""
 WHERE type = "paper" AND ingested_at
 SORT ingested_at DESC
 LIMIT 15
 ```
 
-*Recent synthesis (LIMIT 10, `WHERE type = "synthesis" AND generated_at`):* columns `file.link as Page`, `topic_seed as "Topic seed"`, `dateformat(generated_at, "yyyy-MM-dd") as Generated`; `SORT generated_at DESC`.
+*Recent ideas (LIMIT 10, `WHERE type = "idea" AND generated_at`):* columns `file.link AS "Idea"`, `verdict AS "Verdict"`, `status AS "Status"`, `dateformat(generated_at, "yyyy-MM-dd") AS "Filed"`; `SORT generated_at DESC`.
 
-**No member-count column here** — do not add `length(referenced_papers) as Members`. Synthesis pages carry no `referenced_papers:` field (CLAUDE.md §2: they cite via the body, inline `[[wikilink]]`s plus `## References` footnotes), so the column renders empty for every row. Dataview cannot count body citations, and there is no frontmatter substitute to point it at. The field is real only on **concept** pages, where it is the functional spoke registry — a `type = "concept"` block could legitimately use it.
+*Recent synthesis (LIMIT 10, `WHERE type = "synthesis" AND generated_at`):* columns `file.link AS "Synthesis"`, `topic_seed AS "Topic seed"`, `dateformat(generated_at, "yyyy-MM-dd") AS "Updated"`; `SORT generated_at DESC`.
 
-*Recent ideas (LIMIT 5, `WHERE type = "idea" AND generated_at`):* columns `file.link as Page`, `verdict as Verdict`, `status as Status`, `dateformat(generated_at, "yyyy-MM-dd") as Generated`; `SORT generated_at DESC`.
+**No synthesis member-count column.** Synthesis pages intentionally carry no `referenced_papers:` field: their body citations are the single source of truth, and ordinary Dataview cannot count distinct resolved paper targets without a DataviewJS dependency. Keep this dashboard JavaScript-free.
+
+*Recent concept hubs (LIMIT 10, `WHERE type = "concept" AND generated_at`):* columns `file.link AS "Concept"`, `length(referenced_papers) AS "Members"`, `concept_span AS "Categories"`, `concept_thesis AS "Thesis"`, `dateformat(generated_at, "yyyy-MM-dd") AS "Filed"`; `SORT generated_at DESC`. Here `referenced_papers` is authoritative — it is the concept's canonical spoke registry.
 
 **Frontmatter — no `category:` field.** `views.md` sits at the wiki root (`wiki/views.md`), whose parent dir is `wiki`, not a content category or page-type dir. Give it only `type: dashboard` and `tags:` (mirror the other root bookkeeping files — `index.md`, `log.md` — which carry no `category:`). Adding `category: [...]` here trips `lint`'s category-drift check, which reads the parent dir as the canonical category and sees `wiki` ≠ whatever you wrote. Same rule for any other page you author directly at the wiki root.
 
