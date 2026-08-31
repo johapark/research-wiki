@@ -17,51 +17,20 @@ Uses the same `curl`-subprocess + on-disk cache pattern as
 
 from __future__ import annotations
 
-import json
-import subprocess
 import time
 import urllib.parse
 from datetime import date
 
-from ..log import log
 from ..paths import web_cache_dir
 from ._cache import negative_sentinel, read_cache, safe_cache_key, write_cache
+from ._http import StructuredProviderUnavailable, curl_json
 
 BIORXIV_BASE = "https://api.biorxiv.org/details"
-USER_AGENT = "researchwiki/0.1 (https://github.com/anthropic/claude-code; mailto:noreply@example.com)"
 POLITE_SLEEP = 0.4
 
 
 def _curl_json(url: str, retries: int = 3) -> dict | None:
-    for attempt in range(retries):
-        if attempt > 0:
-            time.sleep(2 ** attempt)
-            log(f"  retry {attempt}", tag="biorxiv")
-        log(f"  fetch {url}", tag="biorxiv")
-        try:
-            proc = subprocess.run(
-                ["curl", "-sS", "-w", "\n%{http_code}", "-A", USER_AGENT, url],
-                capture_output=True, text=True, timeout=60,
-            )
-        except subprocess.TimeoutExpired:
-            log("  timeout", tag="biorxiv")
-            continue
-        if proc.returncode != 0:
-            log(f"  curl error: {proc.stderr.strip()}", tag="biorxiv")
-            continue
-        body, _, status = proc.stdout.rpartition("\n")
-        status = status.strip()
-        if status == "404":
-            return {}
-        if status != "200":
-            log(f"  HTTP {status}", tag="biorxiv")
-            continue
-        try:
-            return json.loads(body)
-        except json.JSONDecodeError as e:
-            log(f"  JSON parse error: {e}", tag="biorxiv")
-            continue
-    return None
+    return curl_json(url, provider="biorxiv", retries=retries)
 
 
 def _fetch_server(server: str, doi: str) -> dict | None:
@@ -74,7 +43,9 @@ def _fetch_server(server: str, doi: str) -> dict | None:
     url = f"{BIORXIV_BASE}/{server}/{urllib.parse.quote(doi, safe='/.')}"
     data = _curl_json(url)
     if data is None:
-        return None
+        # Defensive for injected/custom transports that still use the old
+        # sentinel. The built-in transport raises this directly.
+        raise StructuredProviderUnavailable("biorxiv API returned no response")
     time.sleep(POLITE_SLEEP)
     # 404 or empty collection = "not on this server (yet)"; TTL it so a
     # preprint bioRxiv hasn't posted at query time can be re-checked later.
@@ -123,8 +94,6 @@ def lookup(doi: str) -> dict:
 
     for server in ("biorxiv", "medrxiv"):
         data = _fetch_server(server, out["doi"])
-        if data is None:
-            continue  # network failure; try the other server
         col = data.get("collection") or []
         if not col:
             continue  # empty collection = not on this server

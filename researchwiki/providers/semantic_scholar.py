@@ -22,6 +22,7 @@ from ..fsatomic import read_json, write_json_atomic
 from ..log import log
 from ..paths import s2_cache_dir
 from ._cache import safe_cache_key
+from ._http import StructuredProviderUnavailable, USER_AGENT
 from .base import ScholarlyArticle, ScholarlyDatabaseProvider
 
 S2_BASE = "https://api.semanticscholar.org/graph/v1"
@@ -156,18 +157,18 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
                 tag=self._log_tag)
 
     def _fetch(self, url: str) -> dict[str, Any] | None:
-        """curl-backed GET with retries + disk cache. Returns None on failure."""
+        """GET with cache; return None on 404 and raise on transport outage."""
         s2_cache_dir().mkdir(exist_ok=True)
         cache = self._cache_path(url)
         consumed, value = self._read_cache(cache, url)
         if consumed:
             return value
 
-        # Track whether any attempt saw a 404 — that's the "permanent" signal
-        # we use to negative-cache. Retrying a 404 won't change the answer, but
-        # we still let the existing retry loop run (no behavior regression on
-        # transient 404s) and decide at the end based on what we observed.
-        saw_404 = False
+        # A miss is definitive only when every attempt returned 404.  A mixed
+        # sequence (for example 404 then 503) is an outage, not evidence that
+        # the paper is absent, and must not poison the cache for 30 days.
+        not_found_count = 0
+        last_problem = "unknown transport failure"
         for attempt in range(self.retries):
             if attempt > 0:
                 backoff = 2 ** attempt
@@ -177,46 +178,58 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
             try:
                 proc = subprocess.run(
                     ["curl", "-sS", "-w", "\n%{http_code}",
-                     "-A", "research-wiki-provider/0.1", url],
+                     "-A", USER_AGENT, url],
                     capture_output=True, text=True, timeout=60,
                 )
+            except FileNotFoundError as exc:
+                raise StructuredProviderUnavailable(
+                    "semantic-scholar metadata lookup needs `curl`, but it is not installed"
+                ) from exc
             except subprocess.TimeoutExpired:
+                last_problem = "request timed out"
                 log(f"  timeout on {url}", tag=self._log_tag)
                 continue
             if proc.returncode != 0:
-                log(f"  curl error: {proc.stderr.strip()}", tag=self._log_tag)
+                last_problem = proc.stderr.strip() or f"curl exited {proc.returncode}"
+                log(f"  curl error: {last_problem}", tag=self._log_tag)
                 continue
             body, _, status = proc.stdout.rpartition("\n")
             status = status.strip()
             if status == "429":
+                last_problem = "HTTP 429"
                 log(f"  rate limited, sleeping 5s", tag=self._log_tag)
                 time.sleep(5)
                 continue
             if status == "404":
-                saw_404 = True
+                not_found_count += 1
                 log(f"  HTTP 404 on {url}", tag=self._log_tag)
                 continue
             if status != "200":
+                last_problem = f"HTTP {status or 'unknown'}"
                 log(f"  HTTP {status} on {url}", tag=self._log_tag)
                 continue
             try:
                 data = json.loads(body)
             except json.JSONDecodeError as e:
+                last_problem = f"JSON parse error: {e}"
                 log(f"  JSON parse error on {url}: {e}", tag=self._log_tag)
                 continue
             write_json_atomic(cache, data)
             time.sleep(self.sleep_sec)
             return data
         log(f"  giving up on {url} after {self.retries} retries", tag=self._log_tag)
-        # Negative-cache only when the dominant failure was 404 (permanent
-        # "not in S2"). Transient failures — timeouts, 5xx, 429, curl errors —
-        # leave the cache empty so the next run gets to retry afresh.
-        if saw_404:
+        # Negative-cache only a unanimous 404 result. Transient or mixed
+        # failures leave the cache empty so the next run can retry afresh.
+        if self.retries > 0 and not_found_count == self.retries:
             self._write_negative_cache(cache, status=404, url=url)
-        return None
+            return None
+        raise StructuredProviderUnavailable(
+            f"semantic-scholar API unavailable after {self.retries} attempts "
+            f"({last_problem})"
+        )
 
     def _post_fetch(self, url: str, payload: dict[str, Any], cache_path: Path) -> Any | None:
-        """curl-backed POST with retries + disk cache. Returns None on failure.
+        """POST with cache; return None on 404 and raise on transport outage.
 
         Uses a longer 429 sleep (30s) and more retries than _fetch because batch
         POSTs are less frequent but more valuable — worth waiting longer to succeed.
@@ -227,7 +240,8 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
             return value
         payload_str = json.dumps(payload)
         retries = max(5, self.retries)
-        saw_404 = False
+        not_found_count = 0
+        last_problem = "unknown transport failure"
         for attempt in range(retries):
             if attempt > 0:
                 backoff = 2 ** attempt
@@ -238,41 +252,54 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
             try:
                 proc = subprocess.run(
                     ["curl", "-sS", "-w", "\n%{http_code}",
-                     "-A", "research-wiki-provider/0.1",
+                     "-A", USER_AGENT,
                      "-X", "POST", "-H", "Content-Type: application/json",
                      "-d", payload_str, url],
                     capture_output=True, text=True, timeout=60,
                 )
+            except FileNotFoundError as exc:
+                raise StructuredProviderUnavailable(
+                    "semantic-scholar metadata lookup needs `curl`, but it is not installed"
+                ) from exc
             except subprocess.TimeoutExpired:
+                last_problem = "request timed out"
                 log(f"  timeout on POST {url}", tag=self._log_tag)
                 continue
             if proc.returncode != 0:
-                log(f"  curl error: {proc.stderr.strip()}", tag=self._log_tag)
+                last_problem = proc.stderr.strip() or f"curl exited {proc.returncode}"
+                log(f"  curl error: {last_problem}", tag=self._log_tag)
                 continue
             body, _, status = proc.stdout.rpartition("\n")
             if status.strip() == "429":
+                last_problem = "HTTP 429"
                 log(f"  rate limited, sleeping 30s", tag=self._log_tag)
                 time.sleep(30)
                 continue
             if status.strip() == "404":
-                saw_404 = True
+                not_found_count += 1
                 log(f"  HTTP 404 on POST {url}", tag=self._log_tag)
                 continue
             if status.strip() != "200":
+                last_problem = f"HTTP {status.strip() or 'unknown'}"
                 log(f"  HTTP {status.strip()} on POST {url}", tag=self._log_tag)
                 continue
             try:
                 data = json.loads(body)
             except json.JSONDecodeError as e:
+                last_problem = f"JSON parse error: {e}"
                 log(f"  JSON parse error on POST {url}: {e}", tag=self._log_tag)
                 continue
             write_json_atomic(cache_path, data)
             time.sleep(self.sleep_sec)
             return data
         log(f"  giving up on POST {url} after {retries} retries", tag=self._log_tag)
-        if saw_404:
+        if retries > 0 and not_found_count == retries:
             self._write_negative_cache(cache_path, status=404, url=url)
-        return None
+            return None
+        raise StructuredProviderUnavailable(
+            f"semantic-scholar API unavailable after {retries} attempts "
+            f"({last_problem})"
+        )
 
     # ---------- public interface ----------
 

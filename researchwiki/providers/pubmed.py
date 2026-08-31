@@ -18,18 +18,15 @@ Uses the same `curl`-subprocess + on-disk cache pattern as
 
 from __future__ import annotations
 
-import json
-import subprocess
 import time
 import urllib.parse
 from datetime import date
 
-from ..log import log
 from ..paths import web_cache_dir
 from ._cache import negative_sentinel, read_cache, safe_cache_key, write_cache
+from ._http import StructuredProviderUnavailable, curl_json
 
 EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-USER_AGENT = "researchwiki/0.1 (https://github.com/anthropic/claude-code; mailto:noreply@example.com)"
 # Polite-pool rate: NCBI asks for ≤3 req/sec without an API key.
 POLITE_SLEEP = 0.4
 
@@ -37,36 +34,7 @@ POLITE_SLEEP = 0.4
 def _curl_json(url: str, retries: int = 3) -> dict | None:
     """Fetch JSON via curl subprocess. Mirrors crossref.py's pattern to
     bypass Python stdlib SSL issues behind enterprise proxies."""
-    for attempt in range(retries):
-        if attempt > 0:
-            time.sleep(2 ** attempt)
-            log(f"  retry {attempt}", tag="pubmed")
-        log(f"  fetch {url}", tag="pubmed")
-        try:
-            proc = subprocess.run(
-                ["curl", "-sS", "-w", "\n%{http_code}", "-A", USER_AGENT, url],
-                capture_output=True, text=True, timeout=60,
-            )
-        except subprocess.TimeoutExpired:
-            log("  timeout", tag="pubmed")
-            continue
-        if proc.returncode != 0:
-            log(f"  curl error: {proc.stderr.strip()}", tag="pubmed")
-            continue
-        body, _, status = proc.stdout.rpartition("\n")
-        status = status.strip()
-        if status == "404":
-            log(f"  HTTP 404: {url}", tag="pubmed")
-            return {}
-        if status != "200":
-            log(f"  HTTP {status}", tag="pubmed")
-            continue
-        try:
-            return json.loads(body)
-        except json.JSONDecodeError as e:
-            log(f"  JSON parse error: {e}", tag="pubmed")
-            continue
-    return None
+    return curl_json(url, provider="pubmed", retries=retries)
 
 
 def doi_to_pmid(doi: str) -> str | None:
@@ -83,7 +51,7 @@ def doi_to_pmid(doi: str) -> str | None:
                f"?db=pubmed&retmode=json&term={urllib.parse.quote(doi_norm)}%5Baid%5D")
         data = _curl_json(url)
         if data is None:
-            return None
+            raise StructuredProviderUnavailable("pubmed API returned no response")
         time.sleep(POLITE_SLEEP)
         # Empty dict = HTTP 404; TTL it so a DOI PubMed hasn't indexed yet
         # (common for fresh publications) is re-checked later.
@@ -107,9 +75,9 @@ def retraction_status(doi: str) -> dict:
       "fetched_at": "YYYY-MM-DD",
     }
 
-    On network / missing-PMID failure, returns the record with pmid=None
-    and retracted=False (absence of evidence, not evidence of absence —
-    callers should check `pmid` before trusting `retracted=False`).
+    A missing PMID returns the record with pmid=None and retracted=False.
+    Transport failure raises StructuredProviderUnavailable so it cannot be
+    mistaken for evidence that the paper is not retracted.
     """
     out = {
         "doi": doi.strip().lower() if doi else "",
@@ -134,7 +102,7 @@ def retraction_status(doi: str) -> dict:
         url = f"{EUTILS_BASE}/esummary.fcgi?db=pubmed&retmode=json&id={pmid}"
         data = _curl_json(url)
         if data is None:
-            return out
+            raise StructuredProviderUnavailable("pubmed API returned no response")
         time.sleep(POLITE_SLEEP)
         # Empty dict = HTTP 404; TTL it like the esearch cache above.
         write_cache(cache, negative_sentinel(data) if not data else data)

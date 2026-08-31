@@ -435,10 +435,7 @@ def _find_doi_candidates() -> list[Path]:
 def _lookup_s2(title: str, first_author: str, wiki_year: int | None) -> tuple[str, str] | None:
     """Return (doi, arxiv_id) if S2 hit passes sanity checks, else None."""
     from ..providers.semantic_scholar import SemanticScholarProvider
-    try:
-        art = SemanticScholarProvider().search_by_title(title)
-    except Exception:
-        return None
+    art = SemanticScholarProvider().search_by_title(title)
     if not art:
         return None
     if not _sanity_ok(getattr(art, "year", None),
@@ -462,18 +459,13 @@ def _lookup_s2(title: str, first_author: str, wiki_year: int | None) -> tuple[st
 
 def _lookup_crossref(title: str, first_author: str, wiki_year: int | None) -> tuple[str, str] | None:
     """Crossref title-search fallback. Returns (doi, None) on sanity-passing hit."""
-    import json, subprocess, urllib.parse
+    import urllib.parse
+    from ..providers._http import curl_json
     params = {"query.title": title[:200], "rows": "5"}
     if first_author:
         params["query.author"] = first_author
     url = f"https://api.crossref.org/works?{urllib.parse.urlencode(params)}"
-    ua = "researchwiki/0.1 (mailto:noreply@example.com)"
-    try:
-        proc = subprocess.run(["curl", "-sS", "-A", ua, url],
-                              capture_output=True, text=True, timeout=30)
-        data = json.loads(proc.stdout)
-    except Exception:
-        return None
+    data = curl_json(url, provider="crossref")
     for item in (data.get("message", {}) or {}).get("items", []):
         doi = (item.get("DOI") or "").strip()
         if not doi:
@@ -622,10 +614,9 @@ def _run_doi_verify(args: argparse.Namespace) -> int:
         if not title or not first_author:
             skipped += 1
             continue
-        try:
-            art = provider.get_by_doi(doi)
-        except Exception:
-            art = None
+        # A provider 404 returns None. Transport failures raise an
+        # EnvironmentFailure and must not be counted as an "unresolved DOI".
+        art = provider.get_by_doi(doi)
         if art is None:
             unresolved += 1
             continue

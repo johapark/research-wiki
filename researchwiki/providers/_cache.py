@@ -24,6 +24,8 @@ Two guarantees every provider gets, one way or the other:
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
+import re
 from pathlib import Path
 
 from ..fsatomic import read_json, write_json_atomic
@@ -72,15 +74,23 @@ def write_cache(cache: Path, data) -> None:
 
 
 def safe_cache_key(raw: str, max_len: int = 160) -> str:
-    """Sanitize an arbitrary string (URL, DOI, name) into a filesystem-safe
-    cache-key fragment.
+    """Return a collision-resistant, cross-platform-safe cache-key fragment.
 
-    Strips characters unsafe or awkward in filenames and keeps only the
-    last `max_len` chars — the discriminating part of a long URL or DOI is
-    usually the tail (query string / DOI suffix), and cache keys can
-    otherwise exceed filesystem name limits.
+    A readable tail is useful when inspecting caches by hand, but it is not an
+    identity: punctuation replacement and truncation can map distinct DOIs or
+    URLs onto the same filename. The SHA-256 suffix carries identity while the
+    conservative ASCII fragment keeps the result valid on Windows and POSIX.
+
+    Cache filenames written before the hash suffix are intentionally treated as
+    misses. Those files are derived state, and their lossy identity means there
+    is no safe way to decide which original request they belong to.
     """
-    safe = raw
-    for ch in ("/", ":", "?", "&", " "):
-        safe = safe.replace(ch, "_")
-    return safe[-max_len:]
+    if max_len < 8:
+        raise ValueError("max_len must be at least 8")
+    raw = str(raw)
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    readable = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._")
+    budget = max_len - len(digest) - 1
+    if budget <= 0 or not readable:
+        return digest[:max_len]
+    return f"{readable[-budget:]}-{digest}"

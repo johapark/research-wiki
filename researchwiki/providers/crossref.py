@@ -34,10 +34,9 @@ import urllib.parse
 from ..log import log
 from ..paths import crossref_cache_dir
 from ._cache import negative_sentinel, read_cache, safe_cache_key, write_cache
+from ._http import StructuredProviderUnavailable, USER_AGENT
 
 CROSSREF_BASE = "https://api.crossref.org/works"
-# Polite-pool User-Agent per Crossref API guidelines.
-USER_AGENT = "researchwiki/0.1 (https://github.com/anthropic/claude-code; mailto:noreply@example.com)"
 
 
 def _fetch_crossref_work(
@@ -47,8 +46,9 @@ def _fetch_crossref_work(
 
     Returns the parsed JSON dict on HTTP 200, the sentinel `{"message": {}}`
     on HTTP 404 (unknown DOI — distinguishable from network error because the
-    sentinel is also cached), or None when all retries fail (network error /
-    timeout / unparseable response).
+    sentinel is also cached). Exhausted transport failures raise
+    StructuredProviderUnavailable so callers cannot mistake an outage for an
+    unknown DOI or a work with no deposited references.
 
     Shared between `fetch_crossref_refs` (which extracts the references
     list) and `verify_doi_via_crossref` (which reads title/year from the
@@ -67,6 +67,7 @@ def _fetch_crossref_work(
 
     url = f"{CROSSREF_BASE}/{urllib.parse.quote(doi_norm, safe='/.')}"
     data: dict | None = None
+    last_problem = "unknown transport failure"
     for attempt in range(retries):
         if attempt > 0:
             backoff = 2 ** attempt
@@ -78,11 +79,17 @@ def _fetch_crossref_work(
                 ["curl", "-sS", "-w", "\n%{http_code}", "-A", USER_AGENT, url],
                 capture_output=True, text=True, timeout=60,
             )
+        except FileNotFoundError as exc:
+            raise StructuredProviderUnavailable(
+                "crossref metadata lookup needs `curl`, but it is not installed"
+            ) from exc
         except subprocess.TimeoutExpired:
+            last_problem = "request timed out"
             log(f"  timeout on {url}", tag="crossref")
             continue
         if proc.returncode != 0:
-            log(f"  curl error: {proc.stderr.strip()}", tag="crossref")
+            last_problem = proc.stderr.strip() or f"curl exited {proc.returncode}"
+            log(f"  curl error: {last_problem}", tag="crossref")
             continue
         body, _, status = proc.stdout.rpartition("\n")
         status = status.strip()
@@ -93,18 +100,22 @@ def _fetch_crossref_work(
             data = negative_sentinel({"message": {}})
             break
         if status != "200":
-            log(f"  HTTP {status}", tag="crossref")
+            last_problem = f"HTTP {status or 'unknown'}"
+            log(f"  {last_problem}", tag="crossref")
             continue
         try:
             data = json.loads(body)
         except json.JSONDecodeError as e:
-            log(f"  JSON parse error: {e}", tag="crossref")
+            last_problem = f"JSON parse error: {e}"
+            log(f"  {last_problem}", tag="crossref")
             continue
         time.sleep(sleep_sec)
         break
     if data is None:
         log(f"  giving up on {doi_norm} after {retries} retries", tag="crossref")
-        return None
+        raise StructuredProviderUnavailable(
+            f"crossref API unavailable after {retries} attempts ({last_problem})"
+        )
     write_cache(cache, data)
     return data
 
@@ -112,8 +123,8 @@ def _fetch_crossref_work(
 def fetch_crossref_refs(doi: str, retries: int = 3, sleep_sec: float = 0.5) -> list[str]:
     """Return lowercase DOIs from Crossref's `reference` array for this work.
 
-    Empty list on cache miss + network failure, unknown DOI, or works with
-    no deposited references (common for bioRxiv preprints).
+    Empty list for an unknown DOI or a work with no deposited references
+    (common for bioRxiv preprints). Transport failures raise.
     """
     data = _fetch_crossref_work(doi, retries=retries, sleep_sec=sleep_sec)
     if data is None:
@@ -184,7 +195,7 @@ def crossref_structural_signals(doi: str, *, allow_fetch: bool = False) -> dict:
 
 def verify_doi_via_crossref(doi: str) -> dict | None:
     """Confirm `doi` resolves to an indexed Crossref work; return a small
-    metadata dict on hit, or None on miss / network failure.
+    metadata dict on hit, or None when Crossref reports no such DOI.
 
     Used by the reconcile phase's URL→DOI hunt waterfall to validate
     preprint-server URL conversions (SSRN, arXiv) before adopting them.
@@ -199,10 +210,8 @@ def verify_doi_via_crossref(doi: str) -> dict | None:
             "venue": <first container-title (journal of record), or None>,
         }
 
-    Returns None for HTTP 404 (DOI doesn't exist) and for network errors.
-    Caller should treat both as "candidate failed verification" — the
-    distinction doesn't matter for the hunt waterfall (try the next
-    candidate either way).
+    Transport failures raise StructuredProviderUnavailable instead of being
+    reported as a candidate that failed verification.
     """
     data = _fetch_crossref_work(doi)
     if data is None:

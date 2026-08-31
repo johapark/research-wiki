@@ -34,6 +34,7 @@ You can run `researchwiki` directly, but the intended interface is conversation 
 
 - Python 3.10+
 - Git
+- curl (used by the whitelisted structured-metadata providers)
 - A shell-enabled chat agent (Claude Code, Codex, etc.)
 - Disk space for ML dependencies and the embedding model downloaded on first use
 

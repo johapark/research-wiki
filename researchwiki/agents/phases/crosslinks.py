@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from ...paths import wiki_dir
@@ -108,11 +108,8 @@ def crosslink_candidates(
     doi = metadata.get("doi")
 
     if doi:
-        try:
-            provider = SemanticScholarProvider()
-            article = provider.get_by_doi(doi)
-        except Exception:
-            article = None
+        provider = SemanticScholarProvider()
+        article = provider.get_by_doi(doi)
 
         if article is not None:
             refs = provider.get_references(article)
@@ -154,11 +151,8 @@ def crosslink_candidates(
     # parse the reference list cleanly. Crossref /works returns the publisher-
     # deposited reference DOIs even when S2 doesn't have the paper.
     if doi and (not candidates or len(candidates) < 5):
-        try:
-            from ...providers.crossref import fetch_crossref_refs
-            cr_dois = fetch_crossref_refs(doi)
-        except Exception:
-            cr_dois = []
+        from ...providers.crossref import fetch_crossref_refs
+        cr_dois = fetch_crossref_refs(doi)
         for ref_doi in cr_dois:
             ref_doi_l = ref_doi.lower()
             if ref_doi_l in wiki_dois and ref_doi_l not in seen_dois:

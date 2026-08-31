@@ -11,7 +11,6 @@ footer but no DOI form anywhere in the PDF).
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -97,8 +96,7 @@ def test_verify_doi_via_crossref_uses_cache(tmp_path, monkeypatch):
 
     # Pre-seed a hit-shape payload mimicking Crossref's response for an SSRN DOI.
     doi = "10.2139/ssrn.5736492"
-    safe = doi.lower().replace("/", "_").replace(":", "_")
-    cache_file = tmp_path / f"crossref__{safe[-160:]}.json"
+    cache_file = tmp_path / f"crossref__{crossref.safe_cache_key(doi.lower())}.json"
     cache_file.write_text(json.dumps({
         "message": {
             "DOI": "10.2139/ssrn.5736492",
@@ -122,10 +120,25 @@ def test_verify_doi_via_crossref_returns_none_for_404_cache(tmp_path, monkeypatc
     monkeypatch.setattr(crossref, "crossref_cache_dir", lambda: tmp_path)
 
     doi = "10.9999/this-doi-does-not-exist"
-    safe = doi.lower().replace("/", "_").replace(":", "_")
-    (tmp_path / f"crossref__{safe[-160:]}.json").write_text(json.dumps({"message": {}}))
+    cache = tmp_path / f"crossref__{crossref.safe_cache_key(doi.lower())}.json"
+    cache.write_text(json.dumps({"message": {}}))
 
     assert crossref.verify_doi_via_crossref(doi) is None
+
+
+def test_verify_doi_via_crossref_raises_on_provider_outage(tmp_path, monkeypatch):
+    import researchwiki.providers.crossref as crossref
+    from researchwiki.providers._http import StructuredProviderUnavailable
+
+    class FailedRequest:
+        returncode = 0
+        stdout = "\n503"
+        stderr = ""
+
+    monkeypatch.setattr(crossref, "crossref_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(crossref.subprocess, "run", lambda *a, **k: FailedRequest())
+    with pytest.raises(StructuredProviderUnavailable, match="HTTP 503"):
+        crossref._fetch_crossref_work("10.9999/outage", retries=1)
 
 
 def test_verify_doi_via_crossref_empty_doi_returns_none():
@@ -139,8 +152,8 @@ def test_verify_doi_via_crossref_picks_first_available_year(tmp_path, monkeypatc
 
     monkeypatch.setattr(crossref, "crossref_cache_dir", lambda: tmp_path)
     doi = "10.1038/test-doi"
-    safe = doi.lower().replace("/", "_").replace(":", "_")
-    (tmp_path / f"crossref__{safe[-160:]}.json").write_text(json.dumps({
+    cache = tmp_path / f"crossref__{crossref.safe_cache_key(doi.lower())}.json"
+    cache.write_text(json.dumps({
         "message": {
             "DOI": "10.1038/test-doi",
             "title": ["A paper with no `posted` field"],

@@ -15,61 +15,29 @@ Uses the same `curl`-subprocess + on-disk cache pattern as
 
 from __future__ import annotations
 
-import json
 import re
-import subprocess
 import time
 import urllib.parse
 from datetime import date
+from pathlib import Path
 
-from ..log import log
 from ..paths import web_cache_dir
 from ._cache import negative_sentinel, read_cache, safe_cache_key, write_cache
+from ._http import StructuredProviderUnavailable, curl_json
 
 ORCID_BASE = "https://pub.orcid.org/v3.0"
-USER_AGENT = "researchwiki/0.1 (https://github.com/anthropic/claude-code; mailto:noreply@example.com)"
 POLITE_SLEEP = 0.3  # ORCID public API: 24 req/sec is safe; 0.3s is comfortably below.
 
 ORCID_ID_RE = re.compile(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$")
 
 
 def _curl_json(url: str, retries: int = 3) -> dict | None:
-    for attempt in range(retries):
-        if attempt > 0:
-            time.sleep(2 ** attempt)
-            log(f"  retry {attempt}", tag="orcid")
-        log(f"  fetch {url}", tag="orcid")
-        try:
-            proc = subprocess.run(
-                ["curl", "-sS", "-w", "\n%{http_code}",
-                 "-A", USER_AGENT,
-                 "-H", "Accept: application/json",
-                 url],
-                capture_output=True, text=True, timeout=60,
-            )
-        except subprocess.TimeoutExpired:
-            log("  timeout", tag="orcid")
-            continue
-        if proc.returncode != 0:
-            log(f"  curl error: {proc.stderr.strip()}", tag="orcid")
-            continue
-        body, _, status = proc.stdout.rpartition("\n")
-        status = status.strip()
-        if status == "404":
-            return {}
-        if status != "200":
-            log(f"  HTTP {status}", tag="orcid")
-            continue
-        try:
-            return json.loads(body)
-        except json.JSONDecodeError as e:
-            log(f"  JSON parse error: {e}", tag="orcid")
-            continue
-    return None
+    return curl_json(
+        url, provider="orcid", retries=retries, headers=("Accept: application/json",)
+    )
 
 
-def _cache_path(kind: str, key: str) -> "Path":  # type: ignore[name-defined]
-    from pathlib import Path
+def _cache_path(kind: str, key: str) -> Path:
     cache_dir = web_cache_dir()
     cache_dir.mkdir(exist_ok=True)
     return cache_dir / f"orcid_{kind}__{safe_cache_key(key)}.json"
@@ -126,7 +94,7 @@ def lookup_by_id(orcid_id: str) -> dict:
     if pd is None:
         pd = _curl_json(f"{ORCID_BASE}/{orcid_norm}/personal-details")
         if pd is None:
-            return out  # network failure
+            raise StructuredProviderUnavailable("orcid API returned no response")
         time.sleep(POLITE_SLEEP)
         # Empty dict = HTTP 404 (unknown ORCID) — TTL it so a since-registered
         # ORCID isn't rejected forever; a real 200 payload always has a `name`.
@@ -149,7 +117,7 @@ def lookup_by_id(orcid_id: str) -> dict:
     if em is None:
         em = _curl_json(f"{ORCID_BASE}/{orcid_norm}/employments")
         if em is None:
-            return out
+            raise StructuredProviderUnavailable("orcid API returned no response")
         time.sleep(POLITE_SLEEP)
         # Same 404-vs-real-payload TTL as the personal-details cache above.
         write_cache(em_cache, negative_sentinel(em) if not em else em)
@@ -202,9 +170,10 @@ def search_by_name(given: str = "", family: str = "", limit: int = 5) -> list[di
     """Search ORCID for candidates matching a (given, family) name pair.
 
     Returns up to `limit` structured records (same shape as lookup_by_id).
-    Empty list on zero matches or network failure. Use when you don't know
-    the ORCID ID but do know the author's name — typical entry point when
-    normalising YAML `authors` against a canonical source.
+    Empty list on zero matches; provider outages raise
+    StructuredProviderUnavailable. Use when you don't know the ORCID ID but do
+    know the author's name — typical entry point when normalising YAML
+    `authors` against a canonical source.
     """
     given = (given or "").strip()
     family = (family or "").strip()
@@ -224,7 +193,7 @@ def search_by_name(given: str = "", family: str = "", limit: int = 5) -> list[di
                f"?q={urllib.parse.quote(query, safe=':+')}&rows={limit}")
         data = _curl_json(url)
         if data is None:
-            return []
+            raise StructuredProviderUnavailable("orcid API returned no response")
         time.sleep(POLITE_SLEEP)
         # Empty dict = HTTP 404; TTL it like the lookups above.
         write_cache(cache, negative_sentinel(data) if not data else data)

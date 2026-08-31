@@ -6,7 +6,7 @@ researchwiki.providers.semantic_scholar:_read_cache:
   - 200 → positive cache, honored indefinitely without --refresh-cache
   - 404 (after retries exhausted) → negative-cache sentinel, honored within
     `negative_ttl_days`, re-fetched after expiry
-  - 5xx / timeout / curl error → NOT cached (transient)
+  - 5xx / timeout / curl error → environment failure, NOT cached
   - force_refresh_days == 0 → bypass everything
   - force_refresh_days == N → bypass entries older than N days
 """
@@ -17,10 +17,9 @@ import datetime as _dt
 import json
 import os
 from pathlib import Path
-from unittest.mock import patch
-
 import pytest
 
+from researchwiki.providers._http import StructuredProviderUnavailable
 from researchwiki.providers.semantic_scholar import (
     DEFAULT_NEG_TTL_DAYS,
     SemanticScholarProvider,
@@ -175,8 +174,8 @@ def test_transient_failure_does_not_write_negative_cache(tmp_cache, monkeypatch)
     monkeypatch.setattr(
         "researchwiki.providers.semantic_scholar.time.sleep", lambda *_: None
     )
-    result = provider._fetch("https://example/transient")
-    assert result is None
+    with pytest.raises(StructuredProviderUnavailable, match="HTTP 500"):
+        provider._fetch("https://example/transient")
     cache = provider._cache_path("https://example/transient")
     assert not cache.exists(), (
         "transient (5xx) must not write negative-cache — only confirmed 404 does"
@@ -208,6 +207,80 @@ def test_persistent_404_writes_negative_cache(tmp_cache, monkeypatch):
     payload = json.loads(cache.read_text())
     assert payload[_NEG_KEY] is True
     assert payload[_NEG_STATUS] == 404
+
+
+def test_mixed_404_and_outage_does_not_write_negative_cache(tmp_cache, monkeypatch):
+    provider = SemanticScholarProvider(retries=2, sleep_sec=0)
+    statuses = iter(("404", "503"))
+
+    class _FakeProc:
+        returncode = 0
+        stderr = ""
+
+        def __init__(self):
+            self.stdout = f"\n{next(statuses)}"
+
+    monkeypatch.setattr(
+        "researchwiki.providers.semantic_scholar.subprocess.run",
+        lambda *a, **k: _FakeProc(),
+    )
+    monkeypatch.setattr(
+        "researchwiki.providers.semantic_scholar.time.sleep", lambda *_: None
+    )
+    url = "https://example/mixed-failure"
+    with pytest.raises(StructuredProviderUnavailable, match="HTTP 503"):
+        provider._fetch(url)
+    assert not provider._cache_path(url).exists()
+
+
+def test_404_then_success_recovers_without_negative_cache(tmp_cache, monkeypatch):
+    provider = SemanticScholarProvider(retries=2, sleep_sec=0)
+    responses = iter(("\n404", '{"title": "Recovered"}\n200'))
+
+    class _FakeProc:
+        returncode = 0
+        stderr = ""
+
+        def __init__(self):
+            self.stdout = next(responses)
+
+    monkeypatch.setattr(
+        "researchwiki.providers.semantic_scholar.subprocess.run",
+        lambda *a, **k: _FakeProc(),
+    )
+    monkeypatch.setattr(
+        "researchwiki.providers.semantic_scholar.time.sleep", lambda *_: None
+    )
+    url = "https://example/transient-not-found"
+    assert provider._fetch(url) == {"title": "Recovered"}
+    assert json.loads(provider._cache_path(url).read_text()) == {"title": "Recovered"}
+
+
+def test_post_mixed_404_and_outage_does_not_write_negative_cache(
+    tmp_cache, monkeypatch
+):
+    provider = SemanticScholarProvider(retries=2, sleep_sec=0)
+    statuses = iter(("404", "503", "503", "503", "503"))
+
+    class _FakeProc:
+        returncode = 0
+        stderr = ""
+
+        def __init__(self):
+            self.stdout = f"\n{next(statuses)}"
+
+    monkeypatch.setattr(
+        "researchwiki.providers.semantic_scholar.subprocess.run",
+        lambda *a, **k: _FakeProc(),
+    )
+    monkeypatch.setattr(
+        "researchwiki.providers.semantic_scholar.time.sleep", lambda *_: None
+    )
+    url = "https://example/batch-mixed-failure"
+    cache = tmp_cache / "batch.json"
+    with pytest.raises(StructuredProviderUnavailable, match="HTTP 503"):
+        provider._post_fetch(url, {"ids": ["DOI:10.1/example"]}, cache)
+    assert not cache.exists()
 
 
 def test_default_ttl_is_documented(tmp_cache):

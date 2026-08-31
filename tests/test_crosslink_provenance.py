@@ -15,11 +15,13 @@ Two defects, tested here:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
 from researchwiki.agents import promote
 from researchwiki.agents.phases import crosslinks
+from researchwiki.providers._http import StructuredProviderUnavailable
 
 
 @dataclass
@@ -370,6 +372,40 @@ def test_populated_reference_list_is_not_flagged(monkeypatch):
         stats=stats,
     )
     assert stats["citation_graph_unresolved"] is False
+
+
+def test_crosslink_candidates_propagates_semantic_scholar_outage(monkeypatch):
+    class _Provider:
+        def get_by_doi(self, doi):
+            raise StructuredProviderUnavailable("S2 unavailable")
+
+    monkeypatch.setattr(crosslinks, "read_wiki_dois", lambda: {"10.1/x": "c/x"})
+    monkeypatch.setattr(crosslinks, "SemanticScholarProvider", _Provider)
+
+    with pytest.raises(StructuredProviderUnavailable, match="S2 unavailable"):
+        crosslinks.crosslink_candidates(
+            Path("/nonexistent.pdf"), {"doi": "10.1/source"}
+        )
+
+
+def test_crosslink_candidates_propagates_crossref_outage(monkeypatch):
+    class _Provider:
+        def get_by_doi(self, doi):
+            return None
+
+    def unavailable(doi):
+        raise StructuredProviderUnavailable("Crossref unavailable")
+
+    monkeypatch.setattr(crosslinks, "read_wiki_dois", lambda: {"10.1/x": "c/x"})
+    monkeypatch.setattr(crosslinks, "SemanticScholarProvider", _Provider)
+    monkeypatch.setattr(
+        "researchwiki.providers.crossref.fetch_crossref_refs", unavailable
+    )
+
+    with pytest.raises(StructuredProviderUnavailable, match="Crossref unavailable"):
+        crosslinks.crosslink_candidates(
+            Path("/nonexistent.pdf"), {"doi": "10.1/source"}
+        )
 
 
 def test_topical_candidates_skip_stale_semantic_rows(monkeypatch, tmp_path):

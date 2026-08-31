@@ -45,12 +45,10 @@ def main(argv: list[str]) -> int:
             print(json.dumps(record, indent=2))
         else:
             _print_prose(record, stem=None)
-        # exit code: 0 even if retracted (informational), 2 if PubMed unreachable.
-        # pmid=None is ambiguous (expected miss vs fetch failure); _is_indexed()
-        # is the tiebreak — a DOI that *should* be in PubMed (journal, is True)
-        # coming back empty signals an unreachable PubMed → 2; a preprint that's
-        # legitimately absent (is False) is an expected miss → 0.
-        return 2 if record["pmid"] is None and _is_indexed(args.doi) is True else 0
+        # A completed lookup is informational even when PubMed has no match.
+        # Transport failures raise StructuredProviderUnavailable and the CLI's
+        # shared failure funnel maps them to exit 2.
+        return 0
 
     # --all path
     papers = read_wiki_papers()
@@ -110,14 +108,3 @@ def _print_prose(record: dict, stem: str | None) -> None:
     print(f"- **{label}** (PMID {record['pmid']}) — {' '.join(status)} "
           f"· pubtypes={record['pubtypes']} · pubdate={record['pubdate']} "
           f"· fetched {record['fetched_at']}")
-
-
-def _is_indexed(doi: str) -> bool:
-    """Heuristic — used only to decide between exit code 0 vs 2. Genuinely
-    un-indexed DOIs (e.g. bioRxiv) should return exit 0 with pmid=None."""
-    d = (doi or "").lower()
-    # Common non-PubMed DOI prefixes — return True to suggest it's worth
-    # retrying (so caller can distinguish network failure from expected miss).
-    if d.startswith(("10.1101/", "10.48550/", "10.64898/")):
-        return False  # bioRxiv / arXiv / Hypothesis-adjacent preprint servers
-    return True
