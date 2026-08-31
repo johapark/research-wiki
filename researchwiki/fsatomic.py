@@ -5,13 +5,13 @@ directly: non-atomic (a crash mid-write truncates the file) and, for the shared
 files edited by concurrent `agent ingest` subprocesses (`wiki/index.md`, back-link
 target pages), racy. This module is the single primitive that fixes both.
 
-- `write_text_atomic` / `write_json_atomic` — write to a sibling `.tmp` then
-  `os.replace`, which is atomic on POSIX. A crash leaves either the old file or
-  the new one, never a truncated one.
+- `write_text_atomic` / `write_json_atomic` — write to a unique sibling temp file
+  then `os.replace`. A crash leaves either the old file or the new one, never a
+  truncated one; unique names also let independent cache writers overlap safely.
 - `read_json` — guarded read: a truncated/corrupt cache file reads as a miss
   instead of crashing every subsequent run (the pattern S2's provider already used).
-- `update_locked` — read-modify-write under an exclusive `flock`, so two ingest
-  subprocesses splicing into the same shared file can't clobber each other.
+- `update_locked` — read-modify-write under a cross-platform file lock, so two
+  ingest subprocesses splicing into the same shared file can't clobber each other.
 
 All text I/O is utf-8 so nothing depends on the ambient locale (`LANG=C` safe).
 """
@@ -21,32 +21,61 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
+import stat
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
 
-try:
-    import fcntl  # POSIX only; absent on Windows.
-except ImportError:  # pragma: no cover - not our platform
-    fcntl = None  # type: ignore[assignment]
 
+def _open_unique_sibling(path: Path) -> tuple[int, Path]:
+    """Create a unique sibling using the caller's umask for its initial mode."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_BINARY", 0)
+    for _ in range(100):
+        candidate = path.parent / f".{path.name}.{secrets.token_hex(8)}.tmp"
+        try:
+            # 0666 is the normal text-file request; os.open applies the process
+            # umask atomically, unlike chmodding mkstemp's 0600 inode afterward.
+            return os.open(candidate, flags, 0o666), candidate
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"could not allocate a unique temporary file for {path}")
 
 def write_text_atomic(path: Path | str, text: str) -> None:
     """Write `text` to `path` atomically (utf-8).
 
-    Writes a sibling `{path}.tmp`, fsyncs it, then `os.replace`s it over the
-    target. `os.replace` is atomic on POSIX, so a reader (or a crash) never sees
-    a partially-written file.
+    Writes a unique sibling temporary file, fsyncs it, then `os.replace`s it
+    over the target. Keeping the temp in the same directory preserves atomic
+    rename semantics; making it unique prevents concurrent cache writers from
+    replacing one another's temporary path.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    fd, tmp = _open_unique_sibling(path)
+    try:
+        # Preserve the current target's mode as close to replacement as
+        # practical. A new target keeps the mode the kernel derived from umask.
+        try:
+            mode = stat.S_IMODE(path.stat().st_mode)
+        except FileNotFoundError:
+            pass
+        else:
+            # `os.fchmod` is Unix-only; chmodding our unique path is portable.
+            os.chmod(tmp, mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        tmp = None
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
 
 
 def write_json_atomic(path: Path | str, obj) -> None:
@@ -112,6 +141,13 @@ def _lock_path_for(path: Path) -> Path:
     return lock_dir / f"{digest}.lock"
 
 
+def _file_lock(lock_path: Path):
+    """Construct lazily so metadata-only CLI commands need no runtime extras."""
+    from filelock import FileLock
+
+    return FileLock(str(lock_path))
+
+
 def update_locked(
     path: Path | str,
     mutate: Callable[[str], str],
@@ -120,7 +156,7 @@ def update_locked(
 ) -> bool:
     """Read-modify-write `path` under an exclusive cross-process lock.
 
-    Acquires `flock(LOCK_EX)` on a sibling `{path}.lock`, reads the current text
+    Acquires a cross-platform lock keyed by `path`, reads the current text
     (utf-8; `""` when missing and `missing_ok`), calls `mutate(old) -> new`, and
     writes atomically iff `new != old`. Returns True if the file was written.
 
@@ -128,8 +164,6 @@ def update_locked(
     (e.g. an idempotent insert that finds the content already present) — that
     yields no write and a False return.
 
-    Where `fcntl` is unavailable (Windows), degrades to atomic-write-only: still
-    crash-safe, but not protected against a concurrent writer.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -147,16 +181,9 @@ def update_locked(
         write_text_atomic(path, new)
         return True
 
-    if fcntl is None:  # pragma: no cover - not our platform
-        return _apply()
-
     lock_path = _lock_path_for(path)
-    with open(lock_path, "w") as lock_fp:
-        fcntl.flock(lock_fp, fcntl.LOCK_EX)
-        try:
-            return _apply()
-        finally:
-            fcntl.flock(lock_fp, fcntl.LOCK_UN)
+    with _file_lock(lock_path):
+        return _apply()
 
 
 @contextmanager
@@ -168,13 +195,6 @@ def exclusive_lock(path: Path | str):
     so no single target file can represent the whole critical section.
     """
     path = Path(path)
-    if fcntl is None:  # pragma: no cover - Windows fallback
-        yield
-        return
     lock_path = _lock_path_for(path)
-    with open(lock_path, "w") as lock_fp:
-        fcntl.flock(lock_fp, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_fp, fcntl.LOCK_UN)
+    with _file_lock(lock_path):
+        yield

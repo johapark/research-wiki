@@ -663,7 +663,7 @@ def _append_index_entry(
     )
 
     def _splice(text: str) -> str:
-        # index.md is written by every concurrent ingest subprocess; the flock
+        # index.md is written by every concurrent ingest subprocess; the file lock
         # in update_locked serializes this read-modify-write so entries can't
         # clobber each other, and the atomic replace prevents truncation.
         # Idempotent: a re-ingest of the same stem must not append a second

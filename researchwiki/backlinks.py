@@ -199,7 +199,8 @@ def append_related_paper(
     def _splice(text: str) -> str:
         # Idempotent: returning `text` unchanged signals update_locked to skip
         # the write. Concurrent ingests editing the same target page are
-        # serialized by the flock, so this read-modify-write can't be clobbered.
+        # serialized by the cross-process lock, so this read-modify-write can't
+        # be clobbered.
         if already_linked_re.search(text):
             return text
         m = _RELATED_HEADING_RE.search(text)

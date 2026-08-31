@@ -388,7 +388,7 @@ def _attach_to_concept(
     """
     def _splice(text: str) -> str:
         # attach_after_ingest runs per-paper inside each batch subprocess, so
-        # two papers attaching to the same hub race on this page — the flock in
+        # two papers attaching to the same hub race on this page — the file lock in
         # update_locked serializes them. Returning `text` unchanged signals a
         # no-op (already linked, or structurally not a concept page).
         if f"[[{paper_key}]]" in text or f"[[{paper_key}#" in text:

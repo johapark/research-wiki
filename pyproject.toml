@@ -38,6 +38,9 @@ dependencies = [
     "tantivy>=0.22",
     "pyyaml>=6",
     "numpy>=1.24",
+    # Cross-process locking for shared wiki/index writes. Unlike `fcntl`, this
+    # keeps batch ingest's no-lost-update guarantee on Windows as well as POSIX.
+    "filelock>=3.13",
     # Semantic-similarity claim grader (BAAI/bge-small-en-v1.5, ~133 MB on
     # first use, cached under ~/.cache/huggingface/). Required by the agent
     # path's auto-promote gate. Runtime opt-out: `agent ingest --no-semantic`
