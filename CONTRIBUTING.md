@@ -43,7 +43,7 @@ which is not the zero-config path.
 
 **The suite is hermetic and must stay that way**: no network calls, no LLM calls,
 no model downloads. That keeps it fast enough for routine local runs and lets CI
-run without secrets. CI runs it on Python 3.10 / 3.11 / 3.12.
+run without secrets. CI runs it on Python 3.10 through 3.14.
 
 CI also runs Ruff's correctness checks (`E9`, selected `F` rules, `B023`) and a
 McCabe ceiling (`C901`, maximum 40) across the package and tests. Run

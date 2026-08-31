@@ -19,8 +19,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Matches requires-python (>=3.10) and the classifiers in pyproject.toml.
-        python-version: ["3.10", "3.11", "3.12"]
+        # Matches the currently supported releases declared in pyproject.toml.
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       # v5/v6 are the majors that moved these off Node 20, which the runners now

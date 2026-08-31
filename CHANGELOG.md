@@ -24,9 +24,10 @@ the reasoning behind any line below.
 
 - **CI now checks the artifacts and the code paths users actually install.**
   Ruff runs correctness and complexity rules, the test suite ratchets oversized
-  functions as well as modules, Windows exercises concurrent shared writes, and
-  a clean environment installs the built wheel and verifies its CLI plus bundled
-  graph-template and PDF-wordlist assets.
+  functions as well as modules, Python 3.10–3.14 cover the declared interpreter
+  range, Windows exercises concurrent shared writes, and a clean environment
+  installs the built wheel and verifies its CLI plus bundled graph-template and
+  PDF-wordlist assets.
 
 ### Changed
 
