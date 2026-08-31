@@ -216,7 +216,8 @@ def _run_retrieval_fixture(fixture: RetrievalFixture, args) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the CLI parser separately from fixture dispatch and scoring."""
     parser = argparse.ArgumentParser(
         prog="researchwiki benchmark-fixture",
         description=__doc__.strip().split("\n", 1)[0] if __doc__ else None,
@@ -382,6 +383,11 @@ def main(argv: list[str]) -> int:
             help=f"Query-time prefix for the {side} model only.",
         )
 
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    parser = _build_parser()
     args = parser.parse_args(argv)
 
     if args.list:
@@ -442,16 +448,21 @@ def main(argv: list[str]) -> int:
     if isinstance(fixture, RetrievalFixture):
         return _run_retrieval_fixture(fixture, args)
 
-    # ── from here, content-coverage path (the original behavior) ─────
     # A real precondition, not a narrowing hint: `fixture` comes from parsing a
-    # YAML file, so a third fixture type would reach here and be scored by the
-    # wrong path. Raised rather than asserted so `python -O` can't strip it.
+    # YAML file, so a third fixture type must not reach the content scorer.
     if not isinstance(fixture, ContentFixture):
         raise TypeError(
             f"unsupported fixture type {type(fixture).__name__}; the "
             "content-coverage path needs a ContentFixture"
         )
 
+    return _run_content_fixture(fixture, args)
+
+
+def _run_content_fixture(fixture: ContentFixture, args: argparse.Namespace) -> int:
+    """Score or replicate a content fixture after common CLI dispatch."""
+
+    # ── content-coverage path (the original behavior) ────────────────
     if args.llm:
         _warn_if_judge_matches_author()
 

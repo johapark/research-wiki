@@ -60,6 +60,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "ruff>=0.9",
 ]
 # MCP server for read-only wiki queries (search / claims / db-papers /
 # check-grounding). Enables Claude Desktop and other MCP clients to query
@@ -112,3 +113,17 @@ researchwiki = [
 # classifier). They make no network or LLM calls — fast and hermetic.
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+# Start with correctness rules that found real blind spots in the existing
+# AST-only import check. Broader style adoption can be ratcheted separately.
+select = ["E9", "F401", "F821", "F841", "B023", "C901"]
+
+[tool.ruff.lint.mccabe]
+# A permissive ceiling that still catches the monolithic coordinators this
+# project has historically accumulated. Function code size is ratcheted
+# separately in tests/test_module_size.py.
+max-complexity = 40

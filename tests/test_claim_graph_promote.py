@@ -13,19 +13,17 @@ Covers:
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
 
 from researchwiki.claim_graph import (
-    Edge, SLUG_SCHEME_VERSION, open_edges_db, query, set_status, upsert_edge,
+    Edge, SLUG_SCHEME_VERSION, open_edges_db, set_status, upsert_edge,
 )
 from researchwiki.claim_graph.promote import (
     _find_target_syntheses,
     _insert_bullet_under_section,
     _CONTRADICTS_HEADINGS,
-    _CORROBORATES_HEADINGS,
     apply_promotions,
     propose_promotions,
 )

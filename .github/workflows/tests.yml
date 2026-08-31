@@ -52,4 +52,60 @@ jobs:
           pip install -e '.[dev,mcp]'
 
       - name: Run tests
-        run: python -m pytest -q
+        run: |
+          python -m ruff check .
+          python -m pytest -q
+
+  package:
+    # Editable installs can hide missing package-data declarations. Build and
+    # install the actual wheel on every PR so a tagged release is not its first
+    # clean-artifact test.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build artifacts
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Smoke-test the wheel
+        run: |
+          python -m venv /tmp/researchwiki-wheel-smoke
+          /tmp/researchwiki-wheel-smoke/bin/pip install --no-deps dist/*.whl
+          cd /tmp
+          /tmp/researchwiki-wheel-smoke/bin/researchwiki --version
+          /tmp/researchwiki-wheel-smoke/bin/python - <<'PY'
+          import importlib.resources as resources
+
+          package = resources.files("researchwiki")
+          assert package.joinpath("templates/graph.html").is_file()
+          assert any(package.joinpath("pdf/data").iterdir())
+          PY
+
+  windows-concurrency:
+    # The shared-write path used to fall back to no locking when `fcntl` was
+    # absent. Keep the Windows guarantee executable without paying for the
+    # multi-gigabyte ML stack a second time.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install focused test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-deps -e .
+          pip install pytest filelock pyyaml
+
+      - name: Exercise cross-platform writes and provider boundaries
+        run: python -m pytest -q tests/test_fsatomic.py tests/test_provider_cache.py tests/test_provider_http.py

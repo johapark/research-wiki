@@ -1,4 +1,4 @@
-"""Cap how much *code* one module carries, so it stays legible to read and edit.
+"""Cap how much *code* one module or function carries.
 
 The budget lives in the test suite because that is the only place a budget
 actually holds: a convention in a style guide is advisory, and a `lint` finding is
@@ -48,6 +48,11 @@ ceiling can move without silently unlatching every ratchet beneath it.
 `test_debt_list_has_no_dead_entries` is the other half: a module split back below
 `RATCHET_RELEASE` looks *identical to a passing gate*, so without that check the
 list would quietly turn into a monument to work already finished.
+
+Functions have a tighter 250-code-line ceiling. Ruff independently caps McCabe
+complexity, while this catches long straight-line coordinators and renderers that
+branch metrics miss. `_FUNCTION_DEBT` gives the one inherited exception an exact
+ratchet rather than a permanent exemption.
 """
 
 from __future__ import annotations
@@ -81,6 +86,19 @@ MAX_CODE_LINES = 800
 #: A release point of its own keeps the second promise while the first stays
 #: permissive.
 RATCHET_RELEASE = 500
+
+#: A function is a unit a reader should be able to understand without paging
+#: through several independent workflows. This deliberately measures code lines
+#: with the same prose exclusions as the module budget above.
+MAX_FUNCTION_CODE_LINES = 250
+
+# Function key (`repo/path.py::qualified.name`) -> current code-line count.
+# Retire a pin as soon as the function drops below MAX_FUNCTION_CODE_LINES.
+_FUNCTION_DEBT: dict[str, int] = {
+    # Journalled commit/promotion coordinator. Each transactional step is a
+    # natural extraction boundary; until then, it may shrink but not grow.
+    "researchwiki/agents/runner.py::_phase_commit": 269,
+}
 
 # Locate the package through the import system rather than by walking up from
 # `__file__`. If this test is ever moved, path arithmetic would silently point at
@@ -118,15 +136,18 @@ _DEBT: dict[str, int] = {
     "researchwiki/benchmark/retrieval.py": 644,
     # Backfill targets (hook / keywords / doi) share only a work-list idiom.
     "researchwiki/tasks/backfill.py": 606,
-    # Lint's two emitters (human text, `--json`). Grows by one block per new
-    # check, which is exactly the drift a ratchet is for. Raised 565 -> 588 for
+    # Lint's emitters (human text, `--json`). Grows by one block per new check,
+    # which is exactly the drift a ratchet is for. Raised 565 -> 588 for
     # the `idea_contract_violations` emitter, on the same reasoning as the
     # 549 -> 565 raise before it: rendering findings is this file's one job, and
     # splitting per check would scatter that job across modules to satisfy a
-    # number.
-    "researchwiki/tasks/lint/report.py": 588,
-    # Benchmark fixtures: YAML loading, scoring, and the report.
-    "researchwiki/tasks/benchmark_fixture.py": 525,
+    # number. Raised 588 -> 595 to replace the 525-line prose renderer with five
+    # bounded sections plus a coordinator; no finding-rendering logic was added.
+    "researchwiki/tasks/lint/report.py": 595,
+    # Benchmark fixtures: YAML loading, scoring, and the report. Raised 525 ->
+    # 530 for parser/content-path extraction; the largest function fell from
+    # 388 to 193 code lines and the module gained only the dispatch boundaries.
+    "researchwiki/tasks/benchmark_fixture.py": 530,
     # Memory evolution: candidate selection, proposal drafting, emit.
     "researchwiki/agents/phases/evolution.py": 524,
     # Transactional promote: five journalled steps and their rollback. Each step
@@ -210,6 +231,65 @@ def count_code_lines(module: Path) -> int:
         if not (stripped := line.strip()) or stripped.startswith("#")
     )
     return len(lines) - len(prose)
+
+
+def _qualified_functions(node: ast.AST, prefix: str = ""):
+    """Yield `(qualified_name, node)` without losing nested/class context."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.ClassDef):
+            class_name = f"{prefix}.{child.name}" if prefix else child.name
+            yield from _qualified_functions(child, class_name)
+        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            name = f"{prefix}.{child.name}" if prefix else child.name
+            yield name, child
+            yield from _qualified_functions(child, name)
+        else:
+            yield from _qualified_functions(child, prefix)
+
+
+def function_code_lines(module: Path) -> list[tuple[str, int]]:
+    """Return each qualified function and its code lines, excluding prose."""
+    source = module.read_bytes().decode("utf-8", errors="replace")
+    lines = source.splitlines()
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        # Syntax errors fail compilation too. Still expose one synthetic span so
+        # a malformed large file cannot make this scanner report no functions.
+        return [("<unparseable>", _physical_lines(source))]
+
+    prose = _docstring_line_numbers(tree)
+    prose.update(
+        number for number, line in enumerate(lines, start=1)
+        if not (stripped := line.strip()) or stripped.startswith("#")
+    )
+    return [
+        (
+            name,
+            sum(
+                number not in prose
+                for number in range(node.lineno, (node.end_lineno or node.lineno) + 1)
+            ),
+        )
+        for name, node in _qualified_functions(tree)
+    ]
+
+
+def scan_functions(
+    *, package: Path, repo: Path, ceiling: int, debt: dict[str, int]
+) -> list[Oversize]:
+    """Functions crossing the hard ceiling or their exact inherited pin."""
+    failures: list[Oversize] = []
+    for module in python_modules(package):
+        rel = module.relative_to(repo).as_posix()
+        for name, lines in function_code_lines(module):
+            key = f"{rel}::{name}"
+            pinned = debt.get(key)
+            if pinned is not None and lines > pinned:
+                failures.append(Oversize(key, lines, pinned))
+            elif pinned is None and lines >= ceiling:
+                failures.append(Oversize(key, lines, None))
+    return failures
 
 
 def python_modules(root: Path) -> Iterator[Path]:
@@ -397,6 +477,45 @@ def test_the_two_failure_modes_are_told_apart(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# Function-level ceiling. Complexity is enforced by Ruff C901; this catches
+# long, mostly straight-line functions as well.
+# --------------------------------------------------------------------------
+
+
+def test_function_code_lines_exclude_its_docstring_and_comments(tmp_path):
+    module = _module(tmp_path, '''def compact():
+    """Several words
+    across several lines.
+    """
+    # explanation
+    value = 1
+    return value
+''')
+    assert function_code_lines(module) == [("compact", 3)]
+
+
+def test_function_at_the_ceiling_is_reported(tmp_path):
+    _module(tmp_path, "def long():\n" + "    value = 1\n" * 3)
+    failures = scan_functions(
+        package=tmp_path, repo=tmp_path, ceiling=4, debt={},
+    )
+    assert [(f.path, f.lines) for f in failures] == [("sample.py::long", 4)]
+
+
+def test_pinned_function_may_not_grow(tmp_path):
+    _module(tmp_path, "def watched():\n" + "    value = 1\n" * 4)
+    failures = scan_functions(
+        package=tmp_path,
+        repo=tmp_path,
+        ceiling=4,
+        debt={"sample.py::watched": 4},
+    )
+    assert [(f.path, f.lines, f.ceiling) for f in failures] == [
+        ("sample.py::watched", 5, 4),
+    ]
+
+
+# --------------------------------------------------------------------------
 # The gate.
 # --------------------------------------------------------------------------
 
@@ -431,6 +550,22 @@ def test_no_module_is_too_long():
     raise AssertionError("\n\n".join(complaints))
 
 
+def test_no_function_is_too_long():
+    failures = scan_functions(
+        package=_PACKAGE,
+        repo=_REPO,
+        ceiling=MAX_FUNCTION_CODE_LINES,
+        debt=_FUNCTION_DEBT,
+    )
+    if failures:
+        raise AssertionError(
+            f"Functions over the {MAX_FUNCTION_CODE_LINES}-code-line budget:\n"
+            + "\n".join(f"  - {failure.describe()}" for failure in failures)
+            + "\nFix: extract a cohesive phase. Function pins are exact inherited debt, "
+              "not blanket exemptions."
+        )
+
+
 def test_debt_list_has_no_dead_entries():
     """Prune entries that no longer hold anything back.
 
@@ -451,6 +586,25 @@ def test_debt_list_has_no_dead_entries():
             "Dead entries in _DEBT:\n" + "\n".join(dead)
             + "\n\nFix: delete them. Someone did the work; the list should show "
               "what is still outstanding."
+        )
+
+
+def test_function_debt_has_no_dead_entries():
+    actual = {
+        f"{module.relative_to(_REPO).as_posix()}::{name}": lines
+        for module in python_modules(_PACKAGE)
+        for name, lines in function_code_lines(module)
+    }
+    dead = [
+        f"  - {key}: "
+        + ("gone" if key not in actual else f"down to {actual[key]} code lines")
+        for key in sorted(_FUNCTION_DEBT)
+        if key not in actual or actual[key] < MAX_FUNCTION_CODE_LINES
+    ]
+    if dead:
+        raise AssertionError(
+            "Dead entries in _FUNCTION_DEBT:\n" + "\n".join(dead)
+            + "\n\nFix: delete them; the function now satisfies the ordinary ceiling."
         )
 
 

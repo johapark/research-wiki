@@ -126,7 +126,7 @@ def _emit_json(**kw) -> int:
     return 0
 
 
-def _emit_prose(**kw) -> int:
+def _emit_structural_sections(kw: dict) -> None:
     pages = kw["pages"]
     print("# researchwiki lint report")
     print()
@@ -322,6 +322,9 @@ def _emit_prose(**kw) -> int:
         print("_no drift — every paper page's stem year matches its YAML year._")
     print()
 
+
+def _emit_metadata_sections(kw: dict) -> None:
+    """Render page metadata and supplementary-file findings."""
     missing_keywords = kw["missing_keywords"]
     print(f"## Paper pages missing keywords ({len(missing_keywords)})")
     if missing_keywords:
@@ -424,6 +427,9 @@ def _emit_prose(**kw) -> int:
                 print(f"_... +{len(supp_orphans) - 20} more_")
         print()
 
+
+def _emit_page_contract_sections(kw: dict) -> None:
+    """Render page-shape and durable-anchor contract findings."""
     concept_contract = kw["concept_contract"]
     if concept_contract:
         print(f"## Concept-hub contract violations ({len(concept_contract)}, advisory)")
@@ -494,6 +500,9 @@ def _emit_prose(**kw) -> int:
             print(f"_... +{len(by_page) - 20} more pages_")
         print()
 
+
+def _emit_corpus_evidence_sections(kw: dict) -> None:
+    """Render grading, retrieval, and claim-coverage findings."""
     ungraded_papers = kw["ungraded_papers"]
     if ungraded_papers:
         n_total = sum(p["n_ungraded"] for p in ungraded_papers)
@@ -574,6 +583,9 @@ def _emit_prose(**kw) -> int:
               "`researchwiki claim-overlap --backlog`._")
         print()
 
+
+def _emit_similarity_and_db_sections(kw: dict) -> None:
+    """Render duplicate-claim, DB-drift, cross-paper, and fix summaries."""
     dup_claims = kw["duplicate_claim_sets"]
     if dup_claims is None:
         print("## Near-duplicate claim sets (skipped)")
@@ -650,4 +662,12 @@ def _emit_prose(**kw) -> int:
         print(f"## Applied `--fix` (DB): {up} upsert(s), {de} delete(s)")
         print()
 
+
+def _emit_prose(**kw) -> int:
+    """Render the human report from focused, independently testable sections."""
+    _emit_structural_sections(kw)
+    _emit_metadata_sections(kw)
+    _emit_page_contract_sections(kw)
+    _emit_corpus_evidence_sections(kw)
+    _emit_similarity_and_db_sections(kw)
     return 0

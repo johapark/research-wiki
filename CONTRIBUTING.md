@@ -10,6 +10,7 @@ intentional, or deliberately out of scope.
 git clone https://github.com/johapark/research-wiki.git && cd research-wiki
 python3 -m venv ~/.venvs/research-wiki                    # outside the repo — see below
 ~/.venvs/research-wiki/bin/pip install -e '.[dev,mcp]'
+~/.venvs/research-wiki/bin/python -m ruff check .
 ~/.venvs/research-wiki/bin/python -m pytest -q            # green before you change anything
 ```
 
@@ -43,6 +44,11 @@ which is not the zero-config path.
 **The suite is hermetic and must stay that way**: no network calls, no LLM calls,
 no model downloads. That keeps it fast enough for routine local runs and lets CI
 run without secrets. CI runs it on Python 3.10 / 3.11 / 3.12.
+
+CI also runs Ruff's correctness checks (`E9`, selected `F` rules, `B023`) and a
+McCabe ceiling (`C901`, maximum 40) across the package and tests. Run
+`python -m ruff check .`
+before the full suite.
 
 When touching an LLM path, monkeypatch `llm.call` (see
 `tests/test_llm_retry.py`, `tests/test_keywords_parse_failure.py`) or use the
@@ -117,6 +123,11 @@ Split cohesive groups into focused siblings rather than adding an entry — the
 list is for existing debt, not an escape hatch for new code. When a module drops
 below the release point, delete its entry (a test insists, because a stale
 exemption is indistinguishable from a passing gate).
+
+**Keep functions under 250 lines of code and McCabe complexity at 40 or less.**
+The same test applies the code-line metric per function and exact-ratchets any
+inherited exception; Ruff enforces complexity. A coordinator that crosses either
+limit should delegate cohesive collection, validation, or rendering phases.
 
 ## Content vs framework
 

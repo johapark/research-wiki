@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import os
+import os as os  # explicit compatibility export; tests and integrations patch cli.os
 import pkgutil
 import sys
 import traceback

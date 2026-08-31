@@ -30,12 +30,15 @@ import re
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..paths import wiki_root
 
-# `LLMResponse` is imported lazily inside call_chat_relay to dodge the
+# `LLMResponse` is imported lazily at runtime inside call_chat_relay to dodge the
 # llm.py ↔ relay.py cycle: llm.py imports `call_chat_relay` from us, so
 # importing it back at module load time fails when relay.py loads first.
+if TYPE_CHECKING:
+    from .llm import LLMResponse
 
 
 _RELAY_SCHEMA_VERSION = 1

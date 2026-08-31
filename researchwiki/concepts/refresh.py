@@ -214,17 +214,16 @@ def upgrade_spokes(*, dry_run: bool = False) -> dict:
         )
         if not m:
             continue
-        pre_len = m.end(1)
         section_body = m.group(2)
         upgraded = 0
         skipped = 0
 
-        def _upgrade(match: re.Match) -> str:
+        def _upgrade(match: re.Match, topic: str = term) -> str:
             nonlocal upgraded, skipped
             prefix, target, suffix = match.group(1), match.group(2), match.group(3)
             # Bare stem — extract the paper stem (strip category prefix).
             target_stem = target.rsplit("/", 1)[-1]
-            best_slug = _best_claim_slug(target_stem, term)
+            best_slug = _best_claim_slug(target_stem, topic)
             if not best_slug:
                 skipped += 1
                 return match.group(0)  # unchanged

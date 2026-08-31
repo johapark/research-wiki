@@ -44,6 +44,115 @@ def _doi_key(value: object) -> str | None:
     return value or None
 
 
+def _load_paper_inventory(log_tag: str) -> tuple[list[dict], int, list[str], int]:
+    """Load scoutable papers and account for every intentional DOI omission."""
+    papers = read_wiki_papers()
+    # Surface the operational gap: paper-type pages without `doi:` are
+    # silently filtered out of `read_wiki_papers()` and so can't be scouted.
+    total_paper_pages = 0
+    intentional_no_doi: list[str] = []
+    for page in read_pages():
+        if page.fm.get("type", "paper") != "paper":
+            continue
+        if page.category in PAGE_TYPE_DIRS:
+            continue
+        total_paper_pages += 1
+        # Only effective no-DOI pages are intentional omissions. A stale reason
+        # on a page that now has a DOI must not distort the denominator.
+        if not page.fm.get("doi") and (page.fm.get("no_doi_reason") or "").strip():
+            intentional_no_doi.append(page.stem)
+
+    skipped_no_doi = total_paper_pages - len(papers) - len(intentional_no_doi)
+    eligible = total_paper_pages - len(intentional_no_doi)
+    if skipped_no_doi > 0:
+        log(f"WARN: {skipped_no_doi} paper page(s) skipped (no DOI in YAML); "
+            f"scout denominator is {len(papers)}/{eligible}. "
+            f"Run `researchwiki lint --json | jq .missing_doi` to fix.",
+            tag=log_tag)
+    if intentional_no_doi:
+        log(f"Note: {len(intentional_no_doi)} page(s) excluded from scout by "
+            f"`no_doi_reason:` field (legitimate no-DOI cases).",
+            tag=log_tag)
+    log(f"Wiki papers (scoutable): {len(papers)}", tag=log_tag)
+    return papers, total_paper_pages, intentional_no_doi, skipped_no_doi
+
+
+def _build_doi_inventory(papers: list[dict], log_tag: str) -> dict:
+    """Build unambiguous DOI joins and expose duplicate assignments."""
+    doi_to_stems: dict[str, list[str]] = {}
+    for paper in papers:
+        doi = _doi_key(paper.get("doi"))
+        if doi:
+            doi_to_stems.setdefault(doi, []).append(paper["stem"])
+    duplicate_dois = [
+        {"doi": doi, "stems": sorted(stems)}
+        for doi, stems in sorted(doi_to_stems.items())
+        if len(stems) > 1
+    ]
+    if duplicate_dois:
+        log(
+            f"WARN: {len(duplicate_dois)} DOI(s) occur on multiple wiki pages; "
+            "ambiguous DOI edges are skipped",
+            tag=log_tag,
+        )
+    ambiguous_stems = {
+        stem
+        for entry in duplicate_dois
+        for stem in entry["stems"]
+    }
+    return {
+        "wiki_dois": set(doi_to_stems),
+        "doi_to_stem": {
+            doi: stems[0]
+            for doi, stems in doi_to_stems.items()
+            if len(stems) == 1
+        },
+        "duplicate_dois": duplicate_dois,
+        "ambiguous_stems": ambiguous_stems,
+        "stem_to_category": {p["stem"]: p["category"] for p in papers},
+        "aggregate_papers": len(papers) - len(ambiguous_stems),
+    }
+
+
+def _fetch_bundles(papers: list[dict], provider, log_tag: str) -> tuple[dict, list[dict]]:
+    """Fetch metadata and graph neighborhoods for every scoutable paper."""
+    dois_to_batch = [p["doi"].strip() for p in papers if _doi_key(p.get("doi"))]
+    batch_metadata: dict[str, ScholarlyArticle] = {}
+    if dois_to_batch:
+        log(f"batch-fetching metadata for {len(dois_to_batch)} papers", tag=log_tag)
+        batch_lookup = getattr(provider, "get_batch_metadata", None)
+        if callable(batch_lookup):
+            raw_batch = batch_lookup(dois_to_batch) or {}
+            if isinstance(raw_batch, dict):
+                batch_metadata = {
+                    key: article
+                    for raw_key, article in raw_batch.items()
+                    if (key := _doi_key(raw_key))
+                }
+
+    bundles: dict[str, dict] = {}
+    s2_missing: list[dict] = []
+    for paper in papers:
+        stem = paper["stem"]
+        log(f"Paper {stem}...", tag=log_tag)
+        article = None
+        if paper.get("doi"):
+            article = batch_metadata.get(_doi_key(paper["doi"]) or "")
+            if article is None:
+                article = provider.get_by_doi(paper["doi"])
+        if article is None:
+            article = ScholarlyArticle()
+            if paper.get("doi"):
+                s2_missing.append({"stem": stem, "doi": paper["doi"]})
+        bundles[stem] = {
+            "article": article,
+            "refs": provider.get_references(article) if article.doi else [],
+            "cites": provider.get_citations(article) if article.doi else [],
+            "recs": provider.get_recommendations(article) if article.doi else [],
+        }
+    return bundles, s2_missing
+
+
 def main(
     argv: list[str],
     *,
@@ -80,114 +189,20 @@ def main(
     )
     args = parser.parse_args(argv)
 
-    papers = read_wiki_papers()
-    # Surface the operational gap: paper-type pages without `doi:` are
-    # silently filtered out of `read_wiki_papers()` and so can't be
-    # scouted (no DOI → no S2 lookup). Lint catches them via its
-    # `missing_doi` check; scout acknowledges the skip count so
-    # the denominator (papers_scouted / total_paper_pages) is honest.
-    # Pages that declare `no_doi_reason:` are intentional gaps (NeurIPS
-    # posters, workshop papers, etc.) — scout excludes them from the
-    # WARN and tracks them separately.
-    total_paper_pages = 0
-    intentional_no_doi: list[str] = []
-    for p in read_pages():
-        if p.fm.get("type", "paper") != "paper":
-            continue
-        if p.category in PAGE_TYPE_DIRS:
-            continue
-        total_paper_pages += 1
-        # A stale `no_doi_reason` on a page that now has a DOI must not be
-        # subtracted as well as counted in `papers`; that would make the
-        # denominator arithmetic negative again. Lint can flag/clean the stale
-        # annotation, while scout counts the page by its effective DOI state.
-        if not p.fm.get("doi") and (p.fm.get("no_doi_reason") or "").strip():
-            intentional_no_doi.append(p.stem)
-    skipped_no_doi = total_paper_pages - len(papers) - len(intentional_no_doi)
-    eligible = total_paper_pages - len(intentional_no_doi)
-    if skipped_no_doi > 0:
-        log(f"WARN: {skipped_no_doi} paper page(s) skipped (no DOI in YAML); "
-            f"scout denominator is {len(papers)}/{eligible}. "
-            f"Run `researchwiki lint --json | jq .missing_doi` to fix.",
-            tag=log_tag)
-    if intentional_no_doi:
-        log(f"Note: {len(intentional_no_doi)} page(s) excluded from scout by "
-            f"`no_doi_reason:` field (legitimate no-DOI cases).",
-            tag=log_tag)
-    log(f"Wiki papers (scoutable): {len(papers)}", tag=log_tag)
-    doi_to_stems: dict[str, list[str]] = {}
-    for p in papers:
-        doi = _doi_key(p.get("doi"))
-        if doi:
-            doi_to_stems.setdefault(doi, []).append(p["stem"])
-    duplicate_dois = [
-        {"doi": doi, "stems": sorted(stems)}
-        for doi, stems in sorted(doi_to_stems.items())
-        if len(stems) > 1
-    ]
-    if duplicate_dois:
-        log(
-            f"WARN: {len(duplicate_dois)} DOI(s) occur on multiple wiki pages; "
-            "ambiguous DOI edges are skipped",
-            tag=log_tag,
-        )
-    # Do not silently assign an ambiguous DOI to whichever page was visited last.
-    wiki_dois = set(doi_to_stems)
-    doi_to_stem = {
-        doi: stems[0]
-        for doi, stems in doi_to_stems.items()
-        if len(stems) == 1
-    }
-    ambiguous_stems = {
-        stem
-        for entry in duplicate_dois
-        for stem in entry["stems"]
-    }
-    stem_to_category = {p["stem"]: p["category"] for p in papers}
-    total_papers = len(papers)
-    aggregate_papers = total_papers - len(ambiguous_stems)
+    papers, total_paper_pages, intentional_no_doi, skipped_no_doi = (
+        _load_paper_inventory(log_tag)
+    )
+    doi_inventory = _build_doi_inventory(papers, log_tag)
+    wiki_dois = doi_inventory["wiki_dois"]
+    doi_to_stem = doi_inventory["doi_to_stem"]
+    duplicate_dois = doi_inventory["duplicate_dois"]
+    ambiguous_stems = doi_inventory["ambiguous_stems"]
+    stem_to_category = doi_inventory["stem_to_category"]
+    aggregate_papers = doi_inventory["aggregate_papers"]
     provider = get_default_provider(
         log_tag=log_tag, force_refresh_days=args.refresh_cache,
     )
-
-    # Prefetch all metadata in one batch; get_by_doi calls below hit cache.
-    dois_to_batch = [p["doi"].strip() for p in papers if _doi_key(p.get("doi"))]
-    batch_metadata: dict[str, ScholarlyArticle] = {}
-    if dois_to_batch:
-        log(f"batch-fetching metadata for {len(dois_to_batch)} papers", tag=log_tag)
-        batch_lookup = getattr(provider, "get_batch_metadata", None)
-        if callable(batch_lookup):
-            raw_batch = batch_lookup(dois_to_batch) or {}
-            if isinstance(raw_batch, dict):
-                batch_metadata = {
-                    key: article
-                    for raw_key, article in raw_batch.items()
-                    if (key := _doi_key(raw_key))
-                }
-
-    # Per-paper fetches (metadata now cached; only refs/cites/recs need network)
-    # `s2_missing` tracks stems whose DOI 404'd in S2 — surfaced at the end so
-    # the user can spot wrongly-formatted DOIs (e.g. arXiv DOIs vs the journal
-    # DOI) and fix them in YAML. The provider's negative-cache TTL means a
-    # paper newly indexed by S2 will auto-recover next month.
-    bundles: dict[str, dict] = {}
-    s2_missing: list[dict] = []
-    for p in papers:
-        stem = p["stem"]
-        log(f"Paper {stem}...", tag=log_tag)
-        article = None
-        if p.get("doi"):
-            article = batch_metadata.get(_doi_key(p["doi"]) or "")
-            if article is None:
-                article = provider.get_by_doi(p["doi"])
-        if article is None:
-            article = ScholarlyArticle()
-            if p.get("doi"):
-                s2_missing.append({"stem": stem, "doi": p["doi"]})
-        refs = provider.get_references(article) if article.doi else []
-        cites = provider.get_citations(article) if article.doi else []
-        recs = provider.get_recommendations(article) if article.doi else []
-        bundles[stem] = {"article": article, "refs": refs, "cites": cites, "recs": recs}
+    bundles, s2_missing = _fetch_bundles(papers, provider, log_tag)
 
     # Cross-wiki edges (outgoing + incoming views; union)
     edges: set[tuple[str, str]] = set()

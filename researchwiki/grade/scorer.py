@@ -292,7 +292,6 @@ def _comparator_check(items: list[FixtureItem], page_body: str) -> AxisReport:
             window_start = max(0, m.start() - 100)
             window_end = min(len(page_body), m.end() + 100)
             window = page_body[window_start:window_end]
-            window_lc = window.lower()
 
             # Where does the EXPECTED comparator appear (if at all)?
             expected_offsets = [mm.start() for mm in comp_pat.finditer(window)]

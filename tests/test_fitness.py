@@ -110,11 +110,9 @@ def test_stances_cycle_past_the_list():
 # ────────────────────────────────────────────────────────────────────
 
 from researchwiki.agents.fitness import (
-    BM25_MARGIN,
     FLOOR_MARGIN,
     SAL_WEIGHT,
     SEM_WEIGHT,
-    SEMANTIC_EPSILON,
     combined_quality,
 )
 

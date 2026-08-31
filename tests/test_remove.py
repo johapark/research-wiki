@@ -17,7 +17,6 @@ Hermetic: tmp wiki, no PDFs, no DB writes to the real state.db, no LLM.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 

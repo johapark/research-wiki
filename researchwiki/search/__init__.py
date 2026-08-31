@@ -36,8 +36,11 @@ __all__ = [
     "suggest_category_knn",
     "suggest_category_llm",
     "build_documents_from_wiki",
+    "claim_lookup",
+    "claims_by_stem",
     "document_from_page",
     "format_claim_ref",
+    "pdf_section_search",
 ]
 
 
@@ -355,5 +358,9 @@ def suggest_category(
 # here because they're the query-layer analogue of the storage-layer indexes
 # in `researchwiki.index`. Kept as top-level exports so callers don't have to
 # reach into `search.tools` directly.
-from .tools import claim_lookup, claims_by_stem, pdf_section_search  # noqa: E402
+from .tools import (  # noqa: E402
+    claim_lookup as claim_lookup,
+    claims_by_stem as claims_by_stem,
+    pdf_section_search as pdf_section_search,
+)
 from .refs import format_claim_ref  # noqa: E402

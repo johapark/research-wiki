@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from researchwiki.grade.grounding import (
     check,
     extract_claim_anchors,

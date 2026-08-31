@@ -260,6 +260,26 @@ def test_missing_type_is_wired_into_the_lint_orchestrator():
     assert "Pages with no `type:`" in rendered
 
 
+def test_metadata_report_separates_missing_supplementary_section(capsys):
+    """A missing-only supplementary report still ends before the next H2."""
+    from researchwiki.tasks.lint import report as lint_report
+
+    lint_report._emit_metadata_sections({
+        "missing_keywords": [],
+        "missing_doi": [],
+        "missing_hook": [],
+        "missing_author_model": [],
+        "hook_too_long": [],
+        "unquoted_wikilinks": [],
+        "supp_yaml_missing": [{"page": "cgt/paper", "missing": ["data.csv"]}],
+        "supp_orphans": [],
+    })
+
+    assert capsys.readouterr().out.endswith(
+        "- **cgt/paper** → missing: data.csv\n\n"
+    )
+
+
 def test_find_page_type_mismatches_synthesis_with_paper_type(tmp_wiki):
     s = _mkpage(tmp_wiki, "synthesis/x", "")
     pages = [s]

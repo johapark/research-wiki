@@ -15,7 +15,6 @@ from pathlib import Path
 
 import pytest
 
-from researchwiki.concepts import refresh as concepts_mod
 from researchwiki.concepts.refresh import upgrade_spokes
 
 

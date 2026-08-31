@@ -473,6 +473,46 @@ def main(argv: list[str]) -> int:
     all_pages.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
     recent = all_pages[: args.recent]
 
+    return _render_status({
+        "args": args,
+        "root": root,
+        "page_type_dirs": PAGE_TYPE_DIRS,
+        "page_type_sets": page_type_sets,
+        "n": n,
+        "cat_counts": cat_counts,
+        "directional": directional,
+        "undirected_count": undirected_count,
+        "density": density,
+        "max_possible": max_possible,
+        "orphans": orphans,
+        "inbox_files": inbox_files,
+        "ingest_files": ingest_files,
+        "web_scout_runs": web_scout_runs,
+        "orphan_pdfs": orphan_pdfs,
+        "failed": failed,
+        "recent": recent,
+    })
+
+
+def _render_overview(ctx: dict) -> None:
+    """Render page counts, graph health, workflow state, and recent pages."""
+    args = ctx["args"]
+    PAGE_TYPE_DIRS = ctx["page_type_dirs"]
+    page_type_sets = ctx["page_type_sets"]
+    n = ctx["n"]
+    cat_counts = ctx["cat_counts"]
+    directional = ctx["directional"]
+    undirected_count = ctx["undirected_count"]
+    density = ctx["density"]
+    max_possible = ctx["max_possible"]
+    orphans = ctx["orphans"]
+    inbox_files = ctx["inbox_files"]
+    ingest_files = ctx["ingest_files"]
+    web_scout_runs = ctx["web_scout_runs"]
+    orphan_pdfs = ctx["orphan_pdfs"]
+    failed = ctx["failed"]
+    recent = ctx["recent"]
+
     # --- render
     print("Research Wiki — status")
     print()
@@ -620,6 +660,11 @@ def main(argv: list[str]) -> int:
         print(f"  {key:<65} {rel}")
     print()
 
+
+def _render_model_and_index_health(ctx: dict) -> None:
+    """Render model routing, index state, DB drift, and claim coverage."""
+    root = ctx["root"]
+
     # --- active model routing (validate the selected YAML, then show where an
     # OpenAI-compatible request would really go without ever printing its key)
     import os as _os
@@ -704,6 +749,10 @@ def main(argv: list[str]) -> int:
             print(f"  Claim grading:       {line}")
     print()
 
+
+def _render_backlogs_and_telemetry() -> None:
+    """Render optional proposals, supplements, costs, and concept candidates."""
+
     # --- pending evolution proposals
     proposals = _evolution_proposal_dirs()
     if proposals:
@@ -783,6 +832,12 @@ def main(argv: list[str]) -> int:
               "(`researchwiki candidates concepts --bridges`)")
         print()
 
+
+def _render_status(ctx: dict) -> int:
+    """Render a collected status snapshot without walking the wiki again."""
+    _render_overview(ctx)
+    _render_model_and_index_health(ctx)
+    _render_backlogs_and_telemetry()
     print("For the full citation-scout report run: researchwiki scout")
     return 0
 

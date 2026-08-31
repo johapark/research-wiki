@@ -7,8 +7,6 @@ the docstrings are from a real 532-item ReadCube library.
 
 from pathlib import Path
 
-import pytest
-
 from researchwiki.refimport.pair import Pairing, PdfFacts
 from researchwiki.refimport.parse import ExportItem
 from researchwiki.refimport.triage import (

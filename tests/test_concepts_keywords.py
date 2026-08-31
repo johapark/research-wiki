@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from researchwiki.claim_graph import Edge, open_edges_db, query
+from researchwiki.claim_graph import open_edges_db, query
 from researchwiki.concepts.candidates import _FRAMEWORK_TAG_STOPLIST
-from researchwiki.concepts.candidates import _merge_candidate_sources, _term_slug, find_candidates_from_keywords
+from researchwiki.concepts.candidates import (
+    _merge_candidate_sources,
+    find_candidates_from_keywords,
+)
 
 
 # ---------- keyword aggregator ----------

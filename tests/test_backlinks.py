@@ -5,8 +5,6 @@ in ANY wikilink form: `[[category/stem]]`, bare `[[stem]]` (the form CLAUDE.md
 mandates in tables), an aliased `[[stem|…]]`, or a claim anchor `[[stem#slug]]`.
 """
 
-import pytest
-
 from researchwiki.backlinks import append_related_paper
 
 

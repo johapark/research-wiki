@@ -359,8 +359,8 @@ def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT) -> list[Retrieved
     for score, addr in res.hits:
         d = searcher.doc(addr).to_dict()
 
-        def _first(key, cast):
-            vals = d.get(key)
+        def _first(key, cast, document=d):
+            vals = document.get(key)
             return cast(vals[0]) if vals else None
 
         out.append(

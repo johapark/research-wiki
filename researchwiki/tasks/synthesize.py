@@ -27,7 +27,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
 from collections import Counter
 from datetime import date
 

@@ -111,8 +111,6 @@ def _duplicate_claim_pairs(
     claims whose nearest off-page claim lives in b. Pure function over
     (stems, vecs) so it's testable without a DB or an embedding model.
     """
-    import numpy as np
-
     by_stem: dict[str, list[int]] = {}
     for i, s in enumerate(stems):
         by_stem.setdefault(s, []).append(i)

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from researchwiki.claim_graph import alert as alert_mod
 
 

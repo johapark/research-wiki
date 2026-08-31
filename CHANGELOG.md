@@ -20,6 +20,14 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- **CI now checks the artifacts and the code paths users actually install.**
+  Ruff runs correctness and complexity rules, the test suite ratchets oversized
+  functions as well as modules, Windows exercises concurrent shared writes, and
+  a clean environment installs the built wheel and verifies its CLI plus bundled
+  graph-template and PDF-wordlist assets.
+
 ### Changed
 
 - **Research-question retrieval is now proportional to the question.** Known-paper,
@@ -37,6 +45,23 @@ the reasoning behind any line below.
   after Category; the top 10 Ideas appear before Synthesis in the dashboard flow.
   Periodic `researchwiki lint` runs now report semantic dashboard drift as an
   advisory finding while allowing custom prose and additional columns.
+
+### Fixed
+
+- **Concurrent and cross-platform writes no longer lose or corrupt data.** Atomic
+  replacement uses a unique same-directory temporary file for every writer,
+  preserves an existing file's mode, and cleans up failed writes. Shared
+  read-modify-write operations now use a real cross-process lock on Windows as
+  well as POSIX instead of silently becoming unlocked off Unix.
+
+- **Structured-metadata caches and failures retain their identity.** Cache names
+  carry a SHA-256 identity suffix so punctuation replacement or long-key
+  truncation cannot alias two requests. PubMed, ORCID, and bioRxiv now distinguish
+  a valid 404 from an unavailable API or missing `curl`; Semantic Scholar only
+  negative-caches unanimous 404 retries; and citation crosslink discovery no
+  longer hides Semantic Scholar or Crossref outages. A successful PubMed no-hit
+  remains exit 0. All curl-backed metadata clients identify the current
+  research-wiki project rather than the stale Claude Code repository.
 
 ## [0.4.4] - 2026-08-28
 

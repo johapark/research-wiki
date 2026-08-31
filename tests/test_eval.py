@@ -17,7 +17,6 @@ Hermetic: the LLM is a stub, no network.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 

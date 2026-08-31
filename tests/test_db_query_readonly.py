@@ -23,8 +23,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 from researchwiki.tasks import db as db_task
 
 

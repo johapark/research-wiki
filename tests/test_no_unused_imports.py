@@ -1,16 +1,13 @@
 """No unused imports in `researchwiki/`.
 
-There is no linter in this repo — CI runs pytest and nothing else, and
-ruff/flake8/mypy aren't in `[dev]`. So the 45 dead imports that had accumulated
-were invisible: nothing failed, nothing warned. They aren't cosmetic. Each one
-is a live edge in the import graph, and two of them had already caused real
-trouble — an `import sys` kept alive only by a `sys.exit` that moved, and
-`from .paths import wiki_root` in `log.py` which made a logging call able to
-fail on path resolution.
+Ruff now enforces F401 in CI, but this test predates that gate and keeps the
+rule independently executable under plain pytest. The 45 dead imports that
+motivated it were not cosmetic: each was a live edge in the import graph, and
+two had already caused real trouble — an `import sys` kept alive only by a
+`sys.exit` that moved, and `from .paths import wiki_root` in `log.py` which made
+a logging call able to fail on path resolution.
 
-This test is that missing linter, scoped to the one rule worth pinning without
-adopting a whole toolchain. It's AST-only: no imports are executed, so it stays
-hermetic and fast.
+It remains AST-only: no imports are executed, so it stays hermetic and fast.
 
 Three exemptions, all deliberate:
 

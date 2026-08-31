@@ -151,7 +151,6 @@ def _blocked_pairs(vecs, stems, lo, hi, block):
 
 
 def _reference_pairs(vecs, stems, lo, hi):
-    n = len(stems)
     sims = vecs @ vecs.T
     m = (sims >= lo) & (sims < hi) & (stems[:, None] != stems[None, :])
     ii, jj = np.where(np.triu(m, 1))

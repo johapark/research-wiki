@@ -10,10 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from researchwiki.tasks.lint.concept_contract import (
-    DEFINITION_MIN_WORDS,
     check_hub,
     find_concept_contract_violations,
 )

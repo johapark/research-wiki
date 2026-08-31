@@ -204,9 +204,6 @@ def _papers_where_keywords_match(
         if a_lc and a_lc not in seen:
             search_terms.append(a)
             seen.add(a_lc)
-    # Precompute slugs for the slug-equality check.
-    slugs = {_term_slug(t): t for t in search_terms if _term_slug(t)}
-
     out: dict[str, list[str]] = {}
     for paper in _load_paper_metadata():
         matched: list[str] = []
