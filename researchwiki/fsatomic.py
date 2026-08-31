@@ -5,9 +5,10 @@ directly: non-atomic (a crash mid-write truncates the file) and, for the shared
 files edited by concurrent `agent ingest` subprocesses (`wiki/index.md`, back-link
 target pages), racy. This module is the single primitive that fixes both.
 
-- `write_text_atomic` / `write_json_atomic` — write to a unique sibling temp file
-  then `os.replace`. A crash leaves either the old file or the new one, never a
-  truncated one; unique names also let independent cache writers overlap safely.
+- `write_text_atomic` / `write_json_atomic` — serialize writers per target, write
+  to a unique sibling temp file, then `os.replace`. A crash leaves either the old
+  file or the new one, never a truncated one; unique names keep cleanup local to
+  the writer that created each temporary file.
 - `read_json` — guarded read: a truncated/corrupt cache file reads as a miss
   instead of crashing every subsequent run (the pattern S2's provider already used).
 - `update_locked` — read-modify-write under a cross-platform file lock, so two
@@ -43,16 +44,8 @@ def _open_unique_sibling(path: Path) -> tuple[int, Path]:
             continue
     raise FileExistsError(f"could not allocate a unique temporary file for {path}")
 
-def write_text_atomic(path: Path | str, text: str) -> None:
-    """Write `text` to `path` atomically (utf-8).
-
-    Writes a unique sibling temporary file, fsyncs it, then `os.replace`s it
-    over the target. Keeping the temp in the same directory preserves atomic
-    rename semantics; making it unique prevents concurrent cache writers from
-    replacing one another's temporary path.
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _write_text_atomic_unlocked(path: Path, text: str) -> None:
+    """Write atomically while the caller holds this target's writer lock."""
     fd, tmp = _open_unique_sibling(path)
     try:
         # Preserve the current target's mode as close to replacement as
@@ -76,6 +69,21 @@ def write_text_atomic(path: Path | str, text: str) -> None:
             os.close(fd)
         if tmp is not None:
             tmp.unlink(missing_ok=True)
+
+
+def write_text_atomic(path: Path | str, text: str) -> None:
+    """Write `text` to `path` atomically and serialize same-target writers.
+
+    Writes a unique sibling temporary file, fsyncs it, then `os.replace`s it
+    over the target. Keeping the temp in the same directory preserves atomic
+    rename semantics; making it unique prevents cleanup from touching another
+    writer's temporary path. The per-target lock is required on Windows, where
+    concurrent `os.replace` calls can otherwise fail with ``WinError 5``.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _file_lock(_lock_path_for(path)):
+        _write_text_atomic_unlocked(path, text)
 
 
 def write_json_atomic(path: Path | str, obj) -> None:
@@ -178,7 +186,10 @@ def update_locked(
         new = mutate(old)
         if new is None or new == old:
             return False
-        write_text_atomic(path, new)
+        # The surrounding lock already serializes this target. Calling the
+        # public writer here would acquire a second FileLock instance for the
+        # same path, which is not reliably re-entrant across platforms.
+        _write_text_atomic_unlocked(path, new)
         return True
 
     lock_path = _lock_path_for(path)

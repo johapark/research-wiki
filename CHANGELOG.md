@@ -49,8 +49,9 @@ the reasoning behind any line below.
 ### Fixed
 
 - **Concurrent and cross-platform writes no longer lose or corrupt data.** Atomic
-  replacement uses a unique same-directory temporary file for every writer,
-  preserves an existing file's mode, and cleans up failed writes. Shared
+  replacement serializes same-target writers, uses a unique same-directory
+  temporary file for each one, preserves an existing file's mode, and cleans up
+  failed writes. Shared
   read-modify-write operations now use a real cross-process lock on Windows as
   well as POSIX instead of silently becoming unlocked off Unix.
 
