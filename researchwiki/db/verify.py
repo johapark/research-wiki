@@ -38,9 +38,12 @@ class VerifyReport:
 def _has_frontmatter(md: Path) -> bool:
     """Cheap probe — does the file open with a YAML frontmatter fence?"""
     try:
+        # Rebuild's text-mode parser accepts both newline conventions. Mirror
+        # that behavior here while keeping this probe encoding-independent:
+        # Windows writers persist the same logical fence as ``---\r\n``.
         with md.open("rb") as f:
-            head = f.read(4)
-        return head == b"---\n"
+            head = f.read(5)
+        return head.startswith((b"---\n", b"---\r\n"))
     except OSError:
         return False
 
