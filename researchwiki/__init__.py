@@ -9,4 +9,4 @@ OpenAlex is planned. See CLAUDE.md for the full contract.
 # from here via [tool.setuptools.dynamic]; `--version` reads it directly. Bump it
 # as part of a release commit, never on its own — see CONTRIBUTING.md § Releasing,
 # whose invariants `tests/test_version.py` enforces.
-__version__ = "0.4.4"
+__version__ = "0.4.5"

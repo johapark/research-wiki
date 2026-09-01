@@ -20,6 +20,8 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-09-01
+
 ### Added
 
 - **First-run onboarding: `researchwiki add` and `researchwiki doctor`.** `add` takes a
@@ -2000,7 +2002,8 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/johapark/research-wiki/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/johapark/research-wiki/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/johapark/research-wiki/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/johapark/research-wiki/compare/v0.4.1...v0.4.2
