@@ -30,8 +30,10 @@ done
 researchwiki db rebuild && researchwiki reindex
 ```
 
-The bundled fixtures anchor **only** to stems in `benchmark-fixtures/pdfs/`
-so they remain portable — no dependency on a personal wiki corpus.
+The bundled fixtures anchor **only** to CC-BY-4.0 stems in
+`benchmark-fixtures/pdfs/` so they remain redistributable and portable — no
+dependency on a personal wiki corpus. The per-paper license grant and
+article-bound evidence are recorded in `../LICENSES.md`.
 
 ## When to add a retrieval fixture
 
@@ -110,7 +112,7 @@ must_not_appear:
 A fixture without any `critical` anchors is too thin to detect retrieval
 regressions. Aim for 2–4 critical anchors per fixture.
 
-## Scoring (when implemented)
+## Scoring
 
 `researchwiki benchmark-fixture <fixture-stem>` reports:
 

@@ -1,0 +1,111 @@
+paper_stem: chuai-2018-deepcrispr-optimized-crispr-guide-rna
+paper_type: method-with-benchmarks
+title: "DeepCRISPR: optimized CRISPR guide RNA design by deep learning"
+published_at: "2018-06-26"
+notes: |
+  DeepCRISPR is a joint on-target efficacy and whole-genome off-target
+  prediction framework for SpCas9 guide design. It combines unsupervised
+  pre-training on genome-wide sequence and epigenetic features with supervised
+  CNN predictors, data augmentation, and class-imbalance handling.
+
+  Watch out for: this 2018 paper predates the benchmark contamination cutoff.
+  It is useful as a deterministic extraction and retrieval fixture, but a high
+  LLM-authored content score may partly reflect training-set familiarity. Also
+  preserve the paper's scope: conventional NGG-PAM SpCas9 guides in humans,
+  with off-target training data from only 30 sgRNAs in two cell-line groups.
+
+headline_claims:
+  - id: unified-on-and-off-target-prediction
+    importance: critical
+    verbalization: |
+      DeepCRISPR unifies prediction of sgRNA on-target knockout efficacy and
+      whole-genome off-target cleavage profiles in one deep-learning framework,
+      while learning sequence and epigenetic features automatically rather than
+      relying on a manually specified feature set.
+    location: "Abstract; Background, pp.1-2"
+
+  - id: genome-scale-unsupervised-pretraining
+    importance: critical
+    verbalization: |
+      The parent DCDNN autoencoder is pre-trained on approximately 0.68 billion
+      unlabeled 20-bp human-genome sgRNA sequences with NGG PAMs and epigenetic
+      information collected from 13 human cell types.
+    location: "Results — Deep unsupervised learning for sgRNA representation, pp.2-3; Methods, p.14"
+
+  - id: on-target-auc-with-pretraining-and-augmentation
+    importance: critical
+    verbalization: |
+      In on-target classification testing scenario 3, the pre-trained and
+      data-augmented CNN reached an overall ROC-AUC of 0.857, described as a
+      157% improvement over sgRNA Designer when 0.5 ROC-AUC is used as the
+      baseline. Pre-training without augmentation reached 0.836.
+    relation:
+      subject: "DeepCRISPR on-target classification ROC-AUC"
+      ratio: "0.857"
+      comparator: "sgRNA Designer, 157% improvement relative to a 0.5 ROC-AUC baseline"
+    location: "Results — testing scenarios 2-3, p.5; Fig. 2"
+
+  - id: off-target-corpus-and-leave-one-guide-out
+    importance: high
+    verbalization: |
+      The off-target corpus contains roughly 160,000 possible loci for 30
+      sgRNAs from 293-related and K562 cells, with up to six mismatches. In
+      30-fold leave-one-sgRNA-out testing, DeepCRISPR reached average ROC-AUC
+      0.841 and PR-AUC 0.421.
+    relation:
+      subject: "DeepCRISPR leave-one-sgRNA-out off-target performance"
+      ratio: "ROC-AUC 0.841; PR-AUC 0.421"
+      comparator: "CFD score PR-AUC 0.333"
+    location: "Results — whole-genome off-target prediction, pp.8-10; Methods, p.13"
+
+capabilities:
+  - id: automatic-sequence-and-epigenetic-feature-learning
+    importance: critical
+    verbalization: |
+      Learns guide representations directly from nucleotide sequence and
+      cell-type-specific epigenetic tracks, and uses saliency analysis to
+      identify sequence and epigenetic features associated with sgRNA efficacy.
+    location: "Abstract; Results — feature identification, pp.6-7"
+
+  - id: unseen-cell-type-generalization
+    importance: high
+    verbalization: |
+      Supports sequence-only prediction when matching epigenetic tracks are
+      unavailable and was evaluated on an independent HEL-cell dataset of 425
+      sgRNAs that was not used for training.
+    location: "Results — independent data testing, pp.7-8"
+
+  - id: class-imbalance-handling
+    importance: high
+    verbalization: |
+      Uses bootstrapping within mini-batch training to address an off-target
+      dataset in which only about one in 250 candidate loci is a measured true
+      off-target site.
+    location: "Results — off-target prediction, pp.8-9; Methods, p.13"
+
+limitations:
+  - id: human-spcas9-ngg-scope
+    importance: critical
+    verbalization: |
+      The released system focuses on conventional NGG-PAM guide design for
+      SpCas9 in humans; extension to other PAMs, Cas variants, or species
+      requires additional data and model adaptation.
+    location: "Background, p.2"
+
+  - id: narrow-off-target-training-set
+    importance: critical
+    verbalization: |
+      Whole-genome off-target training and evaluation are based on only 30
+      sgRNAs from two cell-line groups—18 from 293-related lines and 12 from
+      K562—with candidate sites limited to at most six mismatches.
+    location: "Results, p.8; Methods — Off-target data sources, p.13"
+
+  - id: missing-cell-type-epigenetic-features
+    importance: high
+    verbalization: |
+      Cell-type-specific epigenetic features depend on available ENCODE tracks.
+      For an unseen cell type such as HEL, the evaluation therefore uses the
+      sequence-only version rather than the full epigenetic model.
+    location: "Results — independent data testing, pp.7-8"
+
+related_papers: []

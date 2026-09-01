@@ -1,0 +1,34 @@
+fixture_id: allele-specific-editing-measurement
+fixture_type: claims
+query: "reference-free allele-specific CRISPR editing measurement with de novo SNV calling"
+k: 10
+notes: |
+  Targets CRISPECTOR2.0's measurement workflow, including both the headline
+  capability and the concrete method claim. The bundled DeepCRISPR paper is a
+  hard negative because it predicts guide performance rather than measuring
+  sample-specific allelic editing.
+
+  Claim positions follow the paper-page template used by a fresh sandbox
+  ingest. If a materially correct author draft orders these claims differently,
+  update the positions rather than weakening the expected concepts.
+
+expected_claims:
+  - paper_stem: assa-2024-quantifying-allele-specific-crispr-editing-activity
+    section: key_contributions
+    position: 0
+    importance: critical
+    rationale: "Headline contribution: allele-aware editing quantification with de novo SNV discovery from the amplicon data."
+  - paper_stem: assa-2024-quantifying-allele-specific-crispr-editing-activity
+    section: methodology
+    position: 0
+    importance: critical
+    rationale: "Method pipeline: FASTQ binning, sample-specific SNV calling, statistical allele assignment, then per-allele activity quantification."
+  - paper_stem: assa-2024-quantifying-allele-specific-crispr-editing-activity
+    section: results
+    position: 1
+    importance: high
+    rationale: "PAM-changing SNVs provide a concrete result demonstrating allele-specific editing."
+
+must_not_appear:
+  - paper_stem: chuai-2018-deepcrispr-optimized-crispr-guide-rna
+    rationale: "DeepCRISPR predicts guide activity and off-target profiles; it does not infer sample alleles from mock/treatment sequencing."

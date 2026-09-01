@@ -1,0 +1,22 @@
+fixture_id: crispr-guide-prediction-vs-editing-measurement
+fixture_type: pages
+query: "deep learning prediction of sgRNA on-target efficacy and genome-wide off-target sites"
+k: 3
+notes: |
+  A same-domain discrimination case. DeepCRISPR predicts guide efficacy and
+  off-target profiles before an experiment; CRISPECTOR2.0 measures
+  allele-specific editing from treatment and mock amplicon sequencing after an
+  experiment. Shared CRISPR and off-target vocabulary must not collapse those
+  distinct intents.
+
+expected_pages:
+  - paper_stem: chuai-2018-deepcrispr-optimized-crispr-guide-rna
+    importance: critical
+    expected_rank: 1
+    rationale: "DeepCRISPR is the bundled paper whose primary task is joint on-target and whole-genome off-target prediction with deep learning."
+
+must_not_appear:
+  - paper_stem: assa-2024-quantifying-allele-specific-crispr-editing-activity
+    rationale: "CRISPECTOR2.0 quantifies observed editing from amplicon reads; it is not an a-priori guide prediction model."
+  - paper_stem: fonseca-2026-adjunctive-ibuprofen-in-pre-extensively-drug-resistant
+    rationale: "Clinical tuberculosis trial with no CRISPR guide-design task."

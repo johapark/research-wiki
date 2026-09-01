@@ -3,10 +3,10 @@
 `tests/test_figures.py` covers the detection rules and the PNG encoder against
 text and array fixtures — fast, hermetic, and where the judgement calls are
 pinned. This file covers what those cannot: that real PDFs parse, that caption
-detection survives four different venue typesetting styles, and that a render
+detection survives the bundled venue typesetting styles, and that a render
 produces a decodable PNG of the right shape.
 
-The four PDFs under `benchmark-fixtures/pdfs/` are tracked in git and CC-BY-4.0
+The six PDFs under `benchmark-fixtures/pdfs/` are tracked in git and CC-BY-4.0
 (see `benchmark-fixtures/LICENSES.md`), so this runs in any clone — unlike
 `papers/`, which is gitignored and commonly a symlink into a personal vault.
 They were added for ingest benchmarking; nothing else was using them as a test
@@ -16,6 +16,8 @@ corpus, and they happen to span exactly the caption styles that matter:
     li       `Fig 1. Title`                          (PLOS)
     muslu    `Fig. 1 Title`                          (BMC, no separator at all)
     zhang    `Fig. 1 Title` + `Table 1 Title`
+    chuai    `Fig. 1 Title`                          (BMC)
+    assa     `Figure 1. Title` / `Figure 2 Title`    (OUP, mixed separator)
 
 Counts are pinned exactly, so this fails in both directions: a regression that
 drops captions, and a widened rule that starts matching body prose. When a
@@ -44,6 +46,10 @@ pytestmark = pytest.mark.skipif(
 
 # stem -> (figures, tables, a caption line that must be found verbatim-ish)
 EXPECTED = {
+    "assa-2024-quantifying-allele-specific-crispr-editing-activity":
+        (6, 0, "CRISPECTOR2.0 is a tool"),
+    "chuai-2018-deepcrispr-optimized-crispr-guide-rna":
+        (6, 0, "Implementation details of DeepCRISPR"),
     "fonseca-2026-adjunctive-ibuprofen-in-pre-extensively-drug-resistant":
         (4, 2, "Study flow diagram"),
     "li-2026-schilda-hierarchical-integration-of-llm":

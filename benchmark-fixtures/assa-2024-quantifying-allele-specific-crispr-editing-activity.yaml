@@ -1,0 +1,105 @@
+paper_stem: assa-2024-quantifying-allele-specific-crispr-editing-activity
+paper_type: method-with-benchmarks
+title: "Quantifying allele-specific CRISPR editing activity with CRISPECTOR2.0"
+published_at: "2024-07-30"
+notes: |
+  CRISPECTOR2.0 adds allele-aware on- and off-target activity measurement to
+  CRISPECTOR. It identifies sample-specific SNVs from an unedited mock sample,
+  calls haplo-alleles statistically, assigns treatment reads to those alleles,
+  and reports editing activity separately for each allele.
+
+  Watch out for: "reference-free" means that allele discovery does not require
+  a known personal genotype or predeclared SNV reference. The workflow still
+  requires the amplicon configuration plus matched treatment and unedited mock
+  FASTQ data. Do not turn a measurement method into an a-priori off-target
+  prediction method.
+
+headline_claims:
+  - id: reference-free-allele-aware-measurement
+    importance: critical
+    verbalization: |
+      CRISPECTOR2.0 performs allele-aware quantification of CRISPR on- and
+      off-target activity without a pre-specified personal genotype, using de
+      novo sample-specific SNV detection and statistical allele calling on the
+      same amplicon-sequencing experiment.
+    location: "Abstract, p.1; Introduction, p.2"
+
+  - id: cell-line-snv-evaluation
+    importance: critical
+    verbalization: |
+      In an HEK293-Cas9 dataset covering 1,478 on- and off-target sites for 40
+      gRNAs, CRISPECTOR2.0 identified 244 SNVs across 162 sites, with as many as
+      four SNVs in one amplicon.
+    location: "Results — CRISPECTOR2.0 identifies SNVs de novo, p.4"
+
+  - id: pam-and-distal-snv-editing-differences
+    importance: critical
+    verbalization: |
+      The study found allele-specific editing when SNVs changed a PAM or
+      protospacer, and also observed differential editing for alleles carrying
+      SNVs distal to those regions, suggesting factors beyond local target
+      sequence may contribute.
+    location: "Abstract, p.1; Results, pp.6-8; Discussion, pp.8-10"
+
+  - id: triploid-banana-demonstration
+    importance: high
+    verbalization: |
+      In triploid Musa acuminata, CRISPECTOR2.0 resolved three DHS alleles from
+      two downstream SNVs and reported per-allele INDEL rates of 71.03%, 61.47%,
+      and 57.89%.
+    location: "Results — plant-genome analysis, p.8; Fig. 6"
+
+capabilities:
+  - id: de-novo-snv-and-haplo-allele-calling
+    importance: critical
+    verbalization: |
+      Uses the unedited mock sample to identify SNVs de novo, filters sequencing
+      and amplification noise with an entropy-based model, and calls
+      haplo-alleles using both read count and inferred allele frequency.
+    location: "CRISPECTOR2.0 overview, pp.2-4"
+
+  - id: multiple-allele-sample-support
+    importance: high
+    verbalization: |
+      Handles samples with more than two alleles, including polyploid organisms
+      and cells with abnormal chromosome copy number, by assigning reads to the
+      statistically inferred alleles before quantifying editing.
+    location: "Results — CRISPECTOR2.0 overview, p.4; plant demonstration, p.8"
+
+  - id: ambiguous-read-bounds
+    importance: high
+    verbalization: |
+      When an edit or sequencing noise masks the SNV needed for deterministic
+      allele assignment, the tool repeatedly assigns ambiguous reads according
+      to mock and confidently assigned treatment-read proportions, then reports
+      the medoid activity estimate with upper and lower bounds.
+    location: "Results — ambiguous-read assignment, p.6"
+
+limitations:
+  - id: matched-mock-required
+    importance: critical
+    verbalization: |
+      De novo allele discovery depends on a matched unedited mock FASTQ sample;
+      the method is not a genotype-free predictor that can operate from a guide
+      sequence alone.
+    location: "Materials and methods — CRISPECTOR2.0 overview, p.2"
+
+  - id: allele-frequency-imbalance
+    importance: critical
+    verbalization: |
+      Selection-driven imbalance between treatment and mock allele frequencies,
+      especially with small read counts, can slightly deflect editing-activity
+      estimates. CRISPECTOR2.0 warns users when it detects this condition and
+      the paper recommends cautious interpretation or repeat measurement.
+    location: "Discussion, p.10"
+
+  - id: ambiguous-reads-require-probabilistic-assignment
+    importance: high
+    verbalization: |
+      SNVs near the nuclease target can be deleted in edited reads, preventing
+      deterministic allele assignment. The result then depends on the tool's
+      iterative random-assignment procedure and must be interpreted with its
+      reported uncertainty bounds.
+    location: "Results — ambiguous-read assignment, p.6"
+
+related_papers: []
