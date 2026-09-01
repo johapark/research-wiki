@@ -59,15 +59,29 @@ Choose one guided setup path:
 - Open the clone in Claude Code, Codex, or another compatible shell-enabled chat agent, then say: **“Initialize this research wiki.”**
 - Run the interactive wizard: `researchwiki init`.
 
-Both paths configure the provider, create the wiki directories and dashboard, and set up the initial categories. For advanced manual setup, `researchwiki init --scaffold-only` creates only the directories; it does not configure a provider, dashboard, or content categories.
+Both paths configure the provider and create the wiki directories and dashboard. For non-interactive setup, `researchwiki init --scaffold-only` creates the directory and dashboard scaffold without configuring a provider or asking questions.
 
-No taxonomy is predefined. During setup, enter category names yourself (the default) or, with at least three PDFs in `inbox/`, let the agent propose them from your papers. As the corpus grows, the agent suggests useful category splits for your review; nothing changes automatically. `other/` is always available as the classifier’s abstention bucket.
+Then run the local, free readiness check:
+
+```bash
+researchwiki doctor
+```
+
+It checks paths, dependencies, provider configuration, the state DB, search state, and the semantic-model cache without contacting the provider or downloading anything. `researchwiki doctor --probe` is an explicit one-call connectivity test and may spend tokens.
+
+No taxonomy is predefined, and you do not need to invent one before the first paper. New papers use `other/` until at least three PDFs are available; then `researchwiki bootstrap-categories` can propose categories from the corpus. As it grows, the agent suggests useful splits for review; nothing changes automatically.
 
 ### First ingest
 
-Place a PDF in `inbox/` and tell the agent: **“Ingest the new paper.”** It will create a canonical PDF in `papers/`, a grounded page in `wiki/{category}/`, reciprocal supported links, and updated indexes.
+Give the agent a PDF path and say **“Add this paper to my research wiki.”** The file can already be anywhere on disk; copying it into `inbox/` first is optional. The agent will create a canonical PDF in `papers/`, a grounded page in `wiki/{category}/`, reciprocal supported links, and updated indexes.
 
-For multiple PDFs, ask it to ingest the whole inbox in one batch. If your papers already live in Zotero, Paperpile, Mendeley, or ReadCube, use the [library import workflow](#import-and-export) instead.
+The direct CLI equivalent is:
+
+```bash
+researchwiki add /path/to/paper.pdf
+```
+
+Pass several paths—or ask the agent to ingest the whole inbox—to use the checkpointed batch workflow. If your papers already live in Zotero, Paperpile, Mendeley, or ReadCube, use the [library import workflow](#import-and-export) instead.
 
 ## Providers
 

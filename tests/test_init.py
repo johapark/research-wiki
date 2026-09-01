@@ -439,6 +439,12 @@ def test_category_menu_reprompts_too(monkeypatch, tmp_path, capsys):
     compare the raw string to "1" and treat everything else as "manual", so a
     typo silently chose an option the user hadn't picked."""
     monkeypatch.setattr(init, "content_categories", lambda: frozenset({"other"}))
+    from researchwiki.tasks.bootstrap_categories import MIN_INBOX_FOR_BOOTSTRAP
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    for i in range(MIN_INBOX_FOR_BOOTSTRAP):
+        (inbox / f"p{i}.pdf").write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(init, "inbox_dir", lambda: inbox)
     seen = []
     monkeypatch.setattr(init, "_bootstrap_categories", lambda: seen.append("bootstrap"))
     monkeypatch.setattr(init, "_manual_categories", lambda root: seen.append("manual"))
@@ -447,6 +453,51 @@ def test_category_menu_reprompts_too(monkeypatch, tmp_path, capsys):
     init._step_categories(tmp_path)
     assert seen == ["bootstrap"]
     assert "isn't a number" in capsys.readouterr().out
+
+
+def test_categories_defer_until_corpus_reaches_bootstrap_threshold(
+    monkeypatch, tmp_path, capsys,
+):
+    """A first-time user should not design taxonomy before seeing one ingest."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "first.pdf").write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(init, "inbox_dir", lambda: inbox)
+    monkeypatch.setattr(init, "content_categories", lambda: frozenset({"other"}))
+    monkeypatch.setattr(
+        init, "_ask_choice",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not prompt")),
+    )
+
+    init._step_categories(tmp_path)
+
+    out = capsys.readouterr().out
+    assert "Using wiki/other/ for now" in out
+    assert "bootstrap-categories --apply" in out
+
+
+def test_confirm_does_not_offer_ingest_while_doctor_is_blocked(
+    monkeypatch, capsys,
+):
+    from researchwiki.tasks import doctor
+
+    monkeypatch.setattr(doctor, "main", lambda argv: 1)
+
+    assert init._step_confirm() == 1
+    out = capsys.readouterr().out
+    assert "Setup still needs attention" in out
+    assert "Next: add any PDF path" not in out
+
+
+def test_confirm_offers_arbitrary_pdf_path_when_ready(monkeypatch, capsys):
+    from researchwiki.tasks import doctor
+
+    monkeypatch.setattr(doctor, "main", lambda argv: 0)
+
+    assert init._step_confirm() == 0
+    out = capsys.readouterr().out
+    assert "Next: add any PDF path" in out
+    assert "researchwiki add /path/to/paper.pdf" in out
 
 
 def test_ask_choice_empty_takes_the_default(monkeypatch):
@@ -1328,6 +1379,19 @@ def test_warn_gitignore_checks_the_actual_selected_profile(tmp_path, capsys):
 
 
 # ── dashboard template invariant ─────────────────────────────────────────────
+
+def test_scaffold_only_creates_dashboard_without_overwriting_it(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+
+    assert init._scaffold(quiet=True) == 0
+    views = tmp_path / "wiki" / "views.md"
+    assert views.read_text(encoding="utf-8") == init.VIEWS_MD_TEMPLATE
+
+    views.write_text("personal dashboard\n", encoding="utf-8")
+    assert init._scaffold(quiet=True) == 0
+    assert views.read_text(encoding="utf-8") == "personal dashboard\n"
 
 def test_unignored_credential_profile_is_rejected_before_config_change(
     tmp_path, monkeypatch, capsys,

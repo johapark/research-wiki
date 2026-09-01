@@ -863,6 +863,18 @@ def _report_readiness(provider: str) -> None:
 def _step_categories(root: Path) -> None:
     _header("Step 2 — Initial categories")
     existing = sorted(content_categories())
+    from .bootstrap_categories import MIN_INBOX_FOR_BOOTSTRAP
+    n_pdfs = len(list(inbox_dir().glob("*.pdf")))
+
+    # A taxonomy proposed from one or two papers is false precision and an
+    # extra decision before the user has seen the product work. `other/` is a
+    # safe, intentional abstention bucket; let the corpus earn its categories.
+    if existing == ["other"] and n_pdfs < MIN_INBOX_FOR_BOOTSTRAP:
+        print(f"Using wiki/other/ for now ({n_pdfs} PDF(s) in inbox/).")
+        print(f"After {MIN_INBOX_FOR_BOOTSTRAP} PDFs, run `researchwiki "
+              "bootstrap-categories --apply` to propose categories from your papers.")
+        return
+
     print(f"Current content categories: {existing}")
     print("A category is just a `wiki/<slug>/` directory. Classify by METHOD, not topic; "
           "`other` is always present as the abstention bucket.")
@@ -871,13 +883,12 @@ def _step_categories(root: Path) -> None:
             _print_category_help()
             return
 
-    from .bootstrap_categories import MIN_INBOX_FOR_BOOTSTRAP
     print("\nTwo ways to seed categories:")
     print(f"  1. Bootstrap — drop ≥{MIN_INBOX_FOR_BOOTSTRAP} PDFs in inbox/ and let the "
           f"classifier propose a taxonomy from your actual papers.")
-    print("  2. Manual — type the category slugs yourself.")
+    print("  2. Manual (advanced) — type durable category slugs yourself.")
 
-    if _ask_choice(2, default="2") == 0:
+    if _ask_choice(2, default="1") == 0:
         _bootstrap_categories()
     else:
         _manual_categories(root)
@@ -951,29 +962,43 @@ def _step_dashboard(root: Path) -> None:
           "the blocks show as inert code.")
 
 
-def _step_confirm() -> None:
+def _step_confirm() -> int:
     _header("Step 4 — Confirm")
     try:
-        from . import status
-        status.main([])
-    except Exception as e:  # pragma: no cover - status is best-effort here
-        print(f"(couldn't run status: {e})")
-    print("\nNext: drop a PDF in inbox/ and run")
-    print("    researchwiki agent ingest inbox/<file>.pdf")
-    print("or just tell your LLM \"ingest the PDFs in inbox/\".")
+        from . import doctor
+        rc = doctor.main([])
+    except Exception as e:  # pragma: no cover - doctor is best-effort here
+        print(f"(couldn't run readiness checks: {e})")
+        rc = 2
+    if rc:
+        print("\nSetup still needs attention. Apply the fix above, then run "
+              "`researchwiki doctor` again before adding a paper.")
+        return rc
+    print("\nNext: add any PDF path")
+    print("    researchwiki add /path/to/paper.pdf")
+    print("or tell your LLM \"add this paper to my research wiki\".")
     print("\nChange settings later: swap providers by copying another "
           "config/models.*.yaml template over config/models.yaml — or delete that "
           "file to fall back to the built-in OpenAI defaults; keys live in .env; "
           "manage categories per the tips above; re-run `researchwiki init` any "
           "time (it's idempotent).")
+    return 0
 
 
 def _scaffold(quiet: bool = False) -> int:
     """Create the gitignored content dirs. Shared by the wizard and
     `--scaffold-only`, which is the non-interactive entry point (the LLM-guided
-    setup in prompts/init.md has no TTY, so it cannot run the wizard)."""
+    setup in prompts/init.md has no TTY, so it cannot run the wizard).
+
+    The dashboard is static scaffold, not a user decision, so both paths create
+    it automatically. Existing dashboards are always preserved.
+    """
     try:
         created = ensure_scaffold()
+        views = wiki_dir() / "views.md"
+        if not views.exists():
+            write_text_atomic(views, VIEWS_MD_TEMPLATE)
+            created.append(views)
     except FileExistsError as e:
         print(f"researchwiki init: {e}", file=sys.stderr)
         return 2
@@ -1000,8 +1025,8 @@ def main(argv: list[str]) -> int:
 
     root = wiki_root()
     _header("Research Wiki — setup")
-    print("This wizard configures your LLM provider and initial categories, scaffolds the "
-          "dashboard, and confirms the install. Every choice is reversible.")
+    print("This wizard configures your LLM provider and confirms that the wiki is ready. "
+          "Categories grow from your papers; every setting is reversible.")
 
     rc = _scaffold(quiet=True)
     if rc:
@@ -1009,6 +1034,4 @@ def main(argv: list[str]) -> int:
 
     _step_provider(root)
     _step_categories(root)
-    _step_dashboard(root)
-    _step_confirm()
-    return 0
+    return _step_confirm()

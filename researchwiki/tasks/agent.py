@@ -1,9 +1,9 @@
 """Run the Phase 2 ingest agent on one or more PDFs.
 
 The agent runs reconcile → extract → author × N → grade × N → tournament →
-commit, persisting every step to ingest_iterations. The output wiki page is
-written to .agent-output/{stem}.md (NOT wiki/) so you can review before
-promoting it manually.
+commit, persisting every step to ingest_iterations. Passing the promotion gate
+writes the page to wiki/{category}/{stem}.md and the canonical source to
+papers/{stem}.pdf; failed gates retain a reviewable sandbox output.
 
 With ≥2 PDFs (or an explicit --workers/--resume), the invocation auto-enters
 crash-safe batch mode: workers run in parallel, a checkpoint under
@@ -41,6 +41,55 @@ _BATCH_INCOMPATIBLE_FLAGS = (
     ("supplementary", "--supplementary"),
     ("allow_rename", "--allow-rename"),
 )
+
+
+def _indexed_claim_count(stem: str | None) -> int | None:
+    """Best-effort receipt enrichment; never turn a good ingest into a failure."""
+    if not stem:
+        return None
+    try:
+        from ..db.connection import get_connection
+
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM claims WHERE paper_stem = ?", (stem,),
+            ).fetchone()
+            return int(row[0]) if row is not None else 0
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(Path.cwd()))
+    except ValueError:
+        return str(path)
+
+
+def _print_ingest_receipt(ctx) -> None:
+    """Print the compact terminal state for one completed ingest attempt."""
+    if ctx.committed_path and ctx.paper_stem:
+        claim_count = _indexed_claim_count(ctx.paper_stem)
+        print("✓ Paper added")
+        print(f"  Page:   {_display_path(ctx.committed_path)}")
+        print(f"  PDF:    papers/{ctx.paper_stem}.pdf")
+        if claim_count is None:
+            print("  Claims: indexed (count unavailable)")
+        else:
+            print(f"  Claims: {claim_count} indexed")
+        print(f"  Trace:  researchwiki agent trace {ctx.attempt_id}")
+        return
+
+    # A duplicate or deliberately sandboxed run still needs enough detail to
+    # locate its trace, even though there is no successful-add receipt.
+    log(f"attempt_id   = {ctx.attempt_id}", tag="agent")
+    log(f"paper_stem   = {ctx.paper_stem}", tag="agent")
+    log(f"committed    = {ctx.committed_path}", tag="agent")
+    print("Inspect the trace with:")
+    print(f"  researchwiki agent trace {ctx.attempt_id}")
 
 
 def warn_if_chat_relay_batch() -> bool:
@@ -364,12 +413,7 @@ def _cmd_ingest(args) -> int:
         return 3
 
     print()
-    log(f"attempt_id   = {ctx.attempt_id}", tag="agent")
-    log(f"paper_stem   = {ctx.paper_stem}", tag="agent")
-    log(f"committed    = {ctx.committed_path}", tag="agent")
-    print()
-    print("Inspect the trace with:")
-    print(f"  researchwiki agent trace {ctx.attempt_id}")
+    _print_ingest_receipt(ctx)
 
     # Post-commit hooks — skip when the ingest refused to promote (duplicate PDF,
     # sandbox, etc.). committed_path is None in those cases and the hooks would

@@ -43,7 +43,7 @@ inbox/raw-paper.pdf
         │
         ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│ researchwiki agent ingest inbox/raw-paper.pdf                      │
+│ researchwiki add inbox/raw-paper.pdf  (alias: agent ingest)        │
 │                                                                    │
 │  1. reconcile     PDF → DOI / title / year / venue / authors       │
 │                   (LLM extractor on first 1-2 pages → Semantic      │
@@ -112,7 +112,7 @@ paper's first-page metadata (`{author}-{year}-{first-five-title-words}`).
 ### 2. Run the agent
 
 ```bash
-researchwiki agent ingest inbox/some-paper.pdf                 # single PDF
+researchwiki add /path/to/some-paper.pdf                       # single PDF, any location
 researchwiki agent ingest inbox/*.pdf                          # ≥2 PDFs — auto-batch, 4 workers, checkpoint
 researchwiki agent ingest --resume .ingest/batch-<ts>/         # resume after a crash / Ctrl-C
 ```
@@ -1554,6 +1554,7 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 
 | Command | Purpose |
 |---|---|
+| `add <pdf>...` | Discoverable front door to the complete `agent ingest` pipeline; accepts arbitrary paths and preserves all ingest flags, batching, checkpoints, and recovery behavior. |
 | `agent ingest <pdf> [--supplementary <f>...]` | Full pipeline: reconcile → extract target claims → crosslink → author (1 draft by default; `-n 2+` for a tournament) → grade → critic/evolve/debug → promote → incrementally index → propose evolutions → persist grades. Optional per-PDF limits: `--max-model-calls`, `--max-tokens`, `--max-cost-usd`, `--max-wall-seconds`. Provider API key required (`OPENAI_API_KEY` by default). |
 | `ingest <pdf>... [--category] [--supplementary]` | Digest-only (no LLM authoring): DOI, S2 metadata, stem, crosslinks, anchoring → `.ingest/{stem}-digest.md`. Author the page yourself. |
 | `attach <category/stem> <file>` | Attach a supplementary file to an existing page; copies into `papers/{stem}.supp/`, updates YAML. |
@@ -1582,7 +1583,8 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `bootstrap-categories` | Propose a category taxonomy from `inbox/` papers; `--apply` creates the dirs. |
 | `suggest-splits [--category <cat>\|--all]` | Cluster `wiki/other/` or a populated category and propose taxonomy changes. Review-gated; nothing auto-creates a category. |
 | `db <rebuild\|verify>` | Rebuild the structured mirror from markdown after any manual page edit; `verify` reports drift without writing. (`db papers` / `db query` below.) |
-| `init [--scaffold-only]` | First-time setup wizard, or just create the directory scaffold. |
+| `init [--scaffold-only]` | First-time setup wizard, or create the directory and dashboard scaffold without prompts. |
+| `doctor [--probe]` | Local/free readiness checks by default; `--probe` explicitly makes one minimal provider call. |
 | `mcp-serve` | Read-only MCP server (search / claims / check-grounding) for Claude Desktop and IDE clients. |
 | `eval` | `classifier`: leave-one-out accuracy of the category auto-suggester (free). `triggers`: whether CLAUDE.md's prompt pointers fire (costs tokens). `eval-classifier` is a deprecated alias. |
 | `benchmark-fixture <stem> [--repeat N] [--llm]` | Score page authoring against a hand-curated `benchmark-fixtures/` fixture. `--repeat` keeps drafts in memory; for a single authored page use `agent ingest … --force-sandbox`, never a bare `agent ingest` (it would promote a fixture paper into your corpus). |

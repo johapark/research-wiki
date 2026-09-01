@@ -225,6 +225,7 @@ def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
         "inbox",
         "papers",
         "wiki/index.md",
+        "wiki/views.md",
         "wiki/other",
         "wiki/synthesis",
         "wiki/ideas",
@@ -232,18 +233,22 @@ def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
         "wiki/references",
     ):
         assert (root / rel).exists(), rel
+    doctor = run_cli(root, env, "doctor")
+    assert "READY TO INGEST" in doctor.stdout
+    assert "Provider connectivity was not tested" in doctor.stdout
 
-    single = root / "inbox" / "single.pdf"
+    # The happy path accepts a PDF wherever it already lives; inbox/ is a
+    # backlog convenience, not a required staging ritual.
+    single = root / "source-pdfs" / "single.pdf"
     write_fixture_pdf(
         single,
         title="Alpha Acceptance Pipelines for Reliable Research",
         author="Ada Lovelace; Alan Turing",
     )
-    run_cli(
+    added = run_cli(
         root,
         env,
-        "agent",
-        "ingest",
+        "add",
         str(single),
         "--stub",
         "--no-semantic",
@@ -262,8 +267,38 @@ def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
         "Ada Lovelace;Alan Turing",
     )
     single_stem = "lovelace-2026-alpha-acceptance-pipelines-for-reliable"
+    assert single.is_file(), "an external source PDF should be copied, not consumed"
     assert (root / "wiki" / "other" / f"{single_stem}.md").is_file()
     assert (root / "papers" / f"{single_stem}.pdf").is_file()
+    assert "✓ Paper added" in added.stdout
+    assert f"Page:   wiki/other/{single_stem}.md" in added.stdout
+    assert f"PDF:    papers/{single_stem}.pdf" in added.stdout
+    assert "Claims:" in added.stdout and "indexed" in added.stdout
+    assert "Trace:  researchwiki agent trace" in added.stdout
+    assert (root / ".tantivy-index").is_dir()
+    claims = run_python(
+        root,
+        env,
+        f"""
+from researchwiki.db.connection import get_connection
+conn = get_connection()
+try:
+    n = conn.execute(
+        "SELECT COUNT(*) FROM claims WHERE paper_stem = ?", ({single_stem!r},)
+    ).fetchone()[0]
+    paper = conn.execute(
+        "SELECT COUNT(*) FROM papers WHERE stem = ?", ({single_stem!r},)
+    ).fetchone()[0]
+    assert paper == 1, paper
+    print(n)
+finally:
+    conn.close()
+""",
+    )
+    # The deterministic stub deliberately authors placeholder prose, so it can
+    # yield zero claim bullets. What this acceptance pins is that the receipt's
+    # count comes from the real claims DB and agrees with its indexed state.
+    assert f"Claims: {int(claims.stdout.strip())} indexed" in added.stdout
 
     batch_ok = root / "inbox" / "batch-ok.pdf"
     batch_retry = root / "inbox" / "batch-retry.pdf"
