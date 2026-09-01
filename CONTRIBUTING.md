@@ -149,8 +149,9 @@ aren't redistributable.
   that auto-load `AGENTS.md` (Codex CLI, Cursor, Aider, Gemini CLI, …) don't
   follow markdown links out of it, so they'd otherwise run without the
   grounding rules. Edit `CLAUDE.md`; never replace the symlink with a file.
-- **`WORKFLOW.md`** — end-to-end pipeline walkthrough and module map. Update the
-  module map when you add or move a module.
+- **`WORKFLOW.md`** — end-to-end pipeline rationale and task-oriented operating
+  guide. Do not copy the package tree or full CLI inventory into it: the source
+  tree and executable `--help` are canonical and cannot drift.
 - **`CHANGELOG.md`** — add user-visible changes under `## [Unreleased]` as you go,
   not in a scramble at release time. Internal refactors that change nothing for a
   user don't need an entry.

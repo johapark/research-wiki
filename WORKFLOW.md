@@ -896,194 +896,6 @@ invalid runs in *Workflow state*.
 
 ---
 
-## Module map
-
-Where things live in the package:
-
-```
-researchwiki/
-├── index/                  # Indexing primitives
-│   ├── embeddings.py       #   Bi-encoder model singleton (BAAI/bge-small)
-│   ├── claim_embeddings.py #   Cached bi-encoder embeddings for claims. Three readers,
-│   │                       #     two writers: `get_claim_embeddings` rewrites the cache
-│   │                       #     to its own row set (so a narrow caller evicts the rest),
-│   │                       #     `warm_claim_embeddings` persists the union instead, and
-│   │                       #     `load_cached_*` never loads the model at all.
-│   ├── pdf_chunks.py       #   Per-PDF Tantivy chunk index + chunk embeddings
-│   ├── pages_bm25.py       #   Wiki-page BM25 index (Tantivy)
-│   ├── pages_semantic.py   #   Wiki-page dense embedding store
-│   ├── incremental.py      #   Locked per-page BM25 + semantic upserts after ingest
-│   ├── graph.py            #   Weighted paper-graph edges + modularity clustering
-│   └── types.py            #   Document, SearchHit, SearchBackend ABC
-├── search/                 # Query orchestration over index/
-│   ├── __init__.py         #   suggest_category, build_documents_from_wiki
-│   ├── hybrid.py           #   RRF fusion (BM25 + semantic)
-│   ├── refs.py             #   Durable [[stem#slug]] citation form for a claim hit
-│   └── tools.py            #   Read-only primitives behind `claims` + `pdf-search`
-├── grade/                  # All page-scoring / quality evaluation
-│   ├── fidelity/           #   Per-claim fidelity, paired by page-type
-│   │   ├── paper.py        #     Paper page vs. its OWN PDF (continuous floats)
-│   │   └── synthesis.py    #     Synthesis/idea page vs. CITED PDFs (categorical
-│   │                       #     verdicts: supported/weak/composite/misattributed)
-│   ├── salience.py         #   PDF-anchor recall (synthetic ContentFixture from
-│   │                       #     abstract / Results / captions, fed through scorer).
-│   │                       #     `anchor_is_substantive` is shared with the critic —
-│   │                       #     anchors are both denominator and author instruction
-│   ├── coherence.py        #   Page-shape contract (sections, word count,
-│   │                       #     bullets, wikilink density). No PDF, no LLM.
-│   ├── grounding.py        #   Citation-presence check on every claim-shaped unit
-│   ├── support.py          #   Per-claim entailment (qualitative analogue of fidelity)
-│   ├── claim_overlap.py    #   Near-paraphrase claim overlap across papers (crosslink)
-│   ├── scorer.py           #   Fixture-based scorer (token-overlap + bi-encoder
-│   │                       #     cosine + LLM-judge verdict paths). Used by both
-│   │                       #     grade/salience.py and benchmark/benchmark-fixture.
-│   ├── primitives.py       #   Deterministic primitives (numeric drift, negation)
-│   └── parser.py           #   Extract claim units from wiki markdown
-├── benchmark/              # Benchmark methodology (renamed from eval/)
-│   ├── fixture.py          #   ContentFixture / RetrievalFixture loaders
-│   ├── retrieval.py        #   Retrieval-quality benchmarks
-│   ├── retrieval_reports.py#   Retrieval-fixture scoring dispatch + prose reports
-│   ├── content_reports.py  #   Rendering for content-fixture scoring output
-│   ├── replicate.py        #   Author-N-times replication driver (NOT auto-imported
-│   │                       #     from the package — depends on agents.phases)
-│   └── style.py            #   Style report
-├── agents/                 # The ingest agent
-│   ├── runner.py           #   State-machine driver — one `_phase_*` wrapper per
-│   │                       #     phase over the phases/ modules below. The roles
-│   │                       #     persisted to ingest_iterations are enumerated in
-│   │                       #     `db/iterations.VALID_ROLES` (never rename those)
-│   ├── commentary.py       #   Commentary-shaped-PDF guard (refuses to promote a
-│   │                       #     Research Highlight / News & Views as type: paper)
-│   ├── context.py          #   Shared phase Context (each phase reads/writes it)
-│   ├── fitness.py          #   Tournament + improvement-rule lenses;
-│   │                       #     `combined_quality` blends semantic + salience +
-│   │                       #     target-claim recall; recall axes are confidence-
-│   │                       #     weighted, then quantized to 0.01 for selection
-│   ├── llm.py              #   LLM API wrapper (provider-routed; real + stub)
-│   ├── model_config.py     #   Per-role model assignments from config/models.*.yaml
-│   ├── relay.py            #   chat-relay provider client
-│   ├── judge.py            #   LLM-judge helpers (structural verdicts)
-│   ├── prompt_lib.py       #   Load prompts from prompts/*.md (A/B-able)
-│   ├── promote.py          #   Move PDF + write wiki page + back-links + index.md
-│   └── phases/             #   Each phase as its own module
-│       ├── reconcile.py    #     PDF → DOI/title/year/venue/authors
-│       ├── extract.py      #     PDF → sections + full text
-│       ├── target_claims.py#     Identify the load-bearing claims to author against
-│       ├── crosslinks.py   #     Citation-graph + semantic crosslink candidates
-│       ├── draft.py        #     Author + tournament (combined-quality argmax)
-│       ├── grade.py        #     Wraps grade.fidelity.paper + grade.salience
-│       │                   #     + grade.coherence, packs aggregate scores dict
-│       ├── revise.py       #     Critic + evolve + debug
-│       ├── commit.py       #     Sandbox write + propose_short_name + keywords
-│       ├── grade_persist.py#     Post-commit fidelity grading on the promoted page
-│       ├── evolution.py    #     Memory-evolution proposals (orchestration)
-│       ├── memory_evolve.py#     Propose edits to existing synthesis pages
-│       └── evolve_ledger.py#     Judged-pair idempotency cache for memory_evolve
-├── providers/              # External-API wrappers (S2, Crossref, PubMed, bioRxiv, ORCID)
-├── db/                     # State DB (sqlite) — derived from wiki/, rebuildable
-├── tasks/                  # CLI subcommands, auto-discovered from module names.
-│                           #   Not every module here is a command: `claim_discover.py`
-│                           #   and `pair_dismissals.py` are libraries behind
-│                           #   `candidates pairs`. A command is a module exposing
-│                           #   `main()`; the leading `_` convention is the hint and
-│                           #   `__main__._is_entry_point` is the enforced invariant.
-│   ├── ingest.py           #   Digest-only path (manual page authoring)
-│   ├── agent.py            #   Full agent path (auto-authoring)
-│   ├── grade.py            #   Per-paper fidelity + salience report
-│   ├── _grade_synthesis.py #   Synthesis/idea fidelity (misattribution check)
-│   ├── lint/               #   One module per check family (link, yaml, staleness,
-│   │                       #     claim_anchors, concept_contract, db_checks,
-│   │                       #     cross_paper — the one LLM-costing check — …);
-│   │                       #     `__init__` is the dispatcher and decides nothing,
-│   │                       #     `report.py` owns the --json contract + prose report
-│   ├── visualize.py        #   Thin CLI over visualize.py → output/graph.html
-│   ├── check_grounding.py  #   Structural citation check
-│   ├── check_coverage.py   #   Recall surface — unreferenced top-N hits
-│   │                       #     for a synthesis/idea page's topic_seed
-│   ├── benchmark_fixture.py #  Hand-curated-fixture benchmark
-│   ├── evolve.py           #   Standalone memory-evolution proposals
-│   ├── search.py reindex.py status.py scout.py claims.py pdf_search.py ...
-│   ├── audit.py            #   Deprecated alias for scout citations
-├── scouting/
-│   ├── citations.py        # Structured S2 citation edges + corpus-gap report
-│   ├── web.py              # Bounded request + result/brief validation + lifecycle
-│   └── web_cli.py          # Provider-neutral agent-handoff CLI; no network client
-├── concepts/               # Concept-hub surfacing + scaffold + reciprocal linking
-├── claim_graph/            # Content-addressed claim identity + edge cache
-├── synthesis_candidates/   # Detect paper clusters lacking a synthesis page
-├── migrate/                # Import one-paper-per-PDF pages from an older/simpler wiki
-│                           #   (preflight → inspect → apply → verify; zero tokens)
-├── refimport/              # Import a reference-manager library (Zotero/Paperpile/
-│                           #   Mendeley/ReadCube) from its own BibTeX/RIS/CSL-JSON
-│                           #   export. Sibling to migrate/: that one imports pages,
-│                           #   this one imports PDFs + metadata and authors nothing.
-│   ├── parse.py            #   Tolerant BibTeX/RIS/CSL-JSON reader → ExportItem
-│   ├── pair.py             #   Record → PDF, three rungs (declared/doi/title);
-│   │                       #     one extraction pass over the tree, ever
-│   ├── triage.py           #   The gates → ready/review/skip + reason strings
-│   ├── apply.py            #   Plan a wave, copy into inbox/, hand to _ingest_batch
-│   └── manifest.py         #   Run dir + manifest.json (frozen pairing/verdicts/argv)
-├── refexport.py            # The inverse of refimport/: corpus → BibTeX/RIS/CSL-JSON.
-│                           #   One module, not a package — escaping, one type table,
-│                           #   one wiki walk, three renderers. Zero tokens.
-├── okfexport.py            # Corpus → an Open Knowledge Format bundle (OKF v0.2),
-│                           #   behind the same `export` command. Separate module
-│                           #   from refexport because the scope differs: a
-│                           #   bibliography carries only published documents, an
-│                           #   OKF bundle carries every page type (its unit is a
-│                           #   "concept", abstract ideas included). Also emits a
-│                           #   tree, not a stream, so `--format okf` needs `--out`.
-├── visualize.py            # Corpus → a self-contained interactive graph (the
-│                           #   renderer is templates/graph.html). Draws wikilinks
-│                           #   AND typed claim edges; contradictions drawn loud.
-├── names.py                # Author-name parsing, shared by stems (which surname
-│                           #   goes in a stem) and refexport (family/given for CSL)
-├── templates/              # Shipped assets read via importlib.resources
-│   └── graph.html          #   The visualize renderer: no CDN, no build step
-└── pdf/                    # pypdfium2-backed PDF text/structure extraction
-```
-
-**Recent layering cleanup** (worth knowing because the docstrings still
-refer to the old paths in places):
-
-- `grade/coverage.py` → `grade/fidelity/paper.py` (rename for honesty —
-  the file does fidelity, not coverage; the dataclass `CoverageReport`
-  became `PaperFidelityReport`).
-- `grade/fidelity.py` → `grade/fidelity/synthesis.py` (paired sibling;
-  `FidelityReport` → `SynthesisFidelityReport`).
-- `agents/coherence.py` → `grade/coherence.py` (it's a deterministic
-  page-shape grader, not agent-specific).
-- `eval/scorer.py` → `grade/scorer.py` (the fixture-based scorer is
-  consumed by `grade/salience.py` as production grader infrastructure,
-  not benchmark-only).
-- `eval/` → `benchmark/` (after the scorer left, what remains is
-  genuinely benchmark methodology — replication driver, retrieval
-  benchmarks, style report).
-- `grade/scoring.py` → `grade/primitives.py` (the module holds
-  deterministic helpers — numeric integrity, negation parity — not
-  scoring; the rename also disambiguates from `grade/scorer.py`, which
-  is one letter away and does something completely different).
-
-These moves also broke a circular import: `benchmark/__init__.py` no
-longer auto-loads `replicate.py` (which depends upward on
-`agents.phases`). Consumers of the replication driver import it directly
-via `from researchwiki.benchmark.replicate import replicate_score`. The
-lazy imports that previously worked around this in `grade/salience.py`
-are gone.
-
-**Naming history (2026-06):** the CLI was `eval-coverage` and the data
-directory `eval-fixtures/`; both renamed to `benchmark-fixture` /
-`benchmark-fixtures/` to align with the `benchmark/` package and make the
-purpose obvious (it's the hand-curated fixture benchmark, not a coverage
-metric). Wiki-content paths (`wiki/`, `papers/`, `inbox/`) are unchanged.
-
-The `index/` package was carved out specifically to share indexing
-primitives between `grade/` (which scores claims and pages) and `search/`
-(which retrieves pages). Anyone adding a new "embed-and-query something"
-feature should reach for `index/`.
-
----
-
 ## What gets cached, what gets regenerated
 
 The wiki has clear canonicalness:
@@ -1506,99 +1318,32 @@ is supported (readiness checks are provider-aware — leave
 
 ---
 
-## CLI reference
+## Command discovery
 
-Your LLM picks among these based on what you ask; you can run any directly.
+The executable help is the canonical command reference; unlike a copied table,
+it cannot drift from the installed version:
 
 ```bash
-cp ~/Downloads/some-paper.pdf inbox/                 # 1. drop a PDF
-
-researchwiki agent ingest inbox/some-paper.pdf       # 2. default: LLM authors + grades + promotes + back-links + evolve
-researchwiki agent ingest inbox/*.pdf                #    ≥2 PDFs auto-batch with checkpoint/resume
-
-researchwiki ingest inbox/some-paper.pdf --category cgt   # 2-fallback: digest-only (recovery / unextractable / custom voice)
-
-researchwiki synthesize --title "CRISPR off-target strategies" \
-    --slug crispr-off-target-strategies --topic-seed "CRISPR off-target prediction" \
-    --papers cgt/smith-2024-... cgt/jones-2025-...   # 3. scaffold a synthesis page (idea pages are manual)
-
-researchwiki reindex                                 # 4. full recovery after manual edits/index warnings; agent ingest upserts incrementally
-
-researchwiki search "CRISPR off-target"              # 5. hybrid (BM25 + semantic RRF); --mode bm25|semantic
-researchwiki search --like compbio/smith-2024-...    #    See-Also on a page; --see-also adds 2 related/hit
-
-researchwiki evolve cgt/some-stem                    # 6. synthesis-evolution proposals for a paper
-researchwiki neighbors compbio/some-stem --needs-ingest --year 2024-2026   # 7. what to ingest next
-researchwiki attach compbio/some-stem ~/Downloads/Methods.pdf              # 8. attach supplementary files
-
-researchwiki status                                  # 9. health: index, costs, pending proposals
-researchwiki lint --fix                              #    consistency report; --fix auto-inserts back-links
-researchwiki scout > /tmp/scout.md                   #    structured citation scouting (Semantic Scholar)
-researchwiki scout web request "protein design 2026" --json  # CLI performs no search
-researchwiki scout web list                                  # resume local handoffs after a crash/session change
-researchwiki scout web show <run-id> --json                  # exact request + cached result when recorded
-researchwiki scout web record <run-id> --harness codex-web --discovery-method search --fetched https://example.org/page
-# with a request --since bound, add --published-at URL YYYY-MM-DD where known
-researchwiki scout web accept <run-id> receipt.json          # optional JSON form; use - for stdin
-
-researchwiki visualize --open                         # 10. corpus → output/graph.html (self-contained)
-researchwiki export --format bibtex > refs.bib        # 11. corpus → bibliography (published pages only)
-researchwiki export --format okf --out output/okf     #     corpus → OKF bundle (every page type; needs a dir)
+researchwiki --help
+researchwiki <command> --help
 ```
 
-`researchwiki status` on a populated wiki prints per-category counts,
-cross-link density, orphans, and inbox backlog; on an empty wiki it prints
-`Pages: 0` cleanly.
+The normal agent ingest upserts incrementally. Use `researchwiki reindex` only
+after manual edits or an index warning. The task-oriented table below covers
+common decisions.
 
-### All commands
+Web scouting remains an agent handoff rather than a second evidence path:
 
-| Command | Purpose |
-|---|---|
-| `add <pdf>...` | Discoverable front door to the complete `agent ingest` pipeline; accepts arbitrary paths and preserves all ingest flags, batching, checkpoints, and recovery behavior. |
-| `agent ingest <pdf> [--supplementary <f>...]` | Full pipeline: reconcile → extract target claims → crosslink → author (1 draft by default; `-n 2+` for a tournament) → grade → critic/evolve/debug → promote → incrementally index → propose evolutions → persist grades. Optional per-PDF limits: `--max-model-calls`, `--max-tokens`, `--max-cost-usd`, `--max-wall-seconds`. Provider API key required (`OPENAI_API_KEY` by default). |
-| `ingest <pdf>... [--category] [--supplementary]` | Digest-only (no LLM authoring): DOI, S2 metadata, stem, crosslinks, anchoring → `.ingest/{stem}-digest.md`. Author the page yourself. |
-| `attach <category/stem> <file>` | Attach a supplementary file to an existing page; copies into `papers/{stem}.supp/`, updates YAML. |
-| `neighbors <doi-or-stem>` | S2 citation-graph neighbors. `--mode references\|citations\|recommendations\|all`, `--year`, `--needs-ingest`. Structured fields only. |
-| `evolve <category/stem>` | Neighboring synthesis pages to edit in light of a paper → proposals in `.ingest/{stem}-evolution-proposals/`. |
-| `backfill <hook\|keywords\|doi>` | One-shot: populate the named field on existing pages (hook + keywords via LLM from page prose; doi via Semantic Scholar → Crossref with a sanity check). |
-| `migrate <preflight\|inspect\|apply\|verify\|provenance>` | Bulk-import one-paper-per-PDF markdown, or plan/apply the reviewed legacy author-provenance upgrade. Zero tokens; provenance planning is read-only and apply requires a hash-bound manifest plus a pre-apply backup. See `prompts/migration-backfill.md`. |
-| `import <preflight\|inspect\|apply\|verify>` | Bulk-import a reference-manager library from its BibTeX/RIS/CSL-JSON export, which supplies each paper's DOI/title/authors/year instead of rediscovering them. Only `apply` spends tokens or writes pages; `<pdf-root>` is optional, and a metadata-only run still returns a fetch list of DOIs. Stage it with `--limit N`. See `prompts/import-reference-manager.md`. |
-| `export [--format bibtex\|ris\|csl-json]` | The inverse: emit the corpus as a bibliography for a reference manager or a manuscript. Zero tokens, no network, byte-identical across runs. Citekey is the page stem. Only page types describing someone else's publication are emitted — a synthesis page would assert a publication that does not exist. `--json` gives the report, which doubles as a page-defect to-do list. See `prompts/export-bibliography.md`. |
-| `synthesize --title [...] [--papers]` | Scaffold `wiki/synthesis/{slug}.md`. Idea/reference pages are manual. |
-| `candidates <concepts\|synthesis\|pairs>` | Surface opportunity signals: un-scaffolded concept hubs (concepts), uncovered paper clusters warranting a synthesis page (synthesis), or cross-paper claim pairs sitting below the auto-link threshold (pairs). Concepts/pairs are local; synthesis is a local preview unless `--judge` opts into configured-model scope checks, and writes artifacts only with `--write-proposals`. Each pair prints an exact `claim-overlap --pair` review command. `--decline A B --reason` suppresses a pair permanently. See *Bottom-up discovery* above. |
-| `reindex [--no-semantic]` | Rebuild Tantivy + semantic index from `wiki/`. |
-| `search "<query>" [--mode ...]` or `--like <stem>` | Hybrid retrieval (RRF over BM25 + semantic) by default. |
-| `status` | Dashboard: counts, density, orphans, inbox/web-scout backlog, index health, pending proposals, 7-day cost. |
-| `lint [--fix] [--cross-paper]` | Orphans, broken/missing wikilinks (auto-fixable), stale syntheses, missing keywords/DOIs, year drift, stale proposals. All local except `--cross-paper`, which opts into the LLM contradiction judge over high-cosine claim pairs; `--cross-paper-max-pairs 0` sizes that pool for zero calls, and every verdict is recorded so a repeat run only judges what the last one missed. |
-| `scout [citations]` | Structured Semantic Scholar scouting: cross-wiki citation edges, recommendations, and shared external references. Bare `scout` defaults to `citations`; `audit` is a deprecated alias. |
-| `scout web <request\|list\|show\|record\|accept>` | Provider-neutral handoff to the active chat agent's native web-search harness. The CLI makes no network calls and stores no research prose. The agent answers conversationally with native citations, then `record` persists only harness + discovery method + URLs + opened-vs-snippet status; `accept … -` is the minimal JSON alternative. Requests are bounded, resumable, write-once after recording, quarantined, and discovery-only. `show` reads the cached result without creating a report. See `prompts/scout-web.md`. |
-| `retraction-check`, `preprint-check`, `orcid-lookup` | Structured PubMed / bioRxiv / ORCID queries. |
-| `claims "<query>" [--k N]` | Grounded-citation search over the pre-graded claims table (atomic bullets + `[[stem#slug]]` citation anchors + support scores). |
-| `pdf-search <stem> "<query>" [--k N]` | BM25 inside one paper's PDF chunks — pull an exact number/passage the page didn't quote. |
-| `check-grounding <page> [--strict]` | Structural gate: flag claim-bearing units lacking a `[[wikilink]]`. `--strict` also fails `*(model prior)*`-marked units. Exits 1 when it finds something. |
-| `check-coverage <page>` | Advisory recall gate: wiki papers ranking high on the page's `topic_seed` that the page never cites. Run after `check-grounding` + `grade synthesis` on any synthesis/idea/concept page. |
-| `grade <paper\|synthesis\|regression>` | Fidelity scoring against source PDFs: `paper <stem>` (fidelity + salience), `synthesis <page>` (cross-paper misattribution), `regression [--missing-only]` (re-grade all + drift diff). |
-| `concepts <term> --thesis "…"` | Scaffold a concept hub from a recurring term; refuses without a thesis. `--upgrade-spokes` backfills `[[stem#slug]]` citations on existing hubs; `concepts refresh <slug>` drafts a hub's *Cross-domain connections* from typed claim edges (review-gated, never auto-applied). |
-| `claim-graph [--tensions\|--contradicting\|--neighbors]` | Query the LLM-judged claim-edge graph — including the typed edges `claim-overlap` records without writing a Related-Papers bullet. `claim-graph promote [--apply]` transitions candidate edges. |
-| `bootstrap-categories` | Propose a category taxonomy from `inbox/` papers; `--apply` creates the dirs. |
-| `suggest-splits [--category <cat>\|--all]` | Cluster `wiki/other/` or a populated category and propose taxonomy changes. Review-gated; nothing auto-creates a category. |
-| `db <rebuild\|verify>` | Rebuild the structured mirror from markdown after any manual page edit; `verify` reports drift without writing. (`db papers` / `db query` below.) |
-| `init [--scaffold-only] [--refresh-dashboard]` | First-time setup wizard, or create the directory and dashboard scaffold without prompts. `--refresh-dashboard` adopts the current `views.md` template on an existing wiki, backing your copy up under `.ingest/` — the fix for `dashboard_contract_violations` after an upgrade. |
-| `doctor [--probe]` | Local/free readiness checks by default; `--probe` explicitly makes one minimal provider call. |
-| `mcp-serve` | Read-only MCP server (search / claims / check-grounding) for Claude Desktop and IDE clients. |
-| `eval` | `classifier`: leave-one-out accuracy of the category auto-suggester (free). `triggers`: whether CLAUDE.md's prompt pointers fire (costs tokens). `eval-classifier` is a deprecated alias. |
-| `benchmark-fixture <stem> [--repeat N] [--llm]` | Score page authoring against a hand-curated `benchmark-fixtures/` fixture. `--repeat` keeps drafts in memory; for a single authored page use `agent ingest … --force-sandbox`, never a bare `agent ingest` (it would promote a fixture paper into your corpus). |
-| `claim-overlap <stem> [--sim N] [--top N] [--dry-run] [--json]` | Proactively cross-link a newly-ingested paper: finds existing papers with near-paraphrase claims, LLM-judges each as a real relationship vs coincidence, and auto-adds reciprocal Related-Papers `[[wikilinks]]` for confirmed matches. `--pair A#slug B#slug` instead judges exactly one bottom-up discovery pair, bypassing threshold/top-k retrieval. Run after `db rebuild`. |
-| `db papers [--year/--category/--page-type/--no-doi/--venue/--author/--status] [--count] [--json]` | Structured lookups over the frontmatter mirror — counts/filters ("cgt papers from 2024", "papers missing a DOI") without re-reading markdown. `db query "SELECT…"` for ad-hoc read-only SQL. |
-| `remove <stem> [--apply] [--keep-pdf]` | Retract a paper: page, PDF, caches, back-link bullets, `index.md` entry, concept spokes and DB rows. Dry run by default, runs inside the mutation journal. Reports but never edits authored `[[stem#slug]]` citations on synthesis/idea/concept pages — that list is the to-do queue. See `prompts/remove-paper.md`. |
-| `visualize [--open] [--json]` | Self-contained interactive graph of the corpus to `output/graph.html` — `[[wikilinks]]` plus typed claim edges, `contradicts` drawn loud. Zero tokens, no network. Shows structure, not claims. |
-| `figures <stem> [--figure N]` | List a paper's figure captions, or render one page to `.figures-cache/` to read when the evidence is in the figure rather than the prose. Captions are free; render one page at a time — a PNG costs context in proportion to its pixel area. |
-| `insights [--days N] [--json]` | Analytics over the ingest telemetry log: draft quality + cost by model, section difficulty, token spend by role, draft decisions. Read-only, no LLM. |
+```bash
+researchwiki scout web request "protein design 2026" --json
+researchwiki scout web list
+researchwiki scout web show <run-id> --json
+researchwiki scout web record <run-id> --harness codex-web --discovery-method search --fetched https://example.org/page
+```
 
-Content mutations such as ingest, attach, synthesize, concept scaffolding, and
-remove append parseable entries to `wiki/log.md` (inside `wiki/` so an Obsidian
-vault opened there can browse it). Read-only inspection commands do not append
-history merely because they were run.
+The CLI performs no network search and stores no research prose; receipts remain
+discovery-only and never become wiki evidence. See
+[`prompts/scout-web.md`](./prompts/scout-web.md).
 
 ---
 
@@ -1632,21 +1377,6 @@ history merely because they were run.
 | Want to see which papers disagree | `researchwiki claim-graph --tensions`; `researchwiki visualize --open` to see whether tensions cluster on one paper |
 | Want to retract a paper | `researchwiki remove <stem>` (dry run), then `--apply` (see `prompts/remove-paper.md`) |
 | The evidence is in a figure, not the prose | `researchwiki figures <stem>` for captions; `--figure N` to render just that page |
-
----
-
-## Where to go from here
-
-- `CLAUDE.md` — the contract for LLM operations (the Four Rules,
-  file-naming convention, ingest steps, query workflow).
-- `config/models.yaml` — central model assignments for each role
-  (author, critic, judge, classifier, etc.). Edit this file to A/B test
-  models without code changes.
-- Closed planning docs that informed the current architecture (Phase A–D
-  semantic index / hybrid retrieval / memory evolution; v1 agent design
-  history) were removed from `plans/` as they closed out — see git
-  history (`git log --diff-filter=D --name-only -- plans/`) if you need
-  the historical context.
 
 For new contributors: read `CLAUDE.md` first (it's load-bearing for the
 LLM-facing semantics), then this doc. For the pipeline internals, the

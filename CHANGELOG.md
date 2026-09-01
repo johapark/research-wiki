@@ -59,6 +59,12 @@ the reasoning behind any line below.
 
 ### Changed
 
+- **Project-level documentation now has one owner per concern.** `WORKFLOW.md`
+  keeps the end-to-end rationale and task-oriented quick reference, while the
+  source tree and executable `--help` own module and command inventories. The
+  copied package map, full CLI catalogue, and closed-planning pointers were
+  removed so routine code changes no longer require updating redundant prose.
+
 - **Research-question retrieval is now proportional to the question.** Known-paper,
   direct-fact, broad-comparison, structural, telemetry, and follow-up questions
   each have a cheapest grounded first path; claims plus hybrid search are paired
