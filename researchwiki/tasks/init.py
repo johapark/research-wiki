@@ -21,6 +21,7 @@ to skip or reconfigure each.
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import subprocess
@@ -43,7 +44,7 @@ from ..env_profiles import (
     write_profile_atomic,
 )
 from ..errors import EnvironmentFailure
-from .init_dashboard import VIEWS_MD_TEMPLATE
+from .init_dashboard import VIEWS_MD_TEMPLATE, refresh_dashboard
 from ..fsatomic import write_text_atomic
 from ..paths import ensure_scaffold, inbox_dir, wiki_dir, wiki_root
 from ._provider_setup import (
@@ -949,21 +950,8 @@ def _print_category_help() -> None:
     print("  • Move a paper: follow prompts/recategorize.md.")
 
 
-def _step_dashboard(root: Path) -> None:
-    _header("Step 3 — Dashboard")
-    views = wiki_dir() / "views.md"
-    if views.exists():
-        print("wiki/views.md already exists — leaving it.")
-        return
-    wiki_dir().mkdir(parents=True, exist_ok=True)
-    write_text_atomic(views, VIEWS_MD_TEMPLATE)
-    print("Wrote wiki/views.md (recent papers / ideas / synthesis / concepts).")
-    print("It renders only inside Obsidian with the Dataview plugin enabled; on GitHub "
-          "the blocks show as inert code.")
-
-
 def _step_confirm() -> int:
-    _header("Step 4 — Confirm")
+    _header("Step 3 — Confirm")
     try:
         from . import doctor
         rc = doctor.main([])
@@ -977,6 +965,10 @@ def _step_confirm() -> int:
     print("\nNext: add any PDF path")
     print("    researchwiki add /path/to/paper.pdf")
     print("or tell your LLM \"add this paper to my research wiki\".")
+    print("\nwiki/views.md is an Obsidian dashboard of recent papers, ideas, "
+          "synthesis pages and concept hubs. It renders only inside Obsidian "
+          "with the Dataview plugin enabled; on GitHub the blocks show as "
+          "inert code.")
     print("\nChange settings later: swap providers by copying another "
           "config/models.*.yaml template over config/models.yaml — or delete that "
           "file to fall back to the built-in OpenAI defaults; keys live in .env; "
@@ -1013,7 +1005,25 @@ def _scaffold(quiet: bool = False) -> int:
 
 
 def main(argv: list[str]) -> int:
-    if "--scaffold-only" in argv:
+    parser = argparse.ArgumentParser(
+        prog="researchwiki init",
+        description="Initialize a research wiki or refresh its dashboard scaffold.",
+    )
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument(
+        "--scaffold-only", action="store_true",
+        help="create content directories and the dashboard without prompts",
+    )
+    actions.add_argument(
+        "--refresh-dashboard", action="store_true",
+        help="replace wiki/views.md from the current template after backing it up",
+    )
+    args = parser.parse_args(argv)
+
+    if args.refresh_dashboard:
+        return refresh_dashboard()
+
+    if args.scaffold_only:
         return _scaffold()
 
     if not sys.stdin.isatty():

@@ -28,12 +28,15 @@ from ..search import build_documents_from_wiki, suggest_category
 
 
 def main(argv: list[str]) -> int:
+    # Announced before parsing, matching `tasks/audit.py`: `--help` is where a
+    # user goes to discover the new spelling, and argparse exits during parsing,
+    # so a notice printed afterwards is precisely the one nobody sees.
+    print("note: `eval-classifier` is now `researchwiki eval classifier`.",
+          file=sys.stderr)
     argparse.ArgumentParser(
         prog="researchwiki eval-classifier",
         description="Deprecated alias for `researchwiki eval classifier`.",
     ).parse_args(argv)
-    print("note: `eval-classifier` is now `researchwiki eval classifier`.",
-          file=sys.stderr)
     return evaluate()
 
 

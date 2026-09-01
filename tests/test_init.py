@@ -9,6 +9,7 @@ check — see researchwiki/tasks/lint/yaml_checks.py:find_category_drift).
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -1492,3 +1493,129 @@ def test_dashboard_prompt_matches_executable_member_contract():
         'WHERE type = "concept" AND generated_at',
     ):
         assert signal in prompt
+
+
+def test_wizard_steps_are_numbered_consecutively():
+    """Folding the dashboard into scaffold removed step 3; the confirm header was
+    left at 4, so the first-run flow printed 1, 2, 4."""
+    source = Path(init.__file__).read_text(encoding="utf-8")
+    numbers = [int(n) for n in re.findall(r'_header\("Step (\d+) —', source)]
+    assert numbers == list(range(1, len(numbers) + 1)), numbers
+
+
+def test_no_orphaned_wizard_steps():
+    """A `_step_*` helper nobody calls is dead code ruff cannot see, and it takes
+    its user-facing guidance out of the wizard with it."""
+    source = Path(init.__file__).read_text(encoding="utf-8")
+    for name in re.findall(r"^def (_step_\w+)", source, re.MULTILINE):
+        assert source.count(name) > 1, f"{name} is defined but never called"
+
+
+def _isolated_wiki(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+    return tmp_path / "wiki" / "views.md"
+
+
+def test_refresh_dashboard_adopts_template_and_backs_up_the_old_one(tmp_path, monkeypatch, capsys):
+    """The upgrade path for a dashboard scaffolded before the concept-hub section:
+    without it, `dashboard_contract_violations` has no resolving command."""
+    views = _isolated_wiki(tmp_path, monkeypatch)
+    views.write_text("## Recent papers (top 15)\nmy own notes\n", encoding="utf-8")
+
+    assert init.main(["--refresh-dashboard"]) == 0
+
+    assert views.read_text(encoding="utf-8") == init.VIEWS_MD_TEMPLATE
+    backups = list((tmp_path / ".ingest").glob("views-*.md.bak"))
+    assert len(backups) == 1
+    assert "my own notes" in backups[0].read_text(encoding="utf-8")
+    assert "Backed up your dashboard" in capsys.readouterr().out
+
+
+def test_refresh_dashboard_is_idempotent_and_makes_no_second_backup(tmp_path, monkeypatch):
+    views = _isolated_wiki(tmp_path, monkeypatch)
+    views.write_text("stale\n", encoding="utf-8")
+
+    assert init.main(["--refresh-dashboard"]) == 0
+    assert init.main(["--refresh-dashboard"]) == 0
+
+    assert len(list((tmp_path / ".ingest").glob("views-*.md.bak"))) == 1
+
+
+def test_refresh_dashboard_creates_a_missing_dashboard_without_a_backup(tmp_path, monkeypatch):
+    views = _isolated_wiki(tmp_path, monkeypatch)
+
+    assert init.main(["--refresh-dashboard"]) == 0
+
+    assert views.read_text(encoding="utf-8") == init.VIEWS_MD_TEMPLATE
+    assert not (tmp_path / ".ingest").exists()
+
+
+def test_refresh_dashboard_needs_no_tty(tmp_path, monkeypatch):
+    """It has to work on an upgrade, where the interactive wizard refuses to run."""
+    views = _isolated_wiki(tmp_path, monkeypatch)
+    views.write_text("stale\n", encoding="utf-8")
+    monkeypatch.setattr(init.sys.stdin, "isatty", lambda: False)
+
+    assert init.main(["--refresh-dashboard"]) == 0
+    assert views.read_text(encoding="utf-8") == init.VIEWS_MD_TEMPLATE
+
+
+@pytest.mark.parametrize(
+    "argv, expected_code",
+    [
+        (["--refresh-dashboard", "--definitely-invalid"], 2),
+        (["--refresh-dashboard", "--scaffold-only"], 2),
+        (["--refresh-dashboard", "--help"], 0),
+    ],
+)
+def test_refresh_dashboard_help_and_bad_argv_never_mutate(
+    tmp_path, monkeypatch, argv, expected_code,
+):
+    views = _isolated_wiki(tmp_path, monkeypatch)
+    views.write_text("custom dashboard\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        init.main(argv)
+
+    assert exc.value.code == expected_code
+    assert views.read_text(encoding="utf-8") == "custom dashboard\n"
+    assert not (tmp_path / ".ingest").exists()
+
+
+def test_refresh_dashboard_backups_never_collide_within_one_second(
+    tmp_path, monkeypatch,
+):
+    from researchwiki.tasks import init_dashboard
+
+    views = _isolated_wiki(tmp_path, monkeypatch)
+
+    class FixedDateTime(init_dashboard.dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 1, 12, 34, 56)
+
+    monkeypatch.setattr(init_dashboard.dt, "datetime", FixedDateTime)
+    views.write_text("first custom dashboard\n", encoding="utf-8")
+    assert init.main(["--refresh-dashboard"]) == 0
+
+    views.write_text("second custom dashboard\n", encoding="utf-8")
+    assert init.main(["--refresh-dashboard"]) == 0
+
+    backups = sorted((tmp_path / ".ingest").glob("views-*.md.bak"))
+    assert len(backups) == 2
+    assert {p.read_text(encoding="utf-8") for p in backups} == {
+        "first custom dashboard\n", "second custom dashboard\n",
+    }
+
+
+def test_shipped_dashboard_template_satisfies_its_own_lint_contract(tmp_path):
+    """The template and the checker must not be able to disagree — otherwise
+    `--refresh-dashboard` writes a file that lint immediately flags."""
+    from researchwiki.tasks.lint.dashboard_contract import (
+        find_dashboard_contract_violations,
+    )
+
+    views = tmp_path / "views.md"
+    views.write_text(init.VIEWS_MD_TEMPLATE, encoding="utf-8")
+    assert find_dashboard_contract_violations(views) == []

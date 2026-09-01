@@ -197,7 +197,7 @@ def _cmd_ingest(args) -> int:
         )
 
     if not args.pdfs:
-        print("researchwiki agent ingest: need PDF path(s) (or --resume BATCH_DIR)",
+        print(f"{_prog()}: need PDF path(s) (or --resume BATCH_DIR)",
               file=sys.stderr)
         return 1
 
@@ -209,7 +209,7 @@ def _cmd_ingest(args) -> int:
     ):
         value = getattr(args, attr, None)
         if value is not None and value <= 0:
-            print(f"researchwiki agent ingest: {flag} must be greater than zero",
+            print(f"{_prog()}: {flag} must be greater than zero",
                   file=sys.stderr)
             return 1
 
@@ -252,7 +252,7 @@ def _cmd_ingest(args) -> int:
         conflicts = [flag for attr, flag in _BATCH_INCOMPATIBLE_FLAGS
                      if getattr(args, attr, None)]
         if conflicts:
-            print(f"researchwiki agent ingest: cannot combine batch mode "
+            print(f"{_prog()}: cannot combine batch mode "
                   f"({len(args.pdfs)} PDFs / --workers set) with per-PDF flags: "
                   f"{', '.join(conflicts)}",
                   file=sys.stderr)
@@ -260,7 +260,7 @@ def _cmd_ingest(args) -> int:
                   file=sys.stderr)
             return 1
         if args.auto_promote and args.force_sandbox:
-            print("researchwiki agent ingest: --auto-promote and --force-sandbox "
+            print(f"{_prog()}: --auto-promote and --force-sandbox "
                   "are mutually exclusive", file=sys.stderr)
             return 1
         warn_if_chat_relay_batch()
@@ -275,7 +275,7 @@ def _cmd_ingest(args) -> int:
     pdf = args.pdfs[0]
     promote_mode = "auto"
     if args.auto_promote and args.force_sandbox:
-        print("researchwiki agent ingest: --auto-promote and --force-sandbox are mutually exclusive",
+        print(f"{_prog()}: --auto-promote and --force-sandbox are mutually exclusive",
               file=sys.stderr)
         return 1
     if args.auto_promote:
@@ -313,7 +313,7 @@ def _cmd_ingest(args) -> int:
             max_wall_seconds=args.max_wall_seconds,
         )
     except BudgetExhausted as e:
-        print(f"researchwiki agent ingest: {e}", file=sys.stderr)
+        print(f"{_prog()}: {e}", file=sys.stderr)
         partial = getattr(e, "partial_path", None)
         if partial:
             print(f"  best graded partial preserved at: {partial}", file=sys.stderr)
@@ -326,7 +326,7 @@ def _cmd_ingest(args) -> int:
         # ended up null, and a copy-pasteable retry hint. No stack
         # trace; ReconcileFailed is a known-failure mode, not a bug.
         print(
-            "researchwiki agent ingest: reconcile failed — could not derive a paper stem.",
+            f"{_prog()}: reconcile failed — could not derive a paper stem.",
             file=sys.stderr,
         )
         print(f"  sources tried: {', '.join(e.sources) or '(none)'}", file=sys.stderr)
@@ -346,7 +346,7 @@ def _cmd_ingest(args) -> int:
         else:
             print(
                 "  fix: re-run with `--doi`/`--title`/`--year`/`--authors` overrides "
-                "(see `researchwiki agent ingest --help`).",
+                f"(see `{_prog()} --help`).",
                 file=sys.stderr,
             )
         return 2
@@ -354,7 +354,7 @@ def _cmd_ingest(args) -> int:
         # Known-failure mode: re-ingest would orphan a prior page. Surface
         # the prior + new stems and the two ways forward, no stack trace.
         print(
-            "researchwiki agent ingest: refusing to rename an existing page.",
+            f"{_prog()}: refusing to rename an existing page.",
             file=sys.stderr,
         )
         print(f"  prior stem: {e.prior_stem}", file=sys.stderr)
@@ -375,7 +375,7 @@ def _cmd_ingest(args) -> int:
         # didn't. Print exactly what is on disk so the half-landed state can be
         # finished or undone by hand — no stack trace.
         print(
-            "researchwiki agent ingest: promote did not complete — the paper is "
+            f"{_prog()}: promote did not complete — the paper is "
             "PARTIALLY landed.",
             file=sys.stderr,
         )
@@ -407,7 +407,7 @@ def _cmd_ingest(args) -> int:
         # Nothing more specific matched, and we're already printing a stack
         # trace — that's the definition of code 3 (internal bug), not an
         # environment failure the caller could act on.
-        print(f"researchwiki agent ingest: error: {e}", file=sys.stderr)
+        print(f"{_prog()}: error: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return 3
@@ -499,6 +499,18 @@ def _cmd_trace(args) -> int:
     return 0
 
 
+#: How this ingest run was spelled on the command line. `researchwiki add` is a
+#: thin wrapper around `agent ingest` (one implementation, two names), so every
+#: usage line and error prefix has to name whichever the user actually typed —
+#: being told to fix a flag on a command you did not run is its own bug.
+_DEFAULT_INGEST_PROG = "researchwiki agent ingest"
+_INGEST_PROG = _DEFAULT_INGEST_PROG
+
+
+def _prog() -> str:
+    return _INGEST_PROG
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the `researchwiki agent` parser.
 
@@ -510,7 +522,8 @@ def build_parser() -> argparse.ArgumentParser:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     subs = parser.add_subparsers(dest="cmd", required=True)
 
-    p_ingest = subs.add_parser("ingest", help="Run the ingest agent on one or more PDFs")
+    p_ingest = subs.add_parser("ingest", prog=_prog(),
+                               help="Run the ingest agent on one or more PDFs")
     p_ingest.add_argument("pdfs", nargs="*",
                           help="Paths to PDFs (in inbox/ or papers/). Passing two or "
                                "more auto-activates crash-safe batch mode with a "
@@ -620,7 +633,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, ingest_prog: str | None = None) -> int:
+    """Run an `agent` subcommand.
+
+    `ingest_prog` renames the ingest command in usage lines and error prefixes so
+    the `researchwiki add` wrapper can share this implementation without telling
+    the user about a command they did not type.
+    """
+    global _INGEST_PROG
+    # Assigned on every call, not only when overridden: a sticky global would
+    # leak `add`'s label into a later in-process `agent ingest` (tests, or any
+    # embedder calling both).
+    _INGEST_PROG = ingest_prog or _DEFAULT_INGEST_PROG
     parser = build_parser()
     args = parser.parse_args(argv)
     return int(args.func(args) or 0)

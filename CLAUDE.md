@@ -302,6 +302,8 @@ Multi-item Research Highlights columns are the sharpest case — one *Nature Gen
 
 If every `wiki/{category}/` is empty AND user signals they're new (*"set this up"*, *"initialize"*), read [`prompts/init.md`](./prompts/init.md). Proactively offer init; alternatively suggest `researchwiki init` (interactive wizard).
 
+**`researchwiki doctor`** — local, free readiness check (paths, dependencies, model routing, credentials, state DB, index, semantic-model cache). Run it before the first ingest, and whenever an ingest fails in a way that might be setup rather than the PDF. `--probe` adds one real classifier call — network and tokens, so only on request. `researchwiki init --refresh-dashboard` adopts the current `views.md` template (backs your copy up under `.ingest/`) — the fix for `dashboard_contract_violations` on a wiki scaffolded by an earlier release.
+
 ### Model providers — routing and mixed mode
 
 Per-phase provider comes from the selected model config: **`RW_MODELS_CONFIG`** when set, otherwise `config/models.yaml`. A bare selector resolves under `config/`; an absolute/path-separated value is used verbatim. Only an *absent implicit* `config/models.yaml` activates the built-in OpenAI endpoint and all-Luna role table. `researchwiki status` prints the active path. **`RW_LLM_PROVIDER`** is a global override that forces every phase to one provider and silently defeats per-role mixing. It replaces the provider but **not** the model, so forcing it over a config chosen for another backend mints pairs like `anthropic/gpt-5.6-terra` that no API serves; this mismatch is warned about once per process. Prefer `RW_MODELS_CONFIG` for whole-backend swaps.
@@ -329,6 +331,8 @@ New ingest rows record cache-read/write token subsets, and reports apply the tab
 ### Ingest — add a new paper
 
 **Default path: `researchwiki agent ingest`.** Handles pypdfium2 extraction, DOI detection, S2 lookup, LLM-reconcile, stem derivation, `mv` to `papers/`, page authoring, atomic back-link apply, and `researchwiki evolve`. Logs `ingest_iterations` to the state DB; writes no `tags:` (see Page Types).
+
+**`researchwiki add <pdf>` is the same command** — one implementation, two names, so either spelling is correct and neither is a separate path. `add` is the front door the README and the setup wizard hand a new user (it takes a PDF from anywhere, not just `inbox/`); `agent ingest` is the spelling the rest of this file uses because the flags and failure modes below are documented under it. Every flag, guardrail and exit code is identical, and each names whichever spelling you typed in its own errors.
 
 **Step 0** — drop PDF into `inbox/`. **Read the inbox with `researchwiki status`, not `ls inbox/`** — same answer plus the aggregate signals (stale index / DB, orphans, cost rollup, the three decay-stamped nudges) that the every-~5-ingests cadence under *Lint* would otherwise be the only thing surfacing.
 

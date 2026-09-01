@@ -14,7 +14,11 @@ target pages), racy. This module is the single primitive that fixes both.
 - `update_locked` — read-modify-write under a cross-platform file lock, so two
   ingest subprocesses splicing into the same shared file can't clobber each other.
 
-All text I/O is utf-8 so nothing depends on the ambient locale (`LANG=C` safe).
+All text I/O is utf-8 so nothing depends on the ambient locale (`LANG=C` safe),
+and every write pins LF rather than inheriting `os.linesep`, so a page has the
+same bytes whichever platform wrote it. `db/verify.py` still tolerates a CRLF
+frontmatter fence, because pages written by an earlier release (or by a
+Windows editor) are already on disk.
 """
 
 from __future__ import annotations
@@ -57,7 +61,15 @@ def _write_text_atomic_unlocked(path: Path, text: str) -> None:
         else:
             # `os.fchmod` is Unix-only; chmodding our unique path is portable.
             os.chmod(tmp, mode)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        # `newline=""` pins LF on every platform. Without it Python's text
+        # mode translates each "\n" to `os.linesep`, so the same page written
+        # on Windows lands as CRLF — which is how a wiki synced across
+        # platforms grows mixed line endings, and why `db/verify.py` had to
+        # learn to recognize a CRLF frontmatter fence. Reads are unaffected
+        # (text mode translates CRLF back), so pinning the writer removes the
+        # divergence at its source and keeps `file_sha256` page identity —
+        # which gates `migrate provenance` — stable across platforms.
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             fd = -1
             handle.write(text)
             handle.flush()

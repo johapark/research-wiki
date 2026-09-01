@@ -164,3 +164,38 @@ def test_update_locked_serializes_concurrent_processes(tmp_path):
         assert p.wait() == 0
     lines = [ln for ln in target.read_text(encoding="utf-8").splitlines() if ln]
     assert len(lines) == 200  # 4 workers × 50, none clobbered
+
+
+def test_writes_pin_lf_at_the_text_io_boundary(tmp_path, monkeypatch):
+    """Pages must have the same bytes whichever platform wrote them.
+
+    Without `newline=""` Python's text mode expands each "\n" to `os.linesep`,
+    so the identical page written on Windows lands as CRLF. That divergence is
+    what forced `db/verify.py` to recognize a CRLF frontmatter fence, and it
+    moves the `file_sha256` page identity that gates `migrate provenance`.
+
+    A POSIX-only byte assertion passes even when the writer omits `newline=""`,
+    because POSIX text mode already emits LF. Spy on the TextIOWrapper boundary
+    so this test fails on every platform if the explicit no-translation contract
+    is removed.
+    """
+    real_fdopen = fsatomic.os.fdopen
+    seen = []
+
+    def recording_fdopen(fd, *args, **kwargs):
+        seen.append(kwargs.get("newline"))
+        return real_fdopen(fd, *args, **kwargs)
+
+    monkeypatch.setattr(fsatomic.os, "fdopen", recording_fdopen)
+    target = tmp_path / "page.md"
+    fsatomic.write_text_atomic(target, "---\ntitle: x\n---\n\nbody\n")
+    assert seen == [""]
+    assert b"\r" not in target.read_bytes()
+    assert target.read_bytes() == b"---\ntitle: x\n---\n\nbody\n"
+
+
+def test_explicit_crlf_content_is_preserved_verbatim(tmp_path):
+    """Pinning LF must not rewrite content the caller deliberately made CRLF."""
+    target = tmp_path / "keep.txt"
+    fsatomic.write_text_atomic(target, "a\r\nb\r\n")
+    assert target.read_bytes() == b"a\r\nb\r\n"

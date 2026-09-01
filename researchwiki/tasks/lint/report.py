@@ -472,6 +472,9 @@ def _emit_page_contract_sections(kw: dict) -> None:
               "cover table order, date sources, limits, and membership semantics.")
         for violation in dashboard_contract:
             print(f"- `{violation['kind']}` — {violation['detail']}")
+        print("\nA dashboard scaffolded by an earlier release drifts here without "
+              "anyone editing it: `researchwiki init --refresh-dashboard` adopts the "
+              "current template and backs up your copy under `.ingest/`.")
         print()
 
     dangling_anchors = kw["dangling_anchors"]

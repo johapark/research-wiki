@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from researchwiki.tasks import add, agent, doctor
 
 
 def test_add_forwards_every_argument_to_full_agent_ingest(monkeypatch):
     seen = {}
 
-    def fake_main(argv):
+    def fake_main(argv, *, ingest_prog=None):
         seen["argv"] = argv
+        seen["ingest_prog"] = ingest_prog
         return 7
 
     from researchwiki.tasks import agent as agent_task
@@ -23,6 +26,34 @@ def test_add_forwards_every_argument_to_full_agent_ingest(monkeypatch):
     assert seen["argv"] == [
         "ingest", "/tmp/paper.pdf", "--no-semantic", "-n", "1",
     ]
+    # One implementation, two names — so the shared code must be told which name
+    # the user typed, or it answers `add` with `agent ingest`.
+    assert seen["ingest_prog"] == "researchwiki add"
+
+
+def test_each_spelling_names_itself_in_usage_and_errors(capsys):
+    """A first-run user who typed `add` must not be answered by `agent ingest`."""
+    assert add.main([]) == 1
+    assert capsys.readouterr().err.startswith("researchwiki add:")
+
+    assert agent.main(["ingest"]) == 1
+    assert capsys.readouterr().err.startswith("researchwiki agent ingest:")
+
+    # The label must not be sticky across in-process calls.
+    assert add.main([]) == 1
+    assert capsys.readouterr().err.startswith("researchwiki add:")
+    assert agent.main(["ingest"]) == 1
+    assert capsys.readouterr().err.startswith("researchwiki agent ingest:")
+
+
+def test_add_help_does_not_advertise_a_subcommand_the_user_cannot_type(capsys):
+    """`add` injects the `ingest` positional itself, so argparse would otherwise
+    compose usage as `researchwiki add ingest`."""
+    with pytest.raises(SystemExit):
+        add.main(["--help"])
+    usage = capsys.readouterr().out
+    assert usage.startswith("usage: researchwiki add ")
+    assert "add ingest" not in usage
 
 
 def test_doctor_default_never_runs_provider_probe(monkeypatch):

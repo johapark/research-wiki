@@ -22,6 +22,19 @@ the reasoning behind any line below.
 
 ### Added
 
+- **First-run onboarding: `researchwiki add` and `researchwiki doctor`.** `add` takes a
+  PDF from anywhere and runs the full ingest workflow — the same implementation as
+  `agent ingest` under the name a new user reaches for, and each spelling now names
+  itself in its own usage lines and error messages. `doctor` is a local, free
+  readiness check over paths, dependencies, model routing, credentials, the state DB,
+  the search index, `curl`, and the semantic-model cache, reporting `OK`/`WARN`/`BLOCK`
+  with a fix line per blocker; `--probe` adds one explicit classifier call that may use
+  the network and spend tokens. The setup wizard ends by running it, and stops on a
+  blocker instead of pointing at the next step. Category setup no longer proposes a
+  taxonomy from one or two papers — it uses `wiki/other/` and defers to
+  `bootstrap-categories`. The Obsidian dashboard is treated as scaffold rather than a
+  wizard question, so `init` and `--scaffold-only` both create `wiki/views.md`.
+
 - **Beta compatibility and migration contract.** Public CLI/flag, JSON, and
   frontmatter replacements now carry a machine-readable deprecation entry,
   remain available for at least 90 days and through the next minor line, and
@@ -62,6 +75,12 @@ the reasoning behind any line below.
   Periodic `researchwiki lint` runs now report semantic dashboard drift as an
   advisory finding while allowing custom prose and additional columns.
 
+  **Action for existing checkouts:** a `views.md` scaffolded by an earlier release
+  reports these advisory findings without anyone editing it — it predates the
+  concept-hub section. `researchwiki init --refresh-dashboard` adopts the current
+  template and backs your copy up under `.ingest/`; `lint` now prints that pointer
+  beside the findings. Nothing overwrites a dashboard unless you ask.
+
 ### Fixed
 
 - **Concurrent and cross-platform writes no longer lose or corrupt data.** Atomic
@@ -79,6 +98,41 @@ the reasoning behind any line below.
   longer hides Semantic Scholar or Crossref outages. A successful PubMed no-hit
   remains exit 0. All curl-backed metadata clients identify the current
   research-wiki project rather than the stale Claude Code repository.
+
+  **Action for existing checkouts:** every cache filename written before the hash
+  suffix is treated as a miss, because a lossy name cannot say which request it
+  belonged to. Nothing is corrupt and nothing needs repairing — but the first
+  `scout` / `ingest` / `backfill` pass after upgrading re-fetches what it needs,
+  which on a large corpus is thousands of requests into Semantic Scholar's rate
+  limit. Delete `.s2-cache/`, `.crossref-cache/` and `.web-cache/` at leisure to
+  reclaim the space; expect one slow pass either way.
+
+- **A fresh non-editable install could not create its state DB.** `schema.sql` was
+  not packaged, so `pip install researchwiki` (as opposed to `-e .`) produced a CLI
+  that failed on first use. The wheel now ships the runtime schema, and the artifact
+  smoke test asserts its presence alongside the graph template and PDF wordlist.
+
+- **A successful Windows `db rebuild` was reported as database drift.** `db verify`
+  probed for a `---\n` frontmatter fence in binary mode, so pages persisted with
+  CRLF read as having no frontmatter and their rows looked extra. The probe now
+  accepts either newline convention. Page *writes* additionally pin LF on every
+  platform rather than inheriting `os.linesep`, so a wiki synced across macOS,
+  Linux and Windows no longer accumulates mixed line endings and the `file_sha256`
+  page identity that gates `migrate provenance` is platform-independent.
+
+- **Stub ingest could make an unplanned provider request.** Category selection
+  during `--stub` runs now routes through deterministic kNN, so the offline
+  framework test — and the sandbox path — cannot reach the network.
+
+- **The setup wizard numbered its steps 1, 2, 4.** Folding the dashboard into
+  scaffold removed step 3 without renumbering the confirm step, and left the
+  Obsidian/Dataview caveat unprinted; it moves to the wizard's closing guidance.
+
+- **`eval-classifier` announced its rename only when argv parsed.** The notice was
+  printed after `parse_args`, so `--help` — where a user goes to discover the new
+  spelling — showed nothing. It now prints first, matching `audit`, and both
+  aliases are covered by tests asserting the notice reaches stderr and never
+  stdout.
 
 ## [0.4.4] - 2026-08-28
 

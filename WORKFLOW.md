@@ -1583,7 +1583,7 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `bootstrap-categories` | Propose a category taxonomy from `inbox/` papers; `--apply` creates the dirs. |
 | `suggest-splits [--category <cat>\|--all]` | Cluster `wiki/other/` or a populated category and propose taxonomy changes. Review-gated; nothing auto-creates a category. |
 | `db <rebuild\|verify>` | Rebuild the structured mirror from markdown after any manual page edit; `verify` reports drift without writing. (`db papers` / `db query` below.) |
-| `init [--scaffold-only]` | First-time setup wizard, or create the directory and dashboard scaffold without prompts. |
+| `init [--scaffold-only] [--refresh-dashboard]` | First-time setup wizard, or create the directory and dashboard scaffold without prompts. `--refresh-dashboard` adopts the current `views.md` template on an existing wiki, backing your copy up under `.ingest/` — the fix for `dashboard_contract_violations` after an upgrade. |
 | `doctor [--probe]` | Local/free readiness checks by default; `--probe` explicitly makes one minimal provider call. |
 | `mcp-serve` | Read-only MCP server (search / claims / check-grounding) for Claude Desktop and IDE clients. |
 | `eval` | `classifier`: leave-one-out accuracy of the category auto-suggester (free). `triggers`: whether CLAUDE.md's prompt pointers fire (costs tokens). `eval-classifier` is a deprecated alias. |

@@ -59,7 +59,7 @@ Choose one guided setup path:
 - Open the clone in Claude Code, Codex, or another compatible shell-enabled chat agent, then say: **“Initialize this research wiki.”**
 - Run the interactive wizard: `researchwiki init`.
 
-Both paths configure the provider and create the wiki directories and dashboard. For non-interactive setup, `researchwiki init --scaffold-only` creates the directory and dashboard scaffold without configuring a provider or asking questions.
+Both paths configure the provider and create the wiki directories and dashboard. For non-interactive setup, `researchwiki init --scaffold-only` creates the directory and dashboard scaffold without configuring a provider or asking questions. On an existing wiki, `researchwiki init --refresh-dashboard` adopts the current dashboard template and backs your copy up under `.ingest/`; nothing overwrites a dashboard unless you ask.
 
 Then run the local, free readiness check:
 
