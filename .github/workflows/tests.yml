@@ -84,6 +84,7 @@ jobs:
           import importlib.resources as resources
 
           package = resources.files("researchwiki")
+          assert package.joinpath("db/schema.sql").is_file()
           assert package.joinpath("templates/graph.html").is_file()
           assert any(package.joinpath("pdf/data").iterdir())
           PY
