@@ -968,7 +968,10 @@ def _phase_commit(ctx: Context, conn) -> Path:
             short_name=short_name,
             hook=hook,
             keywords=kw_out.keywords,
-            author_model=author_model_id,
+            author_model=author_model_id, use_llm_classify=not ctx.use_stub,
+            # `--stub` promises a zero-provider run. Category selection is
+            # normally LLM-first and was the one post-keyword call that escaped
+            # that promise; use its deterministic kNN path in stub mode.
         )
         # Carry gate-level warnings (e.g. broken-wikilinks-stripped) through
         # to the persisted decision_reason so post-hoc audits see the signal.
@@ -1133,7 +1136,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
         out_path = ctx.sandbox_dir / f"{stem_for_path}.md"
         summary_text = promote_mod._extract_section(cleaned_text, "summary")
         cat_suggestion, cat_strength = promote_mod._suggest_category(
-            (ctx.metadata or {}).get("title") or "", summary_text
+            (ctx.metadata or {}).get("title") or "", summary_text, use_llm=not ctx.use_stub,
         )
         write_text_atomic(out_path, _wrap_with_frontmatter(
             cleaned_text, ctx.metadata, stem_for_path,

@@ -143,6 +143,35 @@ def test_successful_promote_is_unaffected(ctx, commit_env, monkeypatch, tmp_path
     assert commits[0]["decision"] == "committed-to-wiki"
 
 
+def test_stub_promote_disables_llm_category_classification(
+    ctx, commit_env, monkeypatch, tmp_path,
+):
+    """`--stub` covers category selection as well as the named LLM phases.
+
+    The category helper is LLM-first. Before this flag was threaded through,
+    an otherwise-offline stub ingest made one real provider request after the
+    keywords phase, then silently fell back to kNN when it failed.
+    """
+    ctx.use_stub = True
+    page = tmp_path / "page.md"
+    seen = {}
+
+    def promote(**kwargs):
+        seen.update(kwargs)
+        return promote_mod.PromotionResult(
+            promoted=True, wiki_path=page, pdf_path=tmp_path / "p.pdf",
+            category="compbio", index_updated=True, log_appended=True,
+        )
+
+    monkeypatch.setattr(promote_mod, "promote_to_wiki", promote)
+    monkeypatch.setattr(runner.phases, "evolve_memory", lambda *a, **k: None)
+    monkeypatch.setattr(runner.phases, "persist_grades", lambda *a, **k: None)
+
+    runner._phase_commit(ctx, conn=None)
+
+    assert seen["use_llm_classify"] is False
+
+
 def test_post_promote_optional_llm_respects_budget_but_maintenance_finishes(
     ctx, commit_env, monkeypatch, tmp_path,
 ):

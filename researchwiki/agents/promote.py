@@ -161,7 +161,7 @@ class PromotionResult:
 _HEADING_RE = re.compile(r"^## (.+?)\s*$", re.MULTILINE)
 
 
-def _suggest_category(title: str, summary: str) -> tuple[str | None, str]:
+def _suggest_category(title: str, summary: str, *, use_llm: bool = True) -> tuple[str | None, str]:
     """Use the existing search-index helper.
 
     Returns a (category, strength) tuple:
@@ -171,7 +171,7 @@ def _suggest_category(title: str, summary: str) -> tuple[str | None, str]:
       - (None, 'none') when the index is empty or seed text is blank.
     """
     try:
-        from ..search import SearchBackendUnavailable, get_default_backend, suggest_category
+        from ..search import SearchBackendUnavailable, get_default_backend, suggest_category, suggest_category_knn
     except ImportError:
         return None, "none"
     try:
@@ -179,7 +179,7 @@ def _suggest_category(title: str, summary: str) -> tuple[str | None, str]:
     except SearchBackendUnavailable:
         return None, "none"
     try:
-        suggestion = suggest_category(backend, title, summary)
+        suggestion = (suggest_category if use_llm else suggest_category_knn)(backend, title, summary)
     except Exception:
         return None, "none"
     if suggestion is None:
@@ -746,7 +746,7 @@ def promote_to_wiki(
     short_name: str | None = None,
     hook: str | None = None,
     keywords: list[str] | None = None,
-    author_model: str | None = None,
+    author_model: str | None = None, use_llm_classify: bool = True,
 ) -> PromotionResult:
     """Move PDF + write wiki page + add back-links + update index/log.
 
@@ -760,7 +760,7 @@ def promote_to_wiki(
     # Category resolution.
     summary_text = _extract_section(draft_text, "summary")
     cat_suggestion, cat_strength = _suggest_category(
-        metadata.get("title") or "", summary_text
+        metadata.get("title") or "", summary_text, use_llm=use_llm_classify,
     )
     # Abstention fallback. `other` is the structured "uncategorized backlog"
     # bucket; `suggest-splits` proposes promotions when it grows.
