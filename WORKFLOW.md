@@ -359,6 +359,7 @@ claims graded again short of re-running the grader.
 | `migrate inspect <src>` | run dir only | local; per-page classification |
 | `migrate apply [--dry-run]` | `wiki/` + `papers/` | **zero tokens** |
 | `migrate verify` | nothing | local |
+| `migrate provenance` | review manifest only; `--apply` writes reviewed frontmatter after a tar backup | local; exact telemetry recovery, otherwise human decision |
 
 ```bash
 researchwiki migrate preflight ~/old-wiki/pages
@@ -1559,7 +1560,7 @@ cross-link density, orphans, and inbox backlog; on an empty wiki it prints
 | `neighbors <doi-or-stem>` | S2 citation-graph neighbors. `--mode references\|citations\|recommendations\|all`, `--year`, `--needs-ingest`. Structured fields only. |
 | `evolve <category/stem>` | Neighboring synthesis pages to edit in light of a paper → proposals in `.ingest/{stem}-evolution-proposals/`. |
 | `backfill <hook\|keywords\|doi>` | One-shot: populate the named field on existing pages (hook + keywords via LLM from page prose; doi via Semantic Scholar → Crossref with a sanity check). |
-| `migrate <preflight\|inspect\|apply\|verify>` | Bulk-import one-paper-per-PDF markdown from an older release or a simpler LLM wiki. Zero tokens; normalizes H2 headings and frontmatter keys before committing so claim extraction works. See `prompts/migration-backfill.md`. |
+| `migrate <preflight\|inspect\|apply\|verify\|provenance>` | Bulk-import one-paper-per-PDF markdown, or plan/apply the reviewed legacy author-provenance upgrade. Zero tokens; provenance planning is read-only and apply requires a hash-bound manifest plus a pre-apply backup. See `prompts/migration-backfill.md`. |
 | `import <preflight\|inspect\|apply\|verify>` | Bulk-import a reference-manager library from its BibTeX/RIS/CSL-JSON export, which supplies each paper's DOI/title/authors/year instead of rediscovering them. Only `apply` spends tokens or writes pages; `<pdf-root>` is optional, and a metadata-only run still returns a fetch list of DOIs. Stage it with `--limit N`. See `prompts/import-reference-manager.md`. |
 | `export [--format bibtex\|ris\|csl-json]` | The inverse: emit the corpus as a bibliography for a reference manager or a manuscript. Zero tokens, no network, byte-identical across runs. Citekey is the page stem. Only page types describing someone else's publication are emitted — a synthesis page would assert a publication that does not exist. `--json` gives the report, which doubles as a page-defect to-do list. See `prompts/export-bibliography.md`. |
 | `synthesize --title [...] [--papers]` | Scaffold `wiki/synthesis/{slug}.md`. Idea/reference pages are manual. |

@@ -105,6 +105,7 @@ exclude = ["tests*", "internal*", "wiki*"]
 # `templates/graph.html` is the `visualize` renderer — it must ship, because the
 # command's whole promise is a self-contained page with no build step.
 researchwiki = [
+    "data/*.yaml",
     "db/*.sql",
     "pdf/data/*.txt",
     "templates/*.html",

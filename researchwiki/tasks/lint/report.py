@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 from ...paths import s2_cache_dir
+from .contracts import LINT_JSON_KEYS
 from .walk import page_key
 
 
@@ -79,6 +80,7 @@ def _emit_json(**kw) -> int:
         ],
         "missing_hook": kw["missing_hook"],
         "missing_author_model": kw["missing_author_model"],
+        "acknowledged_legacy_provenance": kw["acknowledged_legacy_provenance"],
         "hook_too_long": [
             {"page": key, "chars": n, "ceiling": cap}
             for key, n, cap in kw["hook_too_long"]
@@ -122,6 +124,7 @@ def _emit_json(**kw) -> int:
             "db_deleted": kw["db_drift_fixed"].get("deleted", 0),
         } if kw["fix_applied"] else None,
     }
+    assert set(out) == LINT_JSON_KEYS
     print(json.dumps(out, indent=2))
     return 0
 
@@ -359,19 +362,10 @@ def _emit_metadata_sections(kw: dict) -> None:
         print("_every catalog page carries a hook._")
     print()
 
-    missing_author_model = kw["missing_author_model"]
-    if missing_author_model:
-        print(f"## Non-idea pages missing `author_model:` ({len(missing_author_model)})")
-        print("Authored paper/commentary, synthesis, concept, and reference pages "
-              "must name the exact model that wrote their prose. Idea pages are "
-              "intentionally exempt because they evolve over time. `lint --fix` "
-              "recovers only telemetry-backed paper/commentary pages; hand-authored "
-              "reference, synthesis, and concept pages need a manual value.")
-        for key in missing_author_model[:20]:
-            print(f"- {key}")
-        if len(missing_author_model) > 20:
-            print(f"- ... and {len(missing_author_model) - 20} more")
-        print()
+    from .report_provenance import print_author_provenance_sections
+    print_author_provenance_sections(
+        kw["missing_author_model"], kw.get("acknowledged_legacy_provenance", [])
+    )
 
     hook_too_long = kw["hook_too_long"]
     print(f"## Hooks over the advisory ceiling ({len(hook_too_long)})")

@@ -198,6 +198,11 @@ internal, and renaming a function is a PATCH. What consumers actually depend on:
 | Page frontmatter | Removing or repurposing a field the CLAUDE.md contract specifies |
 | Phase-role strings | `db/iterations.VALID_ROLES` and the `phase=`/`role=` keys — never rename these at all; `ingest_iterations` is the one table `db rebuild` can't regenerate |
 
+From beta onward, replacements also follow [COMPATIBILITY.md](./COMPATIBILITY.md):
+deprecated CLI/JSON/frontmatter surfaces coexist for at least 90 days, through
+the next minor line, and cannot be removed before the second subsequent minor.
+The machine-readable inventory is `researchwiki/data/deprecations.yaml`.
+
 ### Which slot, while on 0.x
 
 **SemVer does not govern this project yet, and saying otherwise caused a bug in

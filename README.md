@@ -171,7 +171,10 @@ Git tracks the framework: `researchwiki/`, `prompts/`, config templates, tests, 
 
 Cloud-backed model workflows may send prompts, extracted PDF text, and wiki content to the configured provider. Use a local model to keep those calls on your machine. See [SECURITY.md](./SECURITY.md) for the complete data-flow surface.
 
-For contribution and test guidance, see [CONTRIBUTING.md](./CONTRIBUTING.md). For the complete CLI walkthrough and recovery procedures, see [WORKFLOW.md](./WORKFLOW.md).
+For contribution and test guidance, see [CONTRIBUTING.md](./CONTRIBUTING.md).
+The [beta compatibility contract](./COMPATIBILITY.md) defines deprecation and
+persisted-data migration guarantees. For the complete CLI walkthrough and
+recovery procedures, see [WORKFLOW.md](./WORKFLOW.md).
 
 ## License
 

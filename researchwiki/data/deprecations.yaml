@@ -1,0 +1,51 @@
+schema_version: 1
+
+# Active compatibility aliases. Dates and versions are lower bounds: removal is
+# allowed only when both have passed. This file ships in the wheel so automation
+# can inspect the same ledger as a source checkout.
+deprecations:
+  - id: eval-classifier-command
+    surface: cli-command
+    deprecated: researchwiki eval-classifier
+    replacement: researchwiki eval classifier
+    announced_in: 0.4.0
+    announced_on: 2026-08-14
+    removal_not_before_version: 0.6.0
+    removal_not_before_date: 2026-11-12
+    compatibility: delegating-alias
+    status: active
+
+  - id: audit-command
+    surface: cli-command
+    deprecated: researchwiki audit
+    replacement: researchwiki scout citations
+    announced_in: 0.4.4
+    announced_on: 2026-08-28
+    removal_not_before_version: 0.6.0
+    removal_not_before_date: 2026-11-26
+    compatibility: delegating-alias
+    status: active
+
+# Historical database values are append-only, not deprecated. Every shipped role
+# stays here and in VALID_ROLES permanently; new roles are appended to both.
+persisted_phase_roles:
+  - attempt
+  - author
+  - budget
+  - claim_support
+  - commit
+  - critic
+  - crosslinks
+  - debug
+  - extract
+  - grade
+  - grade_persist
+  - index_update
+  - keywords
+  - memory_evolve
+  - pdf_upgrade
+  - promote
+  - reconcile
+  - short_name
+  - target_claims
+  - tournament

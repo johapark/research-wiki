@@ -10,6 +10,8 @@
     researchwiki migrate inspect  <src-dir>      # read-only classification
     researchwiki migrate apply    [--run DIR]    # land pages; no tokens
     researchwiki migrate verify   [--run DIR]    # did it work?
+    researchwiki migrate provenance               # plan provenance review
+    researchwiki migrate provenance --apply --run DIR
 
 Phases are ordered so everything free happens before anything paid. `inspect`,
 `apply` and `verify` cost **zero tokens**; so does grading, which is local
@@ -400,6 +402,69 @@ def _run_verify(args: argparse.Namespace) -> int:
     return 0 if not (missing or zero_claims) else 1
 
 
+# ---------- author-provenance migration ----------
+
+def _run_provenance(args: argparse.Namespace) -> int:
+    from ..migrate.provenance import (
+        ProvenanceMigrationError,
+        apply_plan,
+        create_plan,
+    )
+
+    try:
+        if args.apply:
+            if not args.run:
+                print("researchwiki migrate provenance: --apply requires --run DIR "
+                      "from a previously reviewed plan", file=sys.stderr)
+                return 1
+            result = apply_plan(Path(args.run))
+            if args.as_json:
+                print(json.dumps(result, indent=2))
+            else:
+                print("# migrate provenance — applied\n")
+                print(f"  changed          {result['changed']}")
+                print(f"  already applied  {result['already_applied']}")
+                print(f"  skipped          {result['skipped']}")
+                if result["backup"]:
+                    print(f"  backup           {result['backup']}")
+            return 0
+
+        if args.run:
+            print("researchwiki migrate provenance: --run is only valid with --apply",
+                  file=sys.stderr)
+            return 1
+        run, document = create_plan(
+            run_base=Path(args.run_dir) if args.run_dir else None
+        )
+        items = document["items"]
+        payload = {
+            "run_dir": str(run),
+            "manifest": str(run / "manifest.json"),
+            "pages": len(items),
+            "telemetry_recoverable": sum(
+                item["decision"] == "recover" for item in items
+            ),
+            "pending_review": sum(item["decision"] == "pending" for item in items),
+        }
+        if args.as_json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print("# migrate provenance — review plan\n")
+            print(f"  pages                 {payload['pages']}")
+            print(f"  telemetry recoverable {payload['telemetry_recoverable']}")
+            print(f"  pending review        {payload['pending_review']}")
+            print(f"  manifest              {payload['manifest']}\n")
+            if items:
+                print("Edit every pending decision in manifest.json, then run:")
+                print(f"  researchwiki migrate provenance --apply --run {run}")
+            else:
+                print("No actionable missing-author provenance remains.")
+        return 0
+    except (FileNotFoundError, ProvenanceMigrationError) as exc:
+        print(f"researchwiki migrate provenance: {exc}", file=sys.stderr)
+        return 1
+
+
 # ---------- CLI ----------
 
 def main(argv: list[str]) -> int:
@@ -442,6 +507,18 @@ def main(argv: list[str]) -> int:
     ver.add_argument("--run", help="Run directory (default: most recent).")
     ver.add_argument("--json", dest="as_json", action="store_true")
     ver.set_defaults(func=_run_verify)
+
+    prov = subs.add_parser(
+        "provenance",
+        help="Plan or apply reviewed author-provenance migration.",
+    )
+    prov.add_argument("--apply", action="store_true",
+                      help="Apply a fully reviewed prior plan.")
+    prov.add_argument("--run", help="Plan run directory; required with --apply.")
+    prov.add_argument("--run-dir",
+                      help="Parent directory for a new plan (default: .ingest/).")
+    prov.add_argument("--json", dest="as_json", action="store_true")
+    prov.set_defaults(func=_run_provenance)
 
     args = parser.parse_args(argv)
     return int(args.func(args) or 0)

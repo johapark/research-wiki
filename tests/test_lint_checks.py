@@ -269,6 +269,7 @@ def test_metadata_report_separates_missing_supplementary_section(capsys):
         "missing_doi": [],
         "missing_hook": [],
         "missing_author_model": [],
+        "acknowledged_legacy_provenance": [],
         "hook_too_long": [],
         "unquoted_wikilinks": [],
         "supp_yaml_missing": [{"page": "cgt/paper", "missing": ["data.csv"]}],

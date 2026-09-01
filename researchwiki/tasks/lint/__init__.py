@@ -84,6 +84,7 @@ from ...wiki import find_orphan_pdfs
 from .walk import all_pages, page_key
 from .yaml_checks import (
     find_category_drift,
+    find_acknowledged_legacy_provenance,
     find_invalid_frontmatter,
     find_hook_too_long,
     find_missing_doi,
@@ -129,6 +130,7 @@ def main(argv: list[str]) -> int:
                              "stale_by_audit_count, p2_entries_with_anchor_hits, "
                              "stale_evolution_proposals, missing_keywords, "
                              "missing_hook, hook_too_long, missing_author_model, "
+                             "acknowledged_legacy_provenance, "
                              "venue_suspect, none_placeholders, thin_index_text, "
                              "ungraded_papers, zero_claim_papers, "
                              "stems_missing_claim_overlap, "
@@ -192,6 +194,9 @@ def main(argv: list[str]) -> int:
     missing_hook = find_missing_hook(pages, pages_fm)
     hook_too_long = find_hook_too_long(pages, pages_fm)
     missing_author_model = find_missing_author_model(pages, pages_fm)
+    acknowledged_legacy_provenance = find_acknowledged_legacy_provenance(
+        pages, pages_fm
+    )
     unquoted_wikilinks = find_unquoted_wikilink_lists(pages)
     venue_suspect = find_venue_suspect(pages, pages_fm)
     thin_index_text = find_thin_index_text(
@@ -265,6 +270,7 @@ def main(argv: list[str]) -> int:
             missing_keywords=missing_keywords, missing_doi=missing_doi,
             missing_hook=missing_hook, hook_too_long=hook_too_long,
             missing_author_model=missing_author_model,
+            acknowledged_legacy_provenance=acknowledged_legacy_provenance,
             stem_year_drift=stem_year_drift, unquoted_wikilinks=unquoted_wikilinks,
             venue_suspect=venue_suspect, none_placeholders=none_placeholders,
             thin_index_text=thin_index_text,
@@ -298,6 +304,7 @@ def main(argv: list[str]) -> int:
         missing_keywords=missing_keywords, missing_doi=missing_doi,
         missing_hook=missing_hook, hook_too_long=hook_too_long,
         missing_author_model=missing_author_model,
+        acknowledged_legacy_provenance=acknowledged_legacy_provenance,
         stem_year_drift=stem_year_drift, unquoted_wikilinks=unquoted_wikilinks,
         venue_suspect=venue_suspect, none_placeholders=none_placeholders,
         thin_index_text=thin_index_text,

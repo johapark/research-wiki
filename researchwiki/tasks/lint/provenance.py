@@ -159,6 +159,15 @@ def _read_log() -> dict[str, tuple[int, str, int]]:
     return {s: (ts, m, totals[s]) for s, (ts, m, _) in out.items()}
 
 
+def telemetry_author_models() -> dict[str, str]:
+    """Exact recoverable author model by paper stem.
+
+    Kept as a small public view so the reviewed provenance migration uses the
+    same stub filtering and last-real-committed-attempt rule as ``lint --fix``.
+    """
+    return {stem: row[1] for stem, row in _read_log().items()}
+
+
 # ---------- candidate selection ----------
 
 

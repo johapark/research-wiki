@@ -22,6 +22,21 @@ the reasoning behind any line below.
 
 ### Added
 
+- **Beta compatibility and migration contract.** Public CLI/flag, JSON, and
+  frontmatter replacements now carry a machine-readable deprecation entry,
+  remain available for at least 90 days and through the next minor line, and
+  cannot be removed before the second subsequent minor. Deprecated aliases warn
+  on stderr so JSON stdout stays clean. Persisted ingest phase-role strings are
+  explicitly append-only.
+
+- **Reviewed legacy author-provenance migration.** `researchwiki migrate
+  provenance` creates a read-only, hash-bound review manifest, recovers exact
+  telemetry-backed models, and requires an explicit attestation,
+  `legacy-unrecorded` acknowledgment, or skip for every unresolved page. Apply
+  validates the whole plan before writing, refuses conflicts, creates a tarball
+  backup, uses atomic page writes, and is idempotent. `lint` reports acknowledged
+  legacy pages separately from actionable `missing_author_model` findings.
+
 - **CI now checks the artifacts and the code paths users actually install.**
   Ruff runs correctness and complexity rules, the test suite ratchets oversized
   functions as well as modules, Python 3.10–3.14 cover the declared interpreter

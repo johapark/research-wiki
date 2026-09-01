@@ -1,6 +1,6 @@
 # Migration & backfill — importing pages, filling missing YAML
 
-Trigger: the user brings in `.md` pages **plus their source PDFs**, or `lint --json` reports `missing_hook` / `missing_keywords` / `missing_doi` on pages that already exist. These tools fill fields on pages already on disk; they never re-author prose.
+Trigger: the user brings in `.md` pages **plus their source PDFs**, or `lint --json` reports `missing_hook` / `missing_keywords` / `missing_doi` / `missing_author_model` on pages that already exist. These tools fill fields on pages already on disk; they never re-author prose.
 
 ## What this is for
 
@@ -296,6 +296,27 @@ researchwiki status
 | `broken_wikilinks` | 0 | imported links point at pages that didn't come along |
 | `orphans` | low | imported pages often arrive with no inbound links |
 | `unquoted_wikilink_lists` | 0 | quote `[[..]]` list items or Obsidian renders "?" |
+
+### Resolve legacy author provenance
+
+Do not guess `author_model` from prose, file times, or the current provider.
+Create a review plan instead:
+
+```bash
+researchwiki migrate provenance
+# edit every pending item in the printed manifest.json
+researchwiki migrate provenance --apply --run .ingest/provenance-<timestamp>
+```
+
+Telemetry-backed items are preselected as `recover`. For each unresolved item,
+choose `set-author-model` with an exact maintainer-attested ID, `acknowledge` when
+the original model was never recorded, or `skip` to leave the lint finding open.
+Apply refuses any pending item or page whose hash changed after planning, never
+overwrites a conflicting model, and creates `pre-apply.tar.gz` before atomic page
+writes. A second apply is a no-op. Acknowledgment writes
+`author_provenance: legacy-unrecorded` and a dated
+`provenance_acknowledged_at`; it appears under
+`acknowledged_legacy_provenance`, not `missing_author_model`.
 
 Then the zero-claim query from the top. `lint --fix` will insert missing back-links (tagged `auto-added; refine`); it won't touch anything else here.
 

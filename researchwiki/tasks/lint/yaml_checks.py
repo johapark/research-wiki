@@ -10,6 +10,7 @@ flags a structural mismatch.
   - missing_hook: catalog page with no `hook:` gloss
   - hook_too_long: `hook:` past its page type's advisory ceiling
   - missing_author_model: authored non-idea page with no usable `author_model:`
+  - acknowledged_legacy_provenance: reviewed legacy pages whose model is unknowable
 """
 
 from __future__ import annotations
@@ -18,6 +19,12 @@ import re
 from pathlib import Path
 
 from ...categories import PAGE_TYPE_DIRS, content_categories
+from ...provenance import (
+    author_provenance_required,
+    authored_page_type,
+    has_usable_author_model,
+    is_acknowledged_legacy,
+)
 from .walk import count_keywords, first_category, page_key
 
 try:
@@ -497,14 +504,34 @@ def find_missing_author_model(
         if _is_root_bookkeeping(md):
             continue
         fm = pages_fm.get(md, {})
-        ptype = str(fm.get("type") or "paper").strip().strip("\"'")
-        if ptype in ("paper", "commentary"):
-            if not str(fm.get("ingested_at") or "").strip():
-                continue  # legacy page; not recoverable by this check
-        elif ptype not in ("synthesis", "concept", *REFERENCE_TYPES):
+        if not author_provenance_required(fm):
             continue
-        model = str(fm.get("author_model") or "").strip().strip("\"'").lower()
-        if model in {"", "todo", "tbd", "unknown", "none", "null", "exact-model-id"}:
+        if is_acknowledged_legacy(fm):
+            continue
+        if not has_usable_author_model(fm):
+            out.append(page_key(md))
+    out.sort()
+    return out
+
+
+def find_acknowledged_legacy_provenance(
+    pages: list[Path], pages_fm: dict[Path, dict],
+) -> list[str]:
+    """Reviewed legacy pages whose exact author model cannot be recovered.
+
+    This is an informational inventory, not an actionable lint defect. Paper
+    and commentary pages are included even when they predate ``ingested_at``:
+    the two-field acknowledgment exists precisely to make that old state
+    explicit without fabricating an author.
+    """
+    out: list[str] = []
+    for md in pages:
+        if _is_root_bookkeeping(md):
+            continue
+        fm = pages_fm.get(md, {})
+        if not authored_page_type(fm):
+            continue
+        if is_acknowledged_legacy(fm):
             out.append(page_key(md))
     out.sort()
     return out

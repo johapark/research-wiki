@@ -34,6 +34,7 @@ from researchwiki.agents.promote import _build_frontmatter, _yaml_dq
 from researchwiki.tasks.lint.walk import all_pages
 from researchwiki.tasks.lint.yaml_checks import (
     HOOK_MAX_CHARS,
+    find_acknowledged_legacy_provenance,
     find_hook_too_long,
     find_missing_author_model,
     find_missing_hook,
@@ -424,6 +425,41 @@ def test_an_empty_author_model_counts_as_missing(tmp_wiki):
     _mkpage(tmp_wiki, "genomics/a-2026-x",
             'type: paper\ntitle: A\ningested_at: 2026-06-16T23:32:46\nauthor_model: "  "')
     assert find_missing_author_model(*_walk(tmp_wiki)) == ["genomics/a-2026-x"]
+
+
+def test_dated_legacy_acknowledgment_is_informational_not_missing(tmp_wiki):
+    _mkpage(tmp_wiki, "genomics/a-2026-x",
+            "type: paper\ntitle: A\ningested_at: 2026-06-16T23:32:46\n"
+            "author_provenance: legacy-unrecorded\n"
+            "provenance_acknowledged_at: 2026-09-01")
+    walked = _walk(tmp_wiki)
+    assert find_missing_author_model(*walked) == []
+    assert find_acknowledged_legacy_provenance(*walked) == ["genomics/a-2026-x"]
+
+
+@pytest.mark.parametrize("marker", [
+    "author_provenance: legacy-unrecorded",
+    "provenance_acknowledged_at: 2026-09-01",
+    "author_provenance: legacy-unrecorded\nprovenance_acknowledged_at: someday",
+])
+def test_partial_or_invalid_legacy_acknowledgment_remains_actionable(
+    tmp_wiki, marker,
+):
+    _mkpage(tmp_wiki, "synthesis/a-topic",
+            f"type: synthesis\ntitle: S\n{marker}")
+    walked = _walk(tmp_wiki)
+    assert find_missing_author_model(*walked) == ["synthesis/a-topic"]
+    assert find_acknowledged_legacy_provenance(*walked) == []
+
+
+def test_real_author_model_supersedes_a_stale_legacy_acknowledgment(tmp_wiki):
+    _mkpage(tmp_wiki, "synthesis/a-topic",
+            "type: synthesis\ntitle: S\nauthor_model: gpt-5.6-luna\n"
+            "author_provenance: legacy-unrecorded\n"
+            "provenance_acknowledged_at: 2026-09-01")
+    walked = _walk(tmp_wiki)
+    assert find_missing_author_model(*walked) == []
+    assert find_acknowledged_legacy_provenance(*walked) == []
 
 
 def test_root_bookkeeping_is_skipped(tmp_wiki):
