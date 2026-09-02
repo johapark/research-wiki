@@ -74,6 +74,33 @@ def test_write_text_atomic_cleans_up_after_replace_failure(tmp_path, monkeypatch
     assert not list(tmp_path.glob(".page.md.*.tmp"))
 
 
+def test_write_text_atomic_retries_transient_replace_permission_error(
+    tmp_path, monkeypatch,
+):
+    """Windows sharing violations should not make a serialized write flaky."""
+    target = tmp_path / "page.md"
+    real_replace = fsatomic.os.replace
+    calls = []
+    sleeps = []
+
+    def flaky_replace(source, destination):
+        calls.append((source, destination))
+        if len(calls) < 3:
+            raise PermissionError("simulated transient sharing violation")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(fsatomic, "_REPLACE_PERMISSION_ATTEMPTS", 3)
+    monkeypatch.setattr(fsatomic.os, "replace", flaky_replace)
+    monkeypatch.setattr(fsatomic.time, "sleep", sleeps.append)
+
+    fsatomic.write_text_atomic(target, "content")
+
+    assert target.read_text(encoding="utf-8") == "content"
+    assert len(calls) == 3
+    assert sleeps == [0.01, 0.02]
+    assert not list(tmp_path.glob(".page.md.*.tmp"))
+
+
 _ATOMIC_WORKER = """
 import sys
 sys.path.insert(0, sys.argv[2])

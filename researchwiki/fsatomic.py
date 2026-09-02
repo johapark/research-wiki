@@ -29,9 +29,18 @@ import os
 import secrets
 import stat
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
+
+
+# Windows can transiently reject an otherwise valid ``os.replace`` with
+# ``WinError 5`` when an indexer or antivirus process briefly opens the target.
+# The per-target FileLock serializes our writers, but it cannot control those
+# external readers.  POSIX permission errors are normally durable and should
+# still fail immediately.
+_REPLACE_PERMISSION_ATTEMPTS = 8 if os.name == "nt" else 1
 
 
 def _open_unique_sibling(path: Path) -> tuple[int, Path]:
@@ -47,6 +56,22 @@ def _open_unique_sibling(path: Path) -> tuple[int, Path]:
         except FileExistsError:
             continue
     raise FileExistsError(f"could not allocate a unique temporary file for {path}")
+
+
+def _replace_with_retry(source: Path, target: Path) -> None:
+    """Atomically replace ``target``, tolerating transient Windows sharing holds."""
+    for attempt in range(_REPLACE_PERMISSION_ATTEMPTS):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt + 1 >= _REPLACE_PERMISSION_ATTEMPTS:
+                raise
+            # A short exponential backoff keeps normal writes fast while giving
+            # scanners/indexers time to release their handle.  Total wait is
+            # bounded below half a second (10+20+40+80+100+100+100 ms).
+            time.sleep(min(0.01 * (2**attempt), 0.1))
+
 
 def _write_text_atomic_unlocked(path: Path, text: str) -> None:
     """Write atomically while the caller holds this target's writer lock."""
@@ -74,7 +99,7 @@ def _write_text_atomic_unlocked(path: Path, text: str) -> None:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp, path)
+        _replace_with_retry(tmp, path)
         tmp = None
     finally:
         if fd >= 0:
