@@ -271,7 +271,8 @@ def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
     assert (root / "wiki" / "other" / f"{single_stem}.md").is_file()
     assert (root / "papers" / f"{single_stem}.pdf").is_file()
     assert "✓ Paper added" in added.stdout
-    assert f"Page:   wiki/other/{single_stem}.md" in added.stdout
+    expected_page = Path("wiki") / "other" / f"{single_stem}.md"
+    assert f"Page:   {expected_page}" in added.stdout
     assert f"PDF:    papers/{single_stem}.pdf" in added.stdout
     assert "Claims:" in added.stdout and "indexed" in added.stdout
     assert "Trace:  researchwiki agent trace" in added.stdout
