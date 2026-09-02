@@ -37,7 +37,7 @@ Original PDF (immutable) → wiki/{category}/*.md (the single LLM-authored page)
    **User-provided URL exception.** User explicitly hands you a URL/repo → authorized to `WebFetch` (or `gh`) *that exact URL* for the **conversational answer**. Bounds: only the given URL (no transitive links); wiki prose still needs the PDF (Rule 3); cite inline (`per the README at github.com/…`), no `[[wikilink]]`; GitHub via `gh` preferred; doesn't apply to URLs Claude generated.
 
 2. **Answer from the wiki first.** `wiki/` is the only source of truth.
-3. **Wiki insufficient → re-read the PDF.** `papers/{stem}.pdf`; use `pypdfium2` or `Read`. Supplementary at `papers/{stem}.supp/{filename}`.
+3. **Wiki insufficient → re-read the PDF.** `papers/{stem}.pdf`; use `pypdfium2` or `Read`. Supplementary material is at `papers/{stem}.supp/{filename}`. If the reread reveals a material omission or error, identify the affected wiki page and, after answering, ask whether the user wants the correction persisted. Do not update the wiki without confirmation.
 4. **No paper on the topic → say so.** *"I don't have a paper on this — please give me the PDF."* Don't improvise.
 
 These apply to every response, including synthesis pages.
