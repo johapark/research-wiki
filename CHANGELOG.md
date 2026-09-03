@@ -20,6 +20,77 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Changed
+
+- Multi-PDF `agent ingest` / `add`, `import apply` and `researchwiki ingest -w N`
+  runs now default to one worker when a phase that command can reach uses
+  `chat-relay`; API-backed providers and `--stub` retain the four-worker default,
+  and explicit `-w N` still opts into parallel relay requests. The batch parent
+  mirrors `.llm-relay/pending/` handoffs — with both file paths, the deadline and
+  the retry marker, matching the in-process notice, which it now shares a
+  formatter with — so the safe sequential fallback no longer hides for ten
+  minutes in worker logs. Requests abandoned by an exited run are labelled
+  `STALE` rather than listed as live, because answering one writes a response
+  nothing consumes that then becomes a silent cache hit.
+  Chat-agent instructions now prescribe a bounded rolling pool with one
+  foreground single-PDF ingest per native subagent, keeping paper context and
+  paper-specific post-ingest work isolated.
+- Worker-count policy moved from `tasks.agent` into the batch driver
+  (`tasks._ingest_batch.resolve_batch_workers`), keyed off the plan's own
+  subcommand. Every entry point that can start or resume a batch now gets the
+  same answer, so `researchwiki ingest` and `agent ingest` no longer disagree
+  about a batch dir they can both resume.
+- Batch plans now distinguish provider-selected worker defaults from an explicit
+  `-w N`. On `--resume`, the active provider is resolved again: switching an
+  implicit API batch to chat-relay safely enables one worker plus prompt
+  mirroring, while an explicit worker count remains unchanged. In a plan written
+  before that field existed, only a stored `4` is treated as implicit — a stored
+  `1`, `2` or `8` was typed by hand and is honoured.
+- `errors.py` now documents the three call-site rules that decide what happens to
+  an `EnvironmentFailure`: phase wrappers propagate it, work the command's
+  success does not depend on records a skip, and loops over independent items
+  stop and report what they accumulated. `tests/test_environment_failure.py`
+  pins all three.
+
+### Fixed
+
+- Chat-relay response timeouts now remain typed environment failures (exit 2)
+  through `agent ingest`, so batch checkpoints retry them on `--resume` instead
+  of recording exit 3 and permanently skipping the paper. The outstanding prompt
+  file and its deterministic operation ID are retained for the responder; the
+  checkpoint is per-PDF, so the resumed paper restarts from the top rather than
+  from the phase that timed out.
+- A relay timeout no longer disappears into a phase wrapper's `except Exception`.
+  `reconcile`, `target_claims`, `keywords`, `short_name`, `link_generation`, the
+  category `classifier`, and the opt-in `claim_support` veto re-raise it instead
+  of returning a degraded result, which had let an ingest exit 0 having filed a
+  paper on provider metadata alone, authored without its target-claim checklist,
+  skipped a requested entailment veto, or written `keywords: []`; the digest path
+  had likewise fallen back to the kNN classifier after a full timeout per paper.
+- A relay timeout in the optional post-promotion `memory_evolution` phase is now
+  a recorded skip rather than a failed ingest. It had made the worker exit 2 for
+  a paper whose page, PDF move, back-links, `index.md` bullet and `log.md` entry
+  had all landed — so `--resume` filed a complete paper as `unresumable` and
+  advised deleting it as a half-landed promote.
+- `lint --cross-paper` and `claim-overlap --backlog` now stop and report when the
+  judge hits an environment failure, instead of unwinding and discarding results
+  they had already computed and committed. Both keep exit 2; `lint --json` gains
+  `cross_paper_stats.stopped_early` and `claim-overlap --backlog --json` gains a
+  top-level `stopped_early` (both `null` on a clean run).
+- `--workers 0` (or negative) is now a command-line error (exit 1) on
+  `agent ingest`, `import apply` and `researchwiki ingest`, rather than an
+  uncaught `ThreadPoolExecutor` `ValueError` reported as exit 3 after the batch
+  directory and `plan.json` had already been written.
+- `agent ingest --resume` no longer aborts when the active model config is
+  unreadable. Re-checking provider routing is best-effort: it falls back to the
+  worker count the plan recorded and says so, leaving the per-paper failure to
+  the workers, where it is checkpointed.
+- The batch parent's prompt mirror no longer stops after the first malformed
+  request. A non-UTF-8 file or a payload whose top level is not an object used to
+  kill the watcher thread, after which every later paper ran unmirrored while the
+  run still claimed prompts would be surfaced. A request is also re-announced if
+  it is re-created at the same path, which content-addressed op ids do routinely.
+
 ## [0.4.5] - 2026-09-01
 
 ### Added

@@ -292,7 +292,8 @@ def test_cleared_pair_is_recorded_and_skipped_on_rerun(tmp_path, monkeypatch):
     assert cp.find_cross_paper_contradictions(
         judge_fn=_judge, db_conn=conn, stats=first) == []
     assert len(calls) == 1
-    assert first == {"pool": 1, "judged": 1, "skipped_already_judged": 0,
+    assert first == {"stopped_early": None,
+                     "pool": 1, "judged": 1, "skipped_already_judged": 0,
                      "disagreements": 0, "sim_threshold": 0.85}
     # The clear is recorded even though it produced no edge and no report row.
     assert conn.execute(
@@ -369,5 +370,92 @@ def test_stats_are_wellformed_even_when_nothing_clears_the_threshold(tmp_path, m
     assert cp.find_cross_paper_contradictions(
         judge_fn=lambda _p: {"verdict": "agree"}, db_conn=conn,
         sim_threshold=1.5, stats=stats) == []
-    assert stats == {"pool": 0, "judged": 0, "skipped_already_judged": 0,
+    assert stats == {"stopped_early": None,
+                     "pool": 0, "judged": 0, "skipped_already_judged": 0,
                      "disagreements": 0, "sim_threshold": 1.5}
+
+
+# ---------- house rule 3 (errors.py): the sweep stops and reports ----------
+
+def _all_same_direction(monkeypatch, n: int) -> None:
+    """Force every claim onto one vector so all cross-paper pairs are candidates."""
+    monkeypatch.setattr(cp, "_NUMPY_AVAILABLE", True)
+    monkeypatch.setattr(
+        "researchwiki.index.embeddings.is_available", lambda: True, raising=True,
+    )
+    fake = np.array([[1.0, 0.0]] * n, dtype=np.float32)
+    monkeypatch.setattr(
+        "researchwiki.index.embeddings.embed_texts",
+        lambda texts: fake[: len(texts)],
+        raising=True,
+    )
+
+
+def test_sweep_stops_on_an_environment_failure_and_keeps_its_verdicts(
+    tmp_path, monkeypatch
+):
+    """A chat-relay responder who walks away mid-sweep used to unwind the whole
+    of `lint`, discarding the ~30 free local checks already computed. Tolerating
+    it per pair would be worse still: the failure modes are correlated, so each
+    remaining pair would pay its own full RW_RELAY_TIMEOUT for nothing.
+    """
+    from researchwiki.agents.relay import RelayTimeout
+
+    conn = _make_db(tmp_path)
+    _seed_claims(conn, [
+        ("paperA", "claim alpha", "ctx-a"),
+        ("paperB", "claim beta", "ctx-b"),
+        ("paperC", "claim gamma", "ctx-c"),
+        ("paperD", "claim delta", "ctx-d"),
+    ])
+    _all_same_direction(monkeypatch, 4)
+
+    calls = {"n": 0}
+
+    def _judge(_prompt):
+        calls["n"] += 1
+        if calls["n"] >= 3:
+            raise RelayTimeout("chat-relay: no response in 600s for x.response.json")
+        return {"verdict": "disagree_numeric", "rationale": "A 80 vs B 60"}
+
+    stats: dict = {}
+    out = cp.find_cross_paper_contradictions(
+        judge_fn=_judge, db_conn=conn, stats=stats)
+
+    assert calls["n"] == 3, "stopped at the failure, did not keep trying pairs"
+    assert len(out) == 2, "the two verdicts reached are still returned"
+    assert stats["judged"] == 2
+    assert stats["stopped_early"], "a partial sweep must announce itself"
+    assert "RelayTimeout" in stats["stopped_early"]
+
+
+def test_verdicts_reached_before_the_halt_are_committed(tmp_path, monkeypatch):
+    """The judge spend is not lost: `_record_judgement` commits per pair, so a
+    re-run skips what the halted sweep already paid for."""
+    from researchwiki.agents.relay import RelayTimeout
+
+    conn = _make_db(tmp_path)
+    _seed_claims(conn, [
+        ("paperA", "claim alpha", "ctx-a"),
+        ("paperB", "claim beta", "ctx-b"),
+        ("paperC", "claim gamma", "ctx-c"),
+    ])
+    _all_same_direction(monkeypatch, 3)
+
+    calls = {"n": 0}
+
+    def _judge(_prompt):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise RelayTimeout("no response in 600s")
+        return {"verdict": "agree", "rationale": "same fact"}
+
+    cp.find_cross_paper_contradictions(judge_fn=_judge, db_conn=conn, stats={})
+    recorded = conn.execute("SELECT COUNT(*) FROM cross_paper_judgements").fetchone()[0]
+    assert recorded == 1, "the pair judged before the halt is persisted"
+
+    # A second run resumes rather than re-paying for it.
+    second: dict = {}
+    cp.find_cross_paper_contradictions(
+        judge_fn=lambda _p: {"verdict": "agree"}, db_conn=conn, stats=second)
+    assert second["skipped_already_judged"] == 1

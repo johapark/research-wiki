@@ -107,6 +107,27 @@ A named profile replaces rather than merges with the root `.env`; use the same `
 | **Local model** | Select Local LLM in `researchwiki init`; no API key is required. |
 | **Chat relay** | Select Chat-relay in `researchwiki init`; no API key or server is required. |
 
+API-based providers are called directly by each ingest subprocess. They need a
+provider endpoint and usually an API key, but they require no interactive chat
+agent: multi-paper ingest defaults to four concurrent workers, and each request
+returns to the subprocess that issued it.
+
+Chat-relay does not call a model API. It writes each model request under
+`.llm-relay/pending/` and waits for an active Codex, Claude Code, or compatible
+chat agent to write the matching response under `.llm-relay/completed/`. A
+multi-paper chat-relay batch therefore defaults to one worker and forwards
+requests from its own child processes to the parent terminal. Run it in the
+foreground — backgrounding hides those handoffs. Passing `-w N` explicitly permits concurrent
+relay requests, but the CLI creates only isolated ingest subprocesses—not `N`
+isolated chat contexts. When native subagents are available, the supervising chat
+agent should use one foreground single-PDF ingest per subagent and maintain a
+bounded rolling pool. See [the chat-relay protocol](./prompts/chat-relay.md).
+Batch resumes re-evaluate the active provider while preserving an explicit
+`-w N`. A relay timeout keeps its own pending prompt and is retryable with
+`agent ingest --resume` once that prompt is answered — the checkpoint is
+per-PDF, so the paper restarts from the top rather than from the phase that
+timed out.
+
 `RW_MODELS_CONFIG` selects a model config without defeating its per-role routing; `RW_LLM_PROVIDER` globally overrides every role and should normally remain unset. Keep credentials in mode-`0600` dotenv files and use only endpoints you trust. Model roles, endpoint precedence, profile isolation, local setup, and provider-specific caveats are documented in [Provider setup in depth](./WORKFLOW.md#provider-setup-in-depth).
 
 ## Organizing and browsing the wiki

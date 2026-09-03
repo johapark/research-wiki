@@ -24,19 +24,17 @@ Whenever the CLI hits an LLM step, it writes a JSON prompt file to
 response. You'll see a stderr line like:
 
 ```
-📨 LLM relay pending [classifier] → .llm-relay/pending/abc1d2e3f4.prompt.json
-   Awaiting response at .llm-relay/completed/abc1d2e3f4.response.json (timeout 600s)
+📨 LLM relay pending [classifier] paper.pdf → .llm-relay/pending/abc1d2e3f4.prompt.json; response .llm-relay/completed/abc1d2e3f4.response.json; timeout 600s
 ```
 
 ## Your job — the loop
 
-When you see a pending file, or when the user asks you to "respond to the
+When you see a relay handoff, or when the user asks you to "respond to the
 pending prompt" / "watch for prompts" / similar:
 
-1. **List `.llm-relay/pending/*.prompt.json`.** If there are no pending
-   files, the CLI hasn't asked for anything yet — just wait or do other
-   work.
-2. **Read the pending file** (it's plain JSON; see schema below).
+1. **Wait for the foreground command's handoff.** Use its exact prompt path;
+   don't infer ownership by listing the global pending directory.
+2. **Read that pending file** (it's plain JSON; see schema below).
 3. **Produce a response** that follows the `system` + `prompt` fields. If
    `schema` is non-null, your response **must** be a JSON value that
    validates against it (you'll be asked to retry otherwise).
@@ -48,8 +46,8 @@ pending prompt" / "watch for prompts" / similar:
 6. **Don't fabricate prompts.** Only respond to pending files that exist.
    Don't write speculative responses to `completed/` for prompts that
    haven't been asked.
-7. Loop back to step 1 if the user is running a multi-phase command (one
-   `agent ingest` fires 5–8 prompts).
+7. Loop back to step 1 for the next emitted handoff if the user is running a
+   multi-phase command (one `agent ingest` fires 5–8 prompts).
 
 ## Pending file schema (what you read)
 
@@ -200,7 +198,7 @@ short_name. The CLI fires them one at a time — when you fill prompt N's
 response, the CLI consumes it and writes prompt N+1. So you'll see
 exactly one pending file at a time (during a single ingest).
 
-## Parallel ingests — fan out, but NOT with batch mode
+## Parallel ingests — supervised fan-out
 
 Nothing serializes relay calls. Each `call_chat_relay` writes its own
 `{op_id}.prompt.json` and polls its own `{op_id}.response.json`; the op_id
@@ -221,12 +219,44 @@ RW_RELAY_TIMEOUT=2400 RW_LLM_PROVIDER=chat-relay \
 So concurrent ingests produce concurrent pending files and you may answer
 them in parallel — the throughput limit is you, not the protocol.
 
+If the deadline expires, the ingest exits as a retryable environment failure
+(exit 2) and leaves *its own* prompt in `pending/`. Answer **that** prompt, then
+run the batch's printed `agent ingest --resume <batch-dir>` command.
+
+Know what resume actually replays before you rely on it. The checkpoint is
+per-PDF, not per-phase, so the paper restarts **from the top** — and
+`call_chat_relay` unlinks both files once it consumes a response, so every phase
+you already answered is gone from disk and will be asked again. Only the phase
+that timed out still has its prompt, and only its op_id is guaranteed to
+re-derive: op_id is `sha1(phase|prompt)[:12]`, and a later phase's prompt embeds
+earlier output — the author prompt carries reconcile's metadata and a fresh
+semantic-KNN sweep of `wiki/`. So if you hand-write a reconcile answer that
+differs by a character, or a sibling paper in the same batch promotes in the
+meantime, the author op_id shifts and a response you pre-wrote for the old one is
+never read. Answer the outstanding prompt and let the resumed run ask for the
+rest; do not pre-fill ahead of it.
+
 (An earlier version of this document claimed the relay grabs
 `.llm-relay/lock`, so parallel ingests serialized on chat-relay phases.
 That lock never existed. The only `flock`s in the package guard
 `index.md` and back-link writes.)
 
-**To parallelize: one foreground single-PDF invocation per subagent.**
+Multi-PDF batch mode defaults to one worker under chat-relay (API-backed
+providers retain their four-worker default). Each worker forwards its own relay
+handoffs to the parent terminal, so a sequential, checkpointed batch can be
+serviced by the active chat agent without scanning the global pending directory.
+Passing `-w N` explicitly opts into N
+concurrent relay requests; it does not create N isolated chat responders.
+Batch plans record whether `-w N` was explicit. Resume re-evaluates the active
+provider, so an implicit API batch switched to chat-relay becomes one visible
+worker; an explicit count stays explicit. A resume-time `-w N` overrides both.
+
+**When native subagents are available, parallelize with one foreground
+single-PDF invocation per subagent.** Use a bounded rolling pool no larger than
+the requested worker count or the available subagent slots. Each subagent owns
+its paper through ingest, promotion, paper-specific post-ingest hooks, and final
+verification. The main agent waits for terminal results, retries only transient
+failures, and runs corpus-wide post-batch work once after the pool drains.
 
 ```bash
 researchwiki agent ingest inbox/<one>.pdf      # per subagent, no -w
@@ -236,28 +266,26 @@ Each subagent then owns one subprocess, sees that subprocess's own
 `📨 LLM relay pending` line with both file paths, and writes straight to
 its own response path. No scanning, no ownership ambiguity.
 
-**Do not use batch mode for this.** `agent ingest inbox/*.pdf -w 4`
-parallelizes correctly — subprocess per worker, no relay gate — but
-`_ingest_batch._worker` runs each child with
-`stdout=log_fp, stderr=subprocess.STDOUT`, and the handoff line is printed
-to **stderr**. So every prompt notice lands in
-`.ingest/batch-<ts>/worker-*.log` where you will never see it. The parent
-prints only `[i/N] ok:` *after* a worker exits. From here the run looks
-like a hang and then fails every worker on the 600 s timeout. Batch mode
-under chat-relay only works if you independently poll
-`.llm-relay/pending/`, which is strictly more work than fanning out.
+Batch mode remains the portable fallback for shells and hosts without native
+subagents. Its worker output stays in `.ingest/batch-<ts>/worker-*.log`, while
+each child forwards only its relay handoffs to the parent. Explicit parallel batch mode is
+appropriate only when enough responders independently follow those handoffs;
+sharing one conversational responder across papers does
+not provide context isolation.
 
-Note this is the documented exception to `CLAUDE.md`'s "never fan out one
-Bash task per file" rule, which assumes an API-key provider. What you give
-up is batch mode's `checkpoint.json` and `--resume`; what you get back is
-a working notification channel. Two of the three reasons that rule cites
-do not actually differ here — both paths are subprocess-per-worker, so
-`state.db` write contention is a function of worker count either way — and
-the third, uncapped concurrency, is yours to control: keep the fan-out at
-about 4 to match batch mode's default. For recovery, the `inbox/`
-invariant is the fallback record: whatever is still sitting in `inbox/`
-did not land. (Batch mode's checkpoint is also per-PDF, not per-phase, so
-a crashed ingest is re-run from the top under either approach.)
+Run the batch in the **foreground**. `_worker` tees relay handoffs to the parent
+while keeping all stderr in the per-paper log, so a backgrounded batch hides the
+prompt you have to answer and then times out on every phase.
+
+This is the documented exception to `CLAUDE.md`'s "never fan out one Bash task
+per file" rule, which assumes an API provider. Keep the pool bounded (normally
+around 3–4), and treat `inbox/` as the fallback recovery record: anything still
+there did not land. A failed paper is re-run from the top; paper-specific
+post-ingest work stays with its owning subagent, while corpus-wide maintenance
+runs once after all paper workers finish. (Batch mode's checkpoint is per-PDF,
+not per-phase, so a crashed or timed-out ingest re-runs from the top under either
+approach — what you get from batch mode is the checkpoint and `--resume`, not
+per-phase resumption.)
 
 Every payload names its own paper, so ownership never needs guessing:
 
@@ -288,12 +316,30 @@ to the op_id, breaking the cache for that one command.
 
 ## Stale pending files
 
-If `.llm-relay/pending/` accumulates files older than ~1 hour, those are
-probably abandoned (the CLI process died and the user moved on). Don't
-respond to them speculatively — the user can clean them up with
-`researchwiki relay clean --ttl 1h` (when phase 3 lands) or `rm` them
-manually.
+A pending file's age cannot prove whether its owner is still running. Do not
+scan `.llm-relay/pending/` and guess. Answer only a handoff emitted by the active
+foreground command, which reads
 
-The filesystem protocol is the only interface — poll `.llm-relay/pending/`
-and write responses there directly. There is no server or tool plugin to
+```
+📨 LLM relay pending [author] smith-2024-... → .llm-relay/pending/ab12cd34ef56.prompt.json; response .llm-relay/completed/ab12cd34ef56.response.json; timeout 600s
+```
+
+On resume, `call_chat_relay` emits the handoff again before waiting on an
+already-existing prompt, so a live recovered request remains visible without a
+global watcher or an age heuristic.
+
+**Never answer an unannounced request speculatively.** Nothing may be waiting for it, so the
+`completed/{op_id}.response.json` you write is never consumed — and because
+op_ids are content-addressed it stays on disk as a *cache hit* for any later
+byte-identical prompt. A re-ingest of that paper then silently adopts a category
+or keyword set you wrote for a run somebody deliberately abandoned, with no
+pending file and no handoff line to reveal it. `RW_RELAY_FRESH=1` is the only
+override, and nothing prompts you to reach for it.
+
+There is no cleanup subcommand — `researchwiki relay clean` does not exist and no
+release has shipped it. Remove an abandoned prompt/response pair by hand only
+after confirming its owning command has exited and will not be resumed.
+
+The filesystem protocol is the only interface: follow the emitted prompt path
+and write its matching response directly. There is no server or tool plugin to
 register.

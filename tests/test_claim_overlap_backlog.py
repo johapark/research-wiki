@@ -364,3 +364,76 @@ def test_batch_workers_inherit_the_opt_in():
     from researchwiki.tasks.agent import _batch_passthrough_args
     assert "--claim-overlap" in _batch_passthrough_args(_ingest_args(["x.pdf", "--claim-overlap"]))
     assert "--claim-overlap" not in _batch_passthrough_args(_ingest_args(["x.pdf"]))
+
+
+# ---------- house rule 3 (errors.py): draining stops and reports ----------
+
+def _backlog_args(**overrides):
+    import argparse
+
+    ns = argparse.Namespace(limit=None, sim=0.83, top=8, dry_run=False, json=False)
+    for k, v in overrides.items():
+        setattr(ns, k, v)
+    return ns
+
+
+def _halting_run(fail_on: int):
+    """A `run` stub that succeeds then raises a relay timeout on the Nth stem."""
+    from researchwiki.agents.relay import RelayTimeout
+
+    state = {"n": 0}
+
+    def _run(stem, **kwargs):
+        state["n"] += 1
+        if state["n"] >= fail_on:
+            raise RelayTimeout("chat-relay: no response in 600s for x.response.json")
+        return {"applied": [], "coincidence": [], "edge_only": [], "n_candidates": 2}
+
+    return _run, state
+
+
+def test_backlog_stops_and_still_reports_what_it_drained(monkeypatch, capsys):
+    """Letting the timeout unwind threw away the summary for every stem already
+    committed by `record_run`; continuing would pay a fresh 600 s per remaining
+    stem for a responder who has plainly gone away."""
+    monkeypatch.setattr(co, "find_backlog", lambda: ["s-one", "s-two", "s-three"])
+    run, state = _halting_run(fail_on=3)
+    monkeypatch.setattr(co, "run", run)
+
+    rc = co._run_backlog(_backlog_args())
+    out = capsys.readouterr()
+
+    assert state["n"] == 3, "stopped at the failure rather than draining on"
+    assert rc == 2, "an environment failure keeps exit code 2"
+    assert "2 stem(s) processed" in out.out, "the partial summary is still printed"
+    assert "STOPPED EARLY after 2 of 3" in out.err
+    assert "still in the backlog" in out.err
+
+
+def test_backlog_json_reports_the_halt(monkeypatch, capsys):
+    import json as _json
+
+    monkeypatch.setattr(co, "find_backlog", lambda: ["s-one", "s-two"])
+    run, _ = _halting_run(fail_on=2)
+    monkeypatch.setattr(co, "run", run)
+
+    rc = co._run_backlog(_backlog_args(json=True))
+    raw = capsys.readouterr().out
+    payload = _json.loads(raw[raw.index("{"):])
+
+    assert rc == 2
+    assert "RelayTimeout" in payload["stopped_early"]
+    assert len(payload["results"]) == 1, "the completed stem is still reported"
+
+
+def test_backlog_reports_no_halt_on_a_clean_drain(monkeypatch, capsys):
+    import json as _json
+
+    monkeypatch.setattr(co, "find_backlog", lambda: ["s-one", "s-two"])
+    run, _ = _halting_run(fail_on=99)
+    monkeypatch.setattr(co, "run", run)
+
+    assert co._run_backlog(_backlog_args(json=True)) == 0
+    raw = capsys.readouterr().out
+    payload = _json.loads(raw[raw.index("{"):])
+    assert payload["stopped_early"] is None

@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-from ... import metadata_sanity
+from ... import errors, metadata_sanity
 from ...pdf.text import detect_doi, extract_pdf, find_url_doi_candidates, pdf_shape
 from ...providers.crossref import crossref_structural_signals, verify_doi_via_crossref
 from ...providers.semantic_scholar import SemanticScholarProvider
@@ -112,6 +112,8 @@ def propose_metadata_llm(pdf_text: str, *, use_stub: bool = False) -> dict:
             use_stub=False,
             schema=_RECONCILE_SCHEMA,
         )
+    except errors.EnvironmentFailure:
+        raise  # house rule 1 (errors.py): never absorb a provider outage
     except Exception as e:
         log(f"call failed: {e}", tag="reconcile-llm")
         return _empty_metadata()

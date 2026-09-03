@@ -35,6 +35,7 @@ from .runner_support import (
     phase_reconcile as _phase_reconcile,
     phase_target_claims as _phase_target_claims,
     record_revision_decision,
+    run_entailment_check,
     run_post_promote_memory_evolution,
     record_timed_subphase,
     usage_costs,
@@ -701,68 +702,6 @@ def _phase_debug(
     return cleaned_text, n_kc, new_gate, verification
 
 
-def _run_entailment_check(ctx: Context, conn, cleaned_text: str) -> None:
-    """Per-claim entailment (support) check on the FINAL promoted text.
-
-    Runs one batched entailment judge over `cleaned_text`, merges
-    `n_unsupported` into the winner's scores (so should_auto_promote can veto),
-    surfaces each unsupported claim, and writes a durable `claim_support`
-    iteration row. Best-effort: a classifier failure logs and leaves the
-    winner's scores untouched (no veto rather than a crash).
-
-    MUST run *after* any DEBUG repair: a successful repair rebuilds the
-    winner's scores from a fresh grade, which silently drops an `n_unsupported`
-    set before it — the bug this ordering fixes. Caller re-evaluates the gate
-    afterward so the veto lands on the draft that actually gets promoted.
-    """
-    from ..grade.support import llm_support_classifier
-    t0 = time.monotonic()
-    try:
-        support_scores, _ = phases.grade_draft(
-            stem=ctx.paper_stem,
-            draft_text=cleaned_text,
-            metadata=ctx.metadata,
-            sandbox_dir=ctx.sandbox_dir,
-            pdf_path=ctx.pdf_path,
-            use_semantic=ctx.use_semantic,
-            support_classifier=llm_support_classifier,
-        )
-        n_unsup = support_scores.get("n_unsupported", 0)
-        n_checked = support_scores.get("n_support_checked", 0)
-        unsupported = support_scores.get("unsupported_claims", [])
-        ctx.winner.scores["n_unsupported"] = n_unsup
-        ctx.winner.scores["n_support_checked"] = n_checked
-        ctx.winner.scores["unsupported_claims"] = unsupported
-        log(f"support  → {n_unsup} unsupported / {n_checked} checked", tag="agent")
-        # Name the offending claims so a reviewer of a sandboxed page knows
-        # which ones to re-check, not just that N failed.
-        for uc in unsupported:
-            log(f"           ✗ [{uc['section']}] {uc['text'][:80]}", tag="agent")
-        # Durable record: one iteration row carrying the verdict detail, so the
-        # failed claims survive past the console for post-hoc review.
-        ctx.next_iter()
-        write_iteration(
-            attempt_id=ctx.attempt_id,
-            paper_stem=ctx.paper_stem,
-            pdf_filename=ctx.pdf_filename,
-            iteration=ctx.iteration,
-            role="claim_support",
-            parent_iteration_id=ctx.winner.iteration_id,
-            grader_scores={
-                "n_unsupported": n_unsup,
-                "n_support_checked": n_checked,
-                "unsupported_claims": unsupported,
-            },
-            decision="observed",
-            decision_reason=f"{n_unsup} unsupported / {n_checked} checked",
-            duration_ms=int((time.monotonic() - t0) * 1000),
-            gate_metrics={"unsupported_claims": n_unsup, "claims_checked": n_checked},
-            conn=conn,
-        )
-    except Exception as e:
-        log(f"support  → check failed, veto skipped: {e}", tag="agent")
-
-
 def _phase_commit(ctx: Context, conn) -> Path:
     """Commit phase: cross-link verification → promote-or-sandbox decision.
 
@@ -834,7 +773,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # silently drop the n_unsupported veto.) It's the qualitative analogue
         # of the numeric-drift veto that BM25/semantic similarity can't catch.
         if ctx.verify_claim_entailment:
-            _run_entailment_check(ctx, conn, cleaned_text)
+            run_entailment_check(ctx, conn, cleaned_text)
             gate = promote_mod.should_auto_promote(
                 scores=ctx.winner.scores,
                 verification=verification,

@@ -94,6 +94,7 @@ def _embedding_status() -> tuple[bool, str]:
     """
     try:
         from ..index import embeddings
+
         shape = embeddings.embed_texts(["probe"]).shape
         return True, f"{embeddings.DEFAULT_MODEL} ({shape[-1]}d)"
     except Exception as e:  # noqa: BLE001 - any failure means "unusable"
@@ -101,6 +102,7 @@ def _embedding_status() -> tuple[bool, str]:
 
 
 # ---------- preflight ----------
+
 
 def _run_preflight(args: argparse.Namespace) -> int:
     loaded = _load_export(Path(args.export))
@@ -116,6 +118,7 @@ def _run_preflight(args: argparse.Namespace) -> int:
         return 1
 
     n = len(items)
+
     def pct(k):
         return f"{k:>5}  ({100 * k / n:.0f}%)"
 
@@ -128,20 +131,25 @@ def _run_preflight(args: argparse.Namespace) -> int:
     types: dict[str, int] = {}
     for i in items:
         types[i.item_type] = types.get(i.item_type, 0) + 1
-    print("\n  item types         " + ", ".join(
-        f"{k} {v}" for k, v in sorted(types.items(), key=lambda kv: -kv[1])))
+    print(
+        "\n  item types         "
+        + ", ".join(f"{k} {v}" for k, v in sorted(types.items(), key=lambda kv: -kv[1]))
+    )
 
     if not declared:
-        print("\n  NOTE This export names no attachment paths, which is normal for\n"
-              "       ReadCube and for every CSL-JSON exporter. PDFs will be matched\n"
-              "       by the DOI printed in them, then by title. Point `inspect` at\n"
-              "       whatever directory holds them.")
+        print(
+            "\n  NOTE This export names no attachment paths, which is normal for\n"
+            "       ReadCube and for every CSL-JSON exporter. PDFs will be matched\n"
+            "       by the DOI printed in them, then by title. Point `inspect` at\n"
+            "       whatever directory holds them."
+        )
 
     print(f"\nNext: `researchwiki import inspect {args.export!r} <pdf-root>`")
     return 0
 
 
 # ---------- inspect ----------
+
 
 def _run_inspect(args: argparse.Namespace) -> int:
     from ..refimport.manifest import new_run_dir
@@ -171,8 +179,10 @@ def _run_inspect(args: argparse.Namespace) -> int:
     if pdf_root is not None and not pdf_root.is_dir():
         # Exit 1, not 2: a mistyped argument, not a broken environment. Reported
         # with the spelling the user typed, which is what they can recognize.
-        print(f"researchwiki import inspect: no such directory: {pdf_root}",
-              file=sys.stderr)
+        print(
+            f"researchwiki import inspect: no such directory: {pdf_root}",
+            file=sys.stderr,
+        )
         return 1
     if pdf_root is not None:
         pdf_root = canonical(pdf_root)
@@ -190,15 +200,18 @@ def _run_inspect(args: argparse.Namespace) -> int:
     if pdf_root is not None:
         print(f"Indexing PDFs under {pdf_root} …", file=sys.stderr)
         facts = build_pdf_index(pdf_root)
-        pairings, unclaimed = pair_items(active, facts, pdf_root=pdf_root,
-                                         export_dir=export.parent)
+        pairings, unclaimed = pair_items(
+            active, facts, pdf_root=pdf_root, export_dir=export.parent
+        )
     else:
         facts, unclaimed = [], []
         pairings = [Pairing(item=i) for i in active]
     facts_by_path = {f.path: f for f in facts}
 
     assessments = assess_all(
-        items, pairings, facts_by_path,
+        items,
+        pairings,
+        facts_by_path,
         known_dois=read_wiki_dois(),
         # One walk, not one per record — see `read_wiki_stems`.
         stem_exists=read_wiki_stems().__contains__,
@@ -215,25 +228,38 @@ def _run_inspect(args: argparse.Namespace) -> int:
     records = [a.as_dict() for a in assessments]
 
     run = new_run_dir(_stamp(), base=Path(args.run_dir) if args.run_dir else None)
-    run.write_manifest(records, export_path=export, export_format=fmt,
-                       pdf_root=pdf_root, category=None,
-                       created_at=_iso(), summary=summary,
-                       unclaimed_pdfs=[str(f.path) for f in unclaimed])
+    run.write_manifest(
+        records,
+        export_path=export,
+        export_format=fmt,
+        pdf_root=pdf_root,
+        category=None,
+        created_at=_iso(),
+        summary=summary,
+        unclaimed_pdfs=[str(f.path) for f in unclaimed],
+    )
     run.report_path.write_text(
-        _render_report(assessments, summary, fetch, ref_docs, unclaimed,
-                       export, fmt, pdf_root),
-        encoding="utf-8")
+        _render_report(
+            assessments, summary, fetch, ref_docs, unclaimed, export, fmt, pdf_root
+        ),
+        encoding="utf-8",
+    )
 
     if args.as_json:
-        print(json.dumps({
-            "run_dir": str(run.root),
-            "export_format": fmt,
-            "summary": summary,
-            "missing_pdf_fetch_list": fetch,
-            "reference_doc_candidates": ref_docs,
-            "unclaimed_pdfs": [str(f.path) for f in unclaimed],
-            "items": records,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "run_dir": str(run.root),
+                    "export_format": fmt,
+                    "summary": summary,
+                    "missing_pdf_fetch_list": fetch,
+                    "reference_doc_candidates": ref_docs,
+                    "unclaimed_pdfs": [str(f.path) for f in unclaimed],
+                    "items": records,
+                },
+                indent=2,
+            )
+        )
         return 0
 
     _print_report(assessments, summary, fetch, ref_docs, unclaimed, run)
@@ -266,16 +292,22 @@ def _print_report(assessments, summary, fetch, ref_docs, unclaimed, run) -> None
             best = a.pairing.candidates[0]
             print(f"          best PDF candidate: {Path(best[0]).name} ({best[1]})")
     if len(groups.get("review") or []) > 20:
-        print(f"\n  … and {len(groups['review']) - 20} more under review "
-              f"(full list in {run.report_path.name})")
+        print(
+            f"\n  … and {len(groups['review']) - 20} more under review "
+            f"(full list in {run.report_path.name})"
+        )
 
     if fetch:
-        print(f"\n  {len(fetch)} record(s) are importable except that no PDF was "
-              f"found for them.\n  Their DOIs are listed in {run.report_path}.")
+        print(
+            f"\n  {len(fetch)} record(s) are importable except that no PDF was "
+            f"found for them.\n  Their DOIs are listed in {run.report_path}."
+        )
     if ref_docs:
-        print(f"\n  {len(ref_docs)} record(s) are reference material (book / "
-              f"guidance / thesis),\n  not papers — listed in the report for a "
-              f"hand-written wiki/references/ page.")
+        print(
+            f"\n  {len(ref_docs)} record(s) are reference material (book / "
+            f"guidance / thesis),\n  not papers — listed in the report for a "
+            f"hand-written wiki/references/ page."
+        )
     if unclaimed:
         print(f"\n  {len(unclaimed)} PDF(s) matched no record.")
 
@@ -283,14 +315,17 @@ def _print_report(assessments, summary, fetch, ref_docs, unclaimed, run) -> None
     print(f"  report:   {run.report_path}")
     n_ready = len(groups.get("ready") or [])
     if n_ready:
-        print(f"\nNext: `researchwiki import apply --run {run.root} "
-              f"--limit 30 --dry-run`   ({n_ready} ready)")
+        print(
+            f"\nNext: `researchwiki import apply --run {run.root} "
+            f"--limit 30 --dry-run`   ({n_ready} ready)"
+        )
     else:
         print("\nNothing is ready to import yet — see the reasons above.")
 
 
-def _render_report(assessments, summary, fetch, ref_docs, unclaimed,
-                   export, fmt, pdf_root) -> str:
+def _render_report(
+    assessments, summary, fetch, ref_docs, unclaimed, export, fmt, pdf_root
+) -> str:
     """The durable version, including the full fetch list.
 
     The fetch list is the reason this file exists rather than only terminal
@@ -299,12 +334,14 @@ def _render_report(assessments, summary, fetch, ref_docs, unclaimed,
     """
     groups = _by_verdict(assessments)
     L: list[str] = [
-        f"# Import inspection — {export.name}", "",
+        f"# Import inspection — {export.name}",
+        "",
         f"- Format: `{fmt}`",
         f"- Records: {summary['total']}",
         f"- PDF root: {pdf_root or '(none given)'}",
         "",
-        "| Verdict | Count |", "|---|---|",
+        "| Verdict | Count |",
+        "|---|---|",
     ]
     for verdict in ("ready", "review", "skip"):
         L.append(f"| {verdict} | {len(groups.get(verdict) or [])} |")
@@ -319,27 +356,44 @@ def _render_report(assessments, summary, fetch, ref_docs, unclaimed,
             if a.item.doi:
                 L.append(f"  - DOI: `{a.item.doi}`")
             if a.pairing.candidates:
-                L.append("  - candidate PDFs: " + ", ".join(
-                    f"`{Path(p).name}` ({s})" for p, s in a.pairing.candidates[:3]))
+                L.append(
+                    "  - candidate PDFs: "
+                    + ", ".join(
+                        f"`{Path(p).name}` ({s})" for p, s in a.pairing.candidates[:3]
+                    )
+                )
 
     if fetch:
-        L += ["", "## Missing PDFs", "",
-              f"{len(fetch)} record(s) clear every gate except having a file. "
-              "Fetch these and re-run `inspect`:", "", "```"]
+        L += [
+            "",
+            "## Missing PDFs",
+            "",
+            f"{len(fetch)} record(s) clear every gate except having a file. "
+            "Fetch these and re-run `inspect`:",
+            "",
+            "```",
+        ]
         L += [f["doi"] for f in fetch]
         L += ["```", "", "<details><summary>with titles</summary>", ""]
         L += [f"- `{f['doi']}` — {f['title']}" for f in fetch]
         L += ["", "</details>"]
 
     if ref_docs:
-        L += ["", "## Reference material, not papers", "",
-              "Typed by the exporter as a book, thesis, report or web page. These are "
-              "legitimate `wiki/references/` pages — hand-written, not ingested "
-              "(CLAUDE.md → Page Types §3). Listed here because a bare count would "
-              "leave you no way to find them.", ""]
+        L += [
+            "",
+            "## Reference material, not papers",
+            "",
+            "Typed by the exporter as a book, thesis, report or web page. These are "
+            "legitimate `wiki/references/` pages — hand-written, not ingested "
+            "(CLAUDE.md → Page Types §3). Listed here because a bare count would "
+            "leave you no way to find them.",
+            "",
+        ]
         for r in ref_docs:
-            L.append(f"- **{r['title'] or '(untitled)'}** — `{r['item_type']}`"
-                     + (f", DOI `{r['doi']}`" if r["doi"] else ""))
+            L.append(
+                f"- **{r['title'] or '(untitled)'}** — `{r['item_type']}`"
+                + (f", DOI `{r['doi']}`" if r["doi"] else "")
+            )
             if r["primary_pdf"]:
                 L.append(f"  - PDF: `{r['primary_pdf']}`")
 
@@ -356,9 +410,16 @@ def _render_report(assessments, summary, fetch, ref_docs, unclaimed,
 
 # ---------- apply ----------
 
+
 def _run_apply(args: argparse.Namespace) -> int:
+    from . import _ingest_batch
     from ..refimport.apply import dispatch, plan_wave, stage
     from ..refimport.manifest import open_run_dir
+
+    bad_workers = _ingest_batch.invalid_worker_count(args.workers)
+    if bad_workers:
+        print(f"researchwiki import apply: {bad_workers}", file=sys.stderr)
+        return 1
 
     try:
         run = open_run_dir(Path(args.run))
@@ -376,14 +437,23 @@ def _run_apply(args: argparse.Namespace) -> int:
         # Not inert, which is why it names both exits rather than just reporting:
         # a PDF left in `inbox/` is the ingest backlog, and the next
         # `agent ingest inbox/*.pdf` picks it up as a paper on its own.
-        print(f"{len(plan.already_staged)} record(s) already copied into inbox/ by an "
-              f"earlier wave — not re-copied:")
+        print(
+            f"{len(plan.already_staged)} record(s) already copied into inbox/ by an "
+            f"earlier wave — not re-copied:"
+        )
         for rec in plan.already_staged[:10]:
-            command = ["researchwiki", "agent", "ingest", rec["staged_as"],
-                       *(rec.get("ingest_args") or [])]
+            command = [
+                "researchwiki",
+                "agent",
+                "ingest",
+                rec["staged_as"],
+                *(rec.get("ingest_args") or []),
+            ]
             print(f"    {shlex.join(command)}")
-        print("  Each is a real backlog entry: run the printed command to preserve "
-              "its import metadata, or delete it.")
+        print(
+            "  Each is a real backlog entry: run the printed command to preserve "
+            "its import metadata, or delete it."
+        )
     if plan.missing_pdf:
         print(f"{len(plan.missing_pdf)} record(s) lost their PDF since inspect:")
         for rec in plan.missing_pdf[:10]:
@@ -405,14 +475,17 @@ def _run_apply(args: argparse.Namespace) -> int:
                 f"in prompts/migration-backfill.md."
             )
 
-    # A preview is exactly where the user decides whether to spend the wave,
-    # and chat-relay batching stalls silently rather than failing.
-    from .agent import warn_if_chat_relay_batch
-    warn_if_chat_relay_batch()
+    # Resolve the provider-aware default before the preview: API-backed waves use
+    # four workers, while chat-relay stays sequential unless the user supplied -w.
+    from . import _ingest_batch
+
+    workers = _ingest_batch.resolve_batch_workers(args.workers)
 
     staged = stage(plan.staged, dry_run=args.dry_run)
-    print(f"\n# import apply — {len(staged)} paper(s)"
-          f"{' (dry run — nothing copied)' if args.dry_run else ''}\n")
+    print(
+        f"\n# import apply — {len(staged)} paper(s)"
+        f"{' (dry run — nothing copied)' if args.dry_run else ''}\n"
+    )
     for path, argv in staged:
         # Not truncated. The whole point of `--dry-run` is reading the argv, and
         # a 160-char cut lands mid-`--title` on realistic titles — hiding
@@ -424,16 +497,27 @@ def _run_apply(args: argparse.Namespace) -> int:
     if args.dry_run:
         ok, detail = _embedding_status()
         if not ok:
-            print(f"\n  WARNING embedding model unusable — {detail}\n"
-                  f"          A real run would refuse; fix it before applying.")
-        print(f"\nThen: `researchwiki import apply --run {args.run}"
-              f"{f' --limit {args.limit}' if args.limit else ''}`")
+            print(
+                f"\n  WARNING embedding model unusable — {detail}\n"
+                f"          A real run would refuse; fix it before applying."
+            )
+        print(
+            f"\nThen: `researchwiki import apply --run {args.run}"
+            f"{f' --limit {args.limit}' if args.limit else ''}`"
+        )
         return 0
 
-    code = dispatch(staged, workers=args.workers)
+    code = dispatch(
+        staged,
+        workers=workers,
+        workers_explicit=args.workers is not None,
+    )
     if code:
-        print("\nImport wave failed. Use the batch runner's resume command above; "
-              "success follow-ups were not run.", file=sys.stderr)
+        print(
+            "\nImport wave failed. Use the batch runner's resume command above; "
+            "success follow-ups were not run.",
+            file=sys.stderr,
+        )
         return code
 
     print("\nNext — free (no tokens):")
@@ -451,8 +535,11 @@ def _run_apply(args: argparse.Namespace) -> int:
 #: here. Deliberately a subset: `lint` reports ~30 checks and most are about
 #: the wiki as a whole, while these are the ones an import can break.
 _LINT_KEYS = (
-    ("invalid_frontmatter", 0, "unparseable YAML — the page is invisible to "
-                               "db rebuild and every query"),
+    (
+        "invalid_frontmatter",
+        0,
+        "unparseable YAML — the page is invisible to db rebuild and every query",
+    ),
     ("zero_claim_papers", 0, "paper pages producing no citable claims"),
     ("missing_hook", 0, "no catalog gloss"),
     ("missing_doi", None, "no DOI recorded"),
@@ -461,8 +548,12 @@ _LINT_KEYS = (
     ("broken_wikilinks", 0, "links to pages that didn't come along"),
     ("page_type_mismatches", 0, "type: disagrees with the directory"),
     ("category_yaml_drift", 0, "YAML category ≠ parent dir"),
-    ("duplicate_claim_sets", None, "advisory — near-duplicate claim sets; the "
-                                   "signature of a commentary typed as a paper"),
+    (
+        "duplicate_claim_sets",
+        None,
+        "advisory — near-duplicate claim sets; the "
+        "signature of a commentary typed as a paper",
+    ),
 )
 
 
@@ -521,14 +612,21 @@ def _run_verify(args: argparse.Namespace) -> int:
     lint = _lint_snapshot()
 
     if args.as_json:
-        print(_json.dumps({
-            "run_dir": str(run.root),
-            "ready": len(landed) + len(in_sandbox) + len(missing),
-            "landed": [r["landed_as"] for r in landed],
-            "sandboxed": [r["sandboxed_as"] for r in in_sandbox],
-            "not_imported": [r.get("derived_stem") or r.get("key") for r in missing],
-            "lint": lint,
-        }, indent=2))
+        print(
+            _json.dumps(
+                {
+                    "run_dir": str(run.root),
+                    "ready": len(landed) + len(in_sandbox) + len(missing),
+                    "landed": [r["landed_as"] for r in landed],
+                    "sandboxed": [r["sandboxed_as"] for r in in_sandbox],
+                    "not_imported": [
+                        r.get("derived_stem") or r.get("key") for r in missing
+                    ],
+                    "lint": lint,
+                },
+                indent=2,
+            )
+        )
         return 0
 
     total = len(landed) + len(in_sandbox) + len(missing)
@@ -544,8 +642,10 @@ def _run_verify(args: argparse.Namespace) -> int:
             print(f"    .agent-output/{rec['sandboxed_as']}.md")
 
     if lint is None:
-        print("\n  lint: no snapshot — nothing to lint yet, or lint itself "
-              "failed.\n        Run `researchwiki lint --json` directly to see which.")
+        print(
+            "\n  lint: no snapshot — nothing to lint yet, or lint itself "
+            "failed.\n        Run `researchwiki lint --json` directly to see which."
+        )
     else:
         print("\n  lint")
         for key, want, meaning in _LINT_KEYS:
@@ -585,6 +685,7 @@ def _lint_snapshot() -> dict | None:
 
     try:
         from . import lint as lint_task
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             lint_task.main(["--json"])
@@ -595,6 +696,7 @@ def _lint_snapshot() -> dict | None:
 
 # ---------- entry point ----------
 
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="researchwiki import",
@@ -603,27 +705,52 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="phase", required=True, metavar="PHASE")
 
-    pf = sub.add_parser("preflight", help="Parse the export and describe it. No PDFs read.")
+    pf = sub.add_parser(
+        "preflight", help="Parse the export and describe it. No PDFs read."
+    )
     pf.add_argument("export", help="BibTeX / RIS / CSL-JSON export file.")
 
     ins = sub.add_parser("inspect", help="Pair records to PDFs and triage them.")
     ins.add_argument("export", help="BibTeX / RIS / CSL-JSON export file.")
-    ins.add_argument("pdf_root", nargs="?", default=None,
-                     help="Directory holding the PDFs. Optional — without it every "
-                          "record is triaged as far as its metadata allows.")
+    ins.add_argument(
+        "pdf_root",
+        nargs="?",
+        default=None,
+        help="Directory holding the PDFs. Optional — without it every "
+        "record is triaged as far as its metadata allows.",
+    )
     ins.add_argument("--limit", type=int, default=0, help="Assess at most N records.")
-    ins.add_argument("--run-dir", default=None, help="Where to write the run directory.")
+    ins.add_argument(
+        "--run-dir", default=None, help="Where to write the run directory."
+    )
     ins.add_argument("--json", dest="as_json", action="store_true")
 
     ap = sub.add_parser("apply", help="Copy a wave into inbox/ and ingest it.")
-    ap.add_argument("--run", required=True,
-                    help="Run directory from `inspect`. Required: a bare `apply` "
-                         "silently choosing among several runs is a footgun.")
-    ap.add_argument("--limit", type=int, default=0,
-                    help="Import at most N papers this wave. Re-run for the next N.")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="Print the argv per paper; copy nothing, spend nothing.")
-    ap.add_argument("--workers", "-w", type=int, default=4)
+    ap.add_argument(
+        "--run",
+        required=True,
+        help="Run directory from `inspect`. Required: a bare `apply` "
+        "silently choosing among several runs is a footgun.",
+    )
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Import at most N papers this wave. Re-run for the next N.",
+    )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the argv per paper; copy nothing, spend nothing.",
+    )
+    ap.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=None,
+        help="Concurrent ingest subprocesses (default: 4, or 1 when a phase "
+             "this command reaches uses chat-relay)",
+    )
 
     ver = sub.add_parser("verify", help="Did the import land, and what's left?")
     ver.add_argument("--run", required=True, help="Run directory from `inspect`.")

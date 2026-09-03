@@ -64,6 +64,8 @@ Function contract:
 from __future__ import annotations
 
 from typing import Callable
+
+from ...errors import EnvironmentFailure
 from ...log import log
 
 try:
@@ -368,7 +370,8 @@ def find_cross_paper_contradictions(
     """
     if stats is not None:
         stats.update({"pool": 0, "judged": 0, "skipped_already_judged": 0,
-                      "disagreements": 0, "sim_threshold": sim_threshold})
+                      "disagreements": 0, "sim_threshold": sim_threshold,
+                      "stopped_early": None})
 
     if not _NUMPY_AVAILABLE:
         log("numpy unavailable — skipping.", tag="cross_paper")
@@ -454,7 +457,22 @@ def find_cross_paper_contradictions(
         out: list[dict] = []
         for i, j, sim in pairs:
             a, b = claims[i], claims[j]
-            verdict_obj = judge(_format_pair_prompt(a, b))
+            try:
+                verdict_obj = judge(_format_pair_prompt(a, b))
+            except EnvironmentFailure as exc:
+                # House rule 3 (errors.py): stop the sweep, keep what it found.
+                # Letting this unwind discarded the ~30 free local checks the
+                # caller had already computed; tolerating it per pair would turn
+                # one unanswered chat-relay prompt into one per remaining pair,
+                # each costing the full RW_RELAY_TIMEOUT. Every verdict so far is
+                # already committed by `_record_judgement`, so a re-run resumes
+                # from here rather than re-paying.
+                reason = f"{type(exc).__name__}: {exc}"
+                if stats is not None:
+                    stats["stopped_early"] = reason
+                log(f"judging stopped after {stats['judged'] if stats else '?'} "
+                    f"of {len(pairs)} pair(s) — {reason}", tag="cross_paper")
+                break
             if not verdict_obj:
                 continue
             verdict = verdict_obj.get("verdict")

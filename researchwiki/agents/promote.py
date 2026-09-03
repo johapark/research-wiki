@@ -34,6 +34,7 @@ from .. import backlinks as _bl
 from ..fsatomic import write_text_atomic
 from ..mutation import mutation as _mutation
 from ..paths import inbox_dir, papers_dir, wiki_dir
+from .category_selection import suggest_category_for_page as _suggest_category
 from .commentary import gate_reason as commentary_gate_reason
 
 
@@ -159,32 +160,6 @@ class PromotionResult:
 
 
 _HEADING_RE = re.compile(r"^## (.+?)\s*$", re.MULTILINE)
-
-
-def _suggest_category(title: str, summary: str, *, use_llm: bool = True) -> tuple[str | None, str]:
-    """Use the existing search-index helper.
-
-    Returns a (category, strength) tuple:
-      - (cat, 'strong') when ≥ 3 of top-5 neighbors agree.
-      - (cat, 'weak') when there's at least one neighbor but no consensus —
-        first-of-kind topics. Caller flags via frontmatter.
-      - (None, 'none') when the index is empty or seed text is blank.
-    """
-    try:
-        from ..search import SearchBackendUnavailable, get_default_backend, suggest_category, suggest_category_knn
-    except ImportError:
-        return None, "none"
-    try:
-        backend = get_default_backend()
-    except SearchBackendUnavailable:
-        return None, "none"
-    try:
-        suggestion = (suggest_category if use_llm else suggest_category_knn)(backend, title, summary)
-    except Exception:
-        return None, "none"
-    if suggestion is None:
-        return None, "none"
-    return suggestion.category, suggestion.strength
 
 
 def _extract_section(body: str, heading_re_lower: str) -> str:

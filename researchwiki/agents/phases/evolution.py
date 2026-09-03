@@ -38,6 +38,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ...errors import EnvironmentFailure
 from ...fsatomic import write_text_atomic
 from ...paths import wiki_dir
 from ...index import pages_semantic as semantic_pages
@@ -46,11 +47,6 @@ from .. import llm
 from ...log import log
 from . import evolve_ledger
 
-
-# Page types eligible for evolution. Paper pages are immutable per their PDF
-# (Rule 3 says re-extract from PDF, don't synthesize); only synthesis pages
-# get refined when neighbors arrive.
-EVOLVABLE_TYPES = ("synthesis",)
 
 VALID_VERDICTS = {"refine", "enhance", "contrast", "none"}
 
@@ -177,10 +173,9 @@ def propose_evolution(
     # Judged-pair ledger: skip cached "none" pairs. Opened lazily (real mode
     # only); a caller may inject `ledger_conn` to share/observe it.
     conn = ledger_conn
-    own_conn = False
-    if conn is None and not use_stub:
+    own_conn = conn is None and not use_stub
+    if own_conn:
         conn = evolve_ledger.open_ledger()
-        own_conn = True
     src_hash = evolve_ledger.page_hash(source.body) if conn is not None else ""
 
     proposals: list[EvolutionProposal] = []
@@ -247,7 +242,7 @@ def _select_neighbors(source_key: str, source: Page, k: int):
     hits = semantic_pages.query_text(
         probe,
         k=k * 2,
-        page_types=EVOLVABLE_TYPES,
+        page_types=("synthesis",),
         exclude_keys=frozenset({source_key}),
     )
     out = []
@@ -316,7 +311,10 @@ def _judge_one(
     source: Page,
     neighbor: Page,
 ) -> EvolutionProposal | None:
-    """One LLM call; returns the parsed proposal or None on failure.
+    """One LLM call; returns the parsed proposal or None on an untyped failure.
+
+    Provider/environment failures propagate so the post-promotion caller can
+    record one skip instead of paying the same outage once per neighbor.
 
     The prompt deliberately leads with the NEIGHBOR body (not the source) —
     we want the LLM thinking "what would change about this page," not "is
@@ -339,6 +337,8 @@ def _judge_one(
             # empty answer (measured: stop_reason=max_tokens, content=[thinking]).
             disable_thinking=True,
         )
+    except EnvironmentFailure:
+        raise  # optional caller records the skip
     except Exception as e:
         log(f"judge call failed for {neighbor.key}: {e}", tag="propose_evolution")
         return None

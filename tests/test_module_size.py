@@ -123,7 +123,10 @@ _DEBT: dict[str, int] = {
     "researchwiki/agents/runner.py": 817,
     # Metadata reconcile: PDF-side extraction against provider records, plus the
     # sanity gate. The gate is the separable half.
-    "researchwiki/agents/phases/reconcile.py": 661,
+    # +2: house rule 1 (errors.py) — the reconcile phase wrapper must re-raise
+    # EnvironmentFailure so a relay timeout cannot be absorbed into an
+    # empty-metadata return that then files the paper on provider metadata alone.
+    "researchwiki/agents/phases/reconcile.py": 663,
     # Concept candidates: term mining, scoring, triage labelling. Mining and
     # labelling do not need to share a module. Raised 653 -> 656 to count hub
     # membership over contribution sections only, which is what the scaffolder
@@ -150,9 +153,6 @@ _DEBT: dict[str, int] = {
     "researchwiki/tasks/benchmark_fixture.py": 530,
     # Memory evolution: candidate selection, proposal drafting, emit.
     "researchwiki/agents/phases/evolution.py": 524,
-    # Transactional promote: five journalled steps and their rollback. Each step
-    # could stand alone under a thin coordinator.
-    "researchwiki/agents/promote.py": 502,
 }
 
 
@@ -626,7 +626,7 @@ def test_raising_the_ceiling_does_not_retire_a_pin():
     """The regression itself: at a ceiling of 800 every pin except runner.py sits
     underneath, and all of them must still be live."""
     below = {rel: pin for rel, pin in _DEBT.items() if pin < MAX_CODE_LINES}
-    assert len(below) >= 8, "expected most pins to sit under the ceiling"
+    assert len(below) == len(_DEBT) - 1, "expected only runner.py above the ceiling"
     assert all(pin >= RATCHET_RELEASE for pin in below.values())
 
 

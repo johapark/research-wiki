@@ -113,17 +113,26 @@ paper's first-page metadata (`{author}-{year}-{first-five-title-words}`).
 
 ```bash
 researchwiki add /path/to/some-paper.pdf                       # single PDF, any location
-researchwiki agent ingest inbox/*.pdf                          # ≥2 PDFs — auto-batch, 4 workers, checkpoint
+researchwiki agent ingest inbox/*.pdf                          # ≥2 PDFs — auto-batch + checkpoint; API=4 workers, chat-relay=1
 researchwiki agent ingest --resume .ingest/batch-<ts>/         # resume after a crash / Ctrl-C
 ```
 
-Passing multiple PDFs to a single invocation enters crash-safe batch mode:
-workers run in parallel (default 4, tune with `-w N`) and every completion
-is recorded atomically under `.ingest/batch-<ts>/checkpoint.json` — so a
-mid-batch crash is recoverable with `--resume <batch-dir>` and rerun
-picks up exactly where it stopped. Don't fan out one background Bash per
-file: that bypasses the checkpoint, uncaps concurrency, and multiplies
-`state.db` write contention.
+Passing multiple PDFs to a single invocation enters crash-safe batch mode.
+API-backed providers — and `--stub`, which reaches no provider at all — default
+to four parallel workers; chat-relay defaults to one visible worker because it
+needs an active conversational responder. Tune either with `-w N`. Every
+completion is recorded atomically under `.ingest/batch-<ts>/checkpoint.json`, so
+a mid-batch crash is recoverable with `--resume <batch-dir>` and rerun picks up
+exactly where it stopped. Resume re-evaluates the active provider: implicit
+defaults follow the current profile, while an explicit `-w N` remains fixed (and
+a resume-time `-w N` wins). A batch started before worker intent was recorded is
+honoured the same way — only a stored `4` is re-resolved, since that was the old
+unconditional default; a stored `1`, `2` or `8` was typed by hand and is kept,
+which matters because `-w 1` is the documented remedy for the Gemini free tier.
+The same policy applies whichever CLI resumes the batch. Don't fan
+out one background Bash per file for API-backed ingestion: that bypasses the
+checkpoint, uncaps concurrency, and multiplies `state.db` write contention.
+Chat-relay's native-subagent exception is described under Provider setup below.
 
 You'll see something like (excerpted, real output from a recent ingest):
 
@@ -1218,9 +1227,11 @@ why it lives under `~/.local/share/` in the first place.
 ### Chat-relay (subscription users — no API key)
 
 If your only model access is a **chat subscription** (Claude.ai Pro, ChatGPT
-Plus, Cursor Pro), the framework still runs end-to-end. The chat-relay
-provider delegates each LLM call to whatever chat agent is already in your
-terminal via a filesystem protocol — no API key, server, or per-paper cost.
+Plus, Cursor Pro), the framework still runs end-to-end. Unlike an API-backed
+provider, chat-relay does not let each ingest subprocess call a model endpoint
+and receive its own response. It delegates every LLM call to an active chat
+agent through a filesystem protocol — no API key or server, but also no
+automatic responder or isolated model session created by the CLI.
 
 **How it works.** `agent ingest` emits a prompt at
 `.llm-relay/pending/{op_id}.prompt.json` and blocks; the chat agent reads
@@ -1233,16 +1244,36 @@ export RW_LLM_PROVIDER=chat-relay      # or add to .env
 researchwiki agent ingest inbox/some-paper.pdf
 ```
 
-Then tell your chat agent *"watch `.llm-relay/pending/` and respond to each
-prompt as it appears."* Schema validation + retry-with-feedback is built in
+Then tell your chat agent *"watch the foreground command's relay handoffs and
+respond to each prompt as it appears."* Schema validation + retry-with-feedback is built in
 (up to 3 attempts), so you don't babysit format drift.
+
+**Batch behavior differs from API providers.** A multi-PDF chat-relay ingest
+defaults to one worker, and each child forwards its own relay handoffs to the
+batch parent. Explicit `-w N` permits N concurrent
+relay requests, but it creates N isolated ingest subprocesses—not N isolated
+chat contexts. A single responder handling all of them can mix conversational
+context and become the throughput bottleneck.
+
+When the host supports native subagents (for example Codex or Claude Code), the
+preferred parallel shape is a bounded rolling pool with one foreground
+single-PDF invocation per subagent. Each subagent owns its paper through
+promotion, paper-specific post-ingest hooks, and final verification. The main
+agent monitors terminal status, retries only transient failures, and runs
+corpus-wide post-batch maintenance once after the pool drains. Hosts without
+subagents use the sequential, checkpointed batch fallback.
 
 **Caveats:**
 - **Wall clock is bounded by your attention** — each phase blocks on the
-  agent; times out at 10 min/phase if it walks away.
+  agent; times out at 10 min/phase if it walks away. A timeout is retryable
+  (exit 2): answer the prompt still in `pending/`, then run
+  `agent ingest --resume`. The checkpoint is per-PDF, so the paper restarts from
+  the top and re-asks the phases you already answered — don't pre-fill ahead of
+  it ([`prompts/chat-relay.md`](./prompts/chat-relay.md#parallel-ingests--supervised-fan-out)).
 - **Cost dashboards show $0** — tokens aren't measurable through the relay.
-- **One ingest at a time** — parallel ingests queue to the same agent, which
-  responds serially.
+- **Parallelism needs responders** — the safe default is one worker; explicit
+  `-w N` needs enough independently monitored responders, preferably one native
+  subagent per active paper.
 - **Cache reuse on re-runs** — `op_id = sha1(phase|prompt)[:12]`, so a crash
   mid-ingest reuses completed phases. `RW_RELAY_FRESH=1` forces re-prompting.
 

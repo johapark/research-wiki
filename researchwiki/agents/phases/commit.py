@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass, field
 
 from .. import llm
+from ...errors import EnvironmentFailure
 from ...log import log
 
 
@@ -104,6 +105,8 @@ def propose_short_name(
             prompt=prompt,
             use_stub=False,
         )
+    except EnvironmentFailure:
+        raise  # house rule 1 (errors.py): never absorb a provider outage
     except Exception as e:
         log(f"short_name LLM call failed: {type(e).__name__}: {e}", tag="agent")
         return ShortNameOutput(name="TODO", model="(failed)", input_tokens=0, output_tokens=0)
@@ -327,6 +330,8 @@ def propose_keywords(
             prompt=prompt,
             use_stub=False,
         )
+    except EnvironmentFailure:
+        raise  # house rule 1 (errors.py): never absorb a provider outage
     except Exception as e:
         log(f"keywords LLM call failed: {type(e).__name__}: {e}", tag="agent")
         return KeywordsOutput(model="(failed)")
@@ -340,6 +345,8 @@ def propose_keywords(
         log("keywords empty after parse; retrying once", tag="agent")
         try:
             retry = llm.call(phase="keywords", prompt=prompt, use_stub=False)
+        except EnvironmentFailure:
+            raise  # house rule 1 (errors.py)
         except Exception as e:
             log(f"keywords retry failed: {type(e).__name__}: {e}", tag="agent")
         else:
@@ -529,6 +536,8 @@ def propose_keywords_batch(
             use_stub=False,
             schema=_KEYWORDS_BATCH_SCHEMA,
         )
+    except EnvironmentFailure:
+        raise  # house rule 1 (errors.py): never absorb a provider outage
     except Exception as e:
         log(f"keywords batch LLM call failed: {type(e).__name__}: {e}", tag="agent")
         return {item["key"]: KeywordsOutput(model="(failed)") for item in items}
