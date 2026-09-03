@@ -200,7 +200,7 @@ short_name. The CLI fires them one at a time — when you fill prompt N's
 response, the CLI consumes it and writes prompt N+1. So you'll see
 exactly one pending file at a time (during a single ingest).
 
-## Parallel ingests — fan out, but NOT with batch mode
+## Parallel ingests — supervised fan-out
 
 Nothing serializes relay calls. Each `call_chat_relay` writes its own
 `{op_id}.prompt.json` and polls its own `{op_id}.response.json`; the op_id
@@ -226,7 +226,18 @@ them in parallel — the throughput limit is you, not the protocol.
 That lock never existed. The only `flock`s in the package guard
 `index.md` and back-link writes.)
 
-**To parallelize: one foreground single-PDF invocation per subagent.**
+Multi-PDF batch mode defaults to one worker under chat-relay (API-backed
+providers retain their four-worker default). The batch parent mirrors every new
+pending request to its terminal, so a sequential, checkpointed batch can be
+serviced by the active chat agent. Passing `-w N` explicitly opts into N
+concurrent relay requests; it does not create N isolated chat responders.
+
+**When native subagents are available, parallelize with one foreground
+single-PDF invocation per subagent.** Use a bounded rolling pool no larger than
+the requested worker count or the available subagent slots. Each subagent owns
+its paper through ingest, promotion, paper-specific post-ingest hooks, and final
+verification. The main agent waits for terminal results, retries only transient
+failures, and runs corpus-wide post-batch work once after the pool drains.
 
 ```bash
 researchwiki agent ingest inbox/<one>.pdf      # per subagent, no -w
@@ -236,28 +247,19 @@ Each subagent then owns one subprocess, sees that subprocess's own
 `📨 LLM relay pending` line with both file paths, and writes straight to
 its own response path. No scanning, no ownership ambiguity.
 
-**Do not use batch mode for this.** `agent ingest inbox/*.pdf -w 4`
-parallelizes correctly — subprocess per worker, no relay gate — but
-`_ingest_batch._worker` runs each child with
-`stdout=log_fp, stderr=subprocess.STDOUT`, and the handoff line is printed
-to **stderr**. So every prompt notice lands in
-`.ingest/batch-<ts>/worker-*.log` where you will never see it. The parent
-prints only `[i/N] ok:` *after* a worker exits. From here the run looks
-like a hang and then fails every worker on the 600 s timeout. Batch mode
-under chat-relay only works if you independently poll
-`.llm-relay/pending/`, which is strictly more work than fanning out.
+Batch mode remains the portable fallback for shells and hosts without native
+subagents. Its worker output stays in `.ingest/batch-<ts>/worker-*.log`, while
+the parent separately surfaces relay handoffs. Explicit parallel batch mode is
+appropriate only when enough responders independently monitor
+`.llm-relay/pending/`; sharing one conversational responder across papers does
+not provide context isolation.
 
-Note this is the documented exception to `CLAUDE.md`'s "never fan out one
-Bash task per file" rule, which assumes an API-key provider. What you give
-up is batch mode's `checkpoint.json` and `--resume`; what you get back is
-a working notification channel. Two of the three reasons that rule cites
-do not actually differ here — both paths are subprocess-per-worker, so
-`state.db` write contention is a function of worker count either way — and
-the third, uncapped concurrency, is yours to control: keep the fan-out at
-about 4 to match batch mode's default. For recovery, the `inbox/`
-invariant is the fallback record: whatever is still sitting in `inbox/`
-did not land. (Batch mode's checkpoint is also per-PDF, not per-phase, so
-a crashed ingest is re-run from the top under either approach.)
+This is the documented exception to `CLAUDE.md`'s "never fan out one Bash task
+per file" rule, which assumes an API provider. Keep the pool bounded (normally
+around 3–4), and treat `inbox/` as the fallback recovery record: anything still
+there did not land. A failed paper is re-run from the top; paper-specific
+post-ingest work stays with its owning subagent, while corpus-wide maintenance
+runs once after all paper workers finish.
 
 Every payload names its own paper, so ownership never needs guessing:
 

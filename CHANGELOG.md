@@ -20,6 +20,17 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Changed
+
+- Multi-PDF `agent ingest` / `add` and `import apply` runs now default to one
+  worker when any phase uses `chat-relay`; API-backed providers retain the
+  four-worker default, and explicit `-w N` still opts into parallel relay
+  requests. The batch parent mirrors new `.llm-relay/pending/` handoffs so the
+  safe sequential fallback no longer hides for ten minutes in worker logs.
+  Chat-agent instructions now prescribe a bounded rolling pool with one
+  foreground single-PDF ingest per native subagent, keeping paper context and
+  paper-specific post-ingest work isolated.
+
 ## [0.4.5] - 2026-09-01
 
 ### Added

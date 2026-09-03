@@ -41,6 +41,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 
@@ -52,6 +53,7 @@ def _now_iso() -> str:
 def _batch_dir_for_new_run() -> Path:
     """Timestamped batch dir under `.ingest/`. `.ingest/` is gitignored."""
     from ..paths import wiki_root
+
     stamp = _dt.datetime.now().strftime("%Y%m%dT%H%M%S")
     d = wiki_root() / ".ingest" / f"batch-{stamp}"
     d.mkdir(parents=True, exist_ok=False)
@@ -111,8 +113,9 @@ def _worker_log_path(batch_dir: Path, pdf_path: str) -> Path:
     return batch_dir / f"worker-{Path(pdf_path).stem}-{digest}.log"
 
 
-def _worker(pdf_path: str, batch_dir: Path, subcommand: list[str],
-            extra_args: list[str]) -> dict:
+def _worker(
+    pdf_path: str, batch_dir: Path, subcommand: list[str], extra_args: list[str]
+) -> dict:
     """Run one ingest subprocess. Module-level so tests can monkeypatch it.
 
     Full per-worker output lands in `worker-{stem}-{hash8}.log` beside the
@@ -129,7 +132,44 @@ def _worker(pdf_path: str, batch_dir: Path, subcommand: list[str],
     return {"input": pdf_path, "status": status, "returncode": proc.returncode}
 
 
-def _split_unresumable(batch_dir: Path, pending: list[str]) -> tuple[list[str], list[str]]:
+def _watch_relay_prompts(stop: threading.Event, seen: set[Path]) -> None:
+    """Mirror newly-created relay requests to the batch parent's stderr.
+
+    Worker output remains in per-paper logs; this narrow watcher restores only the
+    handoff signal an interactive responder needs. Existing files are surfaced too:
+    deterministic op ids intentionally reuse a pending request after a CLI crash.
+    """
+    from ..paths import wiki_root
+
+    pending = wiki_root() / ".llm-relay" / "pending"
+    while not stop.wait(0.25):
+        try:
+            paths = sorted(pending.glob("*.prompt.json"))
+        except OSError:
+            continue
+        for path in paths:
+            if path in seen:
+                continue
+            seen.add(path)
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                op_id = payload.get("op_id") or path.name.removesuffix(".prompt.json")
+                phase = payload.get("phase") or "ad-hoc"
+                paper = payload.get("stem") or payload.get("pdf") or "unknown paper"
+            except (OSError, json.JSONDecodeError):
+                continue
+            response = pending.parent / "completed" / f"{op_id}.response.json"
+            print(
+                f"📨 LLM relay pending [{phase}] {paper} → {path}\n"
+                f"   Awaiting response at {response}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+
+def _split_unresumable(
+    batch_dir: Path, pending: list[str]
+) -> tuple[list[str], list[str]]:
     """Partition `pending` into (still-runnable, unresumable).
 
     Unresumable = the input path no longer exists. Applied to everything about
@@ -157,14 +197,18 @@ def _report_unresumable(batch_dir: Path, unresumable: list[str], state: dict) ->
     for pdf in unresumable:
         rec = (state.get("unresumable") or {}).get(pdf) or {}
         if rec.get("worker_started"):
-            why = ("worker started, never recorded a result — promote most likely "
-                   "got as far as moving the PDF into papers/ and then died")
+            why = (
+                "worker started, never recorded a result — promote most likely "
+                "got as far as moving the PDF into papers/ and then died"
+            )
         else:
             why = "no worker log — the input was moved or deleted outside this batch"
         print(f"    · {Path(pdf).name}", file=sys.stderr)
         print(f"      {why}", file=sys.stderr)
         if rec.get("worker_started"):
-            print(f"      log: {_worker_log_path(batch_dir, pdf).name}", file=sys.stderr)
+            print(
+                f"      log: {_worker_log_path(batch_dir, pdf).name}", file=sys.stderr
+            )
     print(
         "  These are recorded as terminal and won't be re-queued. Check each by "
         "hand — wiki page present? index.md bullet? back-links? log.md entry? — "
@@ -221,8 +265,7 @@ def _summarize_worker_log(log_path: Path) -> dict:
     Silent on any I/O error — this runs post-batch as an informational
     summary, not a gate.
     """
-    out = {"evolve_actionable": 0,
-           "concept_joined": [], "concept_near_missed": []}
+    out = {"evolve_actionable": 0, "concept_joined": [], "concept_near_missed": []}
     try:
         text = log_path.read_text(encoding="utf-8")
     except OSError:
@@ -277,9 +320,11 @@ def _print_batch_epilogue(batch_dir: Path, state: dict) -> None:
         print()
         print("ingest-batch: post-run summary")
         if per_paper_evolve:
-            print(f"  evolve: {totals['evolve_actionable']} actionable "
-                  f"proposal(s) across {len(per_paper_evolve)} paper(s) — "
-                  f"review under .ingest/*-evolution-proposals/")
+            print(
+                f"  evolve: {totals['evolve_actionable']} actionable "
+                f"proposal(s) across {len(per_paper_evolve)} paper(s) — "
+                f"review under .ingest/*-evolution-proposals/"
+            )
             for stem, n in per_paper_evolve:
                 print(f"    · {stem}: {n} actionable")
         if joined:
@@ -287,8 +332,10 @@ def _print_batch_epilogue(batch_dir: Path, state: dict) -> None:
             for stem, hub in joined:
                 print(f"    · {stem} → {hub}")
         if near_missed:
-            print(f"  concept-attach near-miss: {len(near_missed)} "
-                  "(body prose only; run `researchwiki concepts` to review)")
+            print(
+                f"  concept-attach near-miss: {len(near_missed)} "
+                "(body prose only; run `researchwiki concepts` to review)"
+            )
             for stem, hub in near_missed:
                 print(f"    · {stem} → {hub}")
     except Exception:
@@ -297,9 +344,15 @@ def _print_batch_epilogue(batch_dir: Path, state: dict) -> None:
         pass
 
 
-def _run_batch(batch_dir: Path, pending: list[str], workers: int,
-               subcommand: list[str], extra_args: list[str],
-               per_input_args: dict[str, list[str]] | None = None) -> int:
+def _run_batch(
+    batch_dir: Path,
+    pending: list[str],
+    workers: int,
+    subcommand: list[str],
+    extra_args: list[str],
+    per_input_args: dict[str, list[str]] | None = None,
+    relay_watch: bool = False,
+) -> int:
     """Drive the thread pool. Returns 0 iff every pending item completed.
 
     SIGINT: cancel unstarted futures, let in-flight subprocesses finish
@@ -314,15 +367,21 @@ def _run_batch(batch_dir: Path, pending: list[str], workers: int,
     # the `[i/N]` line would silently start counting a smaller batch than the
     # user submitted, which reads as "some inputs vanished". `unresumable` is
     # in it for the same reason — those inputs are terminal, not absent.
-    total = (len(state["completed"]) + len(state["failed"])
-             + len(state.get("unresumable") or {}) + len(pending))
+    total = (
+        len(state["completed"])
+        + len(state["failed"])
+        + len(state.get("unresumable") or {})
+        + len(pending)
+    )
     done_before = len(state["completed"])
     if not pending:
         print(f"nothing pending ({done_before}/{total} already complete)")
         return 0 if not (state.get("failed") or state.get("unresumable")) else 1
 
-    print(f"ingest-batch: {len(pending)} pending, {done_before} done, "
-          f"{workers} worker{'s' if workers != 1 else ''} → {batch_dir}")
+    print(
+        f"ingest-batch: {len(pending)} pending, {done_before} done, "
+        f"{workers} worker{'s' if workers != 1 else ''} → {batch_dir}"
+    )
 
     interrupted = False
     # Capture the caller's SIGINT handler so we can restore it in the outer
@@ -333,81 +392,111 @@ def _run_batch(batch_dir: Path, pending: list[str], workers: int,
     except (ValueError, OSError):
         prev_sigint = None
     installed_dfl = False
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        # Per-input flags are composed at submit time rather than passed
-        # down, so `_worker` keeps its signature and every existing caller and
-        # test is unaffected.
-        per_input_args = per_input_args or {}
-        futures = {
-            pool.submit(_worker, p, batch_dir, subcommand,
-                        [*extra_args, *per_input_args.get(p, [])]): p
-            for p in pending
-        }
-        try:
+    relay_stop = threading.Event()
+    relay_thread: threading.Thread | None = None
+    if relay_watch:
+        relay_thread = threading.Thread(
+            target=_watch_relay_prompts,
+            args=(relay_stop, set()),
+            name="relay-prompt-watcher",
+            daemon=True,
+        )
+        relay_thread.start()
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            # Per-input flags are composed at submit time rather than passed
+            # down, so `_worker` keeps its signature and every existing caller and
+            # test is unaffected.
+            per_input_args = per_input_args or {}
+            futures = {
+                pool.submit(
+                    _worker,
+                    p,
+                    batch_dir,
+                    subcommand,
+                    [*extra_args, *per_input_args.get(p, [])],
+                ): p
+                for p in pending
+            }
             try:
-                for fut in concurrent.futures.as_completed(futures):
-                    result = fut.result()
-                    idx = len(state["completed"]) + len(state["failed"]) + 1
-                    if result["status"] == "completed":
-                        state["completed"][result["input"]] = result
-                        tag = "ok"
-                    else:
-                        state["failed"][result["input"]] = result
-                        tag = f"FAIL rc={result['returncode']}"
-                    _write_checkpoint(batch_dir, state)
-                    print(f"[{idx}/{total}] {tag}: {Path(result['input']).name}")
-            except KeyboardInterrupt:
-                interrupted = True
-                # Second Ctrl-C: hand the signal back to the default handler so
-                # the whole process group aborts immediately instead of the
-                # doc-comment's promise of "SIGKILL" that no code enforced.
-                # Restored in the outer `finally` so post-batch work still runs
-                # under the caller's original handler.
                 try:
-                    signal.signal(signal.SIGINT, signal.SIG_DFL)
-                    installed_dfl = True
-                except (ValueError, OSError):
-                    pass  # signal only settable from main thread; no-op otherwise
-                print("\ningest-batch: interrupt received — waiting for in-flight "
-                      "workers to finish (Ctrl-C again aborts immediately)",
-                      file=sys.stderr)
-                # In-flight workers finish and their state.db writes complete,
-                # but their results don't make it into checkpoint.json (the
-                # as_completed loop is dead). --resume will re-run them. For
-                # personal-wiki scale that's a few wasted minutes at most.
-                pool.shutdown(wait=True, cancel_futures=True)
-        finally:
-            # Belt-and-braces flush: whatever happened above (normal exit,
-            # KeyboardInterrupt, or unexpected exception), the last observed
-            # `state` must be on disk before we leave. Every worker completion
-            # already writes the checkpoint inside the loop; this extra flush
-            # is a no-op on the happy path and a lifeline on the sad one.
-            try:
-                _write_checkpoint(batch_dir, state)
-            except Exception as e:
-                print(f"ingest-batch: final checkpoint flush failed: "
-                      f"{type(e).__name__}: {e}", file=sys.stderr)
-            # Restore only if we actually installed SIG_DFL. When the prior
-            # handler wasn't Python-settable (getsignal returned None), fall
-            # back to the default KeyboardInterrupt handler rather than leaking
-            # SIG_DFL into post-batch work (evolve, epilogue, tests).
-            if installed_dfl:
-                try:
-                    signal.signal(
-                        signal.SIGINT,
-                        prev_sigint if prev_sigint is not None else signal.default_int_handler,
+                    for fut in concurrent.futures.as_completed(futures):
+                        result = fut.result()
+                        idx = len(state["completed"]) + len(state["failed"]) + 1
+                        if result["status"] == "completed":
+                            state["completed"][result["input"]] = result
+                            tag = "ok"
+                        else:
+                            state["failed"][result["input"]] = result
+                            tag = f"FAIL rc={result['returncode']}"
+                        _write_checkpoint(batch_dir, state)
+                        print(f"[{idx}/{total}] {tag}: {Path(result['input']).name}")
+                except KeyboardInterrupt:
+                    interrupted = True
+                    # Second Ctrl-C: hand the signal back to the default handler so
+                    # the whole process group aborts immediately instead of the
+                    # doc-comment's promise of "SIGKILL" that no code enforced.
+                    # Restored in the outer `finally` so post-batch work still runs
+                    # under the caller's original handler.
+                    try:
+                        signal.signal(signal.SIGINT, signal.SIG_DFL)
+                        installed_dfl = True
+                    except (ValueError, OSError):
+                        pass  # signal only settable from main thread; no-op otherwise
+                    print(
+                        "\ningest-batch: interrupt received — waiting for in-flight "
+                        "workers to finish (Ctrl-C again aborts immediately)",
+                        file=sys.stderr,
                     )
-                except (ValueError, OSError):
-                    pass
+                    # In-flight workers finish and their state.db writes complete,
+                    # but their results don't make it into checkpoint.json (the
+                    # as_completed loop is dead). --resume will re-run them. For
+                    # personal-wiki scale that's a few wasted minutes at most.
+                    pool.shutdown(wait=True, cancel_futures=True)
+            finally:
+                # Belt-and-braces flush: whatever happened above (normal exit,
+                # KeyboardInterrupt, or unexpected exception), the last observed
+                # `state` must be on disk before we leave. Every worker completion
+                # already writes the checkpoint inside the loop; this extra flush
+                # is a no-op on the happy path and a lifeline on the sad one.
+                try:
+                    _write_checkpoint(batch_dir, state)
+                except Exception as e:
+                    print(
+                        f"ingest-batch: final checkpoint flush failed: "
+                        f"{type(e).__name__}: {e}",
+                        file=sys.stderr,
+                    )
+                # Restore only if we actually installed SIG_DFL. When the prior
+                # handler wasn't Python-settable (getsignal returned None), fall
+                # back to the default KeyboardInterrupt handler rather than leaking
+                # SIG_DFL into post-batch work (evolve, epilogue, tests).
+                if installed_dfl:
+                    try:
+                        signal.signal(
+                            signal.SIGINT,
+                            prev_sigint
+                            if prev_sigint is not None
+                            else signal.default_int_handler,
+                        )
+                    except (ValueError, OSError):
+                        pass
+    finally:
+        relay_stop.set()
+        if relay_thread is not None:
+            relay_thread.join(timeout=1.0)
 
     if interrupted:
         resume_cmd = f"researchwiki {' '.join(subcommand)} --resume {batch_dir}"
-        print(f"ingest-batch: interrupted. "
-              f"{len(state['completed'])}/{total} done, "
-              f"{len(state['failed'])} failed, "
-              f"{total - len(state['completed']) - len(state['failed'])} unstarted. "
-              f"Resume: {resume_cmd}",
-              file=sys.stderr)
+        print(
+            f"ingest-batch: interrupted. "
+            f"{len(state['completed'])}/{total} done, "
+            f"{len(state['failed'])} failed, "
+            f"{total - len(state['completed']) - len(state['failed'])} unstarted. "
+            f"Resume: {resume_cmd}",
+            file=sys.stderr,
+        )
         return 1
     _print_batch_epilogue(batch_dir, state)
     return 0 if not (state["failed"] or state.get("unresumable")) else 1
@@ -415,9 +504,15 @@ def _run_batch(batch_dir: Path, pending: list[str], workers: int,
 
 # ---------- public entry points ----------
 
-def new_batch(pdfs: list[str], subcommand: list[str],
-              extra_args: list[str], workers: int,
-              per_input_args: dict[str, list[str]] | None = None) -> int:
+
+def new_batch(
+    pdfs: list[str],
+    subcommand: list[str],
+    extra_args: list[str],
+    workers: int,
+    per_input_args: dict[str, list[str]] | None = None,
+    relay_watch: bool = False,
+) -> int:
     """Create a fresh batch dir, drive the ingest pool. Returns exit code.
 
     `subcommand` is the CLI verb chain each worker's subprocess runs — e.g.
@@ -442,14 +537,23 @@ def new_batch(pdfs: list[str], subcommand: list[str],
         "inputs": resolved,
         "extra_args": extra_args,
         "per_input_args": per_input_args or {},
+        "relay_watch": relay_watch,
     }
     _atomic_write_json(batch_dir / "plan.json", plan)
-    return _run_batch(batch_dir, resolved, workers, subcommand, extra_args,
-                      per_input_args)
+    return _run_batch(
+        batch_dir,
+        resolved,
+        workers,
+        subcommand,
+        extra_args,
+        per_input_args,
+        relay_watch,
+    )
 
 
-def resume_batch(batch_dir: Path, no_retry: bool,
-                 workers_override: int | None = None) -> int:
+def resume_batch(
+    batch_dir: Path, no_retry: bool, workers_override: int | None = None
+) -> int:
     """Continue an interrupted batch. Reads plan.json for its subcommand +
     passthrough flags so semantics don't drift across a restart.
 
@@ -519,14 +623,19 @@ def resume_batch(batch_dir: Path, no_retry: bool,
         _report_unresumable(batch_dir, unresumable, state)
 
     if skipped_non_retryable:
-        print(f"ingest-batch: {len(skipped_non_retryable)} failure(s) not retried "
-              f"— exit code 1 (bad input) or 3 (internal bug), so the same argv "
-              f"would fail the same way. Fix the cause, then re-run the PDF "
-              f"directly to see the error:", file=sys.stderr)
+        print(
+            f"ingest-batch: {len(skipped_non_retryable)} failure(s) not retried "
+            f"— exit code 1 (bad input) or 3 (internal bug), so the same argv "
+            f"would fail the same way. Fix the cause, then re-run the PDF "
+            f"directly to see the error:",
+            file=sys.stderr,
+        )
         for pdf in skipped_non_retryable:
-            print(f"    · {Path(pdf).name}  "
-                  f"(see {_worker_log_path(batch_dir, pdf).name})",
-                  file=sys.stderr)
+            print(
+                f"    · {Path(pdf).name}  "
+                f"(see {_worker_log_path(batch_dir, pdf).name})",
+                file=sys.stderr,
+            )
 
     if not no_retry and failed:
         state.setdefault("failed", {})
@@ -535,10 +644,18 @@ def resume_batch(batch_dir: Path, no_retry: bool,
                 del state["failed"][pdf]
         _write_checkpoint(batch_dir, state)
 
-    workers = workers_override if workers_override is not None else plan.get("workers", 4)
+    workers = (
+        workers_override if workers_override is not None else plan.get("workers", 4)
+    )
     subcommand = plan.get("subcommand", ["agent", "ingest"])  # legacy default
     # `.get` with a default, so a batch dir written before per-input args
     # existed still resumes — the key is additive, not a schema bump.
-    return _run_batch(batch_dir, pending, workers, subcommand,
-                      plan.get("extra_args", []),
-                      plan.get("per_input_args", {}))
+    return _run_batch(
+        batch_dir,
+        pending,
+        workers,
+        subcommand,
+        plan.get("extra_args", []),
+        plan.get("per_input_args", {}),
+        plan.get("relay_watch", False),
+    )

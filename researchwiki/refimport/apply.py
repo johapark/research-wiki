@@ -38,8 +38,12 @@ class Plan:
 
     @property
     def total_ready(self) -> int:
-        return (len(self.staged) + len(self.already_present)
-                + len(self.already_staged) + len(self.missing_pdf))
+        return (
+            len(self.staged)
+            + len(self.already_present)
+            + len(self.already_staged)
+            + len(self.missing_pdf)
+        )
 
 
 def read_inbox_index() -> dict[int, list[Path]]:
@@ -149,7 +153,9 @@ def plan_wave(records: list[dict], limit: int = 0) -> Plan:
     return plan
 
 
-def stage(records: list[dict], *, dry_run: bool = False) -> list[tuple[Path, list[str]]]:
+def stage(
+    records: list[dict], *, dry_run: bool = False
+) -> list[tuple[Path, list[str]]]:
     """Copy each record's PDF into `inbox/`; return `(path, argv)` pairs.
 
     **Copy, never move or symlink.** The source is the user's own library and
@@ -186,8 +192,13 @@ def stage(records: list[dict], *, dry_run: bool = False) -> list[tuple[Path, lis
     return out
 
 
-def dispatch(staged: list[tuple[Path, list[str]]], *, workers: int,
-             extra_args: list[str] | None = None) -> int:
+def dispatch(
+    staged: list[tuple[Path, list[str]]],
+    *,
+    workers: int,
+    extra_args: list[str] | None = None,
+    relay_watch: bool = False,
+) -> int:
     """Hand the wave to `_ingest_batch` with per-record overrides.
 
     Paths are validated first because `_ingest_batch._resolve_inputs` calls
@@ -200,5 +211,11 @@ def dispatch(staged: list[tuple[Path, list[str]]], *, workers: int,
     if not usable:
         return 1
     per_input = {str(p.resolve()): args for p, args in usable}
-    return new_batch([str(p) for p, _ in usable], ["agent", "ingest"],
-                     list(extra_args or []), workers, per_input_args=per_input)
+    return new_batch(
+        [str(p) for p, _ in usable],
+        ["agent", "ingest"],
+        list(extra_args or []),
+        workers,
+        per_input_args=per_input,
+        relay_watch=relay_watch,
+    )

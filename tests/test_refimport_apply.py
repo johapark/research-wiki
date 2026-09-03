@@ -40,11 +40,22 @@ def mk_pdf(tmp_path: Path, name: str, body: bytes | None = None) -> Path:
     return p
 
 
-def rec(tmp_path, key="k", doi="10.1234/a", stem="ada-2024-a-paper-about-things",
-        name="paper.pdf", verdict="ready", pdf=True):
+def rec(
+    tmp_path,
+    key="k",
+    doi="10.1234/a",
+    stem="ada-2024-a-paper-about-things",
+    name="paper.pdf",
+    verdict="ready",
+    pdf=True,
+):
     return {
-        "key": key, "verdict": verdict, "doi": doi, "derived_stem": stem,
-        "title": "A paper about things", "year": 2024,
+        "key": key,
+        "verdict": verdict,
+        "doi": doi,
+        "derived_stem": stem,
+        "title": "A paper about things",
+        "year": 2024,
         "primary_pdf": str(mk_pdf(tmp_path, name)) if pdf else None,
         "ingest_args": ["--doi", doi, "--title", "A paper about things"],
     }
@@ -60,16 +71,21 @@ def add_page(wiki: Path, stem: str, doi: str | None = None) -> None:
 
 # ---------- plan_wave ----------
 
+
 def test_only_ready_records_are_planned(wiki):
-    records = [rec(wiki, key="a"),
-               rec(wiki, key="b", verdict="review", name="b.pdf"),
-               rec(wiki, key="c", verdict="skip", name="c.pdf")]
+    records = [
+        rec(wiki, key="a"),
+        rec(wiki, key="b", verdict="review", name="b.pdf"),
+        rec(wiki, key="c", verdict="skip", name="c.pdf"),
+    ]
     assert [r["key"] for r in plan_wave(records).staged] == ["a"]
 
 
 def test_limit_takes_the_first_n(wiki):
-    records = [rec(wiki, key=str(i), doi=f"10.1234/{i}", stem=f"s-2024-{i}",
-                   name=f"{i}.pdf") for i in range(5)]
+    records = [
+        rec(wiki, key=str(i), doi=f"10.1234/{i}", stem=f"s-2024-{i}", name=f"{i}.pdf")
+        for i in range(5)
+    ]
     assert len(plan_wave(records, limit=2).staged) == 2
 
 
@@ -90,12 +106,14 @@ def test_a_record_whose_stem_is_now_in_the_wiki_is_not_re_imported(wiki):
 def test_the_second_wave_takes_the_next_records_not_the_same_ones(wiki):
     """The bug this design exists to prevent: `--limit 2` twice importing the
     same two papers, because the manifest still calls them ready."""
-    records = [rec(wiki, key=str(i), doi=f"10.1234/{i}", stem=f"s-2024-{i}",
-                   name=f"{i}.pdf") for i in range(4)]
+    records = [
+        rec(wiki, key=str(i), doi=f"10.1234/{i}", stem=f"s-2024-{i}", name=f"{i}.pdf")
+        for i in range(4)
+    ]
     first = plan_wave(records, limit=2)
     assert [r["key"] for r in first.staged] == ["0", "1"]
 
-    for r in first.staged:                      # simulate the wave landing
+    for r in first.staged:  # simulate the wave landing
         add_page(wiki, r["derived_stem"], doi=r["doi"])
 
     second = plan_wave(records, limit=2)
@@ -112,6 +130,7 @@ def test_a_pdf_deleted_since_inspect_is_reported_not_absorbed(wiki):
 
 # ---------- stage ----------
 
+
 def test_staging_copies_rather_than_moving_or_linking(wiki):
     """The source is the user's own library and must survive untouched;
     CLAUDE.md's PDF rule is explicit that files enter inbox/ as copies."""
@@ -119,13 +138,17 @@ def test_staging_copies_rather_than_moving_or_linking(wiki):
     staged = stage([r])
     dest = staged[0][0]
     assert dest.is_file() and not dest.is_symlink()
-    assert Path(r["primary_pdf"]).is_file()      # original still there
+    assert Path(r["primary_pdf"]).is_file()  # original still there
     assert dest.parent.name == "inbox"
 
 
 def test_staging_carries_the_per_record_argv(wiki):
-    assert stage([rec(wiki)])[0][1] == ["--doi", "10.1234/a",
-                                        "--title", "A paper about things"]
+    assert stage([rec(wiki)])[0][1] == [
+        "--doi",
+        "10.1234/a",
+        "--title",
+        "A paper about things",
+    ]
 
 
 def test_a_name_collision_does_not_clobber_a_paper(wiki):
@@ -148,46 +171,70 @@ def test_dry_run_copies_nothing(wiki):
 
 # ---------- dispatch ----------
 
+
 def test_dispatch_passes_per_record_argv_to_the_batch(wiki, monkeypatch):
     seen = {}
 
-    def fake_new_batch(pdfs, subcommand, extra_args, workers, per_input_args=None):
-        seen.update(pdfs=pdfs, subcommand=subcommand, workers=workers,
-                    per_input_args=per_input_args)
+    def fake_new_batch(
+        pdfs, subcommand, extra_args, workers, per_input_args=None, relay_watch=False
+    ):
+        seen.update(
+            pdfs=pdfs,
+            subcommand=subcommand,
+            workers=workers,
+            per_input_args=per_input_args,
+            relay_watch=relay_watch,
+        )
         return 0
 
     from researchwiki.tasks import _ingest_batch
+
     monkeypatch.setattr(_ingest_batch, "new_batch", fake_new_batch)
 
     staged = stage([rec(wiki)])
     assert dispatch(staged, workers=3) == 0
     assert seen["subcommand"] == ["agent", "ingest"] and seen["workers"] == 3
     key = str(staged[0][0].resolve())
-    assert seen["per_input_args"][key] == ["--doi", "10.1234/a",
-                                           "--title", "A paper about things"]
+    assert seen["per_input_args"][key] == [
+        "--doi",
+        "10.1234/a",
+        "--title",
+        "A paper about things",
+    ]
 
 
 def test_dispatch_skips_a_path_that_vanished_rather_than_exiting(wiki, monkeypatch):
     """`_ingest_batch._resolve_inputs` calls `sys.exit(1)` on a missing file —
     fine for a CLI, fatal for a caller that should report and continue."""
     from researchwiki.tasks import _ingest_batch
-    monkeypatch.setattr(_ingest_batch, "new_batch",
-                        lambda pdfs, *a, **k: len(pdfs))
+
+    monkeypatch.setattr(_ingest_batch, "new_batch", lambda pdfs, *a, **k: len(pdfs))
     staged = stage([rec(wiki)])
     staged[0][0].unlink()
-    assert dispatch(staged, workers=1) == 1      # nothing usable, no SystemExit
+    assert dispatch(staged, workers=1) == 1  # nothing usable, no SystemExit
 
 
 # ---------- the apply phase ----------
 
+
 def write_manifest(wiki: Path, records: list[dict]) -> Path:
     run = wiki / ".ingest" / "import-20260101T000000"
     run.mkdir(parents=True)
-    (run / "manifest.json").write_text(json.dumps({
-        "version": 1, "created_at": "2026-01-01T00:00:00",
-        "export_path": "x.ris", "export_format": "ris", "pdf_root": None,
-        "category": None, "summary": {}, "unclaimed_pdfs": [], "items": records,
-    }))
+    (run / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "created_at": "2026-01-01T00:00:00",
+                "export_path": "x.ris",
+                "export_format": "ris",
+                "pdf_root": None,
+                "category": None,
+                "summary": {},
+                "unclaimed_pdfs": [],
+                "items": records,
+            }
+        )
+    )
     return run
 
 
@@ -196,8 +243,10 @@ def no_spend(monkeypatch):
     """Neutralize the two things `apply` does that cost money or need a GPU."""
     calls = []
     from researchwiki.tasks import _ingest_batch
-    monkeypatch.setattr(_ingest_batch, "new_batch",
-                        lambda *a, **k: calls.append((a, k)) or 0)
+
+    monkeypatch.setattr(
+        _ingest_batch, "new_batch", lambda *a, **k: calls.append((a, k)) or 0
+    )
     monkeypatch.setattr(import_task, "_embedding_status", lambda: (True, "fake"))
     return calls
 
@@ -244,12 +293,12 @@ def test_apply_dry_run_copies_nothing_and_dispatches_nothing(wiki, no_spend, cap
 def test_apply_warns_under_chat_relay(wiki, no_spend, monkeypatch, capsys):
     monkeypatch.setenv("RW_LLM_PROVIDER", "chat-relay")
     run = write_manifest(wiki, [rec(wiki)])
-    assert import_task.main(["apply", "--run", str(run)]) == 0, \
+    assert import_task.main(["apply", "--run", str(run)]) == 0, (
         "the guard must warn, not refuse"
+    )
     err = capsys.readouterr().err
     assert "chat-relay" in err
-    assert "worker-*.log" in err
-    assert "one foreground invocation per responder" in err
+    assert "defaults to 1 worker" in err
 
 
 def test_apply_dry_run_warns_too(wiki, no_spend, monkeypatch, capsys):
@@ -268,8 +317,9 @@ def test_apply_silent_for_an_api_provider(wiki, no_spend, monkeypatch, capsys):
     assert "chat-relay" not in capsys.readouterr().err
 
 
-def test_apply_still_passes_per_input_args_under_chat_relay(wiki, no_spend,
-                                                           monkeypatch, capsys):
+def test_apply_still_passes_per_input_args_under_chat_relay(
+    wiki, no_spend, monkeypatch, capsys
+):
     """The warning must not drag `_BATCH_INCOMPATIBLE_FLAGS` along with it.
 
     `agent ingest` refuses batch mode combined with `--doi/--title/...` because
@@ -280,14 +330,18 @@ def test_apply_still_passes_per_input_args_under_chat_relay(wiki, no_spend,
     monkeypatch.setenv("RW_LLM_PROVIDER", "chat-relay")
     run = write_manifest(wiki, [rec(wiki)])
     assert import_task.main(["apply", "--run", str(run)]) == 0
-    (_, kwargs), = [(a, k) for a, k in no_spend]
+    ((positional, kwargs),) = [(a, k) for a, k in no_spend]
     assert kwargs["per_input_args"], "per-paper argv was dropped"
+    assert positional[3] == 1
+    assert kwargs["relay_watch"] is True
     capsys.readouterr()
 
 
 def test_apply_limit_stages_exactly_n(wiki, no_spend, capsys):
-    records = [rec(wiki, key=str(i), doi=f"10.1234/{i}", stem=f"s-2024-{i}",
-                   name=f"{i}.pdf") for i in range(5)]
+    records = [
+        rec(wiki, key=str(i), doi=f"10.1234/{i}", stem=f"s-2024-{i}", name=f"{i}.pdf")
+        for i in range(5)
+    ]
     run = write_manifest(wiki, records)
     assert import_task.main(["apply", "--run", str(run), "--limit", "2"]) == 0
     assert len(list((wiki / "inbox").glob("*.pdf"))) == 2
@@ -299,14 +353,19 @@ def test_apply_on_a_missing_run_returns_1(wiki, no_spend, capsys):
     capsys.readouterr()
 
 
-def test_apply_hard_fails_when_the_embedding_model_is_unusable(wiki, monkeypatch,
-                                                               capsys):
+def test_apply_hard_fails_when_the_embedding_model_is_unusable(
+    wiki, monkeypatch, capsys
+):
     """Dry-run is advisory, but a real run must fail before copying anything."""
     from researchwiki.errors import EnvironmentFailure
     from researchwiki.tasks import _ingest_batch
+
     monkeypatch.setattr(_ingest_batch, "new_batch", lambda *a, **k: 0)
-    monkeypatch.setattr(import_task, "_embedding_status",
-                        lambda: (False, "RuntimeError: _ARRAY_API not found"))
+    monkeypatch.setattr(
+        import_task,
+        "_embedding_status",
+        lambda: (False, "RuntimeError: _ARRAY_API not found"),
+    )
     run = write_manifest(wiki, [rec(wiki)])
     with pytest.raises(EnvironmentFailure, match="embedding model"):
         import_task.main(["apply", "--run", str(run)])
@@ -316,6 +375,7 @@ def test_apply_hard_fails_when_the_embedding_model_is_unusable(wiki, monkeypatch
 
 def test_failed_dispatch_does_not_print_success_followups(wiki, monkeypatch, capsys):
     from researchwiki.tasks import _ingest_batch
+
     monkeypatch.setattr(_ingest_batch, "new_batch", lambda *a, **k: 1)
     monkeypatch.setattr(import_task, "_embedding_status", lambda: (True, "fake"))
     run = write_manifest(wiki, [rec(wiki)])
@@ -333,6 +393,7 @@ def test_failed_dispatch_does_not_print_success_followups(wiki, monkeypatch, cap
 # files. A record can complete its ingest and still not be in wiki/ — that's the
 # sandbox path, and surfacing it is the whole reason this phase exists.
 
+
 def test_verify_reports_a_landed_record(wiki, capsys):
     r = rec(wiki)
     run = write_manifest(wiki, [r])
@@ -347,8 +408,9 @@ def test_verify_distinguishes_sandboxed_from_missing(wiki, capsys):
     """A gate-failed page lands in .agent-output/ instead of wiki/. Counting it
     as 'not imported' would hide work that is done and waiting for review."""
     held = rec(wiki, key="held", stem="held-2024-a-paper", doi="10.1234/held")
-    never = rec(wiki, key="never", stem="never-2024-a-paper", doi="10.1234/never",
-                name="n.pdf")
+    never = rec(
+        wiki, key="never", stem="never-2024-a-paper", doi="10.1234/never", name="n.pdf"
+    )
     run = write_manifest(wiki, [held, never])
     sandbox = wiki / ".agent-output"
     sandbox.mkdir()
@@ -379,9 +441,14 @@ def test_verify_matches_a_doi_only_record_to_its_sandbox_page(wiki, capsys):
 def test_verify_only_counts_records_that_were_ready(wiki, capsys):
     """`skip` and `review` records were never going to land; counting them as
     'not imported' would make every run look half-failed."""
-    run = write_manifest(wiki, [rec(wiki, key="a"),
-                                rec(wiki, key="b", verdict="skip", name="b.pdf"),
-                                rec(wiki, key="c", verdict="review", name="c.pdf")])
+    run = write_manifest(
+        wiki,
+        [
+            rec(wiki, key="a"),
+            rec(wiki, key="b", verdict="skip", name="b.pdf"),
+            rec(wiki, key="c", verdict="review", name="c.pdf"),
+        ],
+    )
     import_task.main(["verify", "--run", str(run), "--json"])
     assert json.loads(capsys.readouterr().out)["ready"] == 1
 
@@ -391,7 +458,7 @@ def test_verify_carries_a_lint_snapshot(wiki, capsys):
     runs the follow-ups by hand."""
     r = rec(wiki)
     run = write_manifest(wiki, [r])
-    add_page(wiki, r["derived_stem"], doi=r["doi"])   # lint needs pages to lint
+    add_page(wiki, r["derived_stem"], doi=r["doi"])  # lint needs pages to lint
     import_task.main(["verify", "--run", str(run), "--json"])
     out = json.loads(capsys.readouterr().out)
     assert isinstance(out["lint"], dict)
@@ -409,8 +476,10 @@ def test_verify_reports_no_snapshot_on_an_empty_wiki(wiki, capsys):
 def test_verify_survives_a_lint_failure(wiki, capsys, monkeypatch):
     """`verify` is a report. It must never be the thing that fails."""
     from researchwiki.tasks import lint as lint_task
-    monkeypatch.setattr(lint_task, "main",
-                        lambda argv: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    monkeypatch.setattr(
+        lint_task, "main", lambda argv: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
     run = write_manifest(wiki, [rec(wiki)])
     assert import_task.main(["verify", "--run", str(run), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["lint"] is None
@@ -437,6 +506,7 @@ def test_verify_names_the_graph_wiring_followups(wiki, capsys):
 
 
 # ---------- dry-run must predict what apply does ----------
+
 
 def test_dry_run_predicts_the_same_destinations_as_a_real_run(wiki):
     """A dry-run that disagrees with the run it previews is worse than none.
@@ -498,8 +568,7 @@ def test_the_leftover_is_found_under_the_uniquified_name(wiki):
     assert plan.already_staged[0]["staged_as"] == str(leftover)
 
 
-def test_apply_prints_frozen_metadata_for_an_already_staged_pdf(wiki, no_spend,
-                                                                capsys):
+def test_apply_prints_frozen_metadata_for_an_already_staged_pdf(wiki, no_spend, capsys):
     r = rec(wiki, doi="10.1234/preserved")
     leftover = wiki / "inbox" / "paper.pdf"
     leftover.write_bytes(Path(r["primary_pdf"]).read_bytes())
@@ -526,9 +595,13 @@ def test_a_different_pdf_of_the_same_name_still_stages(wiki):
 
 def test_already_staged_does_not_consume_the_limit(wiki):
     """Matching `already_present` and `missing_pdf`: the limit counts work to do."""
-    done = rec(wiki, key="done", doi="10.1234/done", stem="s-2024-done", name="done.pdf")
+    done = rec(
+        wiki, key="done", doi="10.1234/done", stem="s-2024-done", name="done.pdf"
+    )
     (wiki / "inbox" / "done.pdf").write_bytes(Path(done["primary_pdf"]).read_bytes())
-    todo = rec(wiki, key="todo", doi="10.1234/todo", stem="s-2024-todo", name="todo.pdf")
+    todo = rec(
+        wiki, key="todo", doi="10.1234/todo", stem="s-2024-todo", name="todo.pdf"
+    )
 
     plan = plan_wave([done, todo], limit=1)
     assert [x["key"] for x in plan.staged] == ["todo"]
@@ -538,12 +611,16 @@ def test_an_empty_inbox_hashes_nothing(wiki, monkeypatch):
     """Size is the pre-filter, so the common case must not read any PDF."""
     import researchwiki.refimport.apply as apply_mod
 
-    monkeypatch.setattr(apply_mod, "file_sha256",
-                        lambda p: pytest.fail(f"hashed {p} with an empty inbox"))
+    monkeypatch.setattr(
+        apply_mod,
+        "file_sha256",
+        lambda p: pytest.fail(f"hashed {p} with an empty inbox"),
+    )
     assert len(plan_wave([rec(wiki)]).staged) == 1
 
 
 # ---------- the stem lookup is batched ----------
+
 
 def test_plan_wave_walks_the_wiki_once_regardless_of_record_count(wiki, monkeypatch):
     """`find_stem_collision` re-walks `wiki/` per call, so calling it per record
@@ -553,11 +630,12 @@ def test_plan_wave_walks_the_wiki_once_regardless_of_record_count(wiki, monkeypa
 
     calls = []
     real = apply_mod.read_wiki_stems
-    monkeypatch.setattr(apply_mod, "read_wiki_stems",
-                        lambda: calls.append(1) or real())
+    monkeypatch.setattr(apply_mod, "read_wiki_stems", lambda: calls.append(1) or real())
 
-    records = [rec(wiki, key=str(i), doi=f"10.1234/{i}", stem=f"s-2024-{i}",
-                   name=f"{i}.pdf") for i in range(25)]
+    records = [
+        rec(wiki, key=str(i), doi=f"10.1234/{i}", stem=f"s-2024-{i}", name=f"{i}.pdf")
+        for i in range(25)
+    ]
     plan_wave(records)
     assert calls == [1], f"walked the wiki {len(calls)} times for 25 records"
 
@@ -566,6 +644,6 @@ def test_batched_lookup_still_sees_a_page_written_between_waves(wiki):
     """Not cached across calls: `apply` re-checks between waves and must see
     what the previous wave wrote."""
     r = rec(wiki)
-    assert plan_wave([r]).staged                      # first wave: importable
+    assert plan_wave([r]).staged  # first wave: importable
     add_page(wiki, r["derived_stem"], doi=r["doi"])
-    assert plan_wave([r]).staged == []                # second: already present
+    assert plan_wave([r]).staged == []  # second: already present
