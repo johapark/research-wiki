@@ -247,15 +247,13 @@ def _cmd_ingest(args) -> int:
                 file=sys.stderr,
             )
             return 1
-        workers, relay_watch = _ingest_batch.resolve_batch_workers(
-            args.workers, subcommand=["agent", "ingest"], stub=args.stub)
+        workers = _ingest_batch.resolve_batch_workers(args.workers, stub=args.stub)
         return _ingest_batch.new_batch(
             args.pdfs,
             ["agent", "ingest"],
             _batch_passthrough_args(args),
             workers=workers,
             workers_explicit=args.workers is not None,
-            relay_watch=relay_watch,
         )
 
     # Single-PDF path — unchanged from before.

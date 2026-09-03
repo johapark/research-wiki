@@ -479,8 +479,7 @@ def _run_apply(args: argparse.Namespace) -> int:
     # four workers, while chat-relay stays sequential unless the user supplied -w.
     from . import _ingest_batch
 
-    workers, relay_watch = _ingest_batch.resolve_batch_workers(
-        args.workers, subcommand=["agent", "ingest"])
+    workers = _ingest_batch.resolve_batch_workers(args.workers)
 
     staged = stage(plan.staged, dry_run=args.dry_run)
     print(
@@ -511,7 +510,6 @@ def _run_apply(args: argparse.Namespace) -> int:
     code = dispatch(
         staged,
         workers=workers,
-        relay_watch=relay_watch,
         workers_explicit=args.workers is not None,
     )
     if code:

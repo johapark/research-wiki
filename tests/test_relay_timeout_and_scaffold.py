@@ -101,6 +101,33 @@ def test_timed_out_prompt_can_be_answered_then_reused(tmp_path, monkeypatch):
     assert not response_path.exists()
 
 
+def test_existing_pending_prompt_is_announced_again(tmp_path, monkeypatch, capsys):
+    """A resumed worker must expose the request it is about to wait on."""
+    monkeypatch.chdir(tmp_path)
+    relay.set_relay_identity(pdf="paper.pdf")
+    phase = "author"
+    prompt = "resumed prompt"
+    op_id = relay._stable_op_id(phase, prompt)
+    prompt_path, _ = relay._paths_for(op_id)
+    relay._write_atomic_json(prompt_path, {"op_id": op_id})
+
+    def answer(path, timeout):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "schema_version": 1,
+            "op_id": op_id,
+            "via": "codex/gpt-5.6-terra",
+            "response": "ok",
+        }), encoding="utf-8")
+
+    monkeypatch.setattr(relay, "_poll_until_exists", answer)
+    relay.call_chat_relay(model="gpt-5.6-terra", prompt=prompt, phase=phase)
+    err = capsys.readouterr().err
+    assert err.startswith(relay.HANDOFF_PREFIX)
+    assert "paper.pdf" in err
+    assert err.count("\n") == 1
+
+
 def test_agent_cli_maps_relay_timeout_to_exit_2(tmp_path, monkeypatch):
     """`agent ingest` must not relabel a responder timeout as an internal bug."""
     from researchwiki.__main__ import main as cli_main

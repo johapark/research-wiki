@@ -30,6 +30,11 @@ def suggest_category_for_page(
         suggestion = (suggest_category if use_llm else suggest_category_knn)(
             backend, title, summary,
         )
+    except SearchBackendUnavailable:
+        # A fresh install has no local index yet. Category selection has always
+        # treated that as an abstention; it is not a provider/environment
+        # failure that should abort stub ingestion.
+        return None, "none"
     except EnvironmentFailure:
         raise
     except Exception:

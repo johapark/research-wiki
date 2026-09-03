@@ -24,19 +24,17 @@ Whenever the CLI hits an LLM step, it writes a JSON prompt file to
 response. You'll see a stderr line like:
 
 ```
-📨 LLM relay pending [classifier] → .llm-relay/pending/abc1d2e3f4.prompt.json
-   Awaiting response at .llm-relay/completed/abc1d2e3f4.response.json (timeout 600s)
+📨 LLM relay pending [classifier] paper.pdf → .llm-relay/pending/abc1d2e3f4.prompt.json; response .llm-relay/completed/abc1d2e3f4.response.json; timeout 600s
 ```
 
 ## Your job — the loop
 
-When you see a pending file, or when the user asks you to "respond to the
+When you see a relay handoff, or when the user asks you to "respond to the
 pending prompt" / "watch for prompts" / similar:
 
-1. **List `.llm-relay/pending/*.prompt.json`.** If there are no pending
-   files, the CLI hasn't asked for anything yet — just wait or do other
-   work.
-2. **Read the pending file** (it's plain JSON; see schema below).
+1. **Wait for the foreground command's handoff.** Use its exact prompt path;
+   don't infer ownership by listing the global pending directory.
+2. **Read that pending file** (it's plain JSON; see schema below).
 3. **Produce a response** that follows the `system` + `prompt` fields. If
    `schema` is non-null, your response **must** be a JSON value that
    validates against it (you'll be asked to retry otherwise).
@@ -48,8 +46,8 @@ pending prompt" / "watch for prompts" / similar:
 6. **Don't fabricate prompts.** Only respond to pending files that exist.
    Don't write speculative responses to `completed/` for prompts that
    haven't been asked.
-7. Loop back to step 1 if the user is running a multi-phase command (one
-   `agent ingest` fires 5–8 prompts).
+7. Loop back to step 1 for the next emitted handoff if the user is running a
+   multi-phase command (one `agent ingest` fires 5–8 prompts).
 
 ## Pending file schema (what you read)
 
@@ -244,9 +242,10 @@ That lock never existed. The only `flock`s in the package guard
 `index.md` and back-link writes.)
 
 Multi-PDF batch mode defaults to one worker under chat-relay (API-backed
-providers retain their four-worker default). The batch parent mirrors every new
-pending request to its terminal, so a sequential, checkpointed batch can be
-serviced by the active chat agent. Passing `-w N` explicitly opts into N
+providers retain their four-worker default). Each worker forwards its own relay
+handoffs to the parent terminal, so a sequential, checkpointed batch can be
+serviced by the active chat agent without scanning the global pending directory.
+Passing `-w N` explicitly opts into N
 concurrent relay requests; it does not create N isolated chat responders.
 Batch plans record whether `-w N` was explicit. Resume re-evaluates the active
 provider, so an implicit API batch switched to chat-relay becomes one visible
@@ -269,15 +268,14 @@ its own response path. No scanning, no ownership ambiguity.
 
 Batch mode remains the portable fallback for shells and hosts without native
 subagents. Its worker output stays in `.ingest/batch-<ts>/worker-*.log`, while
-the parent separately surfaces relay handoffs. Explicit parallel batch mode is
-appropriate only when enough responders independently monitor
-`.llm-relay/pending/`; sharing one conversational responder across papers does
+each child forwards only its relay handoffs to the parent. Explicit parallel batch mode is
+appropriate only when enough responders independently follow those handoffs;
+sharing one conversational responder across papers does
 not provide context isolation.
 
-Run the batch in the **foreground**. The parent's mirror is the only channel
-that still exists once `_worker` redirects each child's stderr into a per-paper
-log, so a backgrounded batch hides the prompt you have to answer and then times
-out on every phase.
+Run the batch in the **foreground**. `_worker` tees relay handoffs to the parent
+while keeping all stderr in the per-paper log, so a backgrounded batch hides the
+prompt you have to answer and then times out on every phase.
 
 This is the documented exception to `CLAUDE.md`'s "never fan out one Bash task
 per file" rule, which assumes an API provider. Keep the pool bounded (normally
@@ -318,19 +316,19 @@ to the op_id, breaking the cache for that one command.
 
 ## Stale pending files
 
-A request older than ~1 hour was almost certainly abandoned by a CLI that has
-since exited. **You do not have to guess which:** the batch parent labels them
-for you. A live request reads
+A pending file's age cannot prove whether its owner is still running. Do not
+scan `.llm-relay/pending/` and guess. Answer only a handoff emitted by the active
+foreground command, which reads
 
 ```
-📨 LLM relay pending [author] smith-2024-... → .llm-relay/pending/ab12cd34ef56.prompt.json
-   Awaiting response at .llm-relay/completed/ab12cd34ef56.response.json (timeout 600s)
+📨 LLM relay pending [author] smith-2024-... → .llm-relay/pending/ab12cd34ef56.prompt.json; response .llm-relay/completed/ab12cd34ef56.response.json; timeout 600s
 ```
 
-and an abandoned one reads `⏳ LLM relay STALE [...]` with its age and no
-response path. Answer the first shape only.
+On resume, `call_chat_relay` emits the handoff again before waiting on an
+already-existing prompt, so a live recovered request remains visible without a
+global watcher or an age heuristic.
 
-**Never answer a stale request speculatively.** Nothing is waiting for it, so the
+**Never answer an unannounced request speculatively.** Nothing may be waiting for it, so the
 `completed/{op_id}.response.json` you write is never consumed — and because
 op_ids are content-addressed it stays on disk as a *cache hit* for any later
 byte-identical prompt. A re-ingest of that paper then silently adopts a category
@@ -339,14 +337,9 @@ pending file and no handoff line to reveal it. `RW_RELAY_FRESH=1` is the only
 override, and nothing prompts you to reach for it.
 
 There is no cleanup subcommand — `researchwiki relay clean` does not exist and no
-release has shipped it. Stale files are removed by hand:
+release has shipped it. Remove an abandoned prompt/response pair by hand only
+after confirming its owning command has exited and will not be resumed.
 
-```bash
-find .llm-relay/pending -name '*.prompt.json' -mmin +60 -delete
-```
-
-Do the same for anything left in `.llm-relay/completed/` that no run consumed.
-
-The filesystem protocol is the only interface — poll `.llm-relay/pending/`
-and write responses there directly. There is no server or tool plugin to
+The filesystem protocol is the only interface: follow the emitted prompt path
+and write its matching response directly. There is no server or tool plugin to
 register.

@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 
 _RELAY_SCHEMA_VERSION = 1
 _RELAY_DEFAULT_TIMEOUT = 600.0   # seconds; generous for slow / inattentive agents
+HANDOFF_PREFIX = "📨 LLM relay pending"
 
 
 def _default_timeout() -> float:
@@ -94,8 +95,8 @@ _fresh_counter = itertools.count(1)
 # subagent per ingest) previously had to guess ownership by reading the prompt
 # body, since the payload named the phase but never the paper. See
 # `prompts/chat-relay.md`: the sanctioned shape is one foreground single-PDF
-# invocation per responder, because batch mode redirects each worker's stderr —
-# where the pending-prompt notice is printed — into a per-worker log file.
+# invocation per responder. Batch mode keeps stderr in a per-worker log and
+# forwards relay notices to the parent.
 #
 # Process-scoped rather than threaded through `llm.call()`: every ingest is its
 # own process (`_ingest_batch._worker` spawns `python -m researchwiki …`, and the
@@ -128,12 +129,6 @@ def set_relay_identity(*, stem: str | None = None, pdf: str | None = None) -> No
 def _relay_dir() -> Path:
     """Lazy resolver — wiki_root() may not be valid at module import time."""
     return wiki_root() / ".llm-relay"
-
-
-def pending_dir() -> Path:
-    """Directory holding un-answered requests. Public: the batch parent mirrors
-    it, and must not hand-build the path (see `format_handoff_message`)."""
-    return _relay_dir() / "pending"
 
 
 def _paths_for(op_id: str) -> tuple[Path, Path]:
@@ -196,38 +191,15 @@ def _poll_until_exists(path: Path, timeout: float) -> None:
 
 def format_handoff_message(prompt_path: Path, response_path: Path,
                           phase: str | None, timeout: float,
-                          retry_of: str | None = None,
-                          *, paper: str | None = None,
-                          stale_age: float | None = None) -> str:
-    """Render the pending-prompt notice.
-
-    Shared with `tasks._ingest_batch`, which mirrors this notice from the batch
-    parent because `_worker` redirects each child's stderr into a per-paper log.
-    Two copies of the wording would drift — the first pair already did, dropping
-    the deadline and the retry marker — so the mirror calls this instead.
-
-    `paper` is for the mirror only: a worker is a single-paper process and its
-    own terminal needs no disambiguation, so omitting it keeps the in-process
-    notice byte-identical to what it has always printed. `stale_age`, also
-    mirror-only, marks a request left behind by a run that is already gone.
-    """
+                          retry_of: str | None = None) -> str:
+    """Render the one-line pending-prompt notice forwarded by batch workers."""
     tag = f"{phase or 'ad-hoc'}"
     if retry_of:
         tag += f", retry of {retry_of}"
-    who = f" {paper}" if paper else ""
-    if stale_age is not None:
-        hours, rem = divmod(int(stale_age), 3600)
-        age = f"{hours}h{rem // 60:02d}m" if hours else f"{rem // 60}m"
-        return (
-            f"⏳ LLM relay STALE [{tag}]{who} → {prompt_path}\n"
-            f"   Written {age} ago, before this run started — most likely "
-            f"abandoned by a CLI that has since exited.\n"
-            f"   Do not answer it speculatively; `rm` it, or leave it and let "
-            f"the owning run be resumed."
-        )
+    paper = _current_stem or _current_pdf or "unknown paper"
     return (
-        f"📨 LLM relay pending [{tag}]{who} → {prompt_path}\n"
-        f"   Awaiting response at {response_path} (timeout {timeout:.0f}s)"
+        f"{HANDOFF_PREFIX} [{tag}] {Path(paper).name} → {prompt_path}; "
+        f"response {response_path}; timeout {timeout:.0f}s"
     )
 
 
@@ -420,29 +392,27 @@ def call_chat_relay(
     for attempt in range(_RELAY_MAX_RETRIES + 1):           # 0, 1, 2 → 3 total
         prompt_path, response_path = _paths_for(op_id)
 
-        # Skip rewriting if a prior response exists (cache hit) or a pending
-        # prompt is still in flight (recovery). Otherwise emit fresh.
-        if not response_path.exists() and not prompt_path.exists():
-            _write_atomic_json(prompt_path, {
-                "schema_version": _RELAY_SCHEMA_VERSION,
-                "op_id": op_id,
-                "phase": phase,
-                # Whose prompt this is. Additive and nullable, so schema_version
-                # stays 1: a responder written before these existed ignores the
-                # extra keys, and the response shape is unchanged. `stem` is null
-                # for the reconcile phase, which is the phase that derives it —
-                # `pdf` is the identifier to use there.
-                "stem": _current_stem,
-                "pdf": _current_pdf,
-                "model_hint": model,
-                "system": system,
-                "prompt": prompt,
-                "schema": schema,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "retry_of": retry_of,
-                "retry_feedback": retry_feedback,
-            })
+        # A response is a cache hit. Otherwise announce every wait, including a
+        # pending prompt recovered from an earlier timed-out invocation.
+        if not response_path.exists():
+            if not prompt_path.exists():
+                _write_atomic_json(prompt_path, {
+                    "schema_version": _RELAY_SCHEMA_VERSION,
+                    "op_id": op_id,
+                    "phase": phase,
+                    # Whose prompt this is. Additive and nullable, so
+                    # schema_version stays 1: older responders ignore it.
+                    "stem": _current_stem,
+                    "pdf": _current_pdf,
+                    "model_hint": model,
+                    "system": system,
+                    "prompt": prompt,
+                    "schema": schema,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "retry_of": retry_of,
+                    "retry_feedback": retry_feedback,
+                })
             response_path.parent.mkdir(parents=True, exist_ok=True)
             _emit_handoff_message(prompt_path, response_path, phase, timeout,
                                   retry_of=retry_of)

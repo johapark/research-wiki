@@ -175,6 +175,21 @@ def test_search_backend_unavailable_is_an_environment_failure():
     assert issubclass(SearchBackendUnavailable, EnvironmentFailure)
 
 
+def test_category_knn_abstains_when_fresh_install_has_no_index(monkeypatch):
+    from researchwiki.agents.category_selection import suggest_category_for_page
+    import researchwiki.search as search
+
+    monkeypatch.setattr(search, "get_default_backend", lambda: object())
+
+    def unavailable(*args, **kwargs):
+        raise search.SearchBackendUnavailable("index not built")
+
+    monkeypatch.setattr(search, "suggest_category_knn", unavailable)
+    assert suggest_category_for_page("title", "summary", use_llm=False) == (
+        None, "none",
+    )
+
+
 # ---------- the funnel: EnvironmentFailure -> 2, uncaught elsewhere -> 3 ----------
 
 @pytest.fixture

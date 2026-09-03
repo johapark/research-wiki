@@ -1244,13 +1244,13 @@ export RW_LLM_PROVIDER=chat-relay      # or add to .env
 researchwiki agent ingest inbox/some-paper.pdf
 ```
 
-Then tell your chat agent *"watch `.llm-relay/pending/` and respond to each
-prompt as it appears."* Schema validation + retry-with-feedback is built in
+Then tell your chat agent *"watch the foreground command's relay handoffs and
+respond to each prompt as it appears."* Schema validation + retry-with-feedback is built in
 (up to 3 attempts), so you don't babysit format drift.
 
 **Batch behavior differs from API providers.** A multi-PDF chat-relay ingest
-defaults to one worker, and the batch parent mirrors pending handoffs that would
-otherwise exist only inside worker logs. Explicit `-w N` permits N concurrent
+defaults to one worker, and each child forwards its own relay handoffs to the
+batch parent. Explicit `-w N` permits N concurrent
 relay requests, but it creates N isolated ingest subprocesses—not N isolated
 chat contexts. A single responder handling all of them can mix conversational
 context and become the throughput bottleneck.

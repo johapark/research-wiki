@@ -27,8 +27,6 @@ Hermetic: no subprocess, no network, no LLM.
 from __future__ import annotations
 
 import json
-import os
-import time
 from pathlib import Path
 
 import pytest
@@ -135,184 +133,49 @@ def test_agent_ingest_two_pdfs_auto_batches(wiki, monkeypatch):
     assert set(plan["inputs"]) == set(pdfs)
     assert plan["workers"] == 4
     assert plan["workers_explicit"] is False
-    assert plan["relay_watch"] is False
+    assert "relay_watch" not in plan
 
 
-# ---------- relay prompt mirroring ----------
-#
-# The scan is tested by calling it. The previous version of these tests drove the
-# polling thread and drained `capsys` from the main thread while the thread wrote
-# to `sys.stderr`: pytest's capture snap is getvalue -> seek -> truncate, which is
-# not atomic against a concurrent write, and because a dropped notice is never
-# re-emitted the loss was permanent and the assertion flaked. It also started a
-# NON-daemon thread with no try/finally, so any exception before `stop.set()` hung
-# the whole session at interpreter exit instead of failing a test.
+# ---------- worker relay forwarding ----------
 
 
-@pytest.fixture
-def relay_root(tmp_path, monkeypatch):
-    """cwd-rooted `.llm-relay/pending/`, matching how `relay` resolves it.
+def test_worker_logs_all_stderr_and_forwards_only_relay_handoffs(
+    tmp_path, monkeypatch, capsys
+):
+    from researchwiki.agents.relay import HANDOFF_PREFIX
 
-    `relay` binds `wiki_root` at import, so it follows the real cwd rather than a
-    monkeypatched `paths.wiki_root` — chdir is what production actually sees.
-    """
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "wiki").mkdir()
-    pending = tmp_path / ".llm-relay" / "pending"
-    pending.mkdir(parents=True)
-    return pending
+    class _Proc:
+        stderr = iter(
+            [
+                "ordinary diagnostic\n",
+                f"{HANDOFF_PREFIX} [author] paper.pdf → prompt; response out\n",
+            ]
+        )
 
+        @staticmethod
+        def wait():
+            return 0
 
-def _write_prompt(pending: Path, op_id: str, **fields) -> Path:
-    payload = {"op_id": op_id, "phase": "author", "stem": f"{op_id}-stem"}
-    payload.update(fields)
-    path = pending / f"{op_id}.prompt.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    return path
+    popen_kwargs = {}
 
+    def _popen(*args, **kwargs):
+        popen_kwargs.update(kwargs)
+        return _Proc()
 
-def test_scan_announces_each_request_once(relay_root):
-    _write_prompt(relay_root, "aaa")
-    seen: dict = {}
-    first = _ingest_batch._scan_relay_prompts(seen)
-    assert len(first) == 1
-    assert "aaa-stem" in first[0]
-    assert "aaa.prompt.json" in first[0]
-    # Parity with the in-process notice: both file paths, and the deadline.
-    assert "Awaiting response at" in first[0]
-    assert "aaa.response.json" in first[0]
-    assert "timeout" in first[0]
-    assert _ingest_batch._scan_relay_prompts(seen) == []
+    monkeypatch.setattr(_ingest_batch.subprocess, "Popen", _popen)
+    pdf = str(tmp_path / "paper.pdf")
+    result = _ingest_batch._worker(pdf, tmp_path, ["agent", "ingest"], [])
 
-
-def test_scan_surfaces_a_request_left_by_an_earlier_run(relay_root):
-    """A prompt already on disk is the documented resume case, so it must be
-    announced — the resumed worker skips its own handoff notice when the file
-    already exists, leaving the mirror as the only channel."""
-    _write_prompt(relay_root, "carried")
-    assert len(_ingest_batch._scan_relay_prompts({})) == 1
-
-
-def test_scan_re_announces_a_re_created_request(relay_root):
-    """op_ids are content-addressed and `call_chat_relay` unlinks the pair on
-    success, so the identical path legitimately reappears — `phases.commit`
-    retries `keywords` with the same prompt, deriving the same op_id. A
-    path-only `seen` set announced that once and stayed silent forever after."""
-    path = _write_prompt(relay_root, "reused")
-    seen: dict = {}
-    assert len(_ingest_batch._scan_relay_prompts(seen)) == 1
-    path.unlink()
-    assert _ingest_batch._scan_relay_prompts(seen) == []
-    assert seen == {}, "a vanished request is pruned, not remembered"
-    recreated = _write_prompt(relay_root, "reused")
-    os.utime(recreated, (1, 1))  # distinct mtime, coarse-clock-proof
-    assert len(_ingest_batch._scan_relay_prompts(seen)) == 1
-
-
-def test_scan_labels_an_abandoned_request_instead_of_listing_it_as_live(relay_root):
-    """`prompts/chat-relay.md` tells responders not to answer abandoned requests
-    speculatively, so the mirror must not print them in the same words as live
-    ones — answering one writes a response nothing consumes, which then becomes
-    a silent cache hit for any later byte-identical prompt."""
-    old = _write_prompt(relay_root, "stale")
-    ancient = time.time() - (_ingest_batch._RELAY_STALE_AFTER + 600)
-    os.utime(old, (ancient, ancient))
-    (message,) = _ingest_batch._scan_relay_prompts({})
-    assert "STALE" in message
-    assert "Do not answer it speculatively" in message
-    assert "Awaiting response at" not in message
-
-
-def test_scan_reports_a_retry_chain(relay_root):
-    _write_prompt(relay_root, "retried", retry_of="deadbeef")
-    (message,) = _ingest_batch._scan_relay_prompts({})
-    assert "retry of deadbeef" in message
-
-
-@pytest.mark.parametrize(
-    "raw",
-    [
-        b"\xff\xfe not utf-8 at all",      # UnicodeDecodeError (a ValueError)
-        b"null",                            # valid JSON, not an object
-        b"[1, 2, 3]",                       # ditto
-        b"{truncated",                      # JSONDecodeError
-    ],
-)
-def test_scan_survives_an_unreadable_request(relay_root, raw):
-    """The narrow `(OSError, JSONDecodeError)` this replaces let a
-    UnicodeDecodeError or a non-object payload's AttributeError kill the watcher
-    thread, after which every later paper ran unmirrored while `relay_watch`
-    still claimed otherwise."""
-    (relay_root / "bad.prompt.json").write_bytes(raw)
-    good = _write_prompt(relay_root, "good")
-    seen: dict = {}
-    messages = _ingest_batch._scan_relay_prompts(seen)
-    assert any("good-stem" in m for m in messages)
-    assert good in seen
-    # Unrecorded, so a transient read failure is retried rather than dropped.
-    assert (relay_root / "bad.prompt.json") not in seen
-
-
-def test_scan_is_silent_when_there_is_no_relay_directory(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    assert _ingest_batch._scan_relay_prompts({}) == []
-
-
-def test_mirror_context_manager_starts_and_stops_a_daemon_thread(relay_root):
-    """Daemon, and joined on the way out even if the body raises — a stuck
-    non-daemon watcher blocks interpreter shutdown rather than failing."""
-    import threading
-
-    before = threading.active_count()
-    with _ingest_batch._mirror_relay_prompts(True):
-        watcher = [t for t in threading.enumerate() if t.name == "relay-prompt-watcher"]
-        assert len(watcher) == 1
-        assert watcher[0].daemon is True
-    assert not [t for t in threading.enumerate() if t.name == "relay-prompt-watcher"]
-
-    with pytest.raises(RuntimeError):
-        with _ingest_batch._mirror_relay_prompts(True):
-            raise RuntimeError("body blew up")
-    assert not [t for t in threading.enumerate() if t.name == "relay-prompt-watcher"]
-    assert threading.active_count() == before
-
-
-def test_mirror_starts_nothing_when_disabled(relay_root):
-    import threading
-
-    with _ingest_batch._mirror_relay_prompts(False):
-        assert not [
-            t for t in threading.enumerate() if t.name == "relay-prompt-watcher"
-        ]
-
-
-def test_watcher_loop_body_prints_to_stderr(relay_root, capsys):
-    """One check that the loop body is wired to stderr at all.
-
-    Runs it on the calling thread with `stop` pre-set: the loop scans once, then
-    its first `stop.wait()` returns True and it returns. No thread, no sleep, and
-    no concurrent capture — the previous shape started a thread and joined it
-    before setting `stop`, which simply blocked for the join timeout.
-    """
-    import threading
-
-    _write_prompt(relay_root, "live")
-    stop = threading.Event()
-    stop.set()
-    _ingest_batch._watch_relay_prompts(stop, interval=0)
-    assert "live-stem" in capsys.readouterr().err
-
-
-def test_watcher_loop_exits_promptly_once_stopped(relay_root):
-    """The join in `_mirror_relay_prompts` has a 1 s budget, so the loop must
-    notice `stop` within one interval rather than sleeping out a long poll."""
-    import threading
-
-    stop = threading.Event()
-    stop.set()
-    started = time.monotonic()
-    _ingest_batch._watch_relay_prompts(stop, interval=5)
-    assert time.monotonic() - started < 1.0, "stop must short-circuit the wait"
+    assert result["status"] == "completed"
+    log = _ingest_batch._worker_log_path(tmp_path, pdf).read_text()
+    assert "ordinary diagnostic" in log
+    assert HANDOFF_PREFIX in log
+    err = capsys.readouterr().err
+    assert HANDOFF_PREFIX in err
+    assert "ordinary diagnostic" not in err
+    assert popen_kwargs["stderr"] is _ingest_batch.subprocess.PIPE
+    assert popen_kwargs["text"] is True
+    assert popen_kwargs["errors"] == "replace"
 
 
 def test_agent_ingest_single_pdf_does_not_batch(wiki, monkeypatch):

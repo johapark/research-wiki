@@ -115,9 +115,9 @@ returns to the subprocess that issued it.
 Chat-relay does not call a model API. It writes each model request under
 `.llm-relay/pending/` and waits for an active Codex, Claude Code, or compatible
 chat agent to write the matching response under `.llm-relay/completed/`. A
-multi-paper chat-relay batch therefore defaults to one worker and mirrors pending
-requests in the parent terminal, labelling abandoned ones so they are not
-answered by mistake. Run it in the foreground — backgrounding hides the mirror. Passing `-w N` explicitly permits concurrent
+multi-paper chat-relay batch therefore defaults to one worker and forwards
+requests from its own child processes to the parent terminal. Run it in the
+foreground — backgrounding hides those handoffs. Passing `-w N` explicitly permits concurrent
 relay requests, but the CLI creates only isolated ingest subprocesses—not `N`
 isolated chat contexts. When native subagents are available, the supervising chat
 agent should use one foreground single-PDF ingest per subagent and maintain a
