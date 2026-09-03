@@ -418,6 +418,8 @@ def test_relay_timeout_is_a_typed_environment_failure():
          {"metadata": {"title": "A Title"}, "draft_text": "## Summary\nA summary."}),
         ("researchwiki.agents.phases.commit", "propose_short_name",
          {"metadata": {"title": "A Title"}, "draft_text": "## Summary\nA summary."}),
+        ("researchwiki.agents.phases.target_claims", "extract_target_claims",
+         {"metadata": {"title": "A Title"}, "sections": {"abstract": "Evidence."}}),
     ],
 )
 def test_phase_wrapper_does_not_absorb_a_provider_failure(
@@ -468,6 +470,71 @@ def test_judge_wrapper_is_the_reference_implementation(monkeypatch):
     )
     with pytest.raises(EnvironmentFailure):
         judge.run_llm_judge(phase="cross_paper_judge", system="s", prompt="p")
+
+
+def test_memory_evolution_judge_propagates_provider_failure(monkeypatch):
+    """The optional caller can record one skip only if the per-neighbor wrapper
+    does not turn the typed failure into ``None`` first."""
+    from pathlib import Path
+
+    from researchwiki.agents.phases import evolution
+    from researchwiki.wiki import Page
+
+    monkeypatch.setattr(
+        evolution.llm, "call", lambda *a, **k: (_ for _ in ()).throw(_relay_timeout())
+    )
+    source = Page(
+        path=Path("wiki/cgt/source.md"), stem="source", category="cgt",
+        fm={"type": "paper"}, body="## Summary\nSource evidence.",
+    )
+    neighbor = Page(
+        path=Path("wiki/synthesis/target.md"), stem="target",
+        category="synthesis", fm={"type": "synthesis"},
+        body="## Short answer\nExisting synthesis.",
+    )
+
+    with pytest.raises(EnvironmentFailure):
+        evolution._judge_one("cgt/source", source, neighbor)
+
+
+def test_promote_classifier_does_not_turn_provider_failure_into_abstention(
+    monkeypatch,
+):
+    """A provider outage must not file a canonical page in ``other`` as though
+    the classifier had deliberately abstained."""
+    from researchwiki import search
+    from researchwiki.agents import promote
+
+    monkeypatch.setattr(search, "get_default_backend", lambda: object())
+    monkeypatch.setattr(
+        search, "suggest_category",
+        lambda *a, **k: (_ for _ in ()).throw(_relay_timeout()),
+    )
+
+    with pytest.raises(EnvironmentFailure):
+        promote._suggest_category("A Title", "A summary")
+
+
+def test_requested_entailment_veto_does_not_disappear_on_provider_failure(
+    monkeypatch,
+):
+    """``--verify-claim-entailment`` is an explicit safety gate, not optional
+    post-promotion work, so an outage must stop rather than disable it."""
+    from types import SimpleNamespace
+
+    from researchwiki.agents import runner_support
+
+    monkeypatch.setattr(
+        runner_support.phases, "grade_draft",
+        lambda *a, **k: (_ for _ in ()).throw(_relay_timeout()),
+    )
+
+    ctx = SimpleNamespace(
+        paper_stem="smith-2024-paper", metadata={}, sandbox_dir=None,
+        pdf_path=None, use_semantic=False,
+    )
+    with pytest.raises(EnvironmentFailure):
+        runner_support.run_entailment_check(ctx, None, "draft")
 
 
 # --- rule 2: optional work records a skip ---

@@ -189,6 +189,19 @@ def test_non_positive_worker_count_rejected_before_resume(tmp_path, capsys):
     assert "greater than zero" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("bad", [0, -1])
+def test_digest_resume_rejects_non_positive_worker_count(tmp_path, capsys, bad):
+    """The digest CLI returns through ``resume_batch`` before its fresh-batch
+    validation block, so the batch driver must enforce the shared invariant."""
+    from researchwiki.tasks import ingest as ingest_cli
+
+    rc = ingest_cli.main([
+        "--resume", str(tmp_path / "batch"), "--workers", str(bad),
+    ])
+    assert rc == 1
+    assert "greater than zero" in capsys.readouterr().err
+
+
 def test_malformed_config_fails_before_chat_relay_batch_spawns(
     _batch_args, tmp_path, monkeypatch
 ):

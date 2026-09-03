@@ -33,6 +33,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .. import llm
+from ...errors import EnvironmentFailure
 
 
 CLAIM_TYPES = ("headline", "capability", "limitation")
@@ -162,11 +163,10 @@ def extract_target_claims(
 ) -> TargetClaimsOutput:
     """Run one target-claims LLM call. Returns the parsed list.
 
-    On any error (LLM failure, JSON parse failure, schema mismatch),
-    returns an empty TargetClaimsOutput with an error string set —
-    the runner treats empty claims as a no-op and the author phase
-    falls back to the pre-L3 prompt shape. So a target-claims failure
-    is graceful: ingest still works, just without the new signal.
+    On an untyped call error, JSON parse failure, or schema mismatch, returns
+    an empty TargetClaimsOutput with an error string set. Typed provider and
+    environment failures propagate: authoring without this checklist after an
+    outage would make a degraded ingest indistinguishable from a good one.
     """
     if use_stub:
         return TargetClaimsOutput(
@@ -191,6 +191,8 @@ def extract_target_claims(
             system=_SYSTEM_PROMPT,
             schema=_JSON_SCHEMA,
         )
+    except EnvironmentFailure:
+        raise  # house rule 1 (errors.py): never author from a hidden outage
     except Exception as e:
         return TargetClaimsOutput(
             error=f"LLM call failed: {type(e).__name__}: {e}",

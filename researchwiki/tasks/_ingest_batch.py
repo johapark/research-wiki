@@ -739,6 +739,11 @@ def resume_batch(
     given the same argv). `--no-retry` overrides this and leaves every
     failure where it is, retryable or not.
     """
+    bad_workers = invalid_worker_count(workers_override)
+    if bad_workers:
+        print(f"ingest-batch: {bad_workers}", file=sys.stderr)
+        return 1
+
     # Both of these mean the `--resume` argument points somewhere that isn't a
     # batch directory — a bad command line, not a broken environment.
     if not batch_dir.is_dir():

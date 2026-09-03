@@ -61,11 +61,12 @@ the reasoning behind any line below.
   checkpoint is per-PDF, so the resumed paper restarts from the top rather than
   from the phase that timed out.
 - A relay timeout no longer disappears into a phase wrapper's `except Exception`.
-  `reconcile`, `keywords`, `short_name`, `link_generation` and the category
-  `classifier` re-raise it instead of returning a degraded result, which had let
-  an ingest exit 0 having filed a paper on provider metadata alone or written
-  `keywords: []`, and had let a digest-path batch fall back to the kNN classifier
-  after a full timeout per paper.
+  `reconcile`, `target_claims`, `keywords`, `short_name`, `link_generation`, the
+  category `classifier`, and the opt-in `claim_support` veto re-raise it instead
+  of returning a degraded result, which had let an ingest exit 0 having filed a
+  paper on provider metadata alone, authored without its target-claim checklist,
+  skipped a requested entailment veto, or written `keywords: []`; the digest path
+  had likewise fallen back to the kNN classifier after a full timeout per paper.
 - A relay timeout in the optional post-promotion `memory_evolution` phase is now
   a recorded skip rather than a failed ingest. It had made the worker exit 2 for
   a paper whose page, PDF move, back-links, `index.md` bullet and `log.md` entry

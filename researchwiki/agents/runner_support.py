@@ -221,6 +221,63 @@ def phase_target_claims(ctx, conn):
     return out
 
 
+def run_entailment_check(ctx, conn, cleaned_text: str) -> None:
+    """Run the explicitly requested support veto against the final draft.
+
+    Malformed classifier output remains best-effort, but a typed provider or
+    environment failure propagates: an outage may not silently disable a gate
+    the user requested.
+    """
+    from ..grade.support import llm_support_classifier
+
+    started = time.monotonic()
+    try:
+        support_scores, _ = phases.grade_draft(
+            stem=ctx.paper_stem,
+            draft_text=cleaned_text,
+            metadata=ctx.metadata,
+            sandbox_dir=ctx.sandbox_dir,
+            pdf_path=ctx.pdf_path,
+            use_semantic=ctx.use_semantic,
+            support_classifier=llm_support_classifier,
+        )
+        n_unsupported = support_scores.get("n_unsupported", 0)
+        n_checked = support_scores.get("n_support_checked", 0)
+        unsupported = support_scores.get("unsupported_claims", [])
+        ctx.winner.scores["n_unsupported"] = n_unsupported
+        ctx.winner.scores["n_support_checked"] = n_checked
+        ctx.winner.scores["unsupported_claims"] = unsupported
+        log(f"support  → {n_unsupported} unsupported / {n_checked} checked", tag="agent")
+        for claim in unsupported:
+            log(f"           ✗ [{claim['section']}] {claim['text'][:80]}", tag="agent")
+        ctx.next_iter()
+        write_iteration(
+            attempt_id=ctx.attempt_id,
+            paper_stem=ctx.paper_stem,
+            pdf_filename=ctx.pdf_filename,
+            iteration=ctx.iteration,
+            role="claim_support",
+            parent_iteration_id=ctx.winner.iteration_id,
+            grader_scores={
+                "n_unsupported": n_unsupported,
+                "n_support_checked": n_checked,
+                "unsupported_claims": unsupported,
+            },
+            decision="observed",
+            decision_reason=f"{n_unsupported} unsupported / {n_checked} checked",
+            duration_ms=int((time.monotonic() - started) * 1000),
+            gate_metrics={
+                "unsupported_claims": n_unsupported,
+                "claims_checked": n_checked,
+            },
+            conn=conn,
+        )
+    except EnvironmentFailure:
+        raise
+    except Exception as exc:
+        log(f"support  → check failed, veto skipped: {exc}", tag="agent")
+
+
 def run_post_promote_memory_evolution(ctx, conn, *, source_key: str) -> None:
     """Re-arm the budget for optional memory evolution, then pause it again.
 
