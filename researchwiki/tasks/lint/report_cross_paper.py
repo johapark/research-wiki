@@ -17,10 +17,17 @@ from __future__ import annotations
 
 
 def _coverage_line(stats: dict) -> str:
-    return (f"pool: {stats.get('pool', 0)} pair(s) above "
+    line = (f"pool: {stats.get('pool', 0)} pair(s) above "
             f"{stats.get('sim_threshold', 0):.2f}; "
             f"judged {stats.get('judged', 0)}, "
             f"skipped {stats.get('skipped_already_judged', 0)} already judged")
+    # A partial sweep must say so, or "0 contradictions" reads as a clean bill of
+    # health. Every verdict reached is already recorded, so a re-run continues.
+    stopped = stats.get("stopped_early")
+    if stopped:
+        line += (f"; STOPPED EARLY — {stopped}. Re-run to continue from here "
+                 f"(judged pairs are not re-paid)")
+    return line
 
 
 def print_cross_paper_section(cross_paper: list[dict], stats: dict | None) -> None:

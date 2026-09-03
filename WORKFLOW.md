@@ -118,11 +118,18 @@ researchwiki agent ingest --resume .ingest/batch-<ts>/         # resume after a 
 ```
 
 Passing multiple PDFs to a single invocation enters crash-safe batch mode.
-API-backed providers default to four parallel workers; chat-relay defaults to
-one visible worker because it needs an active conversational responder. Tune
-either with `-w N`. Every completion is recorded atomically under
-`.ingest/batch-<ts>/checkpoint.json`, so a mid-batch crash is recoverable with
-`--resume <batch-dir>` and rerun picks up exactly where it stopped. Don't fan
+API-backed providers — and `--stub`, which reaches no provider at all — default
+to four parallel workers; chat-relay defaults to one visible worker because it
+needs an active conversational responder. Tune either with `-w N`. Every
+completion is recorded atomically under `.ingest/batch-<ts>/checkpoint.json`, so
+a mid-batch crash is recoverable with `--resume <batch-dir>` and rerun picks up
+exactly where it stopped. Resume re-evaluates the active provider: implicit
+defaults follow the current profile, while an explicit `-w N` remains fixed (and
+a resume-time `-w N` wins). A batch started before worker intent was recorded is
+honoured the same way — only a stored `4` is re-resolved, since that was the old
+unconditional default; a stored `1`, `2` or `8` was typed by hand and is kept,
+which matters because `-w 1` is the documented remedy for the Gemini free tier.
+The same policy applies whichever CLI resumes the batch. Don't fan
 out one background Bash per file for API-backed ingestion: that bypasses the
 checkpoint, uncaps concurrency, and multiplies `state.db` write contention.
 Chat-relay's native-subagent exception is described under Provider setup below.
@@ -1258,7 +1265,11 @@ subagents use the sequential, checkpointed batch fallback.
 
 **Caveats:**
 - **Wall clock is bounded by your attention** — each phase blocks on the
-  agent; times out at 10 min/phase if it walks away.
+  agent; times out at 10 min/phase if it walks away. A timeout is retryable
+  (exit 2): answer the prompt still in `pending/`, then run
+  `agent ingest --resume`. The checkpoint is per-PDF, so the paper restarts from
+  the top and re-asks the phases you already answered — don't pre-fill ahead of
+  it ([`prompts/chat-relay.md`](./prompts/chat-relay.md#parallel-ingests--supervised-fan-out)).
 - **Cost dashboards show $0** — tokens aren't measurable through the relay.
 - **Parallelism needs responders** — the safe default is one worker; explicit
   `-w N` needs enough independently monitored responders, preferably one native

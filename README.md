@@ -116,11 +116,17 @@ Chat-relay does not call a model API. It writes each model request under
 `.llm-relay/pending/` and waits for an active Codex, Claude Code, or compatible
 chat agent to write the matching response under `.llm-relay/completed/`. A
 multi-paper chat-relay batch therefore defaults to one worker and mirrors pending
-requests in the parent terminal. Passing `-w N` explicitly permits concurrent
+requests in the parent terminal, labelling abandoned ones so they are not
+answered by mistake. Run it in the foreground — backgrounding hides the mirror. Passing `-w N` explicitly permits concurrent
 relay requests, but the CLI creates only isolated ingest subprocesses—not `N`
 isolated chat contexts. When native subagents are available, the supervising chat
 agent should use one foreground single-PDF ingest per subagent and maintain a
 bounded rolling pool. See [the chat-relay protocol](./prompts/chat-relay.md).
+Batch resumes re-evaluate the active provider while preserving an explicit
+`-w N`. A relay timeout keeps its own pending prompt and is retryable with
+`agent ingest --resume` once that prompt is answered — the checkpoint is
+per-PDF, so the paper restarts from the top rather than from the phase that
+timed out.
 
 `RW_MODELS_CONFIG` selects a model config without defeating its per-role routing; `RW_LLM_PROVIDER` globally overrides every role and should normally remain unset. Keep credentials in mode-`0600` dotenv files and use only endpoints you trust. Model roles, endpoint precedence, profile isolation, local setup, and provider-specific caveats are documented in [Provider setup in depth](./WORKFLOW.md#provider-setup-in-depth).
 

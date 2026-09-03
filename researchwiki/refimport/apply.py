@@ -198,6 +198,7 @@ def dispatch(
     workers: int,
     extra_args: list[str] | None = None,
     relay_watch: bool = False,
+    workers_explicit: bool = True,
 ) -> int:
     """Hand the wave to `_ingest_batch` with per-record overrides.
 
@@ -218,4 +219,5 @@ def dispatch(
         workers,
         per_input_args=per_input,
         relay_watch=relay_watch,
+        workers_explicit=workers_explicit,
     )

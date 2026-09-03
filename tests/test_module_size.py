@@ -123,7 +123,10 @@ _DEBT: dict[str, int] = {
     "researchwiki/agents/runner.py": 817,
     # Metadata reconcile: PDF-side extraction against provider records, plus the
     # sanity gate. The gate is the separable half.
-    "researchwiki/agents/phases/reconcile.py": 661,
+    # +2: house rule 1 (errors.py) — the reconcile phase wrapper must re-raise
+    # EnvironmentFailure so a relay timeout cannot be absorbed into an
+    # empty-metadata return that then files the paper on provider metadata alone.
+    "researchwiki/agents/phases/reconcile.py": 663,
     # Concept candidates: term mining, scoring, triage labelling. Mining and
     # labelling do not need to share a module. Raised 653 -> 656 to count hub
     # membership over contribution sections only, which is what the scaffolder

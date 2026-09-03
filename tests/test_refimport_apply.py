@@ -176,7 +176,13 @@ def test_dispatch_passes_per_record_argv_to_the_batch(wiki, monkeypatch):
     seen = {}
 
     def fake_new_batch(
-        pdfs, subcommand, extra_args, workers, per_input_args=None, relay_watch=False
+        pdfs,
+        subcommand,
+        extra_args,
+        workers,
+        per_input_args=None,
+        relay_watch=False,
+        workers_explicit=True,
     ):
         seen.update(
             pdfs=pdfs,
@@ -184,6 +190,7 @@ def test_dispatch_passes_per_record_argv_to_the_batch(wiki, monkeypatch):
             workers=workers,
             per_input_args=per_input_args,
             relay_watch=relay_watch,
+            workers_explicit=workers_explicit,
         )
         return 0
 
@@ -194,6 +201,7 @@ def test_dispatch_passes_per_record_argv_to_the_batch(wiki, monkeypatch):
     staged = stage([rec(wiki)])
     assert dispatch(staged, workers=3) == 0
     assert seen["subcommand"] == ["agent", "ingest"] and seen["workers"] == 3
+    assert seen["workers_explicit"] is True
     key = str(staged[0][0].resolve())
     assert seen["per_input_args"][key] == [
         "--doi",
@@ -334,6 +342,22 @@ def test_apply_still_passes_per_input_args_under_chat_relay(
     assert kwargs["per_input_args"], "per-paper argv was dropped"
     assert positional[3] == 1
     assert kwargs["relay_watch"] is True
+    assert kwargs["workers_explicit"] is False
+    capsys.readouterr()
+
+
+def test_apply_persists_an_explicit_worker_count(
+    wiki, no_spend, monkeypatch, capsys
+):
+    monkeypatch.setenv("RW_LLM_PROVIDER", "chat-relay")
+    run = write_manifest(wiki, [rec(wiki)])
+    assert import_task.main(
+        ["apply", "--run", str(run), "--workers", "3"]
+    ) == 0
+    ((positional, kwargs),) = [(a, k) for a, k in no_spend]
+    assert positional[3] == 3
+    assert kwargs["relay_watch"] is True
+    assert kwargs["workers_explicit"] is True
     capsys.readouterr()
 
 

@@ -38,6 +38,7 @@ import stat
 import sys
 import unicodedata
 import urllib.parse
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
@@ -774,8 +775,8 @@ def for_role(name: str) -> ModelConfig:
     return cfg
 
 
-def uses_chat_relay() -> bool:
-    """True when any registered phase resolves to the `chat-relay` provider.
+def uses_chat_relay(phases: Iterable[str] | None = None) -> bool:
+    """True when a selected phase resolves to the `chat-relay` provider.
 
     Two ways it can be on, and a caller that checks only the first will miss the
     second: `RW_LLM_PROVIDER=chat-relay` forces every phase (the usual route for a
@@ -783,8 +784,10 @@ def uses_chat_relay() -> bool:
     to it while the rest stay on an API provider. The env check is just a fast
     path — `for_phase` applies that override itself.
 
-    Used to warn before a batch run, where chat-relay's handoff notice would be
-    redirected into a per-worker log file nobody is watching.
+    With no argument, inspect every registered phase (the introspection behavior
+    retained for existing callers).  A command may pass the phases it can
+    actually reach so an unrelated mixed-mode route does not unnecessarily
+    serialize its batch.
     """
     # Always materialize the strict snapshot first. The env fast path used to
     # return before a malformed selected file was read, letting batch workers
@@ -792,7 +795,8 @@ def uses_chat_relay() -> bool:
     _routing_snapshot()
     if _env_provider_override() == "chat-relay":
         return True
-    for name in list_phases():
+    names = list_phases() if phases is None else phases
+    for name in names:
         try:
             if for_phase(name).provider == "chat-relay":
                 return True

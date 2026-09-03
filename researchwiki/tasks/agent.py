@@ -34,6 +34,7 @@ from ..agents.runner import (
 )
 from ..agents.budget import BudgetExhausted
 from ..db.iterations import read_attempt
+from ..errors import EnvironmentFailure
 from ..log import log
 
 
@@ -46,7 +47,6 @@ _BATCH_INCOMPATIBLE_FLAGS = (
     ("supplementary", "--supplementary"),
     ("allow_rename", "--allow-rename"),
 )
-
 
 def _indexed_claim_count(stem: str | None) -> int | None:
     """Best-effort receipt enrichment; never turn a good ingest into a failure."""
@@ -96,39 +96,6 @@ def _print_ingest_receipt(ctx) -> None:
     log(f"committed    = {ctx.committed_path}", tag="agent")
     print("Inspect the trace with:")
     print(f"  researchwiki agent trace {ctx.attempt_id}")
-
-
-def resolve_batch_workers(requested: int | None) -> tuple[int, bool]:
-    """Return ``(workers, relay_watch)`` for an ingest batch.
-
-    API-backed batches retain the historical four-worker default. Chat-relay has
-    no automatic responder pool, so an implicit parallel batch is unsafe: default
-    it to one worker and surface pending prompts from the batch parent. An explicit
-    ``-w`` is deliberate and remains honored.
-
-    Shared with ``import apply``, which dispatches directly into the batch driver.
-    """
-    from ..agents import model_config as _mc
-
-    if not _mc.uses_chat_relay():
-        return (requested if requested is not None else 4), False
-    if requested is None:
-        print(
-            "researchwiki: chat-relay batch defaults to 1 worker; pending relay "
-            "requests will be surfaced here. Pass -w N to explicitly permit "
-            "parallel relay requests. See prompts/chat-relay.md.",
-            file=sys.stderr,
-        )
-        return 1, True
-    if requested > 1:
-        print(
-            f"researchwiki: WARNING — {requested} concurrent chat-relay workers "
-            "explicitly requested. researchwiki creates isolated ingest processes, "
-            "not isolated chat responders; ensure enough responders are actively "
-            "monitoring .llm-relay/pending/. See prompts/chat-relay.md.",
-            file=sys.stderr,
-        )
-    return requested, True
 
 
 def _batch_passthrough_args(args) -> list[str]:
@@ -189,9 +156,16 @@ def _drain_pending_mutations() -> None:
 def _cmd_ingest(args) -> int:
     # --resume takes over completely: the batch dir's plan.json is the
     # source of truth for subcommand + passthrough flags.
-    if args.resume:
-        from . import _ingest_batch
+    from . import _ingest_batch
 
+    # Ahead of --resume: `-w 0` used to reach ThreadPoolExecutor and surface as
+    # exit 3 with a traceback, after the batch dir and plan.json had been written.
+    bad_workers = _ingest_batch.invalid_worker_count(args.workers)
+    if bad_workers:
+        print(f"{_prog()}: {bad_workers}", file=sys.stderr)
+        return 1
+
+    if args.resume:
         return _ingest_batch.resume_batch(
             Path(args.resume).expanduser().resolve(),
             no_retry=args.no_retry,
@@ -219,8 +193,6 @@ def _cmd_ingest(args) -> int:
     # validation only; the returned list is deliberately discarded so that
     # dedup still happens inside `new_batch`, *after* the batch-mode decision
     # below reads the raw argv count.
-    from . import _ingest_batch
-
     _ingest_batch._resolve_inputs(args.pdfs)
 
     # Now the environment. Fail before extraction and reconcile, not in the
@@ -275,14 +247,14 @@ def _cmd_ingest(args) -> int:
                 file=sys.stderr,
             )
             return 1
-        workers, relay_watch = resolve_batch_workers(args.workers)
-        from . import _ingest_batch
-
+        workers, relay_watch = _ingest_batch.resolve_batch_workers(
+            args.workers, subcommand=["agent", "ingest"], stub=args.stub)
         return _ingest_batch.new_batch(
             args.pdfs,
             ["agent", "ingest"],
             _batch_passthrough_args(args),
             workers=workers,
+            workers_explicit=args.workers is not None,
             relay_watch=relay_watch,
         )
 
@@ -427,6 +399,12 @@ def _cmd_ingest(args) -> int:
             file=sys.stderr,
         )
         return 2
+    except EnvironmentFailure:
+        # Preserve the typed exit-code contract.  The top-level CLI maps this
+        # family to code 2, which makes a batch failure retryable.  Catching it
+        # in the generic block below used to turn provider/relay outages into
+        # code 3 (internal bug), so `--resume` refused to run them again.
+        raise
     except Exception as e:
         # Nothing more specific matched, and we're already printing a stack
         # trace — that's the definition of code 3 (internal bug), not an
@@ -580,7 +558,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Concurrent subprocesses in batch mode. Implies batch "
         "mode when set — passing `-w 1` with a single PDF gives "
         "you a checkpoint dir for a serial run. Default: 4 for API "
-        "providers, 1 when any phase uses chat-relay.",
+        "providers and for --stub, 1 when a phase this command reaches "
+        "uses chat-relay.",
     )
     p_ingest.add_argument(
         "--resume",

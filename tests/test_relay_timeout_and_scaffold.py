@@ -15,9 +15,12 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from researchwiki.agents import relay
+from researchwiki.errors import EnvironmentFailure
 
 
 # ---------- RW_RELAY_TIMEOUT ----------
@@ -49,6 +52,70 @@ def test_timeout_is_resolved_per_call_not_at_import(monkeypatch):
     import inspect
     sig = inspect.signature(relay.call_chat_relay)
     assert sig.parameters["timeout"].default is None
+
+
+def test_timeout_is_a_retryable_environment_failure(tmp_path):
+    missing = tmp_path / "missing.response.json"
+    with pytest.raises(relay.RelayTimeout, match="Pending file remains"):
+        relay._poll_until_exists(missing, timeout=0)
+    assert issubclass(relay.RelayTimeout, EnvironmentFailure)
+
+
+def test_timed_out_prompt_can_be_answered_then_reused(tmp_path, monkeypatch):
+    """The deterministic op id turns a timeout into a resumable handoff."""
+    monkeypatch.chdir(tmp_path)
+    phase = "author"
+    prompt = "grounded test prompt"
+    op_id = relay._stable_op_id(phase, prompt)
+    prompt_path, response_path = relay._paths_for(op_id)
+
+    with pytest.raises(relay.RelayTimeout):
+        relay.call_chat_relay(
+            model="gpt-5.6-terra",
+            prompt=prompt,
+            phase=phase,
+            timeout=0,
+        )
+    assert prompt_path.exists()
+
+    response_path.parent.mkdir(parents=True, exist_ok=True)
+    response_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "op_id": op_id,
+                "via": "codex/gpt-5.6-terra",
+                "response": "recovered",
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = relay.call_chat_relay(
+        model="gpt-5.6-terra",
+        prompt=prompt,
+        phase=phase,
+        timeout=0,
+    )
+    assert result.text == "recovered"
+    assert not prompt_path.exists()
+    assert not response_path.exists()
+
+
+def test_agent_cli_maps_relay_timeout_to_exit_2(tmp_path, monkeypatch):
+    """`agent ingest` must not relabel a responder timeout as an internal bug."""
+    from researchwiki.__main__ import main as cli_main
+    from researchwiki.tasks import agent as agent_task
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+
+    def _timeout(*args, **kwargs):
+        raise relay.RelayTimeout("chat-relay responder timed out")
+
+    monkeypatch.setattr(agent_task, "run_ingest", _timeout)
+    assert cli_main(["agent", "ingest", "--stub", str(pdf)]) == 2
 
 
 # ---------- wiki/index.md in the scaffold ----------

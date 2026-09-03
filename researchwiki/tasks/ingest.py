@@ -558,6 +558,10 @@ def main(argv: list[str]) -> int:
     # some callers rely on the ordered per-PDF logs and the final summary
     # line. `-w 1` is legal: gives you a checkpoint dir with one worker.
     if args.workers is not None:
+        from . import _ingest_batch
+        bad_workers = _ingest_batch.invalid_worker_count(args.workers)
+        if bad_workers:
+            parser.error(bad_workers)
         if args.doi_override:
             parser.error("--doi can only be used with a single PDF (drop --workers "
                          "for a targeted single-file invocation)")
@@ -580,9 +584,17 @@ def main(argv: list[str]) -> int:
             extra += ["--category", args.category]
         if args.no_move:
             extra.append("--no-move")
-        from . import _ingest_batch
+        # This path is not provider-free: `process_one` calls
+        # `search.suggest_category`, which resolves `phase="classifier"` through
+        # the configured provider for every paper. Under chat-relay that prompt
+        # is written to `.llm-relay/pending/` and its notice goes to the worker
+        # log, so without `relay_watch` each paper silently blocked for the full
+        # RW_RELAY_TIMEOUT and then fell back to the kNN classifier.
+        workers, relay_watch = _ingest_batch.resolve_batch_workers(
+            args.workers, subcommand=["ingest"])
         return _ingest_batch.new_batch(
-            args.pdfs, ["ingest"], extra, workers=args.workers,
+            args.pdfs, ["ingest"], extra, workers=workers,
+            workers_explicit=True, relay_watch=relay_watch,
         )
 
     if args.doi_override and len(args.pdfs) != 1:

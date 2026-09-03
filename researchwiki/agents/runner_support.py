@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from ..db.iterations import write_iteration
+from ..errors import EnvironmentFailure
 from ..fsatomic import write_text_atomic
 from ..log import log
 from . import fitness, phases
@@ -227,6 +228,15 @@ def run_post_promote_memory_evolution(ctx, conn, *, source_key: str) -> None:
     optional skip rather than a terminal partial-ingest failure. Required
     maintenance runs with enforcement suspended so the paper cannot remain
     half-maintained when promotion itself crosses the wall deadline.
+
+    `EnvironmentFailure` is skipped on the same terms, and for a sharper reason
+    than budget: by the time this runs, the page, the PDF move, the back-links,
+    the `index.md` bullet and the `log.md` entry have all landed. Letting a
+    provider outage or an unanswered chat-relay prompt escape here made the
+    worker exit 2, which `_should_retry` treats as retryable — and since the PDF
+    has already left `inbox/`, `--resume` then filed a complete, twice-gated
+    paper as `unresumable` and advised deleting the page as a half-landed
+    promote. House rule 2 in `errors.py`.
     """
     if ctx.budget_tracker is not None:
         ctx.budget_tracker.resume()
@@ -246,6 +256,23 @@ def run_post_promote_memory_evolution(ctx, conn, *, source_key: str) -> None:
             conn=conn,
         )
         log(f"evolve   → skipped ({exc})", tag="agent")
+    except EnvironmentFailure as exc:
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.suspend()
+        ctx.next_iter()
+        write_iteration(
+            attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,
+            pdf_filename=ctx.pdf_filename, iteration=ctx.iteration,
+            role="memory_evolve", decision="skipped",
+            decision_reason=(
+                f"post-promotion environment failure: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+            conn=conn,
+        )
+        log(f"evolve   → skipped ({type(exc).__name__}: {exc})", tag="agent")
+        log("evolve   → the page is fully promoted; re-run "
+            "`researchwiki evolve` when the provider is reachable", tag="agent")
     finally:
         if ctx.budget_tracker is not None:
             ctx.budget_tracker.suspend()

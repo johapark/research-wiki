@@ -28,6 +28,7 @@ from ...providers.semantic_scholar import SemanticScholarProvider
 from ...index import pages_semantic as semantic_pages
 from ...wiki import read_page, read_wiki_dois
 from .. import llm
+from ...errors import EnvironmentFailure
 from ...log import log
 
 
@@ -345,6 +346,8 @@ def _judge_candidates(
             use_stub=False,
             schema=_JUDGE_SCHEMA,
         )
+    except EnvironmentFailure:
+        raise  # house rule 1 (errors.py): never absorb a provider outage
     except Exception as e:
         log(f"judge call failed: {e}", tag="propose_crosslinks")
         return []
@@ -429,6 +432,8 @@ def _gleaning_pass(
             use_stub=False,
             schema=_JUDGE_SCHEMA,
         )
+    except EnvironmentFailure:
+        raise  # house rule 1 (errors.py): never absorb a provider outage
     except Exception as e:
         log(f"gleaning call failed: {e}", tag="propose_crosslinks")
         return []

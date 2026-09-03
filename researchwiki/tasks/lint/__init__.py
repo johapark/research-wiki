@@ -256,8 +256,14 @@ def main(argv: list[str]) -> int:
             stats=cross_paper_stats,
         )
 
+    # House rule 3 (errors.py): the sweep stops rather than unwinding, so the
+    # ~30 free local checks above still get reported — but the environment
+    # failure that stopped it must keep its exit code 2, or a caller reads a
+    # partial sweep as a clean one. The report is printed either way.
+    cross_paper_halted = bool((cross_paper_stats or {}).get("stopped_early"))
+
     if args.as_json:
-        return _emit_json(
+        code = _emit_json(
             pages=pages, fm_check_ran=fm_check_ran, invalid_fm=invalid_fm,
             orphans=orphans, broken=broken,
             broken_index_bullets=broken_index_bullets,
@@ -290,8 +296,9 @@ def main(argv: list[str]) -> int:
             cross_paper_stats=cross_paper_stats,
             fix_applied=args.fix, fix_written=fix_written,
         )
+        return 2 if cross_paper_halted else code
 
-    return _emit_prose(
+    code = _emit_prose(
         pages=pages, fm_check_ran=fm_check_ran, invalid_fm=invalid_fm,
         orphans=orphans, broken=broken,
         broken_index_bullets=broken_index_bullets,
@@ -324,3 +331,4 @@ def main(argv: list[str]) -> int:
         cross_paper_stats=cross_paper_stats,
         fix_applied=args.fix, fix_written=fix_written,
     )
+    return 2 if cross_paper_halted else code

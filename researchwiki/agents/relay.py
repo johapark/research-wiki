@@ -32,6 +32,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..errors import EnvironmentFailure
 from ..paths import wiki_root
 
 # `LLMResponse` is imported lazily at runtime inside call_chat_relay to dodge the
@@ -69,6 +70,15 @@ def _default_timeout() -> float:
     return val if val > 0 else _RELAY_DEFAULT_TIMEOUT
 _RELAY_POLL_INTERVAL = 0.5        # seconds between existence checks
 _RELAY_MAX_RETRIES = 2            # retries on schema failure; 1 original + 2 retries = 3 attempts
+
+
+class RelayTimeout(EnvironmentFailure):
+    """A chat responder did not answer before the per-prompt deadline.
+
+    The request remains in ``pending/`` and its deterministic op id makes the
+    same run resumable after a response is supplied, so this is an environment
+    failure (exit 2), not an internal bug (exit 3).
+    """
 
 # Counter for fresh-mode op_ids within a single process. Combined with PID
 # this guarantees per-call uniqueness when the user opts out of cache reuse.
@@ -118,6 +128,12 @@ def set_relay_identity(*, stem: str | None = None, pdf: str | None = None) -> No
 def _relay_dir() -> Path:
     """Lazy resolver — wiki_root() may not be valid at module import time."""
     return wiki_root() / ".llm-relay"
+
+
+def pending_dir() -> Path:
+    """Directory holding un-answered requests. Public: the batch parent mirrors
+    it, and must not hand-build the path (see `format_handoff_message`)."""
+    return _relay_dir() / "pending"
 
 
 def _paths_for(op_id: str) -> tuple[Path, Path]:
@@ -170,7 +186,7 @@ def _poll_until_exists(path: Path, timeout: float) -> None:
     deadline = time.monotonic() + timeout
     while not path.exists():
         if time.monotonic() > deadline:
-            raise RuntimeError(
+            raise RelayTimeout(
                 f"chat-relay: no response in {timeout:.0f}s for {path.name}. "
                 f"Pending file remains; write the response file and retry, "
                 f"or `rm` the pending file to abandon."
@@ -178,17 +194,51 @@ def _poll_until_exists(path: Path, timeout: float) -> None:
         time.sleep(_RELAY_POLL_INTERVAL)
 
 
+def format_handoff_message(prompt_path: Path, response_path: Path,
+                          phase: str | None, timeout: float,
+                          retry_of: str | None = None,
+                          *, paper: str | None = None,
+                          stale_age: float | None = None) -> str:
+    """Render the pending-prompt notice.
+
+    Shared with `tasks._ingest_batch`, which mirrors this notice from the batch
+    parent because `_worker` redirects each child's stderr into a per-paper log.
+    Two copies of the wording would drift — the first pair already did, dropping
+    the deadline and the retry marker — so the mirror calls this instead.
+
+    `paper` is for the mirror only: a worker is a single-paper process and its
+    own terminal needs no disambiguation, so omitting it keeps the in-process
+    notice byte-identical to what it has always printed. `stale_age`, also
+    mirror-only, marks a request left behind by a run that is already gone.
+    """
+    tag = f"{phase or 'ad-hoc'}"
+    if retry_of:
+        tag += f", retry of {retry_of}"
+    who = f" {paper}" if paper else ""
+    if stale_age is not None:
+        hours, rem = divmod(int(stale_age), 3600)
+        age = f"{hours}h{rem // 60:02d}m" if hours else f"{rem // 60}m"
+        return (
+            f"⏳ LLM relay STALE [{tag}]{who} → {prompt_path}\n"
+            f"   Written {age} ago, before this run started — most likely "
+            f"abandoned by a CLI that has since exited.\n"
+            f"   Do not answer it speculatively; `rm` it, or leave it and let "
+            f"the owning run be resumed."
+        )
+    return (
+        f"📨 LLM relay pending [{tag}]{who} → {prompt_path}\n"
+        f"   Awaiting response at {response_path} (timeout {timeout:.0f}s)"
+    )
+
+
 def _emit_handoff_message(prompt_path: Path, response_path: Path,
                           phase: str | None, timeout: float,
                           retry_of: str | None = None) -> None:
     """Print a single human-readable line to stderr so the user (and any
     chat agent watching the terminal) knows a prompt is waiting."""
-    tag = f"{phase or 'ad-hoc'}"
-    if retry_of:
-        tag += f", retry of {retry_of}"
     print(
-        f"📨 LLM relay pending [{tag}] → {prompt_path}\n"
-        f"   Awaiting response at {response_path} (timeout {timeout:.0f}s)",
+        format_handoff_message(prompt_path, response_path, phase, timeout,
+                               retry_of),
         file=sys.stderr,
         flush=True,
     )

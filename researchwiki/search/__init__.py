@@ -16,6 +16,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
+from ..errors import EnvironmentFailure
 from ..wiki import extract_section, read_pages
 from ..index.types import (
     Document,
@@ -279,6 +280,10 @@ def suggest_category_llm(
             prompt=prompt,
             system=_classifier_system(),
         )
+    except EnvironmentFailure:
+        # House rule 1 (errors.py). Without this the digest ingest path silently
+        # fell back to the kNN classifier after a full relay timeout per paper.
+        raise
     except Exception:
         return None
 

@@ -412,8 +412,14 @@ def _render_report(
 
 
 def _run_apply(args: argparse.Namespace) -> int:
+    from . import _ingest_batch
     from ..refimport.apply import dispatch, plan_wave, stage
     from ..refimport.manifest import open_run_dir
+
+    bad_workers = _ingest_batch.invalid_worker_count(args.workers)
+    if bad_workers:
+        print(f"researchwiki import apply: {bad_workers}", file=sys.stderr)
+        return 1
 
     try:
         run = open_run_dir(Path(args.run))
@@ -471,9 +477,10 @@ def _run_apply(args: argparse.Namespace) -> int:
 
     # Resolve the provider-aware default before the preview: API-backed waves use
     # four workers, while chat-relay stays sequential unless the user supplied -w.
-    from .agent import resolve_batch_workers
+    from . import _ingest_batch
 
-    workers, relay_watch = resolve_batch_workers(args.workers)
+    workers, relay_watch = _ingest_batch.resolve_batch_workers(
+        args.workers, subcommand=["agent", "ingest"])
 
     staged = stage(plan.staged, dry_run=args.dry_run)
     print(
@@ -501,7 +508,12 @@ def _run_apply(args: argparse.Namespace) -> int:
         )
         return 0
 
-    code = dispatch(staged, workers=workers, relay_watch=relay_watch)
+    code = dispatch(
+        staged,
+        workers=workers,
+        relay_watch=relay_watch,
+        workers_explicit=args.workers is not None,
+    )
     if code:
         print(
             "\nImport wave failed. Use the batch runner's resume command above; "
@@ -738,7 +750,8 @@ def build_parser() -> argparse.ArgumentParser:
         "-w",
         type=int,
         default=None,
-        help="Concurrent ingest subprocesses (default: 4; chat-relay: 1)",
+        help="Concurrent ingest subprocesses (default: 4, or 1 when a phase "
+             "this command reaches uses chat-relay)",
     )
 
     ver = sub.add_parser("verify", help="Did the import land, and what's left?")

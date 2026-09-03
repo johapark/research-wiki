@@ -33,6 +33,7 @@ Pattern lifted from hermes-agent `batch_runner.py::BatchRunner`.
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import datetime as _dt
 import hashlib
 import json
@@ -42,7 +43,10 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
+
+from ..errors import EnvironmentFailure
 
 
 def _now_iso() -> str:
@@ -132,39 +136,124 @@ def _worker(
     return {"input": pdf_path, "status": status, "returncode": proc.returncode}
 
 
-def _watch_relay_prompts(stop: threading.Event, seen: set[Path]) -> None:
-    """Mirror newly-created relay requests to the batch parent's stderr.
+#: A pending request older than this was written by a run that is almost
+#: certainly gone. `prompts/chat-relay.md` tells responders not to answer those
+#: speculatively, so the mirror has to label them rather than list them as live.
+_RELAY_STALE_AFTER = 3600.0
 
-    Worker output remains in per-paper logs; this narrow watcher restores only the
-    handoff signal an interactive responder needs. Existing files are surfaced too:
-    deterministic op ids intentionally reuse a pending request after a CLI crash.
+_RELAY_POLL_INTERVAL = 0.25
+
+
+def _scan_relay_prompts(seen: dict[Path, float]) -> list[str]:
+    """Return handoff notices for requests `seen` has not announced yet.
+
+    Split out from the polling thread so it can be tested by calling it, with no
+    thread, no sleep and no cross-thread capture of stderr.
+
+    `seen` maps prompt path -> mtime and is mutated in place. Keying on the mtime
+    as well as the path is what makes a *re-created* request visible: op ids are
+    content-addressed and `call_chat_relay` unlinks the pair on success, so the
+    identical path legitimately reappears (`phases.commit` retries `keywords`
+    with the same prompt, which derives the same op id). A path-only set
+    announced that once and stayed silent forever after.
+
+    Nothing is recorded until its notice has been built, so a request whose first
+    read fails transiently — ESTALE on a synced wiki root, a Windows
+    PermissionError racing `os.replace` — is retried on the next tick instead of
+    being marked announced and then dropped.
     """
-    from ..paths import wiki_root
+    from ..agents import relay
 
-    pending = wiki_root() / ".llm-relay" / "pending"
-    while not stop.wait(0.25):
+    pending = relay.pending_dir()
+    try:
+        entries = sorted(pending.glob("*.prompt.json"))
+    except OSError:
+        return []
+
+    live = set()
+    out: list[str] = []
+    now = time.time()
+    for path in entries:
         try:
-            paths = sorted(pending.glob("*.prompt.json"))
+            mtime = path.stat().st_mtime
         except OSError:
             continue
-        for path in paths:
-            if path in seen:
-                continue
-            seen.add(path)
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-                op_id = payload.get("op_id") or path.name.removesuffix(".prompt.json")
-                phase = payload.get("phase") or "ad-hoc"
-                paper = payload.get("stem") or payload.get("pdf") or "unknown paper"
-            except (OSError, json.JSONDecodeError):
-                continue
-            response = pending.parent / "completed" / f"{op_id}.response.json"
-            print(
-                f"📨 LLM relay pending [{phase}] {paper} → {path}\n"
-                f"   Awaiting response at {response}",
-                file=sys.stderr,
-                flush=True,
-            )
+        live.add(path)
+        if seen.get(path) == mtime:
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError(f"prompt payload is {type(payload).__name__}")
+            op_id = payload.get("op_id") or path.name.removesuffix(".prompt.json")
+            paper = payload.get("stem") or payload.get("pdf") or "unknown paper"
+            _, response = relay._paths_for(op_id)
+            age = now - mtime
+            out.append(relay.format_handoff_message(
+                path, response, payload.get("phase"), relay._default_timeout(),
+                payload.get("retry_of"),
+                paper=Path(str(paper)).name,
+                stale_age=age if age > _RELAY_STALE_AFTER else None,
+            ))
+        except Exception:
+            # Deliberately broad, and deliberately without recording `path`.
+            # A malformed or half-visible request must cost one tick, not the
+            # mirror: the narrow `(OSError, JSONDecodeError)` this replaces let
+            # UnicodeDecodeError and a non-object payload's AttributeError kill
+            # the thread, after which every later paper ran unmirrored while
+            # `relay_watch` still claimed otherwise.
+            continue
+        seen[path] = mtime
+
+    for gone in [p for p in seen if p not in live]:
+        del seen[gone]
+    return out
+
+
+def _watch_relay_prompts(stop: threading.Event,
+                         seen: dict[Path, float] | None = None,
+                         *, interval: float = _RELAY_POLL_INTERVAL) -> None:
+    """Mirror relay requests to the batch parent's stderr until `stop` is set.
+
+    Worker output stays in per-paper logs; this restores only the handoff signal
+    an interactive responder needs. Scans before its first wait, so a request
+    already on disk is announced immediately rather than one interval late.
+    """
+    seen = {} if seen is None else seen
+    while True:
+        try:
+            for message in _scan_relay_prompts(seen):
+                print(message, file=sys.stderr, flush=True)
+        except Exception:
+            # The mirror is an aid, never a gate. Even a failure the scan could
+            # not contain (a stderr that has gone away) must not silently retire
+            # the thread and leave `relay_watch` lying about what is visible.
+            pass
+        if stop.wait(interval):
+            return
+
+
+@contextlib.contextmanager
+def _mirror_relay_prompts(enabled: bool):
+    """Run `_watch_relay_prompts` for the duration of the block, or nothing.
+
+    A context manager rather than an inline try/finally so the pool below keeps
+    its original indentation: the alternative wrapped ~60 lines of SIGINT and
+    checkpoint-flush handling in a new `try`, which reindents the subtlest code
+    in this module for a two-line concern.
+    """
+    if not enabled:
+        yield
+        return
+    stop = threading.Event()
+    thread = threading.Thread(target=_watch_relay_prompts, args=(stop,),
+                              name="relay-prompt-watcher", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=1.0)
 
 
 def _split_unresumable(
@@ -392,18 +481,7 @@ def _run_batch(
     except (ValueError, OSError):
         prev_sigint = None
     installed_dfl = False
-    relay_stop = threading.Event()
-    relay_thread: threading.Thread | None = None
-    if relay_watch:
-        relay_thread = threading.Thread(
-            target=_watch_relay_prompts,
-            args=(relay_stop, set()),
-            name="relay-prompt-watcher",
-            daemon=True,
-        )
-        relay_thread.start()
-
-    try:
+    with _mirror_relay_prompts(relay_watch):
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             # Per-input flags are composed at submit time rather than passed
             # down, so `_worker` keeps its signature and every existing caller and
@@ -482,11 +560,6 @@ def _run_batch(
                         )
                     except (ValueError, OSError):
                         pass
-    finally:
-        relay_stop.set()
-        if relay_thread is not None:
-            relay_thread.join(timeout=1.0)
-
     if interrupted:
         resume_cmd = f"researchwiki {' '.join(subcommand)} --resume {batch_dir}"
         print(
@@ -502,6 +575,100 @@ def _run_batch(
     return 0 if not (state["failed"] or state.get("unresumable")) else 1
 
 
+# ---------- provider-aware worker policy ----------
+
+#: Historical default, and still the right one for an API-backed batch.
+_DEFAULT_WORKERS = 4
+
+#: Phases an `agent ingest` worker can reach, including the optional
+#: promotion/debug/post-ingest hooks. Deliberately narrower than every
+#: registered phase: routing an unrelated synthesis or evaluation command
+#: through chat-relay must not serialize an otherwise API-backed ingest.
+#: `tests/test_chat_relay_batch_guard.py` pins this against the live registry,
+#: because `uses_chat_relay` skips names it cannot resolve — so a phase renamed
+#: without updating this set would fail open to four unmirrored workers.
+_INGEST_LLM_PHASES = frozenset({
+    "author",
+    "claim_overlap_judge",
+    "claim_support",
+    "classifier",
+    "critic",
+    "cross_paper_judge",
+    "debug",
+    "evolve",
+    "keywords",
+    "link_generation",
+    "memory_evolution",
+    "reconcile",
+    "target_claims",
+})
+
+#: The digest path (`researchwiki ingest`) authors no prose, but it is *not*
+#: provider-free: `tasks.ingest` calls `search.suggest_category`, which resolves
+#: `phase="classifier"` through the configured provider for every paper.
+_DIGEST_LLM_PHASES = frozenset({"classifier"})
+
+
+def _llm_phases_for(subcommand: list[str]) -> frozenset[str]:
+    """Phases a worker running `subcommand` can actually reach."""
+    return _DIGEST_LLM_PHASES if list(subcommand) == ["ingest"] else _INGEST_LLM_PHASES
+
+
+def resolve_batch_workers(requested: int | None, *, subcommand: list[str],
+                          stub: bool = False) -> tuple[int, bool]:
+    """Return ``(workers, relay_watch)`` for a batch of `subcommand` workers.
+
+    Owned by the batch driver rather than by one CLI, because every entry point
+    that can start or resume a batch needs the same answer: `agent ingest`,
+    `import apply`, `researchwiki ingest`, and `resume_batch` reading a plan
+    written by any of them. When this policy lived in `tasks.agent` and reached
+    `resume_batch` as an injected callback, the two callers that did not inject
+    it silently kept a stale one — a digest batch never mirrored prompts at all,
+    and `researchwiki ingest --resume` on an `agent ingest` batch ran four
+    unmirrored chat-relay workers.
+
+    `stub` short-circuits: `--stub` never reaches a provider, so serializing it
+    and promising to surface relay prompts would both be false.
+    """
+    if stub:
+        return (requested if requested is not None else _DEFAULT_WORKERS), False
+
+    from ..agents import model_config as _mc
+
+    if not _mc.uses_chat_relay(_llm_phases_for(subcommand)):
+        return (requested if requested is not None else _DEFAULT_WORKERS), False
+    if requested is None:
+        print(
+            "researchwiki: chat-relay batch defaults to 1 worker; pending relay "
+            "requests will be surfaced here. Pass -w N to explicitly permit "
+            "parallel relay requests. See prompts/chat-relay.md.",
+            file=sys.stderr,
+        )
+        return 1, True
+    if requested > 1:
+        print(
+            f"researchwiki: WARNING — {requested} concurrent chat-relay workers "
+            "explicitly requested. researchwiki creates isolated ingest processes, "
+            "not isolated chat responders; ensure enough responders are actively "
+            "monitoring .llm-relay/pending/. See prompts/chat-relay.md.",
+            file=sys.stderr,
+        )
+    return requested, True
+
+
+def invalid_worker_count(requested: int | None) -> str | None:
+    """Message when `--workers N` is unusable, else None.
+
+    `ThreadPoolExecutor(max_workers=0)` raises, which the CLI funnel reports as
+    exit 3 "internal bug" for what is plainly a bad command line — after the
+    batch dir and plan.json have already been written. Every entry point shares
+    this so the answer cannot differ between them.
+    """
+    if requested is not None and requested < 1:
+        return f"--workers/-w must be greater than zero (got {requested})"
+    return None
+
+
 # ---------- public entry points ----------
 
 
@@ -512,6 +679,7 @@ def new_batch(
     workers: int,
     per_input_args: dict[str, list[str]] | None = None,
     relay_watch: bool = False,
+    workers_explicit: bool = True,
 ) -> int:
     """Create a fresh batch dir, drive the ingest pool. Returns exit code.
 
@@ -527,6 +695,10 @@ def new_batch(
     input, which is the whole point of importing from a reference manager, and
     that case the guard was never about. Keys are the same absolute paths
     `_resolve_inputs` produces, so `--resume` still works from any cwd.
+
+    `workers_explicit` records intent separately from the effective worker
+    count.  Provider defaults are re-resolved on resume (API=4, chat-relay=1),
+    while a user-supplied `-w N` remains N across provider switches.
     """
     resolved = _resolve_inputs(pdfs)
     batch_dir = _batch_dir_for_new_run()
@@ -534,6 +706,7 @@ def new_batch(
         "started_at": _now_iso(),
         "subcommand": subcommand,
         "workers": workers,
+        "workers_explicit": workers_explicit,
         "inputs": resolved,
         "extra_args": extra_args,
         "per_input_args": per_input_args or {},
@@ -552,7 +725,9 @@ def new_batch(
 
 
 def resume_batch(
-    batch_dir: Path, no_retry: bool, workers_override: int | None = None
+    batch_dir: Path,
+    no_retry: bool,
+    workers_override: int | None = None,
 ) -> int:
     """Continue an interrupted batch. Reads plan.json for its subcommand +
     passthrough flags so semantics don't drift across a restart.
@@ -644,10 +819,47 @@ def resume_batch(
                 del state["failed"][pdf]
         _write_checkpoint(batch_dir, state)
 
-    workers = (
-        workers_override if workers_override is not None else plan.get("workers", 4)
-    )
     subcommand = plan.get("subcommand", ["agent", "ingest"])  # legacy default
+    stored_workers = plan.get("workers", _DEFAULT_WORKERS)
+    if workers_override is not None:
+        requested_workers = workers_override
+    elif "workers_explicit" in plan:
+        requested_workers = stored_workers if plan["workers_explicit"] else None
+    elif stored_workers == _DEFAULT_WORKERS:
+        # Legacy plan, written before intent was recorded. A stored four is
+        # genuinely ambiguous with the old unconditional default, so re-resolve
+        # it — that is what lets a batch started under an API profile finish
+        # safely after a switch to chat-relay.
+        requested_workers = None
+    else:
+        # Any other stored count was typed by hand: nothing ever chose 1, 2 or 8
+        # on the user's behalf. Re-resolving these escalated a deliberate
+        # `-w 1` — which CLAUDE.md prescribes for the Gemini free tier and for
+        # z.ai's 429-prone parallel phase — back up to four on resume.
+        requested_workers = stored_workers
+
+    # `--stub` lives in the plan's passthrough args, since resume has no argv of
+    # its own to read it from.
+    stub = "--stub" in (plan.get("extra_args") or [])
+    try:
+        workers, relay_watch = resolve_batch_workers(
+            requested_workers, subcommand=subcommand, stub=stub)
+    except EnvironmentFailure as exc:
+        # Resuming must not require a healthy provider config. Reading the
+        # routing snapshot is new here, and on its own it turned an unparseable
+        # RW_MODELS_CONFIG into "this half-finished batch cannot be resumed at
+        # all" — including for a --stub batch the config is irrelevant to.
+        # Fall back to what the plan recorded and say so; the workers themselves
+        # will report the config failure per paper, which is checkpointed.
+        workers = requested_workers if requested_workers is not None else stored_workers
+        relay_watch = plan.get("relay_watch", False)
+        print(
+            f"ingest-batch: could not re-check provider routing "
+            f"({type(exc).__name__}: {exc});\n"
+            f"  resuming with the plan's recorded {workers} worker(s). Fix the "
+            f"config if the workers below fail.",
+            file=sys.stderr,
+        )
     # `.get` with a default, so a batch dir written before per-input args
     # existed still resumes — the key is additive, not a schema bump.
     return _run_batch(
@@ -657,5 +869,5 @@ def resume_batch(
         subcommand,
         plan.get("extra_args", []),
         plan.get("per_input_args", {}),
-        plan.get("relay_watch", False),
+        relay_watch,
     )

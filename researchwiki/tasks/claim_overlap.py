@@ -39,6 +39,7 @@ import time
 from typing import Callable
 
 from ..backlinks import append_related_paper
+from ..errors import EnvironmentFailure
 from ..log import log
 from ..wiki import read_pages
 
@@ -822,6 +823,7 @@ def _run_backlog(args) -> int:
           + (" — DRY RUN, no links written" if args.dry_run else ""))
 
     results, failed = [], []
+    stopped_early: str | None = None
     tot = {"candidates": 0, "judged": 0, "confirmed": 0, "edge_only": 0}
     for i, stem in enumerate(pending, 1):
         try:
@@ -831,6 +833,15 @@ def _run_backlog(args) -> int:
             # In the DB but not on disk — a page deleted without a rebuild.
             failed.append((stem, "no wiki page"))
             continue
+        except EnvironmentFailure as exc:
+            # House rule 3 (errors.py): stop draining, report what landed.
+            # `run` records coverage only on a complete stem, so this stem stays
+            # in the backlog and is retried whole — but the stems before it are
+            # already committed, and letting this unwind threw away their
+            # summary. Continuing instead would pay a fresh timeout per
+            # remaining stem for a responder who has plainly gone away.
+            stopped_early = f"{type(exc).__name__}: {exc}"
+            break
         results.append(r)
         edge_only = len(r.get("edge_only", []))
         judged = len(r["applied"]) + edge_only + len(r["coincidence"])
@@ -849,8 +860,9 @@ def _run_backlog(args) -> int:
     if args.json:
         print(json.dumps({"pending": len(pending), "withheld": withheld,
                           "totals": tot, "failed": failed,
+                          "stopped_early": stopped_early,
                           "results": results}, ensure_ascii=False, indent=2))
-        return 0
+        return 0 if stopped_early is None else 2
 
     print(f"\n  {len(results)} stem(s) processed: {tot['candidates']} candidate(s), "
           f"{tot['judged']} judged, {tot['confirmed']} confirmed link(s), "
@@ -860,9 +872,15 @@ def _run_backlog(args) -> int:
     if not args.dry_run and tot["confirmed"]:
         print("  links written to both pages — run `researchwiki db rebuild && "
               "researchwiki reindex`")
+    if stopped_early:
+        print(f"\n  ! STOPPED EARLY after {len(results)} of {len(pending)} "
+              f"stem(s) — {stopped_early}", file=sys.stderr)
+        print(f"  Remaining stems are still in the backlog; re-run "
+              f"`researchwiki claim-overlap --backlog` to continue "
+              f"(processed stems are not re-paid).", file=sys.stderr)
     log(f"claim-overlap backlog: {len(results)} stem(s), {tot['confirmed']} link(s) "
         f"{'(dry-run)' if args.dry_run else 'applied'}", tag="claim-overlap")
-    return 0
+    return 0 if stopped_early is None else 2
 
 
 def main(argv: list[str]) -> int:

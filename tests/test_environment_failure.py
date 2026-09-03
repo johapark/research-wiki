@@ -385,3 +385,140 @@ def test_claim_graph_reconcile_closes_edges_when_the_db_fails(monkeypatch):
     with pytest.raises(StateDBUnavailable):
         mod._run_reconcile(as_json=False)
     assert closed, "edges DB was leaked when get_connection failed"
+
+
+# ---------- the three house rules (errors.py module docstring) ----------
+#
+# `EnvironmentFailure` only changes the outcome for an exception nobody catches,
+# so what a call site does with it is the whole contract. These pin the three
+# categories the docstring names, because each one was violated somewhere before
+# `RelayTimeout` made a relay timeout a typed failure and exposed all three.
+
+
+def _relay_timeout():
+    from researchwiki.agents.relay import RelayTimeout
+
+    return RelayTimeout("chat-relay: no response in 600s for abc.response.json")
+
+
+def test_relay_timeout_is_a_typed_environment_failure():
+    from researchwiki.agents.relay import RelayTimeout
+
+    assert issubclass(RelayTimeout, EnvironmentFailure)
+
+
+# --- rule 1: a phase wrapper propagates ---
+
+@pytest.mark.parametrize(
+    ("module", "func", "kwargs"),
+    [
+        ("researchwiki.agents.phases.reconcile", "propose_metadata_llm",
+         {"pdf_text": "Some paper text long enough to pass the empty check."}),
+        ("researchwiki.agents.phases.commit", "propose_keywords",
+         {"metadata": {"title": "A Title"}, "draft_text": "## Summary\nA summary."}),
+        ("researchwiki.agents.phases.commit", "propose_short_name",
+         {"metadata": {"title": "A Title"}, "draft_text": "## Summary\nA summary."}),
+    ],
+)
+def test_phase_wrapper_does_not_absorb_a_provider_failure(
+    monkeypatch, module, func, kwargs
+):
+    """Rule 1. Swallowing here is the worst outcome available: the command exits
+    0 having written a degraded artefact — a page with `keywords: []`, or a paper
+    filed from provider metadata with the extraction step silently skipped —
+    that is indistinguishable from a good one."""
+    import importlib
+
+    mod = importlib.import_module(module)
+    monkeypatch.setattr(
+        mod.llm, "call", lambda *a, **k: (_ for _ in ()).throw(_relay_timeout())
+    )
+    fn = getattr(mod, func)
+    with pytest.raises(EnvironmentFailure):
+        fn(**kwargs)
+
+
+def test_classifier_does_not_absorb_a_provider_failure(monkeypatch):
+    """Rule 1, and the one that made a digest-path batch look idle: the fallback
+    to the kNN classifier fired after a full relay timeout per paper."""
+    from researchwiki import search
+    from researchwiki.agents import llm
+
+    monkeypatch.setattr(
+        llm, "call", lambda *a, **k: (_ for _ in ()).throw(_relay_timeout())
+    )
+
+    class _Backend:
+        def more_like_text(self, *a, **k):
+            return []
+
+    with pytest.raises(EnvironmentFailure):
+        search.suggest_category_llm(_Backend(), "A title", "An abstract")
+
+
+def test_judge_wrapper_is_the_reference_implementation(monkeypatch):
+    """Rule 1's canonical shape: parse misses degrade, typed failures do not."""
+    from researchwiki.agents import judge, llm
+
+    monkeypatch.setattr(llm, "call", lambda *a, **k: (_ for _ in ()).throw(ValueError("boom")))
+    assert judge.run_llm_judge(phase="cross_paper_judge", system="s", prompt="p") is None
+
+    monkeypatch.setattr(
+        llm, "call", lambda *a, **k: (_ for _ in ()).throw(_relay_timeout())
+    )
+    with pytest.raises(EnvironmentFailure):
+        judge.run_llm_judge(phase="cross_paper_judge", system="s", prompt="p")
+
+
+# --- rule 2: optional work records a skip ---
+
+def test_post_promote_evolution_records_a_skip_rather_than_failing(monkeypatch):
+    """Rule 2. By the time this runs the page, the PDF move, the back-links, the
+    index.md bullet and the log.md entry have all landed. Letting a provider
+    outage escape made the worker exit 2 — which `_should_retry` treats as
+    retryable — and since the PDF has left inbox/, `--resume` then filed a
+    complete, twice-gated paper as `unresumable` and advised deleting the page.
+    """
+    from researchwiki.agents import runner_support
+
+    written: list[dict] = []
+    monkeypatch.setattr(runner_support, "write_iteration",
+                        lambda **kw: written.append(kw))
+    monkeypatch.setattr(
+        runner_support.phases, "evolve_memory",
+        lambda *a, **k: (_ for _ in ()).throw(_relay_timeout()),
+    )
+
+    class _Ctx:
+        budget_tracker = None
+        attempt_id = "att"
+        paper_stem = "smith-2024-a-paper"
+        pdf_filename = "smith.pdf"
+        iteration = 7
+
+        def next_iter(self):
+            self.iteration += 1
+
+    runner_support.run_post_promote_memory_evolution(
+        _Ctx(), None, source_key="cgt/smith-2024-a-paper")
+
+    assert len(written) == 1, "the skip must be recorded, not just swallowed"
+    assert written[0]["decision"] == "skipped"
+    assert "environment failure" in written[0]["decision_reason"]
+    assert "RelayTimeout" in written[0]["decision_reason"]
+
+
+# --- rule 3: loops stop and report ---
+# The sweep itself is pinned in `test_lint_cross_paper.py`, which owns the
+# real claims-DB harness; this is the report side.
+
+def test_lint_keeps_exit_2_when_the_sweep_halts():
+    """The report is printed, but the environment failure keeps its exit code —
+    otherwise a caller reads a partial sweep as a clean bill of health."""
+    from researchwiki.tasks.lint.report_cross_paper import _coverage_line
+
+    line = _coverage_line({"pool": 50, "judged": 6, "skipped_already_judged": 0,
+                           "sim_threshold": 0.85,
+                           "stopped_early": "RelayTimeout: no response in 600s"})
+    assert "STOPPED EARLY" in line
+    assert "Re-run to continue" in line

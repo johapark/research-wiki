@@ -221,6 +221,23 @@ RW_RELAY_TIMEOUT=2400 RW_LLM_PROVIDER=chat-relay \
 So concurrent ingests produce concurrent pending files and you may answer
 them in parallel — the throughput limit is you, not the protocol.
 
+If the deadline expires, the ingest exits as a retryable environment failure
+(exit 2) and leaves *its own* prompt in `pending/`. Answer **that** prompt, then
+run the batch's printed `agent ingest --resume <batch-dir>` command.
+
+Know what resume actually replays before you rely on it. The checkpoint is
+per-PDF, not per-phase, so the paper restarts **from the top** — and
+`call_chat_relay` unlinks both files once it consumes a response, so every phase
+you already answered is gone from disk and will be asked again. Only the phase
+that timed out still has its prompt, and only its op_id is guaranteed to
+re-derive: op_id is `sha1(phase|prompt)[:12]`, and a later phase's prompt embeds
+earlier output — the author prompt carries reconcile's metadata and a fresh
+semantic-KNN sweep of `wiki/`. So if you hand-write a reconcile answer that
+differs by a character, or a sibling paper in the same batch promotes in the
+meantime, the author op_id shifts and a response you pre-wrote for the old one is
+never read. Answer the outstanding prompt and let the resumed run ask for the
+rest; do not pre-fill ahead of it.
+
 (An earlier version of this document claimed the relay grabs
 `.llm-relay/lock`, so parallel ingests serialized on chat-relay phases.
 That lock never existed. The only `flock`s in the package guard
@@ -231,6 +248,9 @@ providers retain their four-worker default). The batch parent mirrors every new
 pending request to its terminal, so a sequential, checkpointed batch can be
 serviced by the active chat agent. Passing `-w N` explicitly opts into N
 concurrent relay requests; it does not create N isolated chat responders.
+Batch plans record whether `-w N` was explicit. Resume re-evaluates the active
+provider, so an implicit API batch switched to chat-relay becomes one visible
+worker; an explicit count stays explicit. A resume-time `-w N` overrides both.
 
 **When native subagents are available, parallelize with one foreground
 single-PDF invocation per subagent.** Use a bounded rolling pool no larger than
@@ -254,12 +274,20 @@ appropriate only when enough responders independently monitor
 `.llm-relay/pending/`; sharing one conversational responder across papers does
 not provide context isolation.
 
+Run the batch in the **foreground**. The parent's mirror is the only channel
+that still exists once `_worker` redirects each child's stderr into a per-paper
+log, so a backgrounded batch hides the prompt you have to answer and then times
+out on every phase.
+
 This is the documented exception to `CLAUDE.md`'s "never fan out one Bash task
 per file" rule, which assumes an API provider. Keep the pool bounded (normally
 around 3–4), and treat `inbox/` as the fallback recovery record: anything still
 there did not land. A failed paper is re-run from the top; paper-specific
 post-ingest work stays with its owning subagent, while corpus-wide maintenance
-runs once after all paper workers finish.
+runs once after all paper workers finish. (Batch mode's checkpoint is per-PDF,
+not per-phase, so a crashed or timed-out ingest re-runs from the top under either
+approach — what you get from batch mode is the checkpoint and `--resume`, not
+per-phase resumption.)
 
 Every payload names its own paper, so ownership never needs guessing:
 
@@ -290,11 +318,34 @@ to the op_id, breaking the cache for that one command.
 
 ## Stale pending files
 
-If `.llm-relay/pending/` accumulates files older than ~1 hour, those are
-probably abandoned (the CLI process died and the user moved on). Don't
-respond to them speculatively — the user can clean them up with
-`researchwiki relay clean --ttl 1h` (when phase 3 lands) or `rm` them
-manually.
+A request older than ~1 hour was almost certainly abandoned by a CLI that has
+since exited. **You do not have to guess which:** the batch parent labels them
+for you. A live request reads
+
+```
+📨 LLM relay pending [author] smith-2024-... → .llm-relay/pending/ab12cd34ef56.prompt.json
+   Awaiting response at .llm-relay/completed/ab12cd34ef56.response.json (timeout 600s)
+```
+
+and an abandoned one reads `⏳ LLM relay STALE [...]` with its age and no
+response path. Answer the first shape only.
+
+**Never answer a stale request speculatively.** Nothing is waiting for it, so the
+`completed/{op_id}.response.json` you write is never consumed — and because
+op_ids are content-addressed it stays on disk as a *cache hit* for any later
+byte-identical prompt. A re-ingest of that paper then silently adopts a category
+or keyword set you wrote for a run somebody deliberately abandoned, with no
+pending file and no handoff line to reveal it. `RW_RELAY_FRESH=1` is the only
+override, and nothing prompts you to reach for it.
+
+There is no cleanup subcommand — `researchwiki relay clean` does not exist and no
+release has shipped it. Stale files are removed by hand:
+
+```bash
+find .llm-relay/pending -name '*.prompt.json' -mmin +60 -delete
+```
+
+Do the same for anything left in `.llm-relay/completed/` that no run consumed.
 
 The filesystem protocol is the only interface — poll `.llm-relay/pending/`
 and write responses there directly. There is no server or tool plugin to
