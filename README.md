@@ -57,7 +57,7 @@ Choose one guided setup path:
 - Open the clone in Claude Code, Codex, or another compatible shell-enabled chat agent, then say: **“Initialize this research wiki.”**
 - Run the interactive wizard: `researchwiki init`.
 
-Both paths configure the provider and create the wiki directories and dashboard. For non-interactive setup, `researchwiki init --scaffold-only` creates the directory and dashboard scaffold without configuring a provider or asking questions. On an existing wiki, `researchwiki init --refresh-dashboard` adopts the current dashboard template and backs your copy up under `.ingest/`; nothing overwrites a dashboard unless you ask.
+Both paths configure the provider and create the wiki directories and dashboard. The wizard creates or updates the root `.env` directly and restricts it to mode `0600`; you do not need to copy `.env.template` first. That template is for manual configuration and for creating named profiles. For non-interactive setup, `researchwiki init --scaffold-only` creates the directory and dashboard scaffold without configuring a provider or asking questions. On an existing wiki, `researchwiki init --refresh-dashboard` adopts the current dashboard template and backs your copy up under `.ingest/`; nothing overwrites a dashboard unless you ask.
 
 Then run the local, free readiness check:
 
@@ -85,7 +85,7 @@ Pass several paths—or ask the agent to ingest the whole inbox—to use the che
 
 Initialization configures the default provider, using the root `.env` for credentials and `config/models.yaml` when custom routing is needed. The root `.env` loads automatically; variables already exported by the parent shell take precedence.
 
-Use a named profile when you want several provider setups in one checkout. The global `--env-file` option must come before the command, and the named file must exist:
+Use a named profile when you want several provider setups in one checkout. Unlike the optional root `.env`, an explicitly selected profile must already exist; this fail-closed behavior prevents a misspelled path from silently selecting another provider. The global `--env-file` option must come before the command:
 
 ```bash
 cp .env.template .env.openai
