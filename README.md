@@ -33,10 +33,8 @@ You can run `researchwiki` directly, but the intended interface is conversation 
 ### Requirements
 
 - Python 3.10+
-- Git
-- curl (used by the whitelisted structured-metadata providers)
 - A shell-enabled chat agent (Claude Code, Codex, etc.)
-- Disk space for ML dependencies and the embedding model downloaded on first use
+- An API key for a supported provider (optional but recommended; not required for local-model or chat-relay setups)
 
 ### Install
 
