@@ -42,6 +42,15 @@ def _load_dotenv(env_file: str | Path | None = None) -> None:
     ``export KEY=value`` is accepted as well as plain ``KEY=value`` for easy
     migration, but this is a CLI profile grammar rather than a shell script.
     """
+    # Batch children receive the parent's fully resolved environment, including
+    # intentionally absent settings. Re-loading .env here would fill those
+    # absences from a profile the parent never selected. Explicit CLI selection
+    # still takes precedence and retains its normal shadowing validation.
+    from .env_profiles import INHERITED_ENV_VAR
+
+    inherited = os.environ.pop(INHERITED_ENV_VAR, None) == "1"
+    if inherited and env_file is None:
+        return
     explicit = env_file is not None
     path = Path(env_file).expanduser() if explicit else Path.cwd() / ".env"
     if explicit and not path.is_absolute():

@@ -124,6 +124,13 @@ def _worker(
     needs `input` + `status`.
     """
     from ..agents.relay import HANDOFF_PREFIX
+    from ..env_profiles import INHERITED_ENV_VAR
+
+    child_env = dict(os.environ)
+    child_env[INHERITED_ENV_VAR] = "1"
+    # Popen's encoding controls the reader only; configure the writer too so
+    # the Unicode handoff marker survives redirected stderr on every locale.
+    child_env["PYTHONIOENCODING"] = "utf-8"
 
     log_path = _worker_log_path(batch_dir, pdf_path)
     cmd = [sys.executable, "-m", "researchwiki", *subcommand, pdf_path, *extra_args]
@@ -137,6 +144,7 @@ def _worker(
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=child_env,
         )
         assert proc.stderr is not None
         for line in proc.stderr:
@@ -418,11 +426,26 @@ def _run_batch(
                     "workers to finish (Ctrl-C again aborts immediately)",
                     file=sys.stderr,
                 )
-                # In-flight workers finish and their state.db writes complete,
-                # but their results don't make it into checkpoint.json (the
-                # as_completed loop is dead). --resume will re-run them. For
-                # personal-wiki scale that's a few wasted minutes at most.
                 pool.shutdown(wait=True, cancel_futures=True)
+                # shutdown waited for running workers; their terminal results
+                # must be recorded even though as_completed was interrupted.
+                # A successful promote may have moved its source PDF already,
+                # so forgetting it would make resume call it unresumable.
+                for fut, pdf in futures.items():
+                    if fut.cancelled() or pdf in state["completed"] or pdf in state["failed"]:
+                        continue
+                    try:
+                        result = fut.result()
+                    except (KeyboardInterrupt, SystemExit):
+                        # A worker interrupted before returning has no terminal
+                        # receipt; leave it pending for the next resume.
+                        continue
+                    except Exception as exc:
+                        result = {"input": pdf, "status": "failed", "returncode": 3,
+                                  "error": f"{type(exc).__name__}: {exc}"}
+                    bucket = "completed" if result["status"] == "completed" else "failed"
+                    state[bucket][pdf] = result
+                    _write_checkpoint(batch_dir, state)
         finally:
             # Belt-and-braces flush: whatever happened above (normal exit,
             # KeyboardInterrupt, or unexpected exception), the last observed

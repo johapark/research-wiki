@@ -188,7 +188,7 @@ def _gather(conn, cutoff: int | None, stem: str | None = None,
             s = json.loads(r["scores"]) if r["scores"] else {}
         except (json.JSONDecodeError, TypeError):
             continue
-        sem = s.get("mean_semantic")
+        sem = _score_value(s, "semantic_score")
         slot = quality.setdefault(model, {"drafts": 0, "sem_sum": 0.0, "sem_n": 0, "drift": 0})
         slot["drafts"] += 1
         if isinstance(sem, (int, float)):
@@ -258,7 +258,7 @@ def _gather(conn, cutoff: int | None, stem: str | None = None,
             continue
         slot = by_section.setdefault(sec, {"graded": 0, "sem_sum": 0.0, "sem_n": 0, "drift": 0, "neg": 0})
         slot["graded"] += 1
-        sem = s.get("mean_semantic")
+        sem = _score_value(s, "semantic_score")
         if isinstance(sem, (int, float)):
             slot["sem_sum"] += sem
             slot["sem_n"] += 1

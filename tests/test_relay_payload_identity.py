@@ -1,6 +1,6 @@
 """Chat-relay prompt payloads must name the paper they belong to.
 
-Nothing serializes relay calls -- each writes its own `{op_id}.prompt.json` and
+Distinct request IDs run in parallel -- each writes its own `{op_id}.prompt.json` and
 polls its own response path -- so `agent ingest inbox/*.pdf -w 4` can leave four
 pending prompts in flight. Before `stem`/`pdf` were in the payload, a responder
 answering them concurrently (one subagent per ingest) had to guess ownership by

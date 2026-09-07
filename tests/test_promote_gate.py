@@ -110,6 +110,28 @@ def test_zero_unsupported_does_not_block():
     assert not any("unsupported claim" in r for r in gate.reasons)
 
 
+def test_failed_support_verification_blocks():
+    gate = should_auto_promote(
+        _passing_scores(support_check_failed=True), _no_broken(),
+        n_key_contributions=MIN_KEY_CONTRIBUTIONS,
+    )
+    assert gate.promoted is False
+    assert any("verification failed" in r for r in gate.reasons)
+
+
+def test_incomplete_support_verification_blocks():
+    gate = should_auto_promote(
+        _passing_scores(
+            support_check_complete=False,
+            n_support_checked=4,
+            n_support_expected=5,
+        ),
+        _no_broken(), n_key_contributions=MIN_KEY_CONTRIBUTIONS,
+    )
+    assert gate.promoted is False
+    assert any("incomplete (4/5" in r for r in gate.reasons)
+
+
 def test_broken_wikilinks_warn_but_dont_block():
     """Verify already strips broken targets from the cleaned text. The list
     records what the drafter *attempted* to link to (typically external

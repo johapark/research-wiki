@@ -220,22 +220,23 @@ def tournament_key(draft) -> tuple[float, float, float, float, float, float]:
 
 def is_strict_improvement(new_draft, prior_winner) -> bool:
     """Generic / DEBUG fitness: replace the winner only on a strict gain on the
-    primary signal. Combined quality first, then a drift veto, then a BM25
-    margin. Avoids cycles where a revision is different-but-not-better.
+    primary signal. A drift increase is an up-front veto; combined quality then
+    decides, with reduced drift and BM25 as tie-breakers. Avoids cycles where a
+    revision is different-but-not-better.
     """
     a, b = new_draft.scores, prior_winner.scores
+    a_drift = a.get("n_drift") or 0
+    b_drift = b.get("n_drift") or 0
+    if a_drift > b_drift:
+        return False
     qa, qb = combined_quality(a), combined_quality(b)
     if qa is not None and qb is not None:
         if qa > qb + SEMANTIC_EPSILON:
             return True
         if qa < qb - SEMANTIC_EPSILON:
             return False
-    a_drift = a.get("n_drift") or 0
-    b_drift = b.get("n_drift") or 0
     if a_drift < b_drift:
         return True
-    if a_drift > b_drift:
-        return False
     return (a.get("mean_bm25") or 0) > (b.get("mean_bm25") or 0) + BM25_MARGIN
 
 
@@ -251,19 +252,20 @@ def is_evolve_improvement(new_draft, prior_winner) -> bool:
     never be accepted while making the primary or drift worse.
     """
     a, b = new_draft.scores, prior_winner.scores
+    # Integrity is a constraint, not a score axis: no gain in prose quality
+    # can compensate for introducing an unsupported number.
+    a_drift = a.get("n_drift") or 0
+    b_drift = b.get("n_drift") or 0
+    if a_drift > b_drift:
+        return False
     qa, qb = combined_quality(a), combined_quality(b)
     if qa is not None and qb is not None:
         if qa > qb + SEMANTIC_EPSILON:
             return True
         if qa < qb - SEMANTIC_EPSILON:
             return False
-    # Primary is tied — drift veto still applies (never accept more drift).
-    a_drift = a.get("n_drift") or 0
-    b_drift = b.get("n_drift") or 0
     if a_drift < b_drift:
         return True
-    if a_drift > b_drift:
-        return False
     # Depth: reward lifting the weakest-supported claim.
     a_floor, b_floor = a.get("weakest_score"), b.get("weakest_score")
     if a_floor is not None and b_floor is not None:

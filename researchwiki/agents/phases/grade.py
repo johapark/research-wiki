@@ -189,6 +189,8 @@ def grade_draft(
         ]
         supports = check_support(graded_claims, support_classifier)
         unsupported = unsupported_claims(supports)
+        aggregate["support_check_complete"] = len(supports) == len(graded_claims)
+        aggregate["n_support_expected"] = len(graded_claims)
         aggregate["n_support_checked"] = len(supports)
         aggregate["n_unsupported"] = len(unsupported)
         aggregate["unsupported_claims"] = [

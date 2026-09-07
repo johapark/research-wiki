@@ -415,7 +415,7 @@ def _phase_author(ctx: Context, conn, temperature: float, slot: int = 0):
         use_stub=ctx.use_stub,
         system_prompt_override=ctx.author_prompt_override,
         stance=stance,
-        pdf_full_text=ctx.pdf_full_text,
+        pdf_full_text=getattr(ctx, "pdf_full_text", None),
         target_claims=ctx.target_claims,
     )
     iter_id = write_iteration(
@@ -550,6 +550,7 @@ def _phase_evolve(ctx: Context, conn, prior_draft, critique):
         critique=critique,
         metadata=ctx.metadata,
         sections=ctx.sections,
+        pdf_full_text=getattr(ctx, "pdf_full_text", None),
         use_stub=ctx.use_stub,
     )
     new_draft = phases.Draft(
@@ -623,6 +624,7 @@ def _phase_debug(
         gate_reasons=gate.reasons,
         metadata=ctx.metadata,
         sections=ctx.sections,
+        pdf_full_text=getattr(ctx, "pdf_full_text", None),
         use_stub=ctx.use_stub,
     )
     new_draft = phases.Draft(

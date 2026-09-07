@@ -224,9 +224,9 @@ def phase_target_claims(ctx, conn):
 def run_entailment_check(ctx, conn, cleaned_text: str) -> None:
     """Run the explicitly requested support veto against the final draft.
 
-    Malformed classifier output remains best-effort, but a typed provider or
-    environment failure propagates: an outage may not silently disable a gate
-    the user requested.
+    Provider/environment failures propagate. Malformed or incomplete output is
+    recorded as a hard gate failure, so a requested verification can never
+    silently turn into an unchecked promotion.
     """
     from ..grade.support import llm_support_classifier
 
@@ -244,6 +244,12 @@ def run_entailment_check(ctx, conn, cleaned_text: str) -> None:
         n_unsupported = support_scores.get("n_unsupported", 0)
         n_checked = support_scores.get("n_support_checked", 0)
         unsupported = support_scores.get("unsupported_claims", [])
+        ctx.winner.scores["support_check_complete"] = support_scores.get(
+            "support_check_complete", False
+        )
+        ctx.winner.scores["n_support_expected"] = support_scores.get(
+            "n_support_expected", n_checked
+        )
         ctx.winner.scores["n_unsupported"] = n_unsupported
         ctx.winner.scores["n_support_checked"] = n_checked
         ctx.winner.scores["unsupported_claims"] = unsupported
@@ -259,6 +265,12 @@ def run_entailment_check(ctx, conn, cleaned_text: str) -> None:
             role="claim_support",
             parent_iteration_id=ctx.winner.iteration_id,
             grader_scores={
+                "support_check_complete": support_scores.get(
+                    "support_check_complete", False
+                ),
+                "n_support_expected": support_scores.get(
+                    "n_support_expected", n_checked
+                ),
                 "n_unsupported": n_unsupported,
                 "n_support_checked": n_checked,
                 "unsupported_claims": unsupported,
@@ -275,7 +287,36 @@ def run_entailment_check(ctx, conn, cleaned_text: str) -> None:
     except EnvironmentFailure:
         raise
     except Exception as exc:
-        log(f"support  → check failed, veto skipped: {exc}", tag="agent")
+        message = f"{type(exc).__name__}: {exc}"
+        ctx.winner.scores["support_check_failed"] = True
+        ctx.winner.scores["support_check_error"] = message
+        ctx.winner.scores["support_check_complete"] = False
+        log(f"support  → check failed; promotion vetoed: {message}", tag="agent")
+        ctx.next_iter()
+        try:
+            write_iteration(
+                attempt_id=ctx.attempt_id,
+                paper_stem=ctx.paper_stem,
+                pdf_filename=ctx.pdf_filename,
+                iteration=ctx.iteration,
+                role="claim_support",
+                parent_iteration_id=ctx.winner.iteration_id,
+                grader_scores={
+                    "support_check_failed": True,
+                    "support_check_complete": False,
+                    "support_check_error": message,
+                },
+                decision="failed",
+                decision_reason=message[:500],
+                duration_ms=int((time.monotonic() - started) * 1000),
+                gate_metrics={"verification_failed": True},
+                conn=conn,
+            )
+        except Exception as telemetry_exc:
+            # The safety outcome already lives on the winner and must reach the
+            # promotion gate even if optional failure telemetry cannot be saved.
+            log(f"support  ⚠ could not persist failure telemetry: {telemetry_exc}",
+                tag="agent")
 
 
 def run_post_promote_memory_evolution(ctx, conn, *, source_key: str) -> None:

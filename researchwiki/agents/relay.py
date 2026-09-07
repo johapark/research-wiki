@@ -89,7 +89,7 @@ _fresh_counter = itertools.count(1)
 # Which paper this process is working on, stamped into every prompt payload as
 # `stem` / `pdf` so a responder can tell whose prompt it is holding.
 #
-# It exists for fan-out. Nothing serializes relay calls — each writes its own
+# It exists for fan-out. Distinct request IDs run in parallel — each writes its own
 # `{op_id}.prompt.json` and polls its own response path — so several ingests can
 # have prompts pending at once, and a responder answering them concurrently (one
 # subagent per ingest) previously had to guess ownership by reading the prompt
@@ -376,14 +376,34 @@ def call_chat_relay(
     `structured` is JSON-serialized into the returned text for callers
     that still parse JSON out of free text.
     """
-    from .llm import LLMResponse           # lazy: see top-of-file note on cycle
-
     # Resolved per call, not as a default argument: a default is evaluated once at
     # import, which would freeze whatever RW_RELAY_TIMEOUT held at that moment.
     if timeout is None:
         timeout = _default_timeout()
 
     op_id = _stable_op_id(phase, prompt, fresh=fresh)
+    # The content key is also a shared filesystem mailbox. Hold ownership from
+    # publication through response consumption (including schema retries), so
+    # concurrent identical calls cannot delete each other's response. Different
+    # keys remain parallel; OS locks release on process death for resume.
+    from ..fsatomic import exclusive_lock
+
+    with exclusive_lock(_relay_dir() / "ownership" / op_id):
+        return _call_chat_relay_owned(
+            op_id=op_id, model=model, prompt=prompt, temperature=temperature,
+            max_tokens=max_tokens, system=system, phase=phase,
+            timeout=timeout, schema=schema,
+        )
+
+
+def _call_chat_relay_owned(
+    *, op_id: str, model: str, prompt: str, temperature: float,
+    max_tokens: int, system: str | None, phase: str | None,
+    timeout: float, schema: dict | None,
+) -> LLMResponse:
+    """Publish and consume one request while holding its mailbox lock."""
+    from .llm import LLMResponse
+
     chain: list[str] = [op_id]
     retry_of: str | None = None
     retry_feedback: str | None = None
@@ -395,24 +415,23 @@ def call_chat_relay(
         # A response is a cache hit. Otherwise announce every wait, including a
         # pending prompt recovered from an earlier timed-out invocation.
         if not response_path.exists():
-            if not prompt_path.exists():
-                _write_atomic_json(prompt_path, {
-                    "schema_version": _RELAY_SCHEMA_VERSION,
-                    "op_id": op_id,
-                    "phase": phase,
-                    # Whose prompt this is. Additive and nullable, so
-                    # schema_version stays 1: older responders ignore it.
-                    "stem": _current_stem,
-                    "pdf": _current_pdf,
-                    "model_hint": model,
-                    "system": system,
-                    "prompt": prompt,
-                    "schema": schema,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "retry_of": retry_of,
-                    "retry_feedback": retry_feedback,
-                })
+            # Ownership may have passed from an exited/timed-out caller. Refresh
+            # the advisory identity to match the handoff this owner emits.
+            _write_atomic_json(prompt_path, {
+                "schema_version": _RELAY_SCHEMA_VERSION,
+                "op_id": op_id,
+                "phase": phase,
+                "stem": _current_stem,
+                "pdf": _current_pdf,
+                "model_hint": model,
+                "system": system,
+                "prompt": prompt,
+                "schema": schema,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "retry_of": retry_of,
+                "retry_feedback": retry_feedback,
+            })
             response_path.parent.mkdir(parents=True, exist_ok=True)
             _emit_handoff_message(prompt_path, response_path, phase, timeout,
                                   retry_of=retry_of)

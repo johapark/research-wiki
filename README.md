@@ -20,11 +20,11 @@ You describe the outcome; the agent chooses the commands:
 
 | You say | The agent does |
 | --- | --- |
-| “Ingest everything in `inbox/`.” | Runs a crash-safe batch ingest and reports every success or failure. |
+| “Ingest everything in `inbox/`.” | Coordinates ingestion for the active provider and reports published pages, sandbox drafts, and failures. |
 | “What does the wiki have on sequence-to-expression models?” | Searches the wiki, reads relevant pages, and answers with `[[wikilinks]]`. |
-| “Should these pangenome papers become a synthesis?” | Finds the cluster, scaffolds a synthesis, grounds it in claims, and runs both gates. |
+| “Should these pangenome papers become a synthesis?” | Reviews their coverage and recommends whether to create a synthesis; writes it only when asked. |
 | “File this design as an idea.” | Creates a reviewable idea page with grounded background and clearly marked model priors. |
-| “Is this paper current?” | Compares its references, citations, and recommendations with the local library. |
+| “What related papers am I missing?” | Compares citation and recommendation metadata with the local library; new evidence still needs a PDF. |
 
 You can run `researchwiki` directly, but the intended interface is conversation with an agent that has file and shell access.
 
@@ -50,6 +50,8 @@ Keep the virtual environment outside the checkout, especially when syncing your 
 
 Setup is clone-first: the framework reads `config/`, prompts, and agent instructions from the checkout. A standalone `pip install` from GitHub without retaining the clone is not a supported installation path.
 
+Run all `researchwiki` commands from the repository root, with the virtual environment activated.
+
 ### Initialize
 
 Choose one guided setup path:
@@ -71,7 +73,7 @@ No taxonomy is predefined, and you do not need to invent one before the first pa
 
 ### First ingest
 
-Give the agent a PDF path and say **“Add this paper to my research wiki.”** The file can already be anywhere on disk; copying it into `inbox/` first is optional. The agent will create a canonical PDF in `papers/`, a grounded page in `wiki/{category}/`, reciprocal supported links, and updated indexes.
+Give the agent a PDF path and say **“Add this paper to my research wiki.”** The file can already be anywhere on disk; copying it into `inbox/` first is optional. When the promotion gates pass, the pipeline moves the PDF to its canonical name in `papers/`, writes a page in `wiki/{category}/`, adds supported reciprocal links, and updates indexes. Copy the source into `inbox/` first if you want to retain the original file at its current path.
 
 The direct CLI equivalent is:
 
@@ -79,7 +81,9 @@ The direct CLI equivalent is:
 researchwiki add /path/to/paper.pdf
 ```
 
-Pass several paths—or ask the agent to ingest the whole inbox—to use the checkpointed batch workflow. If your papers already live in Zotero, Paperpile, Mendeley, or ReadCube, use the [library import workflow](#import-and-export) instead.
+Pass several paths to use the checkpointed batch workflow. Chat-relay agents with native subagents can instead supervise a bounded pool of single-paper ingests (see [Providers](#providers)). If your papers already live in Zotero, Paperpile, Mendeley, or ReadCube, use the [library import workflow](#import-and-export) instead.
+
+Check the reported page path: `.agent-output/` means a reviewable sandbox draft, not a published wiki page. A completed process does not by itself mean promotion succeeded. After every worker exits, run `researchwiki status`; inspect gate failures before retrying or overriding them. See [output and recovery](./WORKFLOW.md#reading-results-and-recovering-a-batch).
 
 ## Providers
 
@@ -94,7 +98,7 @@ researchwiki --env-file .env.openai init
 researchwiki --env-file .env.openai status
 ```
 
-A named profile replaces rather than merges with the root `.env`; use the same `--env-file` option for every command that should use it. Exported credentials may still supply its API key, but parent-shell routing variables are rejected. Put routing in the selected profile and do not `source` it as a shell script. Known providers reuse tracked `config/models.*.yaml` templates; custom OpenAI-compatible backends ask for an explicit writable config path.
+A named profile replaces rather than merges with the root `.env`; use the same `--env-file` option for every command that should use it, including resume. Batch workers inherit the resolved profile without reloading the root `.env`. Exported credentials may still supply its API key, but parent-shell routing variables are rejected. Put routing in the selected profile and do not `source` it as a shell script. Known providers reuse tracked `config/models.*.yaml` templates; custom OpenAI-compatible backends ask for an explicit writable config path.
 
 | Provider | Minimal setup |
 | --- | --- |
@@ -114,17 +118,19 @@ Chat-relay does not call a model API. It writes each model request under
 `.llm-relay/pending/` and waits for an active Codex, Claude Code, or compatible
 chat agent to write the matching response under `.llm-relay/completed/`. A
 multi-paper chat-relay batch therefore defaults to one worker and forwards
-requests from its own child processes to the parent terminal. Run it in the
+requests from its own child processes to the parent terminal; full worker output
+stays in the batch's per-paper logs. Run it in the
 foreground — backgrounding hides those handoffs. Passing `-w N` explicitly permits concurrent
 relay requests, but the CLI creates only isolated ingest subprocesses—not `N`
 isolated chat contexts. When native subagents are available, the supervising chat
 agent should use one foreground single-PDF ingest per subagent and maintain a
 bounded rolling pool. See [the chat-relay protocol](./prompts/chat-relay.md).
 Batch resumes re-evaluate the active provider while preserving an explicit
-`-w N`. A relay timeout keeps its own pending prompt and is retryable with
-`agent ingest --resume` once that prompt is answered — the checkpoint is
-per-PDF, so the paper restarts from the top rather than from the phase that
-timed out.
+`-w N`. A relay timeout keeps its pending prompt. Answer it, then use the printed
+`agent ingest --resume <batch-dir>` command for a batch, or rerun the original
+command for a single-paper ingest. Recovery restarts unfinished papers from the
+top, not from the phase that timed out; consumed responses are not retained.
+The responder records its actual model in `via`, not the configured `model_hint`.
 
 `RW_MODELS_CONFIG` selects a model config without defeating its per-role routing; `RW_LLM_PROVIDER` globally overrides every role and should normally remain unset. Keep credentials in mode-`0600` dotenv files and use only endpoints you trust. Model roles, endpoint precedence, profile isolation, local setup, and provider-specific caveats are documented in [Provider setup in depth](./WORKFLOW.md#provider-setup-in-depth).
 

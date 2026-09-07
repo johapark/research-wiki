@@ -1,15 +1,25 @@
 # Workflow — how the framework operates end-to-end
 
-Companion to `README.md` (the gist) and `CLAUDE.md` (the LLM contract). This
-doc walks through what actually happens when you use the framework, with real
-output excerpts. Read top-to-bottom for the flow; jump to a section if you
-want a specific operation.
+Companion to [README.md](./README.md) (installation and quick start) and
+[CLAUDE.md](./CLAUDE.md) (the agent contract, also loaded through `AGENTS.md`).
+Run commands from the repository root with the virtual environment activated.
+Replace angle-bracket placeholders in examples with actual paths or IDs.
 
-If `README.md` describes the destination, this doc describes the journey.
+Start with the operation you need:
+
+- Ingest: [pipeline](#the-shape-of-one-ingest), [worked example](#a-worked-example), [output and recovery](#reading-results-and-recovering-a-batch).
+- Bring a library in or out: [migrate existing pages](#migrating-an-existing-corpus), [import PDFs and metadata](#importing-a-reference-manager-library), [export bibliography](#exporting-the-corpus-as-a-bibliography).
+- Use the corpus: [query](#querying-the-wiki), [discover candidate pages](#bottom-up-discovery--when-the-wiki-proposes-the-page), [maintain](#maintaining-the-wiki).
+- Operate the framework: [state and backups](#what-gets-cached-what-gets-regenerated), [costs](#costs-and-trade-offs), [providers](#provider-setup-in-depth), [chat relay](#chat-relay-subscription-users--no-api-key).
+- Find a command: [quick reference](#when-to-do-what-quick-reference).
+
+Output excerpts and corpus measurements below are historical examples, not
+promises about your library, current prices, or exact output formatting.
+Installed CLI help and the checked-out implementation define current behavior.
 
 ---
 
-## What the framework does, in one paragraph
+## What the framework does
 
 You drop research-paper PDFs into `inbox/`. An LLM authors a wiki page for
 each one (Summary, Key Contributions, Methodology, Results, Limitations,
@@ -21,18 +31,23 @@ extracted paper-wide before authoring), and **coherence** (page-shape contract �
 required sections, word count, bullet density). When `-n 2+` enables a real
 tournament, the winner is selected by a confidence-weighted blend of fidelity,
 salience, and target-claim recall; coherence and numeric drift form the
-lexicographic tail. The default is one draft, so selection is a no-op. Citation
-**grounding** is a separate structural gate for synthesis, idea, and concept
+lexicographic tail. The default is one draft, so selection is a no-op.
+
+These scores are quality signals, not proof that every claim is true; an optional
+`--verify-claim-entailment` pass checks qualitative support before promotion.
+Citation **grounding** is a separate structural gate for synthesis, idea, and concept
 pages, paired with `grade synthesis`; paper-page claims are graded directly
-against their own PDF. New ingests then trigger evolution proposals against
+against their own PDF.
+
+New ingests then trigger evolution proposals against
 neighboring synthesis pages — when paper P arrives, the framework asks an
 LLM whether existing synthesis pages should be edited in
 light of P, and writes structured proposals to
 `.ingest/{stem}-evolution-proposals/`. Those are reviewed by an LLM — which
 verifies each patch against the source paper before recommending it — and applied
 only on human approval; a human can of course review them directly instead. The
-result is a markdown wiki on disk that compounds: every new paper makes related
-synthesis pages slightly more correct.
+result is a markdown wiki with explicit review queues: ingesting a paper does
+not silently rewrite existing synthesis pages.
 
 ---
 
@@ -66,6 +81,7 @@ inbox/raw-paper.pdf
 │  9. evolve        revise the winning draft against critic notes;    │
 │                   keep only under the evolve fitness lens           │
 │ 10. (debug)       repair structural-gate failures if any            │
+│     (support)     optional final-draft claim-entailment check        │
 │ 11. metadata      HANDLE/HOOK from author trailer + keyword call    │
 │ 12. promote       move PDF → papers/{stem}.pdf,                     │
 │                   write wiki/{category}/{stem}.md,                  │
@@ -90,6 +106,16 @@ Phases are otherwise effectful — they may call providers or LLMs and populate
 sandbox files and derived caches — so they are testable boundaries, not pure
 functions in the functional-programming sense.
 
+The diagram shows a successful promotion. Under the default gates, missing
+semantic signal, insufficient graded claims or contribution bullets, numeric
+drift, and commentary detection can keep a draft in `.agent-output/`. With
+`--verify-claim-entailment`, unsupported claims or incomplete/malformed support
+results also block automatic promotion; provider failures remain errors to fix
+before retrying. `--force-sandbox` deliberately avoids publication.
+`--auto-promote` bypasses failed gates and is a reviewed override, not a repair.
+Revisions receive the full previous draft and source evidence; an increase in
+numeric drift vetoes an evolved draft even if its other scores improve.
+
 ---
 
 ## A worked example
@@ -97,8 +123,9 @@ functions in the functional-programming sense.
 Here's what an ingest looks like when you run it. The excerpts below are from a
 real run on `kim-2026-structural-motif-search-across-the-protein` (Folddisco) —
 values taken from that attempt's `ingest_iterations` rows, not hand-crafted. The
-run predates the `sal`/`target`/`coh` columns in the grade line, so those signals
-are absent from the excerpt and documented separately below.
+run predates the `sal`/`target`/`coh` columns, current metadata ordering, and
+stricter cross-link policy. Treat its log and page as historical excerpts, not
+templates for new output.
 
 ### 1. Drop a PDF
 
@@ -121,9 +148,10 @@ Passing multiple PDFs to a single invocation enters crash-safe batch mode.
 API-backed providers — and `--stub`, which reaches no provider at all — default
 to four parallel workers; chat-relay defaults to one visible worker because it
 needs an active conversational responder. Tune either with `-w N`. Every
-completion is recorded atomically under `.ingest/batch-<ts>/checkpoint.json`, so
-a mid-batch crash is recoverable with `--resume <batch-dir>` and rerun picks up
-exactly where it stopped. Resume re-evaluates the active provider: implicit
+completion is recorded atomically under `.ingest/batch-<ts>/checkpoint.json`.
+Resume skips recorded completions and restarts unfinished or retryable papers
+from the beginning; there is no per-phase checkpoint. Resume re-evaluates the
+active provider: implicit
 defaults follow the current profile, while an explicit `-w N` remains fixed (and
 a resume-time `-w N` wins). A batch started before worker intent was recorded is
 honoured the same way — only a stored `4` is re-resolved, since that was the old
@@ -134,7 +162,7 @@ out one background Bash per file for API-backed ingestion: that bypasses the
 checkpoint, uncaps concurrency, and multiplies `state.db` write contention.
 Chat-relay's native-subagent exception is described under Provider setup below.
 
-You'll see something like (excerpted, real output from a recent ingest):
+Historical output from that ingest:
 
 ```
 [agent] attempt_id=ac715918...
@@ -197,15 +225,58 @@ looks wrong:
 guards** (below) — the guards changed the denominator, so `insights` history
 straddling that change mixes two scales.
 
-Each `[agent] X → Y` line is one phase committing one row to the
-`ingest_iterations` table — the audit trail is durable as the run
-progresses, so a crash mid-way leaves a partial trace you can inspect.
+Runner wrappers persist phase events to `ingest_iterations` as the run
+progresses, so a crash leaves a partial trace. Console lines are not a one-to-one
+mapping to rows. Use `researchwiki insights --attempt-id <full-id>` for the
+timing breakdown or `researchwiki agent trace <attempt-id>` for the lineage.
+
+### Reading results and recovering a batch
+
+| Where you look | What it tells you |
+|---|---|
+| Single-paper foreground command | Its own phase output, relay handoffs, final page path, and attempt ID. |
+| Batch parent terminal | Worker completion/failure status, forwarded relay handoffs, and a post-batch summary; not every phase line. |
+| `.ingest/batch-<ts>/worker-<input-stem>-<hash8>.log` | Full stdout/stderr for one input; the path hash distinguishes identical filenames in different directories. Retrying that input replaces its log. |
+| `.ingest/batch-<ts>/checkpoint.json` | Per-input `completed`, `failed`, and any `unresumable` records. `completed` means exit 0, not necessarily a published page. |
+| Final page path | `wiki/{category}/` means publication; `.agent-output/` means a sandbox draft. Inspect gate reasons in the worker log. |
+
+For chat relay, service the exact prompt/response paths in each forwarded
+handoff. Do not claim a request by scanning the shared pending directory. Keep
+monitoring until every worker is terminal, then report published, sandboxed,
+failed, and unresumable inputs separately.
+
+On Ctrl-C, the parent cancels queued work, waits for active workers, and saves
+their returned terminal results before exiting. That wait can be long under
+chat relay if a worker still needs a response. A hard kill cannot guarantee this
+final checkpoint: if an input has already moved but lacks a terminal record,
+resume marks it `unresumable`. Inspect its log, canonical page/PDF, and any
+mutation journal before retrying; do not recreate the input blindly. See
+[recovery](./prompts/recovery.md#half-landed-promote).
+
+```bash
+researchwiki agent ingest --resume .ingest/batch-<ts>/
+# If the original run used a named profile, select it again:
+researchwiki --env-file .env.relay agent ingest --resume .ingest/batch-<ts>/
+```
+
+Resume retries environment failures (exit 2), but holds back bad-input (1) and
+internal-error (3) failures for inspection. Correct those causes before starting
+a fresh ingest. A single-PDF invocation without `-w` has no batch checkpoint:
+rerun its original command. To get a checkpoint for a single paper, start it
+with `-w 1`. Native-subagent pools likewise need their own
+per-paper terminal accounting, not a nonexistent shared `--resume` directory.
+
+While ingests are active, keep other wiki operations read-only: defer `lint`,
+`grade`, `db rebuild`, and `reindex` until the pool drains. Successful promotions
+update pages, DB rows, and search indexes incrementally; a routine full rebuild
+after every ingest is unnecessary. Run `status` afterward and follow reported
+index warnings or review queues.
 
 ### 3. Inspect the new wiki page
 
 `wiki/compbio/kim-2026-structural-motif-search-across-the-protein.md`:
 
-```yaml
+```markdown
 ---
 title: "Structural motif search across the protein universe with Folddisco"
 authors: Hyunbin Kim, Rachel Seongeun Kim, Milot Mirdita, Jaewon Yoon, Martin Steinegger
@@ -244,12 +315,15 @@ ingested_at: 2026-06-05T15:43:46
 - ...
 ```
 
-YAML carries the full audit (DOI, venue, source-PDF wikilink, the catalog gloss
-in `hook:`, and the ingest timestamp). The body is six standard sections capped
-to budget. Every wikilink in `Related Papers` was verified — either
-citation-graph confirmed or LLM-judged topical with a one-line rationale. This
-run's six candidates split 3 citation-graph (MMseqs2, Foldseek, AlphaFold 3 — all
-cited by the source) and 3 topical.
+YAML carries provenance and catalog metadata. New pages also require the exact
+`author_model:`; it is omitted from this historical excerpt rather than guessed.
+The body has six standard sections capped to budget.
+
+Current `Related Papers` links require source-supported citation, build-on, or
+contrast evidence. Semantic similarity only nominates a candidate; its judge
+must find explicit engagement in source-grounded excerpts. The historical log's
+`topical` label is not permission to link papers merely because they share a
+topic. Stub and borderline judgments produce no link.
 
 ### 4. Review the evolution proposals
 
@@ -300,8 +374,10 @@ say yes or no. The flow (formalized in `CLAUDE.md` Step 6 of the Ingest
 section):
 
 1. The LLM reads each proposal file and the target synthesis page.
-2. It verifies the patch claim against the source paper's wiki page —
-   numbers, framing, and "first/largest/only" claims drift between the
+2. It retrieves the source's graded claims with
+   `researchwiki claims --by-stem <stem>` and verifies the patch against the wiki
+   page, returning to the PDF when needed. Numbers, framing, and
+   "first/largest/only" claims can drift between the
    LLM that wrote the proposal and the actual page text. Mismatches get
    fixed before the patch lands; unsupported superlatives get softened.
 3. Proposals can also be **stale**: the source paper may have been
@@ -315,8 +391,12 @@ section):
    recommendation.
 5. You answer yes or no — a single answer covers all proposals from one
    ingest unless you specify otherwise.
-6. On approval the LLM applies the edits and `rm -rf`'s the proposal
-   directory; on skip, the directory stays and `lint` flags it as
+6. On approval the LLM applies the edits, reconciles hand-edited pages with
+   `db rebuild`, and runs both `check-grounding <page>` and
+   `grade synthesis <page>`; both must exit 0. It also reviews
+   `check-coverage <page>` and refreshes indexes. Only after successful
+   verification should it archive or remove the exact consumed proposal
+   directory. On skip, the directory stays and `lint` flags it as
    `stale_evolution_proposals` after 7 days for revisit.
 
 The reason editing is gated by explicit permission: mutating an existing
@@ -489,9 +569,9 @@ their candidates listed, rather than silently attaching the wrong PDF.
 
 `apply` acts on `ready` only. Four gates are worth knowing:
 
-- **`no-text-layer`** — the silent one. A scanned PDF extracts to nothing, ingest
-  logs a warning nobody reads, and the page then passes every later gate on
-  grounding that does not exist.
+- **`no-text-layer`** — a scanned PDF supplies no extractable text for normal
+  authoring and grading. Obtain a text-extractable source before ingesting it;
+  an import record's metadata is not a substitute for the paper's evidence.
 - **`superseded-by-journal`** — a preprint whose published version is also in the
   export. Invisible to DOI dedupe, since the pair carries two different DOIs; the
   real library held 10 such pairs and zero duplicate DOIs.
@@ -542,8 +622,8 @@ the `inspect` you read. There is no journal and no staging directory here, unlik
 `agent ingest --resume <batch-dir>` — the path you already know.
 
 Per-paper cost is ordinary `agent ingest` cost (see *Costs and trade-offs*), so
-budget by wave size. Cross-linking is deliberately not a phase: a bulk import
-arrives as N disconnected nodes, and `verify` names the follow-ups
+budget by wave size. Ingest-time citation links still apply. The separate
+claim-overlap sweep is not an import phase, and `verify` names the follow-ups
 (`claim-overlap --backlog`, `candidates concepts --bridges`) rather than spending
 a judge call per pair inline.
 
@@ -674,8 +754,10 @@ is `researchwiki search`, a page is a plain file `Read`, and structural
 questions go through `researchwiki db query`. For grounded citations use
 `researchwiki claims "<query>"` — each hit prints a durable
 `[[stem#claim_slug]]` anchor (content-addressed, survives `db rebuild`) that
-you paste straight into a page. The bare `claim_id:NNN` shown alongside is a
-session-local row handle, reassigned on rebuild — never a citation token.
+you paste straight into a page. Current output does not emit the legacy
+`claim_id:NNN` citation form; database row IDs can change on rebuild and must
+not be used as citations. Inspect the grade and supporting passage, not just
+the presence of an anchor: an ungraded claim is not yet verified evidence.
 Use `researchwiki pdf-search <stem> "<query>"` to pull an exact passage the
 wiki page didn't quote.
 
@@ -826,7 +908,8 @@ Three commands cover the maintenance loop:
 | `researchwiki lint` (or `--json`) | Weekly, or after batch ingests | Local only, sub-second |
 | `researchwiki scout` | After batch ingests, or weekly | Calls Semantic Scholar — minutes for hundreds of papers |
 
-`status` is the dashboard. After the recent updates it includes:
+`status` is the dashboard. This historical excerpt illustrates index health,
+review queues, and dated cost estimates:
 
 ```
 Index health:
@@ -835,7 +918,6 @@ Index health:
 
 Pending evolution proposals: 1 dir(s), 1 total file(s)
   wei-2026-...                                             1 file(s), 32m old
-  Review and apply, then `rm -rf` the directory.
 
 Ingest cost (last 7 days):
   attempts:           11
@@ -907,10 +989,12 @@ invalid runs in *Workflow state*.
 
 ## What gets cached, what gets regenerated
 
-The wiki has clear canonicalness:
+Separate source material, derived indexes, and operational records when backing
+up. Not everything outside `wiki/` is disposable.
 
-- **Markdown is canonical.** `wiki/*.md` is the source of truth.
-  Everything else can be regenerated from it.
+- **Markdown and source PDFs are canonical.** Back up `wiki/`, `papers/`
+  (including `{stem}.supp/` supplements), and the unprocessed `inbox/` backlog.
+  Markdown cannot regenerate a missing PDF.
 - **The state DB** (sqlite, at
   `~/.local/share/researchwiki/repos/<name>-<hash>/state.db`) is a derived
   index over `wiki/` + `papers/` + caches. Run `researchwiki db rebuild` to
@@ -919,9 +1003,11 @@ The wiki has clear canonicalness:
   which keeps separate wikis on one machine from sharing a `claims` table —
   but also means **moving or renaming the checkout points the tooling at a
   fresh, empty DB**. `RESEARCHWIKI_DB_PATH` pins it if that is a risk
-  ([below](#pinning-the-state-db-researchwiki_db_path)). One table,
-  `ingest_iterations`, is the only thing here not reconstructable from
-  markdown; it is a per-machine record of what this machine ran.
+  ([below](#pinning-the-state-db-researchwiki_db_path)). Rebuild restores page
+  and claim structure, not every operational record: missing grades need regrading,
+  while attempt telemetry and review/judgment state may need a database backup
+  or another review pass. Existing unchanged claims retain their grades on
+  rebuild.
 - **`.tantivy-index/` and `.semantic-cache/`** are search indexes built
   from `wiki/` by `researchwiki reindex`. Both gitignored.
 - **`.grade-cache/{stem}/`** is per-paper PDF chunk index + embeddings.
@@ -933,12 +1019,23 @@ The wiki has clear canonicalness:
   separate from `.web-cache/` (the structured-API cache). It is not a DB or
   indexing input. Deleting it does not affect the corpus, but loses run provenance;
   reproducing it requires a new web-scout run rather than a local rebuild.
-- **`.ingest/`** is per-attempt transient state (digests, evolution
-  proposals). Cleared as you act on them.
+- **`.ingest/`** holds digests, batch plans/checkpoints/logs, migration backups,
+  and unreviewed evolution proposals. Preserve active runs and rollback material;
+  archive or remove only specific completed artifacts you no longer need.
+- **`.agent-output/`** holds sandbox drafts, including failed-gate and benchmark
+  output. These are not published pages, but may contain work worth retaining.
+- **`.llm-relay/`** holds outstanding requests and unconsumed responses. It is a
+  live mailbox, not a permanent cache of completed phases. Do not clear it while
+  workers or responders are active.
+- **`.mutation/`** holds write-ahead recovery journals. An unfinished journal
+  may be needed to roll back a partial write; follow the recovery procedure
+  rather than deleting it as a cache.
 
-If you wipe everything except `wiki/`, `papers/`, `inbox/`, and the
-framework code, you can rebuild every cache and re-derive every index.
-This is by design — the markdown layer is what survives.
+With source PDFs, wiki pages, and the framework you can regenerate local search
+indexes and grades. External metadata may need refetching; judgments may require
+new model calls. Telemetry, discovery receipts, unapplied proposals, and rollback
+history are not recoverable from Markdown alone. Back up credentials and custom
+configuration securely too, and keep live SQLite databases out of sync folders.
 
 ---
 
@@ -962,40 +1059,26 @@ does not model batch discounts, long-context surcharges, fast mode, data
 residency, or server-side tools. To refresh, correct the rates and bump `as_of:`
 in the same edit.
 
-Absolute cost is **config-dependent** — it rides on whichever
-`config/models.*.yaml` file `RW_MODELS_CONFIG` selects and that provider's
-token pricing. The zero-config default is the hardcoded table in
-`agents/model_config.py`, where `gpt-5.6-luna` drives every role.
-`config/models.chatgpt.yaml` is an opt-in higher-fidelity OpenAI config:
-`gpt-5.6-terra` drives author / critic / judge and Luna drives the other
-roles, so it does **not** mirror the zero-config fallback. `gpt-5.4-mini`
-used to hold the deterministic short-output roles (classifier / extractor)
-as the cheap option, which it is not — mini is a 5.4-generation model and
-the 5.6 line cut prices, so it costs 3.75x luna per token with no offsetting
-quality argument.
+Cost depends on the selected model config, PDF length, number of drafts,
+revision/retry count, and optional judgments. The built-in fallback routes all
+roles to `gpt-5.6-luna`; the checked-in
+[`models.chatgpt.yaml`](./config/models.chatgpt.yaml) template instead uses
+`gpt-5.6-terra` for author / critic / judge. Inspect the selected config rather
+than assuming every run uses the fallback.
 
-At the rates in `config/pricing.yaml` (per 1M tokens: `gpt-5.6-luna` $0.20 in
-/ $1.20 out), a single-draft ingest runs
-roughly ~26K input + ~3.5K output tokens across all roles, with **author**
-and **target_claims** together accounting for nearly all of it and everything
-else a long tail — so a typical paper lands around **~$0.01** (measured mean
-over 13 ingests on this corpus), and a 2-draft author tournament (`-n 2`)
-roughly double. Swapping the quality roles to `gpt-5.6-terra` ($2.00 / $12.00)
-moves that to **~$0.07/paper** — 10x the rate, ~9x the bill once normalized
-for paper size. The two grader runs
-are semantic-only (no LLM) and free; memory-evolution proposals cost in
-proportion to how many synthesis neighbors clear the cosine prefilter.
+Use `researchwiki insights --attempts` for your own observed runs and
+`researchwiki insights --attempt-id <full-id>` for a phase breakdown. Token use
+can change with the model and its output; doubling drafts does not necessarily
+double total ingest cost. Ordinary semantic grading is local, while
+`--verify-claim-entailment`, link judgments, and memory-evolution proposals use
+the configured model. Missing cloud-model prices are reported as unpriced;
+local and relay runs showing $0 do not measure hardware or subscription costs.
 
-Treat these as order-of-magnitude — token counts are config-independent
-(same prompts), but dollars move with the model assignment. The cost
-estimator prices only models present in `config/pricing.yaml`; the current
-GPT-5.6 defaults *are* listed, so `insights` and `status` report real figures
-for them. A model missing from that table resolves to `$0.00`, which is
-correct for a local backend but reads as "unpriced" for a cloud one —
-`status` names any cloud model it could not price, so a stale table is
-visible rather than a silently understated bill. The agent is
-calibrated to spend on *fidelity* (claim-grading, critic, evolve), not on
-speed — that hasn't changed across model swaps.
+To cap a run, `agent ingest` accepts `--max-model-calls`, `--max-tokens`,
+`--max-cost-usd`, and `--max-wall-seconds`. Limits are **per PDF**, including in a
+batch, not a shared batch allowance. Budget exhaustion preserves the best graded
+partial when available in `.agent-output/`. A dollar budget rejects unpriced
+cloud routes rather than treating them as free.
 
 ### When to opt out of which phases
 
@@ -1027,9 +1110,10 @@ speed — that hasn't changed across model swaps.
   drift, and the gate correctly refuses to promote. The fix is to find a
   better-quality source PDF (publisher version vs. preprint scan) and
   re-ingest.
-- **Cross-link verifier strips a real wikilink.** Means the candidate
-  wasn't on the verified list. Either accept it as a topical-not-cited
-  paper, or update the candidate list manually.
+- **Cross-link verifier strips a wikilink.** Check that the target exists and
+  that the source explicitly cites, builds on, or contrasts it. If extraction
+  missed that evidence, re-read the PDF and review the candidate with the actual
+  passage. Do not add a target to the verified list on topical similarity alone.
 - **`sal` is low on a page that reads complete.** Usually the anchor set,
   not the page. `salience_score` is recall against a fixture synthesized from
   PDF structure, and the `critical` tier — weight 3 in
@@ -1087,11 +1171,9 @@ speed — that hasn't changed across model swaps.
 
 ## Provider setup in depth
 
-Companion to `README.md`'s Providers/Model-config tables, which cover the
-default path (`OPENAI_API_KEY` with no `config/models.yaml`; the built-in
-all-Luna table supplies routing). This section is for the paths beyond that
-default: switching configs without copying, mixing providers per role,
-running fully local, and chat-relay for users with no API key at all.
+The [README provider overview](./README.md#providers) covers guided setup.
+This section explains config selection, profile isolation, machine-local state,
+mixed providers, local endpoints, and chat relay.
 
 ### Switching configs without copying (`RW_MODELS_CONFIG`)
 
@@ -1141,6 +1223,11 @@ for an explicit writable config path (for example
 `config/profiles/litellm.yaml`) because its endpoint and exact model IDs must be
 stored somewhere; the path is never inferred from the env filename.
 
+Repeat `--env-file` on every top-level command, including batch resume. Batch
+workers inherit the parent's resolved environment and do not reload the root
+`.env`; a native subagent launching a separate command must select the profile
+itself. A batch checkpoint is not a saved credential or provider profile.
+
 Every explicit endpoint follows the same validation rule, whether it comes from
 YAML, `RW_LLM_BASE_URL`, or `ANTHROPIC_BASE_URL`: HTTP and HTTPS are accepted,
 including trusted LAN services. Credentials in the URL, whitespace or control
@@ -1175,13 +1262,18 @@ It overrides the per-repo path entirely, so the DB follows the *wiki* rather
 than the directory the code happens to live in. Worth setting before you
 reorganize a checkout; it takes precedence over everything else.
 
-If you are already stranded, nothing is lost — the old database is still on
-disk under its previous key. Compare and copy the richer one over the new:
+If you already moved the checkout, the old database may still be on disk under
+its previous key. Stop all wiki writers first and confirm both paths belong to
+the same corpus. Compare their contents; a larger telemetry count alone does
+not make one database authoritative. Back up both before selecting the old
+database with `RESEARCHWIKI_DB_PATH` or restoring it over the new one:
 
 ```bash
 ls -la ~/.local/share/researchwiki/repos/
-sqlite3 <old>/state.db "SELECT COUNT(*) FROM ingest_iterations;"   # richer wins
-cp <new>/state.db <new>/state.db.bak
+sqlite3 <old>/state.db "SELECT COUNT(*) FROM ingest_iterations;"
+sqlite3 <new>/state.db ".backup '<new>/state-before-restore.db'"
+sqlite3 <old>/state.db ".backup '<old>/state-before-restore.db'"
+# Only after reviewing both DBs and choosing to replace the new one:
 sqlite3 <old>/state.db ".backup '<new>/state.db'"
 researchwiki db rebuild        # grades survive: claims upsert by slug
 ```
@@ -1192,13 +1284,15 @@ re-derivable — see the note on multiple machines below.
 
 ### Working from more than one machine
 
-A common setup is one wiki, two computers, with `wiki/` and `papers/` on a
-sync service. What syncs, and what each machine derives for itself:
+A common setup is one wiki, two computers, with `wiki/`, `papers/`, and `inbox/`
+on a sync service. Keep the checkout and runtime state outside that service;
+see [the README symlink layout](./README.md#sync-across-computers).
+What syncs, and what each machine derives for itself:
 
 | | Where it lives | How the second machine gets it |
 |---|---|---|
-| Pages, PDFs | `wiki/`, `papers/` | Sync service — this is the source of truth |
-| Claims, grades, indexes | state DB, `.tantivy-index/`, `.semantic-cache/` | Re-derived locally, identically |
+| Pages, PDFs, backlog | `wiki/`, `papers/`, `inbox/` | Sync service — source material and pending work |
+| Claims, grades, indexes | state DB, `.tantivy-index/`, `.semantic-cache/` | Re-derived locally with the same framework/model versions |
 | LLM-judged caches | `.claim-graph/`, `.evolve-cache/` | Re-judged if needed; the *outcome* already synced as wikilinks |
 | Cost/quality telemetry | `ingest_iterations` | **Stays on the machine that ran the ingest — by design** |
 
@@ -1209,9 +1303,9 @@ researchwiki db rebuild && researchwiki reindex
 researchwiki grade regression --missing-only    # no API calls
 ```
 
-Grading needs only the PDFs (which sync) and the local bi-encoder, so it is
-free and deterministic — both machines compute the same scores. Everything
-that constitutes knowledge therefore converges without copying any database.
+Ordinary grading needs the PDFs and local bi-encoder, not model API calls.
+Use the same framework revision and embedding model for comparable results;
+do not assume optional LLM judgments or operational history are reconstructed.
 
 **Telemetry is deliberately not shared.** `ingest_iterations` records what a
 given machine actually ran — which model, how many tokens, which drafts were
@@ -1224,10 +1318,15 @@ SQLite file through a sync daemon corrupts it — WAL sidecars are exactly the
 files these daemons handle worst. Keeping the DB outside the synced tree is
 why it lives under `~/.local/share/` in the first place.
 
+Host-local mutation and relay locks do not coordinate two computers through a
+sync service. Wait for sync to finish and use one writing machine at a time;
+do not ingest or edit the shared wiki concurrently on both.
+
 ### Chat-relay (subscription users — no API key)
 
-If your only model access is a **chat subscription** (Claude.ai Pro, ChatGPT
-Plus, Cursor Pro), the framework still runs end-to-end. Unlike an API-backed
+If your model access is through a chat agent with shell and file tools, the
+framework can delegate model work through that agent. A subscription or a plain
+chat window alone is not an automatic responder. Unlike an API-backed
 provider, chat-relay does not let each ingest subprocess call a model endpoint
 and receive its own response. It delegates every LLM call to an active chat
 agent through a filesystem protocol — no API key or server, but also no
@@ -1236,8 +1335,9 @@ automatic responder or isolated model session created by the CLI.
 **How it works.** `agent ingest` emits a prompt at
 `.llm-relay/pending/{op_id}.prompt.json` and blocks; the chat agent reads
 it, writes `.llm-relay/completed/{op_id}.response.json`; the CLI moves on.
-One ingest is 5–8 handoffs — a few minutes if the agent watches for
-prompts. Protocol spec: [`prompts/chat-relay.md`](./prompts/chat-relay.md).
+The number of handoffs depends on drafts, retries, optional checks, and corpus
+neighbors; keep responding until the process exits, not until a fixed count.
+Protocol spec: [`prompts/chat-relay.md`](./prompts/chat-relay.md).
 
 ```bash
 export RW_LLM_PROVIDER=chat-relay      # or add to .env
@@ -1263,19 +1363,39 @@ agent monitors terminal status, retries only transient failures, and runs
 corpus-wide post-batch maintenance once after the pool drains. Hosts without
 subagents use the sequential, checkpointed batch fallback.
 
+**Output ownership.** Follow the exact prompt and response paths emitted by each
+process. The payload's `pdf` and `stem` identify its paper (`stem` can be null
+before reconciliation). In batch mode, relay handoffs reach the parent in UTF-8;
+full output remains in that input's hashed worker log. Direct single-PDF
+subagents see their own full command output. See
+[reading results](#reading-results-and-recovering-a-batch).
+
+Distinct request IDs run concurrently. Identical content-derived IDs serialize
+under a host-local mailbox lock spanning publication, retries, consumption, and
+cleanup; the next owner emits its own handoff after acquiring the lock. Locks
+release if a worker dies. Do not infer ownership from a global directory scan
+or respond ahead of an emitted handoff. Set response `via` to the exact platform
+and model that actually answered, not `model_hint`.
+
 **Caveats:**
-- **Wall clock is bounded by your attention** — each phase blocks on the
-  agent; times out at 10 min/phase if it walks away. A timeout is retryable
+
+- **Each prompt has a deadline** — the default response timeout is 600 seconds
+  after publication, not after the responder notices it. Set `RW_RELAY_TIMEOUT`
+  in seconds when a supervised pool needs more time. A timeout is retryable
   (exit 2): answer the prompt still in `pending/`, then run
-  `agent ingest --resume`. The checkpoint is per-PDF, so the paper restarts from
+  `agent ingest --resume <batch-dir>` for a batch, or rerun the original
+  single-PDF command. The checkpoint is per-PDF, so the paper restarts from
   the top and re-asks the phases you already answered — don't pre-fill ahead of
   it ([`prompts/chat-relay.md`](./prompts/chat-relay.md#parallel-ingests--supervised-fan-out)).
 - **Cost dashboards show $0** — tokens aren't measurable through the relay.
 - **Parallelism needs responders** — the safe default is one worker; explicit
   `-w N` needs enough independently monitored responders, preferably one native
   subagent per active paper.
-- **Cache reuse on re-runs** — `op_id = sha1(phase|prompt)[:12]`, so a crash
-  mid-ingest reuses completed phases. `RW_RELAY_FRESH=1` forces re-prompting.
+- **No permanent phase cache** — stable request IDs let a restart reuse an
+  already-written, unconsumed response only if it asks the same request again.
+  Both mailbox files are deleted on consumption. Earlier answers or newly
+  ingested neighbors can change later prompts and their IDs.
+  `RW_RELAY_FRESH=1` forces unique IDs and disables that reuse.
 
 ### Per-role mixing
 
@@ -1286,6 +1406,7 @@ in `.env`**). To mix (e.g. chat-relay `author`, local everything else):
 `config/models.yaml`:
 
 ```yaml
+base_url: http://localhost:1234/v1
 roles:
   author:     {provider: chat-relay, model: claude-via-relay,    temperature: 0.5, max_tokens: 16000}
   critic:     {provider: lmstudio,   model: qwen3.6-35b-a3b-mlx, temperature: 0.3, max_tokens: 12000}
@@ -1296,56 +1417,48 @@ roles:
 ```
 
 `author`/`evolve`/`debug` follow the `author` role. For this mix,
-**`RW_LLM_BASE_URL` must be set** (e.g. `http://localhost:1234/v1`) so local
-roles pass the readiness gate — **even on the default port** — and the
-relay needs an active servicer for the `author` phase.
+the top-level `base_url` supplies the local endpoint. `RW_LLM_BASE_URL`, if set,
+overrides it; an endpoint must be explicit even on the default port. The relay
+needs an active responder for author, evolve, and debug calls. Phase-specific
+overrides can change role routing, so inspect those as well as `roles`.
 
 ### Local LLMs (LM Studio / vLLM / llama.cpp / ollama)
 
-Any OpenAI-compatible server works alongside or instead of Anthropic. For a
-**fully local** setup, the model we dogfood is **Qwen3.6-35B-A3B** (a
-35B-param MoE, ~3B active — runs on a 32 GB Apple-silicon laptop via LM
-Studio's MLX build): across our ingest history it authored drafts at mean
-claim-fidelity ≈ 0.78, within a hair of Gemini 3.5 Flash (≈ 0.80) and above
-Solar (≈ 0.75) — good enough to keep **every** role local, not just the
-cheap ones. `config/models.lmstudio.yaml` points all six roles at one such
-model. If you'd rather mix, a common split is to keep **author** on
-Anthropic for peak fidelity and route **classifier** / **proposer** /
-**reconcile** to a smaller local model to drop marginal cost toward zero.
+Use an OpenAI-compatible local endpoint and configure its exact served model
+ID. The checked-in [LM Studio template](./config/models.lmstudio.yaml) routes
+all six roles locally and declares `base_url`; use it as a starting point,
+adjusting the model ID, context allowance, and output budgets for your server.
+Test a representative paper in the sandbox before bulk ingestion.
 
-**Start a server** (LM Studio is simplest — download a model, click **Start
-Server**; default `http://localhost:1234/v1`):
+After starting your server, check the endpoint you intend to use:
 
 ```bash
 curl http://localhost:1234/v1/models | jq '.data[].id'   # confirm it's up
 ```
 
-vLLM: `vllm serve <model> --port 1234`. llama.cpp:
-`llama-server -m <gguf> --port 1234`. ollama: `http://localhost:11434/v1`.
-Real OpenAI: `RW_LLM_BASE_URL=https://api.openai.com/v1` + `OPENAI_API_KEY`.
+Select the matching config for both readiness and ingest, leaving the global
+`RW_LLM_PROVIDER` override unset:
 
-**Route a role** in `config/models.yaml`:
-
-```yaml
-roles:
-  author:     {provider: anthropic, model: claude-sonnet-4-6,          temperature: 0.5, max_tokens: 2500}
-  classifier: {provider: lmstudio,  model: meta-llama-3.1-8b-instruct, temperature: 0.1, max_tokens: 200}
-  proposer:   {provider: lmstudio,  model: meta-llama-3.1-8b-instruct, temperature: 0.3, max_tokens: 200}
+```bash
+RW_MODELS_CONFIG=models.lmstudio.yaml researchwiki doctor
+RW_MODELS_CONFIG=models.lmstudio.yaml researchwiki agent ingest inbox/paper.pdf --force-sandbox
 ```
 
-**Sizing:** a **7–8B** model handles the short roles well —
-`classifier`, `short_name`/`keywords`, `reconcile` (verify against S2) —
-but writes shallow `author` drafts and weak `judge` verdicts, so on small
-hardware keep those two on Anthropic and route the rest local. A **~30B+
-MoE like Qwen3.6-35B-A3B** closes that gap (near-cloud author fidelity in
-our runs) while still fitting a 32 GB laptop, which is why it's our
-recommended all-roles-local model; dense 70B+ raises the ceiling further
-but needs 40+ GB VRAM.
+`doctor` is local-only unless you explicitly add `--probe`. Other compatible
+servers use the same routing contract; set `base_url` to their actual endpoint.
+Do not rely on omitted roles being local: unspecified roles inherit defaults.
 
-**Caveats:** no prompt caching (author is ~free on local anyway); token
-counts may be approximate/zero (dashboard shows $0 — accurate); pure-local
-is supported (readiness checks are provider-aware — leave
-`ANTHROPIC_API_KEY` unset).
+Small output limits can truncate structured responses, especially when the
+server counts reasoning tokens against the same budget. Leave room for both
+the prompt and output in the context window; `ingest.target_claims_max_chars`
+controls the paper-wide extraction input budget. Check sandbox quality and logs
+before increasing workers or enabling promotion.
+
+Local **model routing** does not make the whole ingest offline: structured
+metadata lookups and first-use embedding downloads may still contact external
+services. The deterministic `--stub` path is for offline harness tests, not
+research-page authoring. Cloud roles in a mixed config still send their prompts
+to the selected provider.
 
 ---
 
@@ -1385,6 +1498,8 @@ discovery-only and never become wiki evidence. See
 | Dropped PDF in `inbox/` | `researchwiki agent ingest inbox/<file>.pdf` |
 | Dropped ≥2 PDFs in `inbox/` | `researchwiki agent ingest inbox/*.pdf` (auto-batches with checkpoint/resume) |
 | Batch ingest crashed mid-run | `researchwiki agent ingest --resume .ingest/batch-<ts>/` |
+| A relay prompt timed out | Answer the retained prompt, then resume the batch or rerun the single-PDF command; [details](#chat-relay-subscription-users--no-api-key). |
+| A worker completed but the page is absent from `wiki/` | Read its full worker log and final page path; it may be a sandbox draft, not a failed process. |
 | Edited a wiki page manually | `researchwiki db rebuild && researchwiki reindex` |
 | Have paper pages from an older/simpler wiki | `researchwiki migrate preflight <src>`, then `inspect` (see *Migrating an existing corpus*) |
 | Want the library in Zotero/Paperpile | `researchwiki export --format ris --out library.ris` |
@@ -1399,11 +1514,12 @@ discovery-only and never become wiki evidence. See
 | Want to score a paper page against its PDF | `researchwiki grade paper <stem>` |
 | Want to backfill grading for un-graded papers only | `researchwiki grade regression --missing-only` |
 | Want to re-grade every paper and detect drift | `researchwiki grade regression` (or `--no-persist` for diff-only) |
-| Want to verify a synthesis page's claims trace to cited papers | `researchwiki grade synthesis <page>` |
+| Authored or revised a synthesis, idea, or concept page | `researchwiki db rebuild`, then `check-grounding <page>` and `grade synthesis <page>` (both exit 0), followed by advisory `check-coverage <page>` and `reindex`. |
+| Want to verify a synthesis page's claims trace to cited papers | `researchwiki grade synthesis <page>` (pair with structural `check-grounding`). |
 | Want to check that every claim has a citation | `researchwiki check-grounding <page>` |
 | Want to benchmark page authoring against a curated fixture | `researchwiki benchmark-fixture <stem>` |
 | Want the wiki to propose a page instead of answering one | `researchwiki candidates concepts --bridges`, then `candidates pairs --cross-category` (see *Bottom-up discovery*) |
-| `status` printed a bridge-term or claim-pair count | That line is the trigger — `researchwiki candidates <concepts --bridges\|pairs --cross-category>` |
+| `status` printed a bridge-term or claim-pair count | Run `researchwiki candidates concepts --bridges` or `researchwiki candidates pairs --cross-category`, respectively. |
 | Want to act on a proposed claim pair | Copy that row's `researchwiki claim-overlap --pair A#slug B#slug` command (the exact judged path); `candidates pairs --decline A B --reason "…"` to reject it for good |
 | Want to see which papers disagree | `researchwiki claim-graph --tensions`; `researchwiki visualize --open` to see whether tensions cluster on one paper |
 | Want to retract a paper | `researchwiki remove <stem>` (dry run), then `--apply` (see `prompts/remove-paper.md`) |

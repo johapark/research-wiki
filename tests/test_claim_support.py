@@ -13,7 +13,6 @@ from __future__ import annotations
 import pytest
 
 from researchwiki.grade.support import (
-    ClaimSupport,
     check_support,
     count_unsupported,
     unsupported_claims,
@@ -78,10 +77,9 @@ def test_empty_chunks_are_skipped_not_sent():
     assert out[0].position == 0
 
 
-def test_unknown_verdict_falls_back_to_partial_not_veto():
-    out = check_support(_claims()[:1], lambda pairs: ["bogus"])
-    assert out[0].verdict == "partial"
-    assert count_unsupported(out) == 0
+def test_unknown_verdict_fails_verification():
+    with pytest.raises(ValueError, match="invalid support verdict"):
+        check_support(_claims()[:1], lambda pairs: ["bogus"])
 
 
 def test_classifier_length_mismatch_raises():
@@ -95,10 +93,10 @@ def test_no_claims_returns_empty():
 
 # ---- parser robustness --------------------------------------------------
 
-def test_parse_verdicts_orders_by_id_and_defaults_partial():
+def test_parse_verdicts_requires_every_id():
     text = '{"verdicts": [{"id": 2, "verdict": "unsupported"}, {"id": 0, "verdict": "supported"}]}'
-    out = _parse_verdicts(text, n=3)
-    assert out == ["supported", "partial", "unsupported"]  # id 1 missing → partial
+    with pytest.raises(ValueError, match=r"omitted verdict ids \[1\]"):
+        _parse_verdicts(text, n=3)
 
 
 def test_parse_verdicts_tolerates_code_fence_and_prose():
@@ -106,9 +104,6 @@ def test_parse_verdicts_tolerates_code_fence_and_prose():
     assert _parse_verdicts(text, n=1) == ["supported"]
 
 
-def test_parse_verdicts_unparseable_is_all_partial_never_vetoes():
-    out = _parse_verdicts("the model refused to answer", n=2)
-    assert out == ["partial", "partial"]
-    assert count_unsupported(
-        [ClaimSupport("s", i, "t", v) for i, v in enumerate(out)]
-    ) == 0
+def test_parse_verdicts_unparseable_fails_verification():
+    with pytest.raises(ValueError, match="no JSON object"):
+        _parse_verdicts("the model refused to answer", n=2)

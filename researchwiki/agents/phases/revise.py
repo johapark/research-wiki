@@ -254,10 +254,14 @@ def evolve(
     critique: CritiqueOutput,
     metadata: dict,
     sections: dict,
+    pdf_full_text: str | None = None,
     use_stub: bool = False,
 ) -> EvolveOutput:
     """Evolve phase — produce a revised draft addressing the critic's notes."""
-    prompt = _build_evolve_prompt(draft.text, critique.notes, metadata, sections)
+    prompt = _build_evolve_prompt(
+        draft.text, critique.notes, metadata, sections,
+        pdf_full_text=pdf_full_text,
+    )
     paper_type = (metadata or {}).get("paper_type")
     resp = llm.call(
         phase="evolve",
@@ -276,21 +280,61 @@ def evolve(
     )
 
 
-def _build_evolve_prompt(prior_draft: str, critic_notes: str, metadata: dict, sections: dict) -> str:
+def _build_revision_evidence(sections: dict, pdf_full_text: str | None) -> str:
+    """Source context shared by EVOLVE and DEBUG.
+
+    Revision used to receive three short section slices even when the authoring
+    phase had fallen back to a document-stratified full-text sample. That made
+    the reviser blind to both the evidence it needed and late draft sections it
+    was instructed to preserve. Keep the curated anchors, then apply the same
+    section-health-aware full-text fallback used by authoring.
+    """
+    parts: list[str] = []
+    for key, label, budget in (
+        ("introduction", "Introduction", 1500),
+        ("methods", "Methods", 2500),
+        ("results", "Results", 2500),
+        ("discussion", "Discussion", 1500),
+        ("figure_captions", "Figure / Table captions", 4000),
+        ("extended_data", "Extended Data captions", 4000),
+    ):
+        excerpt = (sections.get(key) or "").strip()
+        if excerpt:
+            parts.extend([f"## {label}", excerpt[:budget], ""])
+
+    if pdf_full_text:
+        from ...pdf.sections import assess_section_health, stratified_text_sample
+
+        budget = 30_000
+        health = assess_section_health(pdf_full_text, sections)
+        if health.healthy:
+            body = pdf_full_text[:budget]
+            label = "Full PDF text (supplementary context)"
+        else:
+            body = stratified_text_sample(pdf_full_text, budget)
+            label = "Full PDF text (document-stratified fallback)"
+        parts.extend([f"## {label}", body, ""])
+
+    return "\n".join(parts).rstrip()
+
+
+def _build_evolve_prompt(
+    prior_draft: str,
+    critic_notes: str,
+    metadata: dict,
+    sections: dict,
+    *,
+    pdf_full_text: str | None = None,
+) -> str:
     return "\n".join([
         "# Prior draft (passed tournament but the critic flagged issues)",
-        prior_draft[:4000],
+        prior_draft,
         "",
         "# Critic's revision notes",
         critic_notes,
         "",
         "# PDF excerpts (use these to ground revisions)",
-        "## Methods",
-        sections.get("methods", "")[:2000],
-        "## Results",
-        sections.get("results", "")[:2000],
-        "## Discussion",
-        sections.get("discussion", "")[:1200],
+        _build_revision_evidence(sections, pdf_full_text),
         "",
         "---",
         "",
@@ -345,6 +389,7 @@ def debug(
     gate_reasons: list[str],
     metadata: dict,
     sections: dict,
+    pdf_full_text: str | None = None,
     use_stub: bool = False,
 ) -> DebugOutput:
     """DEBUG phase — repair a draft that failed structural gate checks.
@@ -380,6 +425,7 @@ def debug(
         gate_reasons=gate_reasons,
         drift_details=drift_details,
         sections=sections,
+        pdf_full_text=pdf_full_text,
     )
     paper_type = (metadata or {}).get("paper_type")
     resp = llm.call(
@@ -407,6 +453,7 @@ def _build_debug_prompt(
     gate_reasons: list[str],
     drift_details: list[str],
     sections: dict,
+    pdf_full_text: str | None = None,
 ) -> str:
     instructions: list[str] = []
     if "drift" in issues:
@@ -437,7 +484,7 @@ def _build_debug_prompt(
 
     return "\n".join([
         "# Prior draft (passed tournament but failed the structural gate)",
-        prior_draft[:4000],
+        prior_draft,
         "",
         "# Gate rejection reasons",
         *(f"- {r}" for r in gate_reasons),
@@ -446,12 +493,7 @@ def _build_debug_prompt(
         *instructions,
         "",
         "# PDF excerpts (use these to ground repairs — verbatim numbers only)",
-        "## Methods",
-        (sections.get("methods") or "")[:2000],
-        "## Results",
-        (sections.get("results") or "")[:2000],
-        "## Discussion",
-        (sections.get("discussion") or "")[:1200],
+        _build_revision_evidence(sections, pdf_full_text),
         "",
         "---",
         "",

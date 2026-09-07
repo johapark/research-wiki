@@ -76,6 +76,25 @@ def test_section_difficulty(seeded):
     assert sec["sem_sum"] / sec["sem_n"] == pytest.approx((0.85 + 0.70) / 2)
 
 
+def test_current_semantic_score_schema_is_included(seeded):
+    author = _add(
+        seeded, attempt_id="current", role="author", section="limitations",
+        model_used="current-model",
+    )
+    _add(
+        seeded, attempt_id="current", role="grade", section="limitations",
+        parent_iteration_id=author,
+        grader_scores=json.dumps({"semantic_score": 0.8, "n_drift": 0}),
+    )
+    seeded.commit()
+
+    data = insights._gather(seeded, None)
+    assert data["quality"]["current-model"]["sem_n"] == 1
+    assert data["quality"]["current-model"]["sem_sum"] == pytest.approx(0.8)
+    assert data["by_section"]["limitations"]["sem_n"] == 1
+    assert data["by_section"]["limitations"]["sem_sum"] == pytest.approx(0.8)
+
+
 def test_decisions_and_attempts(seeded):
     data = insights._gather(seeded, None)
     assert data["decisions"] == {"committed": 1, "discarded": 1}

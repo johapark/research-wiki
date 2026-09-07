@@ -20,6 +20,7 @@ Hermetic: tmp dirs only, no PDFs, no DB, no LLM.
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -220,6 +221,67 @@ def test_recovery_is_idempotent(root):
     mut.recover_pending()
     assert mut.recover_pending() == []
     assert page.read_text(encoding="utf-8") == "original"
+
+
+def test_recovery_waits_for_a_live_transaction(root):
+    """A second worker's startup recovery must not undo a live promote."""
+    page = _write(root / "wiki" / "a.md", "original")
+    entered = threading.Event()
+    release = threading.Event()
+    recovered = threading.Event()
+    notes: list[str] = []
+
+    def writer():
+        with mut.mutation([page], operation="promote") as snap:
+            page.write_text("committed by live transaction", encoding="utf-8")
+            entered.set()
+            assert release.wait(2)
+            snap.mark_committed()
+
+    def recoverer():
+        assert entered.wait(2)
+        notes.extend(mut.recover_pending())
+        recovered.set()
+
+    writer_thread = threading.Thread(target=writer)
+    recovery_thread = threading.Thread(target=recoverer)
+    writer_thread.start()
+    recovery_thread.start()
+    assert entered.wait(2)
+    assert not recovered.wait(0.1), "recovery should wait for the transaction lock"
+    release.set()
+    writer_thread.join(2)
+    recovery_thread.join(2)
+
+    assert not writer_thread.is_alive() and not recovery_thread.is_alive()
+    assert page.read_text(encoding="utf-8") == "committed by live transaction"
+    assert notes == []
+
+
+def test_failed_transaction_cannot_erase_later_commit(root):
+    """A later transaction starts only after the earlier rollback finishes."""
+    page = _write(root / "wiki" / "index.md", "original")
+    later_entered = threading.Event()
+
+    def later_writer():
+        with mut.mutation([page], operation="promote-b") as snap:
+            later_entered.set()
+            page.write_text("committed by B", encoding="utf-8")
+            snap.mark_committed()
+
+    thread = None
+    with pytest.raises(RuntimeError, match="A failed"):
+        with mut.mutation([page], operation="promote-a"):
+            page.write_text("uncommitted A", encoding="utf-8")
+            thread = threading.Thread(target=later_writer)
+            thread.start()
+            assert not later_entered.wait(0.1), "B must wait until A rolls back"
+            raise RuntimeError("A failed")
+
+    assert thread is not None
+    thread.join(2)
+    assert not thread.is_alive()
+    assert page.read_text(encoding="utf-8") == "committed by B"
 
 
 def test_recovery_gives_up_after_the_attempt_cap(root):

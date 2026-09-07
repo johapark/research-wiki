@@ -552,6 +552,43 @@ def test_requested_entailment_veto_does_not_disappear_on_provider_failure(
         runner_support.run_entailment_check(ctx, None, "draft")
 
 
+def test_malformed_entailment_result_becomes_a_hard_gate_failure(monkeypatch):
+    """Parser/shape failures are telemetry plus a veto, never a silent skip."""
+    from types import SimpleNamespace
+
+    from researchwiki.agents import runner_support
+
+    monkeypatch.setattr(
+        runner_support.phases, "grade_draft",
+        lambda *a, **k: (_ for _ in ()).throw(ValueError("omitted verdict ids [1]")),
+    )
+    written = []
+    monkeypatch.setattr(
+        runner_support, "write_iteration", lambda **kw: written.append(kw)
+    )
+
+    class Ctx:
+        paper_stem = "smith-2024-paper"
+        pdf_filename = "paper.pdf"
+        metadata = {}
+        sandbox_dir = None
+        pdf_path = None
+        use_semantic = False
+        winner = SimpleNamespace(scores={}, iteration_id=3)
+        attempt_id = "att"
+        iteration = 7
+
+        def next_iter(self):
+            self.iteration += 1
+
+    ctx = Ctx()
+    runner_support.run_entailment_check(ctx, None, "draft")
+
+    assert ctx.winner.scores["support_check_failed"] is True
+    assert ctx.winner.scores["support_check_complete"] is False
+    assert written[0]["decision"] == "failed"
+
+
 # --- rule 2: optional work records a skip ---
 
 def test_post_promote_evolution_records_a_skip_rather_than_failing(monkeypatch):

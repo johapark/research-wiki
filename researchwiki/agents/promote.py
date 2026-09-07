@@ -113,6 +113,15 @@ def should_auto_promote(
     # is inert until the check is enabled and calibrated; once populated, a
     # claim the cited passage does not support blocks auto-promote the same way
     # a drifted number does.
+    if scores.get("support_check_failed"):
+        fails.append("claim-support verification failed")
+    elif "support_check_complete" in scores and not scores.get("support_check_complete"):
+        checked = scores.get("n_support_checked") or 0
+        expected = scores.get("n_support_expected") or 0
+        fails.append(
+            f"claim-support verification incomplete ({checked}/{expected} claims checked)"
+        )
+
     unsupported = scores.get("n_unsupported") or 0
     if unsupported > 0:
         fails.append(f"{unsupported} unsupported claim(s)")

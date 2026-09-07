@@ -59,6 +59,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .fsatomic import write_json_atomic
+from .fsatomic import exclusive_lock
 from .log import log
 from .paths import mutation_dir
 
@@ -357,22 +358,30 @@ def mutation(
         )
         return
 
-    snap = snapshot(paths, operation=operation, details=details)
-    try:
-        yield snap
-    except BaseException:
+    # Snapshot isolation matters just as much as atomic writes. Without a lock
+    # spanning this whole interval, transaction A can snapshot a shared file,
+    # transaction B can commit a newer version, and A's later rollback can
+    # restore its stale copy over B's committed work. Recovery uses this same
+    # lock, so a new worker also cannot mistake A's live journal for crash
+    # residue. The critical section is only the final filesystem mutation; PDF
+    # extraction and model calls happen before callers enter here.
+    with exclusive_lock(_transaction_lock_resource()):
+        snap = snapshot(paths, operation=operation, details=details)
         try:
-            snap.rollback()
-        except Exception as exc:
-            log(f"ERROR: rollback failed for {operation}; journal retained at "
-                f"{snap.journal_path} — the next ingest will retry it: {exc}",
-                tag="mutation")
-        raise
-    else:
-        if snap.committed:
-            snap.discard()
+            yield snap
+        except BaseException:
+            try:
+                snap.rollback()
+            except Exception as exc:
+                log(f"ERROR: rollback failed for {operation}; journal retained at "
+                    f"{snap.journal_path} — the next ingest will retry it: {exc}",
+                    tag="mutation")
+            raise
         else:
-            snap.rollback()
+            if snap.committed:
+                snap.discard()
+            else:
+                snap.rollback()
 
 
 # ---------- recovery ----------
@@ -422,6 +431,16 @@ def _clean_up(journal_path: Path, backup_dir: Path | None) -> None:
     journal_path.unlink(missing_ok=True)
 
 
+def _transaction_lock_resource() -> Path:
+    """Stable resource name shared by mutations and crash recovery.
+
+    ``exclusive_lock`` stores the actual lock outside the repository and keys
+    it from this resolved path, so this marker need not exist on disk and does
+    not leak into a synced wiki vault.
+    """
+    return mutation_dir() / "transaction"
+
+
 def recover_pending() -> list[str]:
     """Drain stale journals. Returns one human-readable line per journal handled.
 
@@ -434,6 +453,16 @@ def recover_pending() -> list[str]:
     Called at the start of the write paths (`agent ingest`, `ingest`), never from
     a read-only command.
     """
+    # A live transaction owns this lock from before its snapshot until after
+    # commit/rollback cleanup. Waiting here is therefore the liveness check:
+    # once acquired, any remaining active journal was abandoned by a process
+    # that exited (OS locks are released on process death).
+    with exclusive_lock(_transaction_lock_resource()):
+        return _recover_pending_locked()
+
+
+def _recover_pending_locked() -> list[str]:
+    """Implementation of :func:`recover_pending` with transaction lock held."""
     notes: list[str] = []
     for document in pending_journals():
         journal_path = Path(document["journal_path"])

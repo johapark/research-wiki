@@ -200,9 +200,12 @@ exactly one pending file at a time (during a single ingest).
 
 ## Parallel ingests — supervised fan-out
 
-Nothing serializes relay calls. Each `call_chat_relay` writes its own
-`{op_id}.prompt.json` and polls its own `{op_id}.response.json`; the op_id
-namespace is the only coordination and the 600 s timeout is per prompt.
+Different relay request IDs run in parallel. Calls with the same content-derived
+`op_id` take turns holding a cross-process mailbox lock, covering prompt
+publication, schema retries, response consumption, and cleanup. Each owner emits
+its handoff after acquiring the lock; the 600 s response timeout starts then.
+This also covers two paper workers judging the same claim pair. After successful
+consumption deletes the pair, the next owner requests its own response.
 
 That deadline starts when the prompt is **written**, not when you notice it, so
 it is really a budget for how long until someone looks. It does not survive
@@ -236,10 +239,10 @@ meantime, the author op_id shifts and a response you pre-wrote for the old one i
 never read. Answer the outstanding prompt and let the resumed run ask for the
 rest; do not pre-fill ahead of it.
 
-(An earlier version of this document claimed the relay grabs
-`.llm-relay/lock`, so parallel ingests serialized on chat-relay phases.
-That lock never existed. The only `flock`s in the package guard
-`index.md` and back-link writes.)
+There is no global relay lock. Mailbox locks use host-local temporary lock files
+keyed by repository and request ID, and the OS releases ownership if a worker
+exits. A subsequent owner refreshes the pending payload's paper identity before
+announcing it. Already-written responses remain reusable on restart.
 
 Multi-PDF batch mode defaults to one worker under chat-relay (API-backed
 providers retain their four-worker default). Each worker forwards its own relay
@@ -250,6 +253,11 @@ concurrent relay requests; it does not create N isolated chat responders.
 Batch plans record whether `-w N` was explicit. Resume re-evaluates the active
 provider, so an implicit API batch switched to chat-relay becomes one visible
 worker; an explicit count stays explicit. A resume-time `-w N` overrides both.
+Workers inherit the parent's resolved environment without loading the root
+`.env` again, so a selected named profile cannot acquire unrelated settings in
+the child. Child output is UTF-8 to preserve forwarded relay handoffs. If the
+parent is interrupted, it cancels queued work and checkpoints the terminal
+results of running workers before returning.
 
 **When native subagents are available, parallelize with one foreground
 single-PDF invocation per subagent.** Use a bounded rolling pool no larger than

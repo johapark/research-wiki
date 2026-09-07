@@ -70,7 +70,8 @@ def check_support(
         )
     out: list[ClaimSupport] = []
     for (section, position, text, _chunk), v in zip(scored, verdicts):
-        v = v if v in _VALID else "partial"  # unknown → treat as soft, not a veto
+        if v not in _VALID:
+            raise ValueError(f"classifier returned invalid support verdict {v!r}")
         out.append(ClaimSupport(section=section, position=position, text=text, verdict=v))
     return out
 
@@ -158,22 +159,34 @@ def llm_support_classifier(pairs: list[tuple[str, str]]) -> list[SupportVerdict]
 
 def _parse_verdicts(text: str, *, n: int) -> list[SupportVerdict]:
     """Parse the judge's JSON into an ordered verdict list of length `n`.
-    Robust to fenced code blocks and to missing ids (defaults to 'partial',
-    which never vetoes — an unparseable response can't fabricate a failure)."""
-    out: list[SupportVerdict] = ["partial"] * n
+    Robust to fenced code blocks, but deliberately strict about coverage: a
+    malformed or incomplete response means the requested verification did not
+    happen and must not be represented as a legitimate ``partial`` verdict."""
     m = re.search(r"\{.*\}", text, re.DOTALL)
     if not m:
-        return out
+        raise ValueError("support classifier returned no JSON object")
     try:
         data = json.loads(m.group(0))
-    except json.JSONDecodeError:
-        return out
-    for item in data.get("verdicts", []):
+    except json.JSONDecodeError as exc:
+        raise ValueError("support classifier returned malformed JSON") from exc
+    items = data.get("verdicts")
+    if not isinstance(items, list):
+        raise ValueError("support classifier response has no verdicts array")
+    by_id: dict[int, SupportVerdict] = {}
+    for item in items:
         try:
             i = int(item["id"])
             v = str(item["verdict"]).strip().lower()
-        except (KeyError, ValueError, TypeError):
-            continue
-        if 0 <= i < n and v in _VALID:
-            out[i] = v  # type: ignore[assignment]
-    return out
+        except (KeyError, ValueError, TypeError) as exc:
+            raise ValueError("support classifier returned an invalid verdict item") from exc
+        if not 0 <= i < n:
+            raise ValueError(f"support classifier returned out-of-range id {i}")
+        if i in by_id:
+            raise ValueError(f"support classifier returned duplicate id {i}")
+        if v not in _VALID:
+            raise ValueError(f"support classifier returned invalid verdict {v!r}")
+        by_id[i] = v  # type: ignore[assignment]
+    missing = [i for i in range(n) if i not in by_id]
+    if missing:
+        raise ValueError(f"support classifier omitted verdict ids {missing}")
+    return [by_id[i] for i in range(n)]

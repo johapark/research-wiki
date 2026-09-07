@@ -73,6 +73,15 @@ def test_evolve_drift_veto_precedes_floor():
     assert is_evolve_improvement(new, old) is False
 
 
+def test_quality_gain_cannot_bypass_new_numeric_drift():
+    prior = _d(semantic_score=0.60, salience_score=0.60, n_drift=0,
+               weakest_score=0.20, mean_bm25=4.0)
+    revised = _d(semantic_score=0.90, salience_score=0.90, n_drift=1,
+                 weakest_score=0.90, mean_bm25=10.0)
+    assert is_evolve_improvement(revised, prior) is False
+    assert is_strict_improvement(revised, prior) is False
+
+
 # ---------- contrast: the strict (DEBUG) rule ignores the floor ----------
 
 def test_strict_rule_does_not_credit_floor_lift():
