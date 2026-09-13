@@ -123,15 +123,15 @@ def propose_metadata_llm(pdf_text: str, *, use_stub: bool = False) -> dict:
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.DOTALL).strip()
     m = re.search(r"\{.*\}", raw, re.DOTALL)
     if not m:
-        return _empty_metadata()
+        return {**_empty_metadata(), "_llm_usage": llm.response_usage(resp)}
     try:
         out = json.loads(m.group(0))
     except json.JSONDecodeError:
-        return _empty_metadata()
+        return {**_empty_metadata(), "_llm_usage": llm.response_usage(resp)}
     if not isinstance(out, dict):
-        return _empty_metadata()
+        return {**_empty_metadata(), "_llm_usage": llm.response_usage(resp)}
 
-    return _coerce_metadata_shape(out)
+    return {**_coerce_metadata_shape(out), "_llm_usage": llm.response_usage(resp)}
 
 
 def _empty_metadata() -> dict:
@@ -269,8 +269,7 @@ def reconcile_metadata(
     llm_meta: dict = _empty_metadata()
     if use_llm:
         llm_meta = propose_metadata_llm(text)
-        if any(llm_meta[k] for k in ("doi", "title", "first_author_surname", "year")):
-            sources.append("llm-extractor")
+        sources.extend(["llm-extractor"] if any(llm_meta.values()) else [])
 
     seed_title = title_override or llm_meta["title"] or pdf_meta_title or pdf_first_page_title
 
@@ -571,6 +570,7 @@ def reconcile_metadata(
         "pdf_text_preview": text[:4000],
         "sources": sources,
         "prior_stem": prior_stem,
+        "_reconcile_usage": llm_meta.pop("_llm_usage", {}),
     }
 
 

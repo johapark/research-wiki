@@ -247,9 +247,13 @@ def _build_author_prompt(
                 "references excluded when detectable]"
             )
         elif len(body) > FULL_PDF_BUDGET:
-            body = body[:FULL_PDF_BUDGET]
+            # The curated section excerpts already preserve the beginnings of
+            # Methods/Results/Discussion. Spend the wider context budget across
+            # the full substantive document so long papers do not hide late
+            # experiments behind their introduction.
+            body = stratified_text_sample(pdf_full_text, FULL_PDF_BUDGET)
             truncated_note = (
-                f"\n[truncated at {FULL_PDF_BUDGET} chars; "
+                f"\n[stratified to {FULL_PDF_BUDGET} chars; "
                 f"full PDF is {len(pdf_full_text)} chars]"
             )
         parts.extend([

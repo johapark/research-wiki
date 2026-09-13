@@ -640,7 +640,7 @@ def _parse_keywords_response(text: str) -> list[str]:
     return _filter_keyword_list(obj.get("keywords") or [])
 
 
-def _filter_keyword_list(items: list) -> list[str]:
+def filter_keywords(items: list) -> list[str]:
     """Apply the deny-list, length cap, dedup, and max-count rules to a raw
     keyword list. Shared by the single-paper and batched parsers."""
     out: list[str] = []
@@ -663,6 +663,10 @@ def _filter_keyword_list(items: list) -> list[str]:
         if len(out) >= MAX_KEYWORDS:
             break
     return out
+
+
+# Backward-compatible private name for tests and older internal callers.
+_filter_keyword_list = filter_keywords
 
 
 def render_keywords_yaml(keywords: list[str]) -> str | None:

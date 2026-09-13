@@ -8,6 +8,9 @@ benchmark ratios live, and emitted only qualitative claims.
 """
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
+
 from researchwiki.agents.phases.target_claims import (
     _allocate,
     _build_prompt,
@@ -15,6 +18,7 @@ from researchwiki.agents.phases.target_claims import (
     render_for_author_prompt,
     TargetClaim,
     TargetClaimsOutput,
+    extract_target_claims,
 )
 from researchwiki.agents.phases.draft import _build_author_prompt
 
@@ -115,3 +119,48 @@ def test_unhealthy_author_context_is_stratified_not_head_only():
     assert "document-stratified fallback" in prompt
     assert "LATE_RESULT" in prompt
     assert "REFERENCE_DECOY" not in prompt
+
+
+def test_healthy_long_author_context_is_also_stratified():
+    full = _long_paper() + ("late substantive material. " * 3000)
+    sections = {
+        "introduction": "Background prose.",
+        "methods": "Methods detail.",
+        "results": "Results include AUPRC 0.918.",
+        "discussion": "Discussion limitation.",
+    }
+    prompt = _build_author_prompt(
+        {"title": "X", "pdf_text_preview": full[:1000]}, sections, [],
+        pdf_full_text=full,
+    )
+    assert "[document stratum 5/5" in prompt
+    assert "[stratified to 30000 chars" in prompt
+    assert "DECOY" not in prompt
+
+
+def test_target_extraction_returns_filtered_keywords(monkeypatch):
+    payload = {
+        "claims": [{
+            "type": "headline", "content": "The caller reaches AUPRC 0.918",
+            "importance": "critical", "location": "Results",
+        }],
+        "keywords": [
+            "VariantMedium", "variant calling", "AUPRC", "genome benchmark",
+            "precision recall", "study", "variant calling",
+        ],
+    }
+    monkeypatch.setattr(
+        "researchwiki.agents.phases.target_claims.llm.call",
+        lambda **kw: SimpleNamespace(
+            text=json.dumps(payload), model="test-model", input_tokens=10,
+            output_tokens=5, cache_read_tokens=0, cache_write_tokens=0,
+        ),
+    )
+    out = extract_target_claims(
+        metadata={"title": "VariantMedium"}, sections={"results": "AUPRC 0.918"},
+    )
+    assert len(out.claims) == 1
+    assert out.keywords == [
+        "VariantMedium", "variant calling", "AUPRC", "genome benchmark",
+        "precision recall",
+    ]

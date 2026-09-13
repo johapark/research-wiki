@@ -126,6 +126,18 @@ def should_auto_promote(
     if unsupported > 0:
         fails.append(f"{unsupported} unsupported claim(s)")
 
+    # The target-claims phase is the paper-wide completeness check. Older
+    # callers that do not report a status retain the legacy gate behavior;
+    # live ingest always reports one. Exact critical misses are the narrow
+    # hard boundary: partial matches and lower-priority omissions remain
+    # selection/revision signals rather than reasons to bloat the page.
+    target_status = scores.get("target_claim_extraction_status")
+    if target_status is not None and target_status != "extracted":
+        fails.append(f"target-claim extraction {target_status} — completeness not verified")
+    critical_missed = scores.get("n_critical_target_claims_missed") or 0
+    if critical_missed:
+        fails.append(f"{critical_missed} critical target claim(s) missing")
+
     # Broken wikilinks are NOT a hard gate-fail. By construction they are
     # already stripped from the cleaned text by verify_crosslinks — the list
     # records targets the drafter wrote that didn't exist (typically

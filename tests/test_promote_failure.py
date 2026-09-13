@@ -141,6 +141,43 @@ def test_successful_promote_is_unaffected(ctx, commit_env, monkeypatch, tmp_path
     assert out == page
     commits = [r for r in commit_env if r.get("role") == "commit"]
     assert commits[0]["decision"] == "committed-to-wiki"
+    assert ctx.outcome == "promoted"
+
+
+def test_memory_evolution_is_off_by_default(ctx, commit_env, monkeypatch, tmp_path):
+    page = tmp_path / "page.md"
+    monkeypatch.setattr(promote_mod, "promote_to_wiki", lambda **kw:
+                        promote_mod.PromotionResult(
+                            promoted=True, wiki_path=page, pdf_path=tmp_path / "p.pdf",
+                            category="compbio", index_updated=True, log_appended=True))
+    memory_calls = []
+    monkeypatch.setattr(
+        runner.phases, "evolve_memory", lambda *a, **k: memory_calls.append(True)
+    )
+    monkeypatch.setattr(runner.phases, "persist_grades", lambda *a, **k: None)
+    runner._phase_commit(ctx, conn=None)
+    assert memory_calls == []
+
+
+def test_commit_reuses_target_claim_keywords(ctx, commit_env, monkeypatch, tmp_path):
+    page = tmp_path / "page.md"
+    ctx.target_claims = type("Targets", (), {
+        "keywords": ["one", "two", "three", "four", "five"],
+        "model": "extractor-model",
+    })()
+    monkeypatch.setattr(promote_mod, "promote_to_wiki", lambda **kw:
+                        promote_mod.PromotionResult(
+                            promoted=True, wiki_path=page, pdf_path=tmp_path / "p.pdf",
+                            category="compbio", index_updated=True, log_appended=True))
+    monkeypatch.setattr(
+        runner.phases, "propose_keywords",
+        lambda *a, **k: pytest.fail("valid extracted keywords must avoid a second call"),
+    )
+    monkeypatch.setattr(runner.phases, "persist_grades", lambda *a, **k: None)
+    runner._phase_commit(ctx, conn=None)
+    keyword_rows = [r for r in commit_env if r.get("role") == "keywords"]
+    assert keyword_rows[0]["cost_input_tokens"] == 0
+    assert "reused target-claims" in keyword_rows[0]["decision_reason"]
 
 
 def test_stub_promote_disables_llm_category_classification(
@@ -185,6 +222,7 @@ def test_post_promote_optional_llm_respects_budget_but_maintenance_finishes(
                             index_updated=True, log_appended=True))
     tracker = budget.BudgetTracker(budget.IngestBudget(max_tokens=100))
     ctx.budget_tracker = tracker
+    ctx.run_memory_evolve = True
     grade_calls = []
     monkeypatch.setattr(
         "researchwiki.agents.runner_support.write_iteration",
@@ -223,6 +261,7 @@ def test_expired_wall_after_promote_skips_optional_work_but_finishes_maintenance
     page = tmp_path / "page.md"
     tracker = budget.BudgetTracker(budget.IngestBudget(max_wall_seconds=1))
     ctx.budget_tracker = tracker
+    ctx.run_memory_evolve = True
 
     def promote_and_expire(**kwargs):
         tracker.started -= 2
@@ -291,6 +330,32 @@ def test_cli_maps_promote_failure_to_exit_2(monkeypatch, capsys, tmp_path):
     assert "already exists" in err
     assert "recovery.md" in err
     assert "Traceback" not in err, "known-failure mode must not print a stack trace"
+
+
+def test_cli_auto_sandbox_exits_1_and_skips_post_hooks(monkeypatch, capsys, tmp_path):
+    from types import SimpleNamespace
+    from researchwiki.tasks import agent as agent_cli
+    from researchwiki.agents import llm
+    from researchwiki import categories
+
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    sandbox = tmp_path / ".agent-output" / "paper.md"
+    ctx = SimpleNamespace(
+        outcome="sandboxed", promote_mode="auto", committed_path=sandbox,
+        paper_stem="paper", attempt_id="a-review", gate_reasons=["incomplete"],
+        supplementary=None,
+    )
+    monkeypatch.setattr(llm, "preflight_providers", lambda: None)
+    monkeypatch.setattr(agent_cli, "_drain_pending_mutations", lambda: None)
+    monkeypatch.setattr(agent_cli, "run_ingest", lambda *a, **k: ctx)
+    monkeypatch.setattr(categories, "other_saturation_warning", lambda: None)
+
+    rc = agent_cli.main([
+        "ingest", str(pdf), "--claim-overlap", "--contradiction-alert",
+    ])
+    assert rc == 1
+    assert "Review required" in capsys.readouterr().out
 
 
 # ---------- the real promote, rolled back (WI-4) ----------

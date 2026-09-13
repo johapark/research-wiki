@@ -142,6 +142,15 @@ def grade_draft(
     # but should not automatically trigger additive prose.
     missed_anchors.extend(target_scores.get("missed_target_claims", []))
 
+    if target_claims is None:
+        target_extraction_status = "unavailable"
+    elif getattr(target_claims, "error", None):
+        target_extraction_status = "error"
+    elif not getattr(target_claims, "claims", None):
+        target_extraction_status = "empty"
+    else:
+        target_extraction_status = "extracted"
+
     aggregate = {
         "n_claims": report.n_claims,
         "n_graded": report.n_graded,
@@ -159,6 +168,7 @@ def grade_draft(
         "n_anchors_matched": n_anchors_matched,
         "n_anchors_missed": n_anchors_missed,
         "missed_anchors": missed_anchors,
+        "target_claim_extraction_status": target_extraction_status,
         **target_scores,
     }
     details = [

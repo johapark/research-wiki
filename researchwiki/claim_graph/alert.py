@@ -5,11 +5,10 @@ just the new paper's claims, then prints one-line `⚠ contradicts` alerts
 per detected disagreement. Silent no-op on any failure — this hook must
 NEVER break ingest.
 
-Same shape as `claim_overlap.run_after_ingest` and
-`concepts.attach_after_ingest`: called from the agent path right after
-promotion. The judge is LLM-call-heavy but bounded by max_pairs; when
---stub / --no-semantic (no embedder / no judge) is in play, this returns
-early with no alerts.
+Same shape as `claim_overlap.run_after_ingest`: called from the agent path
+right after promotion only when `--contradiction-alert` is requested. The
+judge is LLM-call-heavy but bounded by max_pairs; when --stub / --no-semantic
+(no embedder / no judge) is in play, this returns early with no alerts.
 """
 
 from __future__ import annotations

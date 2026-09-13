@@ -116,7 +116,9 @@ def critic(
     """
     weak = [c for c in draft.claim_details if c.is_weak()]
     gaps = coverage_gaps(draft.scores)
-    if len(gaps) < _COVERAGE_GAP_TRIGGER:
+    target_gaps = [g for g in gaps if g.get("axis") == "target_claims"]
+    structural_gaps = [g for g in gaps if g.get("axis") != "target_claims"]
+    if not target_gaps and len(structural_gaps) < _COVERAGE_GAP_TRIGGER:
         # Below the trigger, gaps ride along only when the critic is already
         # firing for weak claims — one uncovered anchor is as likely to be an
         # extraction artifact as a real omission, and isn't worth a round on

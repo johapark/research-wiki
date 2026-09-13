@@ -271,6 +271,33 @@ def test_gleaning_still_runs_when_citations_were_available(monkeypatch):
     assert [c.wikilink for c in out] == ["compbio/g"]
 
 
+def test_judge_records_model_usage(monkeypatch):
+    hit = _Hit("compbio/h0")
+    monkeypatch.setattr(crosslinks, "_build_judge_prompt", lambda *a, **k: "P")
+    monkeypatch.setattr(
+        crosslinks, "_parse_judge_response",
+        lambda _text: [{"wikilink": hit.key, "verdict": "none"}],
+    )
+    monkeypatch.setattr(
+        crosslinks.llm, "call",
+        lambda *a, **k: crosslinks.llm.LLMResponse(
+            text="{}", model="judge-model", temperature=0.0,
+            input_tokens=120, output_tokens=8,
+            cache_read_tokens=30, cache_write_tokens=5,
+        ),
+    )
+    stats: dict = {}
+
+    assert crosslinks._judge_candidates(
+        {}, {}, [hit], allow_gleaning=False, stats=stats,
+    ) == []
+    assert stats == {
+        "model_used": "judge-model", "input_tokens": 120,
+        "output_tokens": 8, "cache_read_tokens": 30,
+        "cache_write_tokens": 5,
+    }
+
+
 def test_first_pass_borderline_verdict_does_not_become_a_link(monkeypatch):
     """Semantic adjacency is a proposal signal, never durable link evidence."""
     hit = _Hit("compbio/h0")

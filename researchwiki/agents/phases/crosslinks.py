@@ -255,6 +255,7 @@ def propose_crosslinks(
     use_stub: bool = False,
     exclude_keys: frozenset[str] = frozenset(),
     allow_gleaning: bool = True,
+    stats: dict | None = None,
 ) -> list[CrosslinkCandidate]:
     """Find source-supported crosslink candidates the citation graph misses.
 
@@ -313,7 +314,7 @@ def propose_crosslinks(
         return []
 
     judged = _judge_candidates(
-        metadata, sections, hits, allow_gleaning=allow_gleaning
+        metadata, sections, hits, allow_gleaning=allow_gleaning, stats=stats
     )
     return judged
 
@@ -324,6 +325,7 @@ def _judge_candidates(
     hits: list,
     *,
     allow_gleaning: bool = True,
+    stats: dict | None = None,
 ) -> list[CrosslinkCandidate]:
     """Two-pass LLM judge for a batch of semantic candidates.
 
@@ -351,6 +353,8 @@ def _judge_candidates(
     except Exception as e:
         log(f"judge call failed: {e}", tag="propose_crosslinks")
         return []
+
+    _add_usage(stats, resp)
 
     verdicts = _parse_judge_response(resp.text)
     by_key = {h.key: h for h in hits}
@@ -388,7 +392,9 @@ def _judge_candidates(
     elif len(out) <= 2 and len(rejected_keys) >= 3:
         log(f"gleaning fires (pass-1: {len(out)} topical, "
               f"{len(rejected_keys)} rejected)", tag="propose_crosslinks")
-        gleaned = _gleaning_pass(metadata, sections, hits, rejected_keys, by_key)
+        gleaned = _gleaning_pass(
+            metadata, sections, hits, rejected_keys, by_key, stats=stats
+        )
         n_added = 0
         for cand in gleaned:
             if cand.wikilink in promoted_keys:
@@ -410,6 +416,8 @@ def _gleaning_pass(
     hits: list,
     rejected_keys: list[str],
     by_key: dict,
+    *,
+    stats: dict | None = None,
 ) -> list[CrosslinkCandidate]:
     """Re-prompt the judge on its rejected candidates only.
 
@@ -438,6 +446,8 @@ def _gleaning_pass(
         log(f"gleaning call failed: {e}", tag="propose_crosslinks")
         return []
 
+    _add_usage(stats, resp)
+
     out: list[CrosslinkCandidate] = []
     for v in _parse_judge_response(resp.text):
         key = v.get("wikilink")
@@ -459,6 +469,22 @@ def _gleaning_pass(
             relationship=rationale,
         ))
     return out
+
+
+def _add_usage(stats: dict | None, resp: llm.LLMResponse) -> None:
+    """Accumulate judge usage without changing the phase's public result."""
+    if stats is None:
+        return
+    model = getattr(resp, "model", None)
+    if model:
+        stats["model_used"] = model
+    for field in (
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+    ):
+        stats[field] = stats.get(field, 0) + int(getattr(resp, field, 0) or 0)
 
 
 # JSON Schema for the crosslink judge envelope (used by both _judge_candidates

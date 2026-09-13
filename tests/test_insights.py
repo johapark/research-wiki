@@ -65,6 +65,10 @@ def test_token_and_role_tallies(seeded):
     assert data["by_model"]["small-model"]["cache_unknown"] == 1
     assert "author" in data["by_role"] and "grade" in data["by_role"] and "extract" in data["by_role"]
     assert data["by_role"]["author"]["calls"] == 2
+    assert data["by_role"]["author"]["events"] == 2
+    assert data["by_role"]["author"]["model_events"] == 2
+    assert data["by_role"]["extract"]["events"] == 1
+    assert data["by_role"]["extract"]["model_events"] == 0
 
 
 def test_section_difficulty(seeded):

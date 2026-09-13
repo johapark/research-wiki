@@ -110,6 +110,38 @@ def test_zero_unsupported_does_not_block():
     assert not any("unsupported claim" in r for r in gate.reasons)
 
 
+def test_failed_target_claim_extraction_blocks():
+    gate = should_auto_promote(
+        _passing_scores(target_claim_extraction_status="error"),
+        _no_broken(), n_key_contributions=MIN_KEY_CONTRIBUTIONS,
+    )
+    assert gate.promoted is False
+    assert any("completeness not verified" in r for r in gate.reasons)
+
+
+def test_critical_target_claim_miss_blocks():
+    gate = should_auto_promote(
+        _passing_scores(
+            target_claim_extraction_status="extracted",
+            n_critical_target_claims_missed=1,
+        ),
+        _no_broken(), n_key_contributions=MIN_KEY_CONTRIBUTIONS,
+    )
+    assert gate.promoted is False
+    assert any("critical target claim" in r for r in gate.reasons)
+
+
+def test_complete_target_claim_extraction_passes():
+    gate = should_auto_promote(
+        _passing_scores(
+            target_claim_extraction_status="extracted",
+            n_critical_target_claims_missed=0,
+        ),
+        _no_broken(), n_key_contributions=MIN_KEY_CONTRIBUTIONS,
+    )
+    assert gate.promoted is True
+
+
 def test_failed_support_verification_blocks():
     gate = should_auto_promote(
         _passing_scores(support_check_failed=True), _no_broken(),

@@ -147,6 +147,23 @@ def test_single_gap_alone_does_not_fire(monkeypatch):
     assert out.model == "(skipped)"
 
 
+def test_single_critical_target_gap_does_fire(monkeypatch):
+    """The LLM-extracted target was explicitly triaged as load-bearing, so one
+    exact miss is actionable; the two-item noise threshold applies only to
+    structural salience anchors."""
+    calls = []
+    monkeypatch.setattr(
+        "researchwiki.agents.phases.revise.llm.call",
+        lambda **kw: calls.append(kw) or SimpleNamespace(
+            text="- add-to Results: central finding", model="m",
+            input_tokens=10, output_tokens=5),
+    )
+    gap = _anchor(_REAL, id="target-001", axis="target_claims")
+    out = critic(draft=_draft([gap]), metadata={})
+    assert len(calls) == 1
+    assert out.coverage_gaps == [gap]
+
+
 def test_two_gaps_fire_with_zero_weak_claims(monkeypatch):
     """The core regression: before the fix this returned "no weak claims" and the
     runner broke out of the evolve loop without ever revising."""

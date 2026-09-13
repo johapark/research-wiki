@@ -30,10 +30,12 @@ from .commit_support import promotion_decision_reason, update_indexes_after_prom
 from .budget import BudgetExhausted, activate
 from .runner_support import (
     finalize_attempt_timing, handle_budget_exhausted,
-    keyword_body_gaps as _keyword_body_gaps,
+    keyword_body_gaps,
     make_budget_tracker, phase_extract as _phase_extract,
     phase_reconcile as _phase_reconcile,
     phase_target_claims as _phase_target_claims,
+    find_exact_duplicate as _find_exact_duplicate,
+    prepare_keywords,
     record_revision_decision,
     run_entailment_check,
     run_post_promote_memory_evolution,
@@ -44,6 +46,11 @@ from .runner_support import (
 from .relay import set_relay_identity
 from ..fsatomic import write_text_atomic
 from ..log import log
+
+
+def _keyword_body_gaps(keywords: list[str], body_text: str) -> list[str]:
+    """Compatibility shim for callers that imported the former local helper."""
+    return keyword_body_gaps(keywords, body_text)
 
 
 def run_ingest(
@@ -68,6 +75,7 @@ def run_ingest(
     max_tokens: int | None = None,
     max_cost_usd: float | None = None,
     max_wall_seconds: float | None = None,
+    run_memory_evolve: bool = False,
 ) -> Context:
     """Drive a single ingest attempt end-to-end.
 
@@ -94,6 +102,7 @@ def run_ingest(
         supplementary=supplementary,
         use_llm_reconcile=use_llm_reconcile,
         allow_rename=allow_rename,
+        run_memory_evolve=run_memory_evolve,
     )
     ctx.budget_tracker = make_budget_tracker(
         max_model_calls=max_model_calls,
@@ -174,6 +183,32 @@ def run_ingest(
                 missing=missing,
             )
 
+        # Exact duplicate fast path. An inbox copy byte-identical to the
+        # canonical PDF is already ingested, so authoring it again would spend
+        # several model calls only to fail on the eventual PDF collision. A
+        # source already under papers/ is a deliberate re-ingest and must keep
+        # running; a different file with the same DOI may be a journal upgrade
+        # and is left to promotion's existing classifier.
+        duplicate = _find_exact_duplicate(ctx, prior_stem)
+        if duplicate:
+            existing_stem, existing_page = duplicate
+            ctx.outcome = "already_present"
+            ctx.paper_stem = existing_stem
+            ctx.committed_path = existing_page
+            ctx.next_iter()
+            write_iteration(
+                attempt_id=ctx.attempt_id,
+                paper_stem=ctx.paper_stem,
+                pdf_filename=ctx.pdf_filename,
+                iteration=ctx.iteration,
+                role="duplicate",
+                decision="already-present",
+                decision_reason=f"incoming PDF is byte-identical to papers/{existing_stem}.pdf",
+                conn=conn,
+            )
+            log(f"duplicate → papers/{existing_stem}.pdf is byte-identical; stopping", tag="agent")
+            return ctx
+
         # Phase 2: extract
         ctx.next_iter()
         sections, full_text = _phase_extract(ctx, conn)
@@ -184,8 +219,8 @@ def run_ingest(
 
         # Phase 2.4: target-claims extraction (L3) — structured list of
         # claims the page should preserve. Surfaces a coverage target the
-        # author phase consumes; failure is graceful (empty target_claims
-        # → author falls back to pre-L3 prompt shape).
+        # author phase consumes. Failure still permits a reviewable draft, but
+        # the completeness gate prevents automatic promotion.
         ctx.next_iter()
         ctx.target_claims = _phase_target_claims(ctx, conn)
         if ctx.target_claims is not None and not ctx.target_claims.is_empty():
@@ -365,6 +400,7 @@ def _phase_crosslinks(ctx: Context, conn) -> list:
         # No citation evidence anywhere in this run — don't let the
         # second-chance pass reopen candidates pass 1 already rejected.
         allow_gleaning=not cl_stats.get("citation_graph_unresolved", False),
+        stats=cl_stats,
     )
     cands = list(cite_cands) + list(topical_cands)
     # Drop any self-reference. On re-ingest the paper's own prior page is
@@ -389,6 +425,11 @@ def _phase_crosslinks(ctx: Context, conn) -> list:
             + (f"; first 10: {summary}" if cands else "")
         ),
         duration_ms=elapsed_ms,
+        model_used=cl_stats.get("model_used"),
+        cost_input_tokens=cl_stats.get("input_tokens", 0),
+        cost_output_tokens=cl_stats.get("output_tokens", 0),
+        cost_cache_read_tokens=cl_stats.get("cache_read_tokens", 0),
+        cost_cache_write_tokens=cl_stats.get("cache_write_tokens", 0),
         gate_metrics={
             "candidates": len(cands),
             "citation_candidates": len(cite_cands),
@@ -479,7 +520,12 @@ def _phase_grade(ctx: Context, conn, draft) -> None:
             k: scores.get(k) for k in (
                 "n_graded", "n_drift", "n_negation_mismatches",
                 "n_anchors", "n_target_claims",
+                "n_critical_target_claims_missed",
             ) if scores.get(k) is not None
+        } | {
+            "target_claim_extraction_failed": (
+                scores.get("target_claim_extraction_status") != "extracted"
+            ),
         },
         conn=conn,
     )
@@ -840,50 +886,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # `keywords:` field a structural coverage signal — terms named in
         # the source but missing from the page body are flagged in the
         # body-coverage log line below.
-        ctx.next_iter()
-        kw_t0 = time.monotonic()
-        kw_out = phases.propose_keywords(
-            metadata=ctx.metadata,
-            draft_text=cleaned_text,
-            sections=ctx.sections,
-            full_pdf_text=ctx.pdf_full_text,
-            use_stub=ctx.use_stub,
-        )
-        write_iteration(
-            attempt_id=ctx.attempt_id,
-            paper_stem=ctx.paper_stem,
-            pdf_filename=ctx.pdf_filename,
-            iteration=ctx.iteration,
-            role="keywords",
-            decision="kept" if kw_out.keywords else "rejected",
-            decision_reason=f"proposed: {kw_out.keywords!r}",
-            model_used=kw_out.model,
-            **usage_costs(kw_out),
-            duration_ms=int((time.monotonic() - kw_t0) * 1000),
-            conn=conn,
-        )
-        log(f"keywords  → {kw_out.keywords}", tag="agent")
-
-        # Body-coverage signal. With source-derived keywords, any keyword
-        # that doesn't appear (even partially) in the page body is a
-        # candidate omission worth a reviewer's eye. We log this rather
-        # than gate on it — a small body/keyword gap is normal (e.g., the
-        # body uses a synonym, or the keyword names a paper-internal
-        # subsystem the wiki page deliberately summarized at higher
-        # altitude). Whole-token presence test (`keyword in body`,
-        # case-insensitive); multi-word keywords pass if any token-bigram
-        # of the keyword appears, since "panel of normals" matching the
-        # body's `(PoN)` is a different shape of presence.
-        if kw_out.keywords:
-            missing = _keyword_body_gaps(kw_out.keywords, cleaned_text)
-            if missing:
-                log(
-                    f"kw-coverage → {len(kw_out.keywords) - len(missing)}/"
-                    f"{len(kw_out.keywords)} keywords appear in body; "
-                    f"missing: {missing[:5]}", tag="agent"
-                )
-            else:
-                log(f"kw-coverage → all {len(kw_out.keywords)} keywords appear in body", tag="agent")
+        kw_out = prepare_keywords(ctx, conn, cleaned_text, writer=write_iteration)
 
         # `ctx.winner.model` is the model that produced the final page text.
         # It's set by either the author phase (initial draft) or the evolve
@@ -951,6 +954,9 @@ def _phase_commit(ctx: Context, conn) -> Path:
                     "promoted": False,
                     "gate_failures": len(gate.reasons),
                     "warnings": len(result.warnings),
+                    "critical_target_claims_missed": (
+                        ctx.winner.scores.get("n_critical_target_claims_missed") or 0
+                    ),
                 },
                 conn=conn,
             )
@@ -1037,13 +1043,6 @@ def _phase_commit(ctx: Context, conn) -> Path:
             reason="incremental page and claim indexes", writer=write_iteration,
         )
 
-        # Memory evolution: now that the new page is on disk, ask whether any
-        # neighboring synthesis pages need updating. It is optional and must
-        # not escape a user-supplied budget merely because promotion landed.
-        run_post_promote_memory_evolution(
-            ctx, conn, source_key=f"{result.category}/{ctx.paper_stem}"
-        )
-
         # Coverage grading: score the just-committed page's claims against
         # its source PDF and write the per-claim signal back into the DB.
         # Without this, the `claims` table's grader columns stay NULL and
@@ -1052,12 +1051,23 @@ def _phase_commit(ctx: Context, conn) -> Path:
         ctx.next_iter()
         phases.persist_grades(ctx, conn)
 
+        # Synthesis maintenance is model-backed corpus enrichment, so it is
+        # opt-in on the ingest hot path. Required canonical-page grading above
+        # always finishes first. The helper re-arms this ingest's budget only
+        # around the optional work.
+        if ctx.run_memory_evolve:
+            run_post_promote_memory_evolution(
+                ctx, conn, source_key=f"{result.category}/{ctx.paper_stem}"
+            )
+
         # Warnings can be added after promotion itself (supplementary staging,
         # incremental indexing), so assemble the durable commit reason only
         # after those derived operations have finished.
         decision_reason = promotion_decision_reason(result)
 
         out_path = result.wiki_path
+        ctx.outcome = "promoted"
+        ctx.gate_reasons = list(gate.reasons)
     else:
         # Sandbox path: write the agent's draft to .agent-output (was the
         # commit phase's behavior in Phase 2.6).
@@ -1099,6 +1109,8 @@ def _phase_commit(ctx: Context, conn) -> Path:
         log(f"sandbox  → {out_path}", tag="agent")
         for r in gate.reasons:
             log(f"           ✗ {r}", tag="agent")
+        ctx.outcome = "sandboxed"
+        ctx.gate_reasons = list(gate.reasons)
 
     write_iteration(
         attempt_id=ctx.attempt_id,
@@ -1116,6 +1128,12 @@ def _phase_commit(ctx: Context, conn) -> Path:
             "gate_failures": len(gate.reasons),
             "warnings": len(gate.warnings),
             "unsupported_claims": (ctx.winner.scores.get("n_unsupported") or 0),
+            "critical_target_claims_missed": (
+                ctx.winner.scores.get("n_critical_target_claims_missed") or 0
+            ),
+            "target_claim_extraction_failed": (
+                ctx.winner.scores.get("target_claim_extraction_status") != "extracted"
+            ),
         },
         conn=conn,
     )

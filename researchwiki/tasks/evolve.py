@@ -7,13 +7,12 @@ Nothing in `wiki/` is modified — review and apply manually.
 
 ✅ Use when: you want to (re-)run evolution against an already-ingested paper
    on demand — e.g. after the synthesis coverage has grown, or for the
-   digest ingest path, which (unlike the agent path) does not evolve for you.
+   normal low-overhead ingest path, which does not evolve synthesis pages.
    Run with `--dry-run` first to see the verdict distribution before letting
    it write proposals.
-ℹ️ Note: the agent ingest path already runs this automatically post-promote
-   (the `memory_evolve` phase in the runner), so you usually don't invoke the
-   CLI by hand after `agent ingest`. It stays a separate command for the
-   digest path and for re-running on demand.
+ℹ️ Note: `agent ingest --memory-evolve` runs this post-promote under the
+   ingest budget. Without that explicit flag, use this command when synthesis
+   evolution is useful; it is intentionally not a per-paper default.
 
 Usage:
   researchwiki evolve cgt/du-2025-...           # propose against neighbors of Du 2025

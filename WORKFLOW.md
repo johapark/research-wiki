@@ -76,27 +76,27 @@ inbox/raw-paper.pdf
 │                   to 0.01 and confidence-weighted by denominator;   │
 │                   tail: coherence → drift → coverage → BM25         │
 │  8. critic        translate weak-claim flags into revision notes,   │
-│                   plus triage of uncovered critical PDF anchors     │
-│                   (recall gaps; ≥2 eligible fires the loop alone)   │
+│                   plus triage of uncovered PDF anchors (one missed  │
+│                   critical target claim fires; other gaps need ≥2)  │
 │  9. evolve        revise the winning draft against critic notes;    │
 │                   keep only under the evolve fitness lens           │
 │ 10. (debug)       repair structural-gate failures if any            │
 │     (support)     optional final-draft claim-entailment check        │
-│ 11. metadata      HANDLE/HOOK from author trailer + keyword call    │
+│ 11. metadata      HANDLE/HOOK from author trailer + target-claim    │
+│                   keywords (dedicated call only as fallback)        │
 │ 12. promote       move PDF → papers/{stem}.pdf,                     │
 │                   write wiki/{category}/{stem}.md,                  │
 │                   add back-links, append to index.md and log.md     │
 │ 13. index         upsert changed pages into BM25 + semantic indexes │
-│ 14. memory evolve KNN against existing synthesis                    │
-│                   pages → per-neighbor LLM judgment → proposals     │
-│                   written to .ingest/{stem}-evolution-proposals/    │
-│ 15. persist grade write promoted-page claim grades to state DB      │
+│ 14. persist grade write promoted-page claim grades to state DB      │
+│ 15. memory evolve optional (--memory-evolve): KNN against synthesis │
+│                   pages → LLM judgment → reviewable proposals       │
 └────────────────────────────────────────────────────────────────────┘
         │
         ▼
 papers/{stem}.pdf                     # canonical filename
 wiki/{category}/{stem}.md             # the new wiki page
-.ingest/{stem}-evolution-proposals/   # proposals for neighbor pages
+.ingest/{stem}-evolution-proposals/   # only when memory evolution is requested
 ingest_iterations table               # per-phase audit trail in state DB
 ```
 
@@ -219,7 +219,9 @@ looks wrong:
   strength; those dilute toward fidelity instead.
 - **Target-claim recall is confidence-weighted by `n_target_claims`**, ramping
   to full weight at 5. When target extraction fails or is absent on a legacy
-  row, the axis is omitted and the prior fidelity/salience behavior is retained.
+  row, the axis is omitted from draft ranking. For a live ingest this is still
+  a promotion failure: coverage cannot be declared complete without a target
+  checklist, and any missed `critical` target claim also vetoes promotion.
 
 `salience_score` values are **not comparable across the 2026-07 abstract-anchor
 guards** (below) — the guards changed the denominator, so `insights` history
@@ -237,7 +239,7 @@ timing breakdown or `researchwiki agent trace <attempt-id>` for the lineage.
 | Single-paper foreground command | Its own phase output, relay handoffs, final page path, and attempt ID. |
 | Batch parent terminal | Worker completion/failure status, forwarded relay handoffs, and a post-batch summary; not every phase line. |
 | `.ingest/batch-<ts>/worker-<input-stem>-<hash8>.log` | Full stdout/stderr for one input; the path hash distinguishes identical filenames in different directories. Retrying that input replaces its log. |
-| `.ingest/batch-<ts>/checkpoint.json` | Per-input `completed`, `failed`, and any `unresumable` records. `completed` means exit 0, not necessarily a published page. |
+| `.ingest/batch-<ts>/checkpoint.json` | Per-input `completed`, `failed`, and any `unresumable` records. Automatic gate failures exit 1 and are `failed`; an intentional `--force-sandbox` run exits 0 but is still not a published page. |
 | Final page path | `wiki/{category}/` means publication; `.agent-output/` means a sandbox draft. Inspect gate reasons in the worker log. |
 
 For chat relay, service the exact prompt/response paths in each forwarded
@@ -854,8 +856,9 @@ hook whose output goes to a batch worker's log file.
 **Contradiction density is not the gate it looks like.** The cross-paper judge's
 pool at its 0.85 floor is 1,106 claim pairs across 643 paper pairs, and per paper
 that is median 4 / p90 17 / max 44 — so only 19 of 305 papers exceed
-`alert_after_ingest`'s `max_pairs=20`, and **≥85% of that pool has already been
-judged** across the corpus's ingests, for exactly one disagreement (~1-in-900).
+`alert_after_ingest`'s `max_pairs=20`, and **≥85% of that pool was already in
+the judgment cache** in the measured corpus, for exactly one disagreement
+(~1-in-900).
 More judging at 0.85 buys almost nothing.
 
 What that judge is *for* matters more than its volume: it keeps only
@@ -1091,7 +1094,8 @@ cloud routes rather than treating them as free.
   format-specific patches; LLM-reconcile is the structurally robust path.
 - **`--no-semantic` on reindex** — skip the bi-encoder pass, BM25 only.
   Use when sentence-transformers isn't installed.
-- **Agent runner skips memory-evolution in stub mode** automatically.
+- **Memory evolution is opt-in** via `agent ingest --memory-evolve` or the
+  on-demand `researchwiki evolve` command. Stub mode skips it even when asked.
 
 ### When the agent gets it wrong
 

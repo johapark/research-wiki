@@ -99,6 +99,17 @@ class LLMResponse:
     cache_write_tokens: int = 0
 
 
+def response_usage(response) -> dict:
+    """Normalize a response's optional usage fields for telemetry."""
+    return {
+        "model": getattr(response, "model", None),
+        "input_tokens": getattr(response, "input_tokens", 0),
+        "output_tokens": getattr(response, "output_tokens", 0),
+        "cache_read_tokens": getattr(response, "cache_read_tokens", 0),
+        "cache_write_tokens": getattr(response, "cache_write_tokens", 0),
+    }
+
+
 def has_synchronous_llm() -> bool:
     """True if a fast-turnaround LLM provider is reachable.
 

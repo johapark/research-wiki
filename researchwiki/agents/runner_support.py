@@ -128,6 +128,67 @@ def keyword_body_gaps(keywords: list[str], body_text: str) -> list[str]:
     return missing
 
 
+def prepare_keywords(ctx, conn, cleaned_text: str, *, writer=write_iteration):
+    """Reuse target-pass keywords, falling back to one dedicated source call."""
+    ctx.next_iter()
+    started = time.monotonic()
+    extracted = list(getattr(ctx.target_claims, "keywords", None) or [])
+    if len(extracted) >= phases.MIN_KEYWORDS:
+        out = phases.KeywordsOutput(
+            keywords=extracted,
+            model=getattr(ctx.target_claims, "model", "") or "(target_claims)",
+        )
+        reason = "reused target-claims extraction"
+    else:
+        out = phases.propose_keywords(
+            metadata=ctx.metadata, draft_text=cleaned_text,
+            sections=ctx.sections, full_pdf_text=ctx.pdf_full_text,
+            use_stub=ctx.use_stub,
+        )
+        reason = "fallback keyword extraction"
+    writer(
+        attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,
+        pdf_filename=ctx.pdf_filename, iteration=ctx.iteration, role="keywords",
+        decision="kept" if out.keywords else "rejected",
+        decision_reason=f"{reason}: {out.keywords!r}", model_used=out.model,
+        **usage_costs(out), duration_ms=int((time.monotonic() - started) * 1000),
+        conn=conn,
+    )
+    log(f"keywords  → {out.keywords}", tag="agent")
+    missing = keyword_body_gaps(out.keywords, cleaned_text) if out.keywords else []
+    if missing:
+        log(f"kw-coverage → {len(out.keywords) - len(missing)}/{len(out.keywords)} "
+            f"keywords appear in body; missing: {missing[:5]}", tag="agent")
+    elif out.keywords:
+        log(f"kw-coverage → all {len(out.keywords)} keywords appear in body", tag="agent")
+    return out
+
+
+def find_exact_duplicate(ctx, prior_stem: str | None):
+    """Return ``(stem, page_path)`` for an identical deposited PDF."""
+    from ..fsatomic import file_sha256
+    from ..paths import papers_dir
+    from ..wiki import find_stem_collision
+
+    existing_stem = (
+        ctx.paper_stem
+        if ctx.allow_rename and prior_stem and prior_stem != ctx.paper_stem
+        else prior_stem or ctx.paper_stem
+    )
+    if not existing_stem:
+        return None
+    canonical_pdf = papers_dir() / f"{existing_stem}.pdf"
+    try:
+        if (not canonical_pdf.exists()
+                or ctx.pdf_path.resolve() == canonical_pdf.resolve()
+                or file_sha256(ctx.pdf_path) != file_sha256(canonical_pdf)):
+            return None
+    except OSError:
+        return None
+    page = find_stem_collision(existing_stem)
+    return (existing_stem, page) if page is not None else None
+
+
 _FINDING_SECTIONS = ("results", "discussion", "conclusion", "findings")
 
 
@@ -161,13 +222,20 @@ def phase_reconcile(ctx, conn):
         year_override=ctx.year_override, authors_override=ctx.authors_override,
         use_llm=ctx.use_llm_reconcile,
     )
+    usage = meta.pop("_reconcile_usage", {})
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     iteration_id = write_iteration(
         attempt_id=ctx.attempt_id, pdf_filename=ctx.pdf_filename,
         iteration=ctx.iteration, role="reconcile", paper_stem=meta.get("stem"),
         decision="observed",
         decision_reason=f"reconciled in {elapsed_ms}ms; sources={meta.get('sources', [])}",
-        critic_notes=str(meta), duration_ms=elapsed_ms, conn=conn,
+        critic_notes=str(meta), duration_ms=elapsed_ms,
+        model_used=usage.get("model"),
+        cost_input_tokens=usage.get("input_tokens", 0),
+        cost_output_tokens=usage.get("output_tokens", 0),
+        cost_cache_read_tokens=usage.get("cache_read_tokens", 0),
+        cost_cache_write_tokens=usage.get("cache_write_tokens", 0),
+        conn=conn,
     )
     return meta, iteration_id
 
@@ -215,7 +283,12 @@ def phase_target_claims(ctx, conn):
         cost_cache_read_tokens=out.cache_read_tokens,
         cost_cache_write_tokens=out.cache_write_tokens,
         duration_ms=elapsed_ms,
-        gate_metrics={"target_claims": len(out.claims), "error": bool(out.error)},
+        gate_metrics={
+            "target_claims": len(out.claims),
+            "keywords": len(getattr(out, "keywords", None) or []),
+            "error": bool(out.error),
+            "empty": out.is_empty(),
+        },
         conn=conn,
     )
     return out

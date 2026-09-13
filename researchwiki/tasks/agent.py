@@ -32,7 +32,7 @@ from ..agents.runner import (
     StemRenameRefused,
     run_ingest,
 )
-from ..agents.budget import BudgetExhausted
+from ..agents.budget import BudgetExhausted, activate
 from ..db.iterations import read_attempt
 from ..errors import EnvironmentFailure
 from ..log import log
@@ -77,7 +77,7 @@ def _display_path(path: Path) -> str:
 
 def _print_ingest_receipt(ctx) -> None:
     """Print the compact terminal state for one completed ingest attempt."""
-    if ctx.committed_path and ctx.paper_stem:
+    if ctx.outcome == "promoted" and ctx.committed_path and ctx.paper_stem:
         claim_count = _indexed_claim_count(ctx.paper_stem)
         print("✓ Paper added")
         print(f"  Page:   {_display_path(ctx.committed_path)}")
@@ -86,6 +86,28 @@ def _print_ingest_receipt(ctx) -> None:
             print("  Claims: indexed (count unavailable)")
         else:
             print(f"  Claims: {claim_count} indexed")
+        if ctx.supplementary:
+            print(f"  Supp:   {len(ctx.supplementary)} attached; not analyzed as evidence")
+        print(f"  Trace:  researchwiki agent trace {ctx.attempt_id}")
+        return
+
+    if ctx.outcome == "already_present" and ctx.paper_stem:
+        print("✓ Paper already present")
+        if ctx.committed_path:
+            print(f"  Page:   {_display_path(ctx.committed_path)}")
+        print(f"  PDF:    papers/{ctx.paper_stem}.pdf")
+        print("  Input:  unchanged")
+        print(f"  Trace:  researchwiki agent trace {ctx.attempt_id}")
+        return
+
+    if ctx.outcome == "sandboxed" and ctx.committed_path:
+        heading = "✓ Sandbox draft written" if ctx.promote_mode == "never" else "⚠ Review required"
+        print(heading)
+        print(f"  Draft:  {_display_path(ctx.committed_path)}")
+        for reason in ctx.gate_reasons:
+            print(f"  Gate:   {reason}")
+        if ctx.supplementary:
+            print("  Note:   supplementary files were not attached or analyzed")
         print(f"  Trace:  researchwiki agent trace {ctx.attempt_id}")
         return
 
@@ -113,6 +135,10 @@ def _batch_passthrough_args(args) -> list[str]:
         out.append("--no-cross-link")
     if args.claim_overlap:
         out.append("--claim-overlap")
+    if getattr(args, "memory_evolve", False):
+        out.append("--memory-evolve")
+    if getattr(args, "contradiction_alert", False):
+        out.append("--contradiction-alert")
     if args.auto_promote:
         out.append("--auto-promote")
     if args.force_sandbox:
@@ -151,6 +177,22 @@ def _drain_pending_mutations() -> None:
             print(f"researchwiki: recovery — {note}", file=sys.stderr)
     except Exception as e:  # recovery must never block the run it precedes
         print(f"researchwiki: recovery pass failed: {e}", file=sys.stderr)
+
+
+def _run_budgeted_post_hook(ctx, label: str, fn):
+    """Run optional post-promotion model work under this ingest's budget."""
+    tracker = ctx.budget_tracker
+    if tracker is not None:
+        tracker.resume()
+    try:
+        with activate(tracker):
+            return fn()
+    except BudgetExhausted as exc:
+        log(f"{label} skipped — ingest budget exhausted: {exc}", tag="agent")
+        return None
+    finally:
+        if tracker is not None:
+            tracker.suspend()
 
 
 def _cmd_ingest(args) -> int:
@@ -299,6 +341,7 @@ def _cmd_ingest(args) -> int:
             max_tokens=args.max_tokens,
             max_cost_usd=args.max_cost_usd,
             max_wall_seconds=args.max_wall_seconds,
+            run_memory_evolve=args.memory_evolve,
         )
     except BudgetExhausted as e:
         print(f"{_prog()}: {e}", file=sys.stderr)
@@ -424,6 +467,7 @@ def _cmd_ingest(args) -> int:
         and not args.stub
         and ctx.paper_stem
         and ctx.committed_path
+        and ctx.outcome == "promoted"
     ):
         # Claim-grounded cross-linking is OPT-IN (--claim-overlap). It spends an
         # LLM judge call per candidate pair and confirms a link for roughly one
@@ -433,18 +477,27 @@ def _cmd_ingest(args) -> int:
         if args.claim_overlap:
             from . import claim_overlap
 
-            claim_overlap.run_after_ingest(ctx.paper_stem, ctx.committed_path)
+            _run_budgeted_post_hook(
+                ctx, "claim-overlap",
+                lambda: claim_overlap.run_after_ingest(
+                    ctx.paper_stem, ctx.committed_path
+                ),
+            )
         # Attach the new paper to any existing concept hub whose term it
         # mentions (spoke + reciprocal link). No-ops until concept pages exist.
         from .. import concepts
 
         concepts.attach_after_ingest(ctx.paper_stem, ctx.committed_path)
-        # Contradiction alert: any claim in the new paper that disagrees
-        # with a graded existing claim surfaces as `⚠ contradicts [[stem#slug]]`.
-        # Silent no-op when the LLM judge / bi-encoder isn't reachable.
-        from ..claim_graph.alert import alert_after_ingest
+        if args.contradiction_alert:
+            # Any claim in the new paper that disagrees with a graded existing
+            # claim surfaces as `⚠ contradicts [[stem#slug]]`. This analysis is
+            # model-backed and therefore opt-in on the ingest hot path.
+            from ..claim_graph.alert import alert_after_ingest
 
-        alert_after_ingest(ctx.paper_stem, ctx.committed_path)
+            _run_budgeted_post_hook(
+                ctx, "contradiction-alert",
+                lambda: alert_after_ingest(ctx.paper_stem, ctx.committed_path),
+            )
 
     # Saturation check. If this paper landed in wiki/other/ and pushed the
     # bucket over threshold, surface the suggest-splits nudge once. The
@@ -453,10 +506,12 @@ def _cmd_ingest(args) -> int:
     # researchwiki agent ingest "$f"; done` loop only nags once.
     from ..categories import other_saturation_warning
 
-    msg = other_saturation_warning()
+    msg = other_saturation_warning() if ctx.outcome == "promoted" else None
     if msg:
         print()
         print(msg)
+    if ctx.outcome == "sandboxed" and ctx.promote_mode == "auto":
+        return 1
     return 0
 
 
@@ -647,8 +702,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument(
         "--no-cross-link",
         action="store_true",
-        help="Skip the post-promote concept-hub attachment and "
-        "contradiction-alert passes.",
+        help="Skip all post-promote cross-paper hooks: concept-hub attachment "
+        "and any explicitly requested claim-overlap or contradiction pass.",
     )
     p_ingest.add_argument(
         "--claim-overlap",
@@ -658,6 +713,18 @@ def build_parser() -> argparse.ArgumentParser:
         "confirms a link on roughly 1 paper in 10, so it is "
         "batched instead — skipped stems accumulate and "
         "`researchwiki claim-overlap --backlog` drains them.",
+    )
+    p_ingest.add_argument(
+        "--memory-evolve",
+        action="store_true",
+        help="After promotion, run model-backed synthesis-page evolution. "
+        "Off by default; `researchwiki evolve CATEGORY/STEM` is the on-demand path.",
+    )
+    p_ingest.add_argument(
+        "--contradiction-alert",
+        action="store_true",
+        help="After promotion, run the model-backed cross-paper contradiction alert. "
+        "Off by default; `researchwiki lint --cross-paper` is the corpus path.",
     )
     p_ingest.add_argument(
         "--doi",

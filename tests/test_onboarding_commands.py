@@ -108,6 +108,8 @@ def test_success_receipt_names_page_pdf_claims_and_trace(
         committed_path=page,
         paper_stem="paper-stem",
         attempt_id="attempt-123",
+        outcome="promoted",
+        supplementary=None,
     )
 
     agent._print_ingest_receipt(ctx)
@@ -118,3 +120,33 @@ def test_success_receipt_names_page_pdf_claims_and_trace(
     assert "PDF:    papers/paper-stem.pdf" in out
     assert "Claims: 4 indexed" in out
     assert "researchwiki agent trace attempt-123" in out
+
+
+def test_sandbox_receipt_is_not_reported_as_added(tmp_path, capsys):
+    ctx = SimpleNamespace(
+        committed_path=tmp_path / ".agent-output" / "paper-stem.md",
+        paper_stem="paper-stem",
+        attempt_id="attempt-456",
+        outcome="sandboxed",
+        promote_mode="auto",
+        gate_reasons=["1 critical target claim(s) missing"],
+        supplementary=None,
+    )
+    agent._print_ingest_receipt(ctx)
+    out = capsys.readouterr().out
+    assert "Review required" in out
+    assert "Paper added" not in out
+    assert "critical target claim" in out
+
+
+def test_already_present_receipt_is_explicit(tmp_path, capsys):
+    ctx = SimpleNamespace(
+        committed_path=tmp_path / "wiki" / "other" / "paper-stem.md",
+        paper_stem="paper-stem",
+        attempt_id="attempt-789",
+        outcome="already_present",
+    )
+    agent._print_ingest_receipt(ctx)
+    out = capsys.readouterr().out
+    assert "Paper already present" in out
+    assert "Paper added" not in out

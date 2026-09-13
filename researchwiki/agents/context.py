@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from . import phases
 
@@ -116,6 +117,7 @@ class Context:
     allow_rename: bool = False                # opt-in: allow committing a stem rename when reconcile finds a prior page at a different stem
     budget_tracker: object | None = None      # BudgetTracker; object avoids a module cycle
     budget_exhausted: dict | None = None
+    run_memory_evolve: bool = False          # opt-in model-backed synthesis maintenance
 
     # Filled by phases (None until set):
     paper_stem: str | None = None
@@ -129,6 +131,8 @@ class Context:
     drafts: list[phases.Draft] = field(default_factory=list)
     winner: phases.Draft | None = None
     committed_path: Path | None = None
+    outcome: Literal["pending", "promoted", "sandboxed", "already_present"] = "pending"
+    gate_reasons: list[str] = field(default_factory=list)
 
     def next_iter(self) -> int:
         if self.budget_tracker is not None and self.budget_exhausted is None:

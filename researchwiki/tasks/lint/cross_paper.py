@@ -78,8 +78,8 @@ except ImportError:                                   # pragma: no cover
 
 # Rows per similarity block. Bounds peak memory at _BLOCK x N instead of N x N.
 # Measured over this corpus's 12.4k claims: the full-matrix formulation peaks at
-# 611 MB, the blocked corpus sweep at 62 MB, and the `only_stem` path — the one
-# that runs on every ingest via `alert_after_ingest` — at 13 MB. The residual 62 MB
+# 611 MB, the blocked corpus sweep at 62 MB, and the opt-in `only_stem` ingest
+# path used by `alert_after_ingest` at 13 MB. The residual 62 MB
 # is the float32 block plus its boolean temporaries, so it scales with this
 # constant if a tighter ceiling is ever wanted. Kept at 512 to match
 # `tasks/claim_discover._BLOCK`, which fixed the identical cliff.
@@ -262,7 +262,7 @@ def _candidate_pairs(
     Blocked upper-triangle scan. The full N x N product is the obvious
     formulation and does not scale: at this corpus's 12.4k claims it is a 611 MB
     float32 allocation plus a 78-million-iteration Python loop, and
-    `alert_after_ingest` pays both on every ingest. Per block the peak is bounded
+    `alert_after_ingest` would otherwise pay both when requested. Per block the peak is bounded
     by _BLOCK x N and the comparison is vectorized. Same fix as
     `tasks/claim_discover.discover_pairs`.
 

@@ -215,7 +215,8 @@ def _should_retry(record: dict) -> bool:
     the same argv every time, so its exit code (the contract in CLAUDE.md's
     Exit-code contract section) tells us whether a retry can plausibly change
     anything:
-      1  bad argv — same flags, same failure, every time. Not retryable.
+      1  bad input or a review-required gate outcome — unchanged inputs and
+         flags produce the same result. Not retryable.
       2  environment error (state.db locked, index missing, provider
          unreachable) — exactly the transient class a retry might clear.
       3  internal bug — deterministic given the same input; a retry hits the
@@ -680,7 +681,8 @@ def resume_batch(
     if skipped_non_retryable:
         print(
             f"ingest-batch: {len(skipped_non_retryable)} failure(s) not retried "
-            f"— exit code 1 (bad input) or 3 (internal bug), so the same argv "
+            f"— exit code 1 (bad input or review required) or 3 (internal bug), "
+            f"so the same argv "
             f"would fail the same way. Fix the cause, then re-run the PDF "
             f"directly to see the error:",
             file=sys.stderr,

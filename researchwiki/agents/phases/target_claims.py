@@ -56,6 +56,7 @@ class TargetClaim:
 class TargetClaimsOutput:
     """Result of one target-claims call."""
     claims: list[TargetClaim] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -86,9 +87,10 @@ one of three categories:
                11 modalities at 1bp resolution", "distinguishes active
                from inactive β-adrenergic receptor structures".
 
-  limitation — a constraint, weakness, or scope boundary the paper
-               acknowledges, OR an obvious gap a careful reader would
-               flag. Examples: "20 Å connectivity cutoff misses long-
+  limitation — a constraint, weakness, or scope boundary stated or directly
+               demonstrated by the paper. Do not invent peer-review concerns
+               or infer limitations from outside knowledge. Examples:
+               "20 Å connectivity cutoff misses long-
                range allosteric pockets", "single-arm phase 1 trial",
                "validated only on human cell lines".
 
@@ -105,7 +107,7 @@ Importance tiers (use them as a TRIAGE — most claims are NOT critical):
   normal     — context / secondary detail. Worth flagging but the page
                can summarize at higher level.
 
-Output strict JSON: {"claims": [{"type": "...", "content": "...", "importance": "...", "location": "..."}]}
+Output strict JSON: {"claims": [{"type": "...", "content": "...", "importance": "...", "location": "..."}], "keywords": ["...", "..."]}
 
 Constraints:
   - Cap at 35 claims total. Prefer SPECIFIC (numbers + names + venues)
@@ -121,9 +123,13 @@ Constraints:
     text, emit it ONCE citing the most specific location (the figure/table
     or Methods §, not the Abstract). Two entries whose `content` restates
     the same number or finding is a duplicate — collapse them.
-  - Limitations should reflect what the paper itself says OR what a
-    peer reviewer would call a methodological caveat. Don't invent
-    limitations the paper doesn't support.
+  - Limitations must reflect what the paper states or directly demonstrates.
+    Do not add a methodological caveat merely because a reviewer might raise it.
+  - Return 5-10 retrieval keywords, ordered by importance. Use specific method,
+    dataset, benchmark, protein, or metric names central to this paper's own
+    work. Each keyword is 1-4 words, contains no comma, and is grounded in the
+    title, abstract, or main-text description of what the authors did. Exclude
+    generic words such as paper, study, method, approach, results, and analysis.
   - For review papers, "headline" claims are the review's framing
     statements (e.g., "field has shifted from physics-based to ML-
     based design") and "capability" claims are the categories of work
@@ -135,7 +141,7 @@ Output JSON only, no prose.
 
 _JSON_SCHEMA = {
     "type": "object",
-    "required": ["claims"],
+    "required": ["claims", "keywords"],
     "properties": {
         "claims": {
             "type": "array",
@@ -149,6 +155,12 @@ _JSON_SCHEMA = {
                     "location": {"type": ["string", "null"]},
                 },
             },
+        },
+        "keywords": {
+            "type": "array",
+            "minItems": 5,
+            "maxItems": 10,
+            "items": {"type": "string"},
         },
     },
 }
@@ -176,6 +188,8 @@ def extract_target_claims(
                     importance="high", location="Abstract",
                 ),
             ],
+            keywords=["stub keyword one", "stub keyword two", "stub keyword three",
+                      "stub keyword four", "stub keyword five"],
             model="(stub)",
         )
 
@@ -217,6 +231,7 @@ def extract_target_claims(
     try:
         data = json.loads(raw_json)
         claims_raw = data.get("claims") or []
+        keywords_raw = data.get("keywords") or []
         partial = False
     except json.JSONDecodeError:
         # Truncated output — extract complete claim objects via regex rather
@@ -227,6 +242,7 @@ def extract_target_claims(
             )
             if m is not None
         ]
+        keywords_raw = []
         partial = True
 
     _TIER_ORDER = {"critical": 0, "high": 1, "normal": 2}
@@ -261,8 +277,11 @@ def extract_target_claims(
     parsed.sort(key=lambda c: _TIER_ORDER.get(c.importance, 99))
     parsed = parsed[:_MAX_CLAIMS]
 
+    from .commit import filter_keywords
+
     return TargetClaimsOutput(
         claims=parsed,
+        keywords=filter_keywords(keywords_raw),
         model=resp.model,
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,

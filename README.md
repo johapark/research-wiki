@@ -83,7 +83,7 @@ researchwiki add /path/to/paper.pdf
 
 Pass several paths to use the checkpointed batch workflow. Chat-relay agents with native subagents can instead supervise a bounded pool of single-paper ingests (see [Providers](#providers)). If your papers already live in Zotero, Paperpile, Mendeley, or ReadCube, use the [library import workflow](#import-and-export) instead.
 
-Check the reported page path: `.agent-output/` means a reviewable sandbox draft, not a published wiki page. A completed process does not by itself mean promotion succeeded. After every worker exits, run `researchwiki status`; inspect gate failures before retrying or overriding them. See [output and recovery](./WORKFLOW.md#reading-results-and-recovering-a-batch).
+Check the reported outcome: “Paper added” means promotion succeeded; `.agent-output/` means a reviewable sandbox draft, not a published wiki page; “Already present” means the deposited file exactly matched the canonical PDF, the input was left unchanged, and downstream authoring was skipped. Automatic gate failures exit 1, while an intentional `--force-sandbox` review run exits 0. After every worker exits, run `researchwiki status`; inspect gate failures before retrying or overriding them. See [output and recovery](./WORKFLOW.md#reading-results-and-recovering-a-batch).
 
 ## Providers
 

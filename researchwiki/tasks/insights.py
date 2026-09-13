@@ -32,9 +32,8 @@ from .insights_timing import gather_attempts, latency_distribution
 # Reuse the single source of truth for pricing so cost figures match `status`.
 from ..agents import model_config as _mc
 
-# Roles whose rows carry a real LLM model_used (others are deterministic phases
-# with model_used NULL — reconcile/extract/grade/tournament/commit).
-_NON_MODEL_SENTINELS = ("stub", "(skipped)")
+# Sentinels used by rows that did not invoke a real model.
+_NON_MODEL_SENTINELS = ("stub", "(skipped)", "(local)", "(no calls)")
 
 
 def _fmt_tokens(n: int) -> str:
@@ -210,7 +209,7 @@ def _gather(conn, cutoff: int | None, stem: str | None = None,
         "                 THEN 1 ELSE 0 END) "
         "           AS cache_unknown "
         "FROM ingest_iterations "
-        "WHERE model_used IS NOT NULL AND model_used NOT IN (?, ?)" + where_time +
+        "WHERE model_used IS NOT NULL AND model_used NOT IN (?, ?, ?, ?)" + where_time +
         " GROUP BY model_used",
         (*_NON_MODEL_SENTINELS, *params),
     ).fetchall()
@@ -227,17 +226,25 @@ def _gather(conn, cutoff: int | None, stem: str | None = None,
     # --- token spend by role.
     by_role: dict[str, dict] = {}
     r_rows = conn.execute(
-        "SELECT role, COUNT(*) AS calls, "
+        "SELECT role, COUNT(*) AS events, "
+        "       SUM(CASE WHEN model_used IS NOT NULL "
+        "                 AND model_used NOT IN (?, ?, ?, ?) "
+        "                THEN 1 ELSE 0 END) AS model_events, "
         "       SUM(COALESCE(cost_input_tokens,0)) AS in_tok, "
         "       SUM(COALESCE(cost_output_tokens,0)) AS out_tok, "
         "       SUM(COALESCE(cost_cache_read_tokens,0)) AS cache_read, "
         "       SUM(COALESCE(cost_cache_write_tokens,0)) AS cache_write "
         "FROM ingest_iterations WHERE 1=1" + where_time + " GROUP BY role",
-        params,
+        (*_NON_MODEL_SENTINELS, *params),
     ).fetchall()
     for r in r_rows:
         by_role[r["role"]] = {
-            "calls": int(r["calls"]),
+            # `calls` remains as a compatibility alias for phase events. Older
+            # reports used the label even though deterministic rows were
+            # included; the explicit fields remove that ambiguity.
+            "calls": int(r["events"]),
+            "events": int(r["events"]),
+            "model_events": int(r["model_events"] or 0),
             "in_tok": int(r["in_tok"] or 0),
             "out_tok": int(r["out_tok"] or 0),
             "cache_read": int(r["cache_read"] or 0),
@@ -394,7 +401,8 @@ def _to_json(data: dict, days: int | None) -> dict:
             for m, v in sorted(data["by_model"].items())
         },
         "by_role": {
-            r: {"calls": v["calls"], "input_tokens": v["in_tok"],
+            r: {"calls": v["calls"], "events": v["events"],
+                "model_events": v["model_events"], "input_tokens": v["in_tok"],
                 "output_tokens": v["out_tok"],
                 "cache_read_tokens": v["cache_read"],
                 "cache_write_tokens": v["cache_write"]}
@@ -492,10 +500,10 @@ def _print_report(data: dict, days: int | None, show_lineage: bool = False,
 
     # Token spend by role
     print("\nToken spend by role:")
-    print(f"  {'role':<16}{'calls':>7}{'tokens(in/out)':>18}")
+    print(f"  {'role':<16}{'events':>8}{'modeled':>8}{'tokens(in/out)':>18}")
     for r, v in sorted(data["by_role"].items(), key=lambda kv: -(kv[1]["in_tok"] + kv[1]["out_tok"])):
         toks = f"{_fmt_tokens(v['in_tok'])}/{_fmt_tokens(v['out_tok'])}"
-        print(f"  {r:<16}{v['calls']:>7}{toks:>18}")
+        print(f"  {r:<16}{v['events']:>8}{v['model_events']:>8}{toks:>18}")
 
     # Decisions
     if data["decisions"]:

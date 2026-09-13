@@ -51,6 +51,7 @@ from .commit import (
     ShortNameOutput,
     propose_keywords,
     propose_keywords_batch,
+    filter_keywords,
     MAX_KEYWORDS,
     MIN_KEYWORDS,
     propose_short_name,
@@ -101,7 +102,7 @@ __all__ = [
     "author", "tournament", "stance_for_slot", "DRAFT_STANCES",
     "grade_draft", "persist_grades",
     "critic", "evolve", "debug", "detect_structural_gate_issues",
-    "propose_short_name", "propose_keywords", "propose_keywords_batch",
+    "propose_short_name", "propose_keywords", "propose_keywords_batch", "filter_keywords",
     "render_keywords_yaml",
     "propose_evolution", "render_proposal_md", "evolve_memory",
     # Dataclasses / outputs
