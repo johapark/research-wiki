@@ -723,7 +723,7 @@ by default; a synthesis is written only when the user explicitly asks to file it
 One empty query is not proof of corpus absence — try the complementary path and a
 sensible reformulation, and distinguish an index error from an empty corpus.
 
-Three retrieval modes via `researchwiki search`:
+Page retrieval has three modes via `researchwiki search`:
 
 ```bash
 researchwiki search "memory evolution"           # default: hybrid (RRF over BM25 + semantic)
@@ -731,6 +731,22 @@ researchwiki search "memory evolution" --mode bm25      # keyword only
 researchwiki search "memory evolution" --mode semantic  # bi-encoder only
 researchwiki search --like ai/xu-2025-...               # See-Also on a page
 ```
+
+The optional model pass is deliberately explicit:
+
+```bash
+researchwiki search "memory evolution" --llm-rerank
+```
+
+`--llm-rerank` applies only to text queries. It sends the query plus a bounded
+packet from at most 12 locally retrieved candidates (summary and up to two
+claims per page) to the configured classifier model, using one low-reasoning
+call. The model may reorder existing IDs but cannot add results; malformed
+output falls back to the local order. Without the flag, search remains entirely
+local. With `--json`, the flag changes the top-level output from the usual hit
+array to `{ "hits": [...], "llm_rerank": {...} }`, including model and token
+accounting. Use it only when the local shortlist is plausible but its ordering
+matters enough to justify sending those excerpts and paying for a call.
 
 Hybrid output shows the per-ranker provenance inline:
 
@@ -753,8 +769,23 @@ match — likely noise).
 
 The same content is reachable from the CLI without any server: topic search
 is `researchwiki search`, a page is a plain file `Read`, and structural
-questions go through `researchwiki db query`. For grounded citations use
-`researchwiki claims "<query>"` — each hit prints a durable
+questions go through `researchwiki db query`. Claim retrieval is separate and
+defaults directly to BM25:
+
+```bash
+researchwiki claims "retrieval cost"                    # default: BM25
+researchwiki claims "retrieval cost" --mode semantic    # claim embeddings
+researchwiki claims "retrieval cost" --mode hybrid      # RRF over both
+researchwiki claims --by-stem <stem>                     # every claim in one paper
+```
+
+There is no claim-level `auto` mode: it would be a misleading alias while BM25
+is the selected default. Semantic and hybrid remain explicit evaluation and
+recall tools. On the current claim fixtures, neither improved aggregate ranking
+quality enough to replace BM25, so the simplest and cheapest behavior stays the
+default until fixtures show otherwise.
+
+Each claim hit prints a durable
 `[[stem#claim_slug]]` anchor (content-addressed, survives `db rebuild`) that
 you paste straight into a page. Current output does not emit the legacy
 `claim_id:NNN` citation form; database row IDs can change on rebuild and must
@@ -762,6 +793,44 @@ not be used as citations. Inspect the grade and supporting passage, not just
 the presence of an anchor: an ungraded claim is not yet verified evidence.
 Use `researchwiki pdf-search <stem> "<query>"` to pull an exact passage the
 wiki page didn't quote.
+
+`check-coverage` is broader than either search alone, but remains an advisory
+review gate. It fuses page BM25, page-semantic, and semantic contribution-claim
+ranks. A BM25 page hit is admitted directly; a new semantic-only page must be
+corroborated by both semantic channels and its contribution claim must clear the
+stricter 0.80 cosine floor. Each row prints its `via:` sources and matching claim
+when present, so the author can make a deliberate cite-or-exclude decision
+without treating topical similarity as evidence.
+
+### Retrieval evaluation guardrails
+
+Retrieval fixtures exercise the production retrieval paths, not approximations:
+
+```bash
+researchwiki benchmark-fixture --list
+researchwiki benchmark-fixture <retrieval-fixture> --retrieval-backend bm25
+researchwiki benchmark-fixture <retrieval-fixture> --retrieval-backend semantic
+researchwiki benchmark-fixture <retrieval-fixture> --retrieval-backend hybrid
+```
+
+The suite currently has four portable fixtures anchored to bundled OA papers
+and ten corpus-native fixtures that preserve recurring real queries. Before
+scoring, the harness resolves every expected anchor against the current wiki.
+If any expected anchor is missing, it reports the fixture as `unavailable` and
+exits 2 instead of recording a false zero-quality result. Missing negative
+anchors are reported separately as inactive: they reduce the strength of that
+fixture's false-positive check but do not prevent its positive ranking metrics
+from running.
+
+Category evaluation follows the same cost discipline:
+
+```bash
+researchwiki eval classifier             # local/free BM25 kNN leave-one-out
+researchwiki eval classifier --mode llm  # one model call per held-out paper
+```
+
+Use the local mode for routine regression checks. The LLM mode is an explicit,
+cost-bearing comparison, not part of the default evaluation path.
 
 ---
 
@@ -1513,7 +1582,8 @@ discovery-only and never become wiki evidence. See
 | Want to know what to ingest next | `researchwiki scout --json` |
 | Want to find pages with sparse keywords | `researchwiki lint --json \| jq .missing_keywords` |
 | Want to know how much you've spent ingesting lately | `researchwiki status` (last section) |
-| Got curious whether your wiki has anything on X | `researchwiki search "X"` (or `--like` from a page) |
+| Got curious whether your wiki has anything on X | `researchwiki search "X"` (or `--like` from a page); add `--llm-rerank` only when a bounded external model call is warranted. |
+| Need citable evidence about X | `researchwiki claims "X"` (BM25 default); try explicit `--mode semantic` or `--mode hybrid` when lexical recall is insufficient. |
 | Lost track of what's in the inbox | `researchwiki status` (top section) |
 | Want to score a paper page against its PDF | `researchwiki grade paper <stem>` |
 | Want to backfill grading for un-graded papers only | `researchwiki grade regression --missing-only` |
@@ -1522,6 +1592,8 @@ discovery-only and never become wiki evidence. See
 | Want to verify a synthesis page's claims trace to cited papers | `researchwiki grade synthesis <page>` (pair with structural `check-grounding`). |
 | Want to check that every claim has a citation | `researchwiki check-grounding <page>` |
 | Want to benchmark page authoring against a curated fixture | `researchwiki benchmark-fixture <stem>` |
+| Want to compare retrieval backends without false scores from absent papers | `researchwiki benchmark-fixture <retrieval-fixture> --retrieval-backend bm25\|semantic\|hybrid`; unavailable expected anchors exit 2. |
+| Want to evaluate category assignment | `researchwiki eval classifier` locally; use `--mode llm` only for the paid comparison. |
 | Want the wiki to propose a page instead of answering one | `researchwiki candidates concepts --bridges`, then `candidates pairs --cross-category` (see *Bottom-up discovery*) |
 | `status` printed a bridge-term or claim-pair count | Run `researchwiki candidates concepts --bridges` or `researchwiki candidates pairs --cross-category`, respectively. |
 | Want to act on a proposed claim pair | Copy that row's `researchwiki claim-overlap --pair A#slug B#slug` command (the exact judged path); `candidates pairs --decline A B --reason "…"` to reject it for good |

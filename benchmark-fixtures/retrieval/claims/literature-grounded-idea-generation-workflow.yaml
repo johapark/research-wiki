@@ -1,0 +1,18 @@
+fixture_id: literature-grounded-idea-generation-workflow
+fixture_type: claims
+query: "multi-agent literature review gap analysis research idea generation and refinement"
+k: 10
+expected_claims:
+  - paper_stem: baek-2024-researchagent-iterative-research-idea-generation
+    section: key_contributions
+    position: 1
+    importance: critical
+    rationale: "The claim names the coordinated retrieval, summarization, gap, ideation, and refinement stages."
+  - paper_stem: baek-2024-researchagent-iterative-research-idea-generation
+    section: methodology
+    position: 1
+    importance: high
+    rationale: "The method claim describes the complete literature-grounded workflow."
+must_not_appear:
+  - paper_stem: assadi-2026-the-embedders-dilemma-llms-are
+    rationale: "The benchmark evaluates retrieval pipelines rather than generating research ideas."

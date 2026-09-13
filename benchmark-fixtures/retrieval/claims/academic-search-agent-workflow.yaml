@@ -1,0 +1,18 @@
+fixture_id: academic-search-agent-workflow
+fixture_type: claims
+query: "agent retrieves papers reads them extracts information and synthesizes an analysis"
+k: 10
+expected_claims:
+  - paper_stem: he-2025-pasa-an-llm-agent-for-comprehensive
+    section: key_contributions
+    position: 1
+    importance: critical
+    rationale: "The contribution integrates search, reading, and reasoning."
+  - paper_stem: he-2025-pasa-an-llm-agent-for-comprehensive
+    section: methodology
+    position: 1
+    importance: critical
+    rationale: "The method claim enumerates retrieval, reading, extraction, and synthesis."
+must_not_appear:
+  - paper_stem: assadi-2026-the-embedders-dilemma-llms-are
+    rationale: "MTEB(LLM) compares retrieval systems but is not a paper-analysis agent."

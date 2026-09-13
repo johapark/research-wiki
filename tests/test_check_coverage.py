@@ -122,3 +122,55 @@ def test_returns_1_when_unreferenced_hit_surfaces(tmp_path, monkeypatch, capsys)
     out = capsys.readouterr().out
     assert "unreferenced hit" in out
     assert "other/uncited" in out
+
+
+def test_corroborated_semantic_claim_can_add_candidate_bm25_missed(tmp_path, monkeypatch, capsys):
+    md = _write(
+        tmp_path / "page.md",
+        "---\ntitle: t\ntopic_seed: alpha beta\n---\n\nbody\n",
+    )
+    other_md = _write(
+        tmp_path / "other" / "semantic.md",
+        "---\ntitle: Semantic paper\ntype: paper\n---\n\nbody\n",
+    )
+
+    class _Backend:
+        def query(self, q, limit=1):
+            return []
+        def more_like_text(self, seed, limit, page_type=None):
+            return []
+
+    class _SemanticHit:
+        key = "other/semantic"
+        stem = "semantic"
+        score = 0.85
+
+    class _ClaimHit:
+        stem = "semantic"
+        score = 0.85
+        claim_slug = "kc-semantic"
+        section = "key_contributions"
+        text = "A contribution directly matching alpha beta."
+
+    import researchwiki.search as search_mod
+    monkeypatch.setattr(search_mod, "get_default_backend", lambda: _Backend())
+    monkeypatch.setattr(check_coverage, "all_pages", lambda: [md, other_md])
+    monkeypatch.setattr(
+        "researchwiki.index.pages_semantic.query_text",
+        lambda *a, **kw: [_SemanticHit()],
+    )
+    monkeypatch.setattr(
+        "researchwiki.concepts.semantic_members.semantic_member_candidates",
+        lambda *a, **kw: [_ClaimHit()],
+    )
+    def _key(path):
+        return "synthesis/page" if path == md else "other/semantic"
+    monkeypatch.setattr(check_coverage, "page_key", _key)
+    monkeypatch.setattr("researchwiki.tasks.lint.staleness.page_key", _key)
+
+    rc = check_coverage.main([str(md)])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "other/semantic" in out
+    assert "page-semantic" in out
+    assert "claim-semantic" in out

@@ -193,12 +193,12 @@ _PREPRINT_VENUES = (
     "researchsquare", "ssrn", "preprints.org", "preprint", "zenodo",
 )
 
-
 # Venue plausibility lives in `metadata_sanity` so `lint`'s `venue_suspect`
 # check applies the identical rule without importing the agents package (the
 # import-cost constraint `tasks.lint` documents elsewhere). See that module for
 # why the list is restricted to unambiguous furniture.
 _is_venue_furniture = metadata_sanity.is_venue_furniture
+_trusted_s2_venue = metadata_sanity.trusted_s2_venue
 
 
 def _s2_record_is_preprint(s2_meta: dict, doi: str | None) -> bool:
@@ -217,8 +217,7 @@ def _s2_record_is_preprint(s2_meta: dict, doi: str | None) -> bool:
     d = (doi or "").lower()
     if not d:
         return False
-    return not d.startswith(("10.1101/", "10.64898/", "10.48550/",
-                             "10.31219/", "10.20944/", "10.2139/"))
+    return not metadata_sanity.is_preprint_doi(d)
 
 
 def _is_preprint_venue(venue: str | None) -> bool:
@@ -495,7 +494,7 @@ def reconcile_metadata(
     # journal of record) before trusting the masthead. cr_meta_from_hunt is only
     # populated on the URL→DOI hunt path; for a directly-detected DOI we fetch
     # Crossref here (responses are cached under .crossref-cache/).
-    venue = s2_meta.get("venue") or cr_meta_from_hunt.get("venue")
+    venue = _trusted_s2_venue(s2_meta.get("venue"), doi) or cr_meta_from_hunt.get("venue")
     if doi and (not venue or _is_preprint_venue(venue)):
         cr_venue = cr_meta_from_hunt.get("venue") or (verify_doi_via_crossref(doi) or {}).get("venue")
         if cr_venue and not _is_preprint_venue(cr_venue):

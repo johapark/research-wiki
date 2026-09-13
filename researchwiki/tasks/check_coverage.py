@@ -56,12 +56,21 @@ from .lint.walk import all_pages, page_key
 from ..log import log
 
 
+_RRF_K = 60
+
+
 # Cosine floor for the claim pass. Stricter than `semantic_members.DEFAULT_FLOOR`
 # (0.70) because this report already carries the page-level hit list, and a long
 # advisory tail trains the reader to skip the whole thing. 0.74 sits in the gap
 # the calibration case measured: its lowest true member scored 0.744 and its
 # highest false positive 0.733.
 _CLAIM_FLOOR = 0.74
+
+# A semantic candidate that BM25 did not retrieve needs corroboration from both
+# page and contribution-claim embeddings, plus a stronger claim score. The
+# broader 0.74 floor remains useful for annotating lexical candidates, but was
+# too noisy as an admission threshold on generic seeds such as "LLM memory".
+_CLAIM_EXPANSION_FLOOR = 0.80
 
 # How deep to rank claim matches. Only used to annotate rows the page-level pass
 # already produced, so this bounds work, not output — it must comfortably exceed
@@ -132,8 +141,9 @@ def main(argv: list[str]) -> int:
     # in the query path — let it reach the CLI funnel for a traceback and code 3
     # rather than reporting a real bug as "search backend probe failed".
 
-    known = {page_key(p) for p in all_pages()}
-    unreferenced = unreferenced_top_hits(backend, md, seed, known, top_n=args.top_n)
+    pages = all_pages()
+    known = {page_key(p) for p in pages}
+    bm25_hits = unreferenced_top_hits(backend, md, seed, known, top_n=args.top_n)
 
     # Claim-level pass. Same machinery the concept scaffolder uses, pointed at
     # the page's seed instead of a concept term: papers whose *contribution*
@@ -155,17 +165,82 @@ def main(argv: list[str]) -> int:
     except Exception:
         claim_hits = []      # advisory enrichment — never fail the gate on it
 
-    # Annotation only: a claim hit adds evidence to a page the report already
-    # lists, never a new row. That keeps the pass incapable of introducing a
-    # false positive, which is why it needs no lexical guard of its own.
-    by_stem = {c.stem: c for c in claim_hits}
-    for h in unreferenced:
-        c = by_stem.get(h["stem"])
-        if c is not None:
-            h["claim_score"] = round(c.score, 3)
-            h["claim_slug"] = c.claim_slug
-            h["claim_section"] = c.section
-            h["claim_text"] = c.text
+    # Page-semantic pass. Like the claim pass, this is bounded and advisory.
+    try:
+        from ..index import pages_semantic
+        semantic_hits = pages_semantic.query_text(
+            seed, k=max(args.top_n * 2, args.top_n), page_types=("paper",),
+        )
+    except Exception:
+        semantic_hits = []
+
+    # Union the three candidate channels and fuse ranks. Previously semantic
+    # claims could only annotate a page BM25 had already found, which made the
+    # recall check incapable of repairing a lexical false negative.
+    linked_stems = {key.split("/", 1)[-1] for key in linked}
+    self_key = page_key(md)
+    key_by_stem = {key.split("/", 1)[-1]: key for key in known}
+    title_by_key: dict[str, str] = {}
+    for page_path in pages:
+        key = page_key(page_path)
+        fm_for_page = _read_frontmatter(page_path) or {}
+        title_by_key[key] = str(fm_for_page.get("title") or "")
+
+    candidates: dict[str, dict] = {}
+
+    def eligible(key: str) -> bool:
+        return key in known and key != self_key and key not in linked
+
+    def add(key: str, rank: int, source: str, **extra) -> None:
+        if not eligible(key):
+            return
+        slot = candidates.setdefault(key, {
+            "key": key,
+            "stem": key.split("/", 1)[-1],
+            "score": 0.0,
+            "title": title_by_key.get(key, ""),
+            "sources": [],
+        })
+        slot["score"] += 1.0 / (_RRF_K + rank)
+        slot["sources"].append(source)
+        slot.update(extra)
+
+    for rank, hit in enumerate(bm25_hits, 1):
+        add(hit["key"], rank, "page-bm25", title=hit.get("title") or "")
+    for rank, hit in enumerate(semantic_hits, 1):
+        add(hit.key, rank, "page-semantic", page_semantic_score=round(hit.score, 3))
+    for rank, claim in enumerate(claim_hits, 1):
+        if claim.stem in cited_stems or claim.stem in linked_stems:
+            continue
+        key = key_by_stem.get(claim.stem)
+        if key:
+            add(
+                key, rank, "claim-semantic",
+                claim_score=round(claim.score, 3),
+                claim_slug=claim.claim_slug,
+                claim_section=claim.section,
+                claim_text=claim.text,
+            )
+
+    admitted = [
+        hit for hit in candidates.values()
+        if "page-bm25" in hit["sources"]
+        or (
+            "page-semantic" in hit["sources"]
+            and "claim-semantic" in hit["sources"]
+            and hit.get("claim_score", 0.0) >= _CLAIM_EXPANSION_FLOOR
+        )
+    ]
+    unreferenced = sorted(
+        admitted,
+        key=lambda hit: (
+            "page-bm25" not in hit["sources"],
+            -hit["score"],
+            hit["key"],
+        ),
+    )[:args.top_n]
+    for hit in unreferenced:
+        hit["score"] = round(hit["score"], 4)
 
     if args.as_json:
         report = {
@@ -188,11 +263,10 @@ def main(argv: list[str]) -> int:
     note = f" — {n_backed} with a matching contribution claim" if n_backed else ""
     print(f"  ⚠ {len(unreferenced)} unreferenced hit(s){note}; "
           f"review and decide cite-or-exclude:")
-    # Claim-backed hits first: a page that ranks *and* has a contribution claim
-    # near the seed is a stronger candidate than a page-text match.
-    for h in sorted(unreferenced, key=lambda x: -x.get("claim_score", 0.0)):
+    for h in unreferenced:
         flag = "  ← claim match" if "claim_score" in h else ""
         print(f"    score={h['score']:.2f}  [[{h['key']}]]{flag}")
+        print(f"      via: {', '.join(h['sources'])}")
         if h.get("title"):
             print(f"      › {h['title']}")
         if "claim_score" in h:

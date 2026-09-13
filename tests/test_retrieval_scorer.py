@@ -19,6 +19,7 @@ from researchwiki.benchmark.retrieval import (
     score_claims_fixture,
     score_pages_fixture,
 )
+from researchwiki.benchmark.retrieval_preflight import validate_fixture_anchors
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -339,3 +340,32 @@ def test_diff_fixture_id_mismatch_raises():
     b = score_claims_fixture(f2, [_claim("a", "kc", 0)], "y")
     with pytest.raises(ValueError, match="fixture_id mismatch"):
         diff_retrieval_scores(a, b)
+
+
+def test_fixture_preflight_distinguishes_missing_claim_from_retrieval_miss(monkeypatch):
+    class _Conn:
+        def execute(self, sql):
+            return [("present", "kc", 0)]
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        "researchwiki.benchmark.retrieval_preflight.get_connection", lambda: _Conn()
+    )
+    fixture = _claims_fixture([
+        ExpectedClaim("present", "kc", 0, "critical"),
+        ExpectedClaim("absent", "results", 2, "critical"),
+    ], must_not=[NegativeAnchor("inactive-negative")])
+    availability = validate_fixture_anchors(fixture)
+    assert availability.available is False
+    assert availability.missing_expected == ["absent§results#2"]
+    assert availability.inactive_negatives == ["inactive-negative"]
+
+
+def test_page_fixture_preflight_accepts_bare_stem(monkeypatch):
+    page = type("P", (), {"key": "ai/present"})()
+    monkeypatch.setattr("researchwiki.wiki.read_pages", lambda: [page])
+    availability = validate_fixture_anchors(
+        _pages_fixture([ExpectedPage("present", "critical")])
+    )
+    assert availability.available is True

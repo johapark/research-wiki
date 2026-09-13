@@ -35,6 +35,11 @@ The bundled fixtures anchor **only** to CC-BY-4.0 stems in
 dependency on a personal wiki corpus. The per-paper license grant and
 article-bound evidence are recorded in `../LICENSES.md`.
 
+Corpus-specific fixtures may also be committed when they capture recurring
+real-world queries. The harness preflights their anchors: if their source papers
+are not present in a checkout, it reports the fixture as unavailable rather than
+misreporting retrieval quality as zero.
+
 ## When to add a retrieval fixture
 
 - **Before changing the embedding.** Curate ~10 fixtures spanning the query

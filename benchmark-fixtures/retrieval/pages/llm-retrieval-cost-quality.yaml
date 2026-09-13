@@ -1,0 +1,15 @@
+fixture_id: llm-retrieval-cost-quality
+fixture_type: pages
+query: "cost quality tradeoff between embedding retrieval and LLM reranking"
+k: 5
+expected_pages:
+  - paper_stem: assadi-2026-the-embedders-dilemma-llms-are
+    importance: critical
+    expected_rank: 1
+    rationale: "The paper directly benchmarks retrieval quality, cost, throughput, and reranking."
+  - paper_stem: li-2026-genrec-an-llm-backed-recommendation-ranker
+    importance: high
+    rationale: "GenRec is a production LLM-backed ranking architecture."
+must_not_appear:
+  - paper_stem: park-2023-generative-agents-interactive-simulacra-of-human
+    rationale: "The paper concerns agent memory rather than retrieval-system efficiency."

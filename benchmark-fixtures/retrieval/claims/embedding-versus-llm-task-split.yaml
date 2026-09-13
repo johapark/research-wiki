@@ -1,0 +1,18 @@
+fixture_id: embedding-versus-llm-task-split
+fixture_type: claims
+query: "which tasks favor LLM retrieval and which favor embedding classification clustering and similarity"
+k: 10
+expected_claims:
+  - paper_stem: assadi-2026-the-embedders-dilemma-llms-are
+    section: key_contributions
+    position: 2
+    importance: critical
+    rationale: "This claim states the retrieval-versus-classification performance split."
+  - paper_stem: assadi-2026-the-embedders-dilemma-llms-are
+    section: key_contributions
+    position: 3
+    importance: high
+    rationale: "This claim reports the ties on clustering, STS, and pair classification."
+must_not_appear:
+  - paper_stem: park-2023-generative-agents-interactive-simulacra-of-human
+    rationale: "The paper does not compare embedding and generative retrieval pipelines."

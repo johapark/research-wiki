@@ -1,0 +1,15 @@
+fixture_id: automated-research-idea-generation
+fixture_type: pages
+query: "research agent scientific idea generation from literature"
+k: 5
+expected_pages:
+  - paper_stem: baek-2024-researchagent-iterative-research-idea-generation
+    importance: critical
+    expected_rank: 1
+    rationale: "ResearchAgent directly targets iterative idea generation over scientific literature."
+  - paper_stem: lu-2026-towards-end-to-end-automation-of-ai
+    importance: high
+    rationale: "The AI Scientist includes literature search and research-idea generation."
+must_not_appear:
+  - paper_stem: park-2023-generative-agents-interactive-simulacra-of-human
+    rationale: "Generative Agents models social behavior rather than scientific idea generation."

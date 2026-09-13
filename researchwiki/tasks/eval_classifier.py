@@ -24,7 +24,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from ..index.pages_bm25 import TantivySearchBackend
-from ..search import build_documents_from_wiki, suggest_category
+from ..search import build_documents_from_wiki, suggest_category, suggest_category_knn
 
 
 def main(argv: list[str]) -> int:
@@ -37,10 +37,12 @@ def main(argv: list[str]) -> int:
         prog="researchwiki eval-classifier",
         description="Deprecated alias for `researchwiki eval classifier`.",
     ).parse_args(argv)
-    return evaluate()
+    return evaluate(mode="knn")
 
 
-def evaluate() -> int:
+def evaluate(*, mode: str = "knn") -> int:
+    if mode not in {"knn", "llm"}:
+        raise ValueError(f"unknown classifier evaluation mode: {mode}")
     docs = build_documents_from_wiki()
     papers = [d for d in docs if d.page_type == "paper"]
     if not papers:
@@ -73,7 +75,8 @@ def evaluate() -> int:
             # Match the real ingest signal: title from S2, abstract from S2.
             # The summary section is our proxy for abstract.
             seed_text_abstract = held_out.summary or held_out.body[:500]
-            suggestion = suggest_category(backend, held_out.title, seed_text_abstract)
+            classifier = suggest_category_knn if mode == "knn" else suggest_category
+            suggestion = classifier(backend, held_out.title, seed_text_abstract)
         # An abstention still *places* the paper: `suggest_category_llm` returns
         # category="other", and `promote` files it there. So `predicted` stays
         # "other" — the confusion matrix reports where papers actually land, and
@@ -130,8 +133,12 @@ def evaluate() -> int:
     if decided:
         print(f"  Accuracy when committed: {correct}/{decided} = {correct/decided:.1%}")
     print()
-    print("  Confidence is the classifier's own self-report, not a vote share —")
-    print("  `suggest_category` is LLM-first and only falls back to kNN counting.")
+    if mode == "llm":
+        print("  Confidence is the classifier's own self-report, not a vote share —")
+        print("  LLM mode makes one provider call per held-out paper.")
+    else:
+        print("  Confidence is the top-category share among local BM25 neighbors,")
+        print("  not a model self-report.")
     print()
 
     print("## Confusion matrix (row=actual, col=predicted; `·` = no answer at all)")

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import math
-import re
 import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
@@ -694,52 +693,16 @@ def _load_or_build_page_cache(
 # scoring shape) for claims; for pages we delegate to the existing Tantivy
 # index when available.
 
-_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
-_STOPWORDS = frozenset({
-    "a", "an", "the", "of", "for", "with", "and", "or", "in", "on", "at",
-    "to", "from", "by", "as", "is", "are", "was", "were", "be", "do", "does",
-})
-
-
-def _tokenize_query(q: str) -> list[str]:
-    out = []
-    for tok in _TOKEN_RE.findall(q.lower()):
-        if len(tok) >= 3 and tok not in _STOPWORDS:
-            out.append(tok)
-    return out
-
-
 def _bm25ish_claims(query: str, k: int) -> list[RetrievedClaim]:
-    """Cheap keyword retrieval over claim text. Match-count + claim's own
-    semantic_score-against-PDF as a secondary signal. Returns a list of
-    RetrievedClaim (not full claim_lookup output) for scorer consumption."""
-    tokens = _tokenize_query(query)
-    if not tokens:
-        return []
-    conn = get_connection()
-    conn.row_factory = sqlite3.Row
-    try:
-        like_clauses = " + ".join(
-            ["(CASE WHEN LOWER(text) LIKE ? THEN 1 ELSE 0 END)"] * len(tokens)
-        )
-        params = [f"%{t}%" for t in tokens]
-        sql = f"""
-            SELECT paper_stem, section, position,
-                   ({like_clauses}) AS match_score,
-                   COALESCE(semantic_score, 0) AS sem
-            FROM claims
-            WHERE is_cross_ref = 0 AND ({like_clauses}) > 0
-            ORDER BY match_score DESC, sem DESC
-            LIMIT ?
-        """
-        rows = conn.execute(sql, params + params + [k]).fetchall()
-    finally:
-        conn.close()
+    """Use the production lexical claim retriever to prevent benchmark drift."""
+    from ..search.tools import claim_lookup
+
+    rows = claim_lookup(query, k=k)
     return [
         RetrievedClaim(
             paper_stem=r["paper_stem"], section=r["section"],
             position=r["position"],
-            score=float(r["match_score"] + 0.01 * r["sem"]),  # primary by match, tie-break by semantic
+            score=float(r["match_score"]),
         )
         for r in rows
     ]

@@ -217,6 +217,32 @@ def is_venue_furniture(venue: str | None) -> bool:
     return any(f in v for f in VENUE_FURNITURE)
 
 
+_PREPRINT_DOI_PREFIXES = (
+    "10.1101/", "10.64898/", "10.48550/", "10.31219/", "10.20944/", "10.2139/",
+)
+_PREPRINT_VENUE_NAMES = (
+    "biorxiv", "medrxiv", "arxiv", "chemrxiv", "research square",
+    "researchsquare", "ssrn", "preprints.org", "preprint", "zenodo",
+)
+
+
+def is_preprint_doi(doi: str | None) -> bool:
+    """Whether a DOI belongs to a preprint/deposit service."""
+    return (doi or "").lower().startswith(_PREPRINT_DOI_PREFIXES)
+
+
+def trusted_s2_venue(venue: str | None, doi: str | None) -> str | None:
+    """Drop a formal venue merged by S2 onto a preprint-only DOI record."""
+    v = (venue or "").lower()
+    if (
+        is_preprint_doi(doi)
+        and v
+        and not any(name in v for name in _PREPRINT_VENUE_NAMES)
+    ):
+        return None
+    return venue
+
+
 # --- placeholder DOIs -------------------------------------------------------
 #: A DOI whose suffix is template boilerplate rather than an identifier. ACM's
 #: LaTeX class ships `10.1145/nnnnnnn.nnnnnnn` in its sample document, and

@@ -1,0 +1,15 @@
+fixture_id: generative-agent-memory-architecture
+fixture_type: pages
+query: "generative agents memory reflection planning architecture"
+k: 5
+expected_pages:
+  - paper_stem: park-2023-generative-agents-interactive-simulacra-of-human
+    importance: critical
+    expected_rank: 1
+    rationale: "The paper directly introduces the memory, reflection, and planning architecture named by the query."
+  - paper_stem: sumers-2024-cognitive-architectures-for-language-agents
+    importance: high
+    rationale: "CoALA organizes language-agent memory and action architecture."
+must_not_appear:
+  - paper_stem: he-2025-pasa-an-llm-agent-for-comprehensive
+    rationale: "PaSa is an academic-search agent, not a memory architecture."

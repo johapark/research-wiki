@@ -38,6 +38,9 @@ __all__ = [
     "suggest_category_llm",
     "build_documents_from_wiki",
     "claim_lookup",
+    "claim_query",
+    "hybrid_claim_lookup",
+    "semantic_claim_lookup",
     "claims_by_stem",
     "document_from_page",
     "format_claim_ref",
@@ -367,5 +370,10 @@ from .tools import (  # noqa: E402
     claim_lookup as claim_lookup,
     claims_by_stem as claims_by_stem,
     pdf_section_search as pdf_section_search,
+)
+from .claims_hybrid import (  # noqa: E402
+    claim_query as claim_query,
+    hybrid_claim_lookup as hybrid_claim_lookup,
+    semantic_claim_lookup as semantic_claim_lookup,
 )
 from .refs import format_claim_ref  # noqa: E402

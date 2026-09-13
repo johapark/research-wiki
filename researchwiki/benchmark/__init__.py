@@ -52,6 +52,7 @@ from .retrieval import (
     score_claims_fixture,
     score_pages_fixture,
 )
+from .retrieval_preflight import FixtureAvailability, validate_fixture_anchors
 from ..grade.scorer import ScoreReport, score_page, score_text
 from .style import StyleReport, compute_style
 
@@ -66,6 +67,8 @@ __all__ = [
     "RetrievalScore", "RetrievalDiff",
     "score_claims_fixture", "score_pages_fixture",
     "diff_retrieval_scores",
+    "FixtureAvailability",
+    "validate_fixture_anchors",
     "retrieve_claims", "retrieve_pages",
     # Style
     "StyleReport", "compute_style",

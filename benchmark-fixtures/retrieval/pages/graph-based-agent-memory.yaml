@@ -1,0 +1,15 @@
+fixture_id: graph-based-agent-memory
+fixture_type: pages
+query: "graph based memory architecture for long horizon LLM agents"
+k: 5
+expected_pages:
+  - paper_stem: yang-2026-graph-based-agent-memory-taxonomy-techniques
+    importance: critical
+    expected_rank: 1
+    rationale: "The survey directly organizes graph-based memory for long-horizon LLM agents."
+  - paper_stem: xu-2025-a-mem-agentic-memory-for-llm
+    importance: high
+    rationale: "A-MEM dynamically links and organizes agent memories."
+must_not_appear:
+  - paper_stem: he-2025-pasa-an-llm-agent-for-comprehensive
+    rationale: "PaSa focuses on academic search rather than persistent agent memory."

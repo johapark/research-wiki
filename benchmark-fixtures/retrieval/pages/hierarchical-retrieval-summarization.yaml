@@ -1,0 +1,15 @@
+fixture_id: hierarchical-retrieval-summarization
+fixture_type: pages
+query: "recursive hierarchical retrieval clustering summarization of text chunks"
+k: 5
+expected_pages:
+  - paper_stem: sarthi-2024-raptor-recursive-abstractive-processing-for-tree-organized
+    importance: critical
+    expected_rank: 1
+    rationale: "RAPTOR recursively embeds, clusters, and summarizes chunks into a retrieval tree."
+  - paper_stem: edge-2025-from-local-to-global-a-graphrag
+    importance: high
+    rationale: "GraphRAG performs hierarchical community summarization for corpus retrieval."
+must_not_appear:
+  - paper_stem: park-2023-generative-agents-interactive-simulacra-of-human
+    rationale: "The paper concerns agent memory and behavior, not hierarchical corpus retrieval."

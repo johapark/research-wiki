@@ -31,7 +31,7 @@ import sys
 
 def _cmd_classifier(args) -> int:
     from .eval_classifier import evaluate
-    return evaluate()
+    return evaluate(mode=args.mode)
 
 
 def _print_trigger_report(reports, count) -> None:
@@ -136,7 +136,12 @@ def main(argv: list[str]) -> int:
 
     p_cls = subs.add_parser(
         "classifier",
-        help="Leave-one-out accuracy of the category auto-suggester (free).")
+        help="Leave-one-out category accuracy (local kNN by default).")
+    p_cls.add_argument(
+        "--mode", choices=["knn", "llm"], default="knn",
+        help="Classifier to evaluate. knn is local/free; llm makes one model "
+             "call per held-out paper.",
+    )
     p_cls.set_defaults(func=_cmd_classifier)
 
     p_trg = subs.add_parser(

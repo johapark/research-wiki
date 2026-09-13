@@ -10,10 +10,10 @@
 
 Usage:
   researchwiki claims "AlphaFold 3 protein-ligand accuracy"
-  researchwiki claims "off-target rate" --k 8 --json
+  researchwiki claims "off-target rate" --mode hybrid --k 8 --json
   researchwiki claims --by-stem smith-2024-paper-title-slug
 
-Exit codes: 0 = hits returned; 1 = no claim contains any query token,
+Exit codes: 0 = hits returned; 1 = no claim matches the query,
             or `--by-stem` resolved to a paper with zero claims.
 """
 
@@ -23,7 +23,7 @@ import argparse
 import json
 import sys
 
-from ..search import claim_lookup, claims_by_stem
+from ..search import claim_query, claims_by_stem
 
 
 def _fmt(hit: dict) -> str:
@@ -71,6 +71,10 @@ def main(argv: list[str]) -> int:
                         help="Dump every claim for this paper stem instead of a query search. "
                              "Useful when authoring a synthesis page that references the paper.")
     parser.add_argument("--k", type=int, default=5, help="Max claims to return (default: 5). Ignored with --by-stem.")
+    parser.add_argument(
+        "--mode", choices=["bm25", "semantic", "hybrid"], default="bm25",
+        help="Query retrieval mode (default: bm25).",
+    )
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Emit a JSON array instead of formatted prose.")
     parser.add_argument("--include-context", dest="include_context", action="store_true",
@@ -86,7 +90,10 @@ def main(argv: list[str]) -> int:
     if args.by_stem:
         hits = claims_by_stem(args.by_stem, include_context=args.include_context)
     else:
-        hits = claim_lookup(args.query, k=args.k, include_context=args.include_context)
+        hits = claim_query(
+            args.query, k=args.k, mode=args.mode,
+            include_context=args.include_context,
+        )
 
     if args.as_json:
         print(json.dumps(hits, indent=2, ensure_ascii=False))

@@ -139,6 +139,9 @@ def run_eval(monkeypatch, capsys):
         monkeypatch.setattr(
             ec, "suggest_category",
             lambda backend, title, seed: by_stem[f"p{docs.index(next(d for d in docs if d.title == title))}"])
+        monkeypatch.setattr(
+            ec, "suggest_category_knn",
+            lambda backend, title, seed: by_stem[f"p{docs.index(next(d for d in docs if d.title == title))}"])
         ec.evaluate()
         return capsys.readouterr().out
     return _run

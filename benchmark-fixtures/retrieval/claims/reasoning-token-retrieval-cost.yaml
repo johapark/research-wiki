@@ -1,0 +1,18 @@
+fixture_id: reasoning-token-retrieval-cost
+fixture_type: claims
+query: "how reducing reasoning tokens changes retrieval quality and inference cost"
+k: 10
+expected_claims:
+  - paper_stem: assadi-2026-the-embedders-dilemma-llms-are
+    section: key_contributions
+    position: 6
+    importance: critical
+    rationale: "This claim quantifies reasoning-token cost and retrieval behavior after reducing reasoning."
+  - paper_stem: assadi-2026-the-embedders-dilemma-llms-are
+    section: key_contributions
+    position: 7
+    importance: high
+    rationale: "This claim captures the quality and cost tradeoff of retrieve-then-rerank."
+must_not_appear:
+  - paper_stem: park-2023-generative-agents-interactive-simulacra-of-human
+    rationale: "Agent reflection is not inference-time reasoning-token efficiency."

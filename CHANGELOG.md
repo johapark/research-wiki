@@ -20,7 +20,68 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- Page search has an explicit, bounded `--llm-rerank` mode: one low-reasoning
+  classifier call reorders at most 12 locally retrieved candidates using bounded
+  summaries and claims, reports model and token usage in JSON, rejects invented
+  identifiers, and falls back to the original ranking. The flag makes the
+  external, cost-bearing step visible; unflagged search remains local.
+- Claim search supports `bm25`, `semantic`, and `hybrid` retrieval modes using
+  the existing claim embedding cache. There is no ambiguous claim-level `auto`
+  alias: BM25 remains the direct default because the new local fixtures did not
+  justify promoting hybrid. The retrieval suite now includes ten corpus-native
+  fixtures alongside its four portable fixtures.
+
 ### Changed
+
+- Coverage checks fuse BM25 page, semantic page, and semantic contribution-claim
+  evidence with reciprocal-rank fusion. BM25 candidates remain eligible; new
+  semantic-only candidates require corroboration from both vector signals and a
+  contribution-claim cosine of at least 0.80. Retrieval provenance and the
+  supporting claim are shown per hit for human cite-or-exclude review.
+- Classifier evaluation is local BM25-kNN by default; paid LLM evaluation is now
+  an explicit `--mode llm` choice that makes one call per held-out paper.
+
+### Fixed
+
+- Retrieval fixtures whose expected anchors are absent now report `unavailable`
+  and exit 2 instead of emitting misleading zero-quality scores. Inactive
+  negative anchors are reported separately without blocking positive scoring.
+- Retrieval benchmark keyword rankings now call the production claim retriever,
+  preventing its former LIKE-based approximation from drifting from FTS results.
+
+## [0.5.0] - 2026-09-13
+
+> **Breaking:** an automatic ingest that fails promotion gates now exits 1 after
+> writing its review draft. Previously that sandbox outcome exited 0 and could be
+> mistaken for a successfully published paper. Explicit `--force-sandbox` runs
+> remain successful exit-0 review operations.
+
+### Added
+
+- Ingest now reports distinct terminal outcomes for a promoted paper, an exact
+  duplicate already present in the library, and a review-only sandbox draft.
+  Byte-identical inbox duplicates stop after reconciliation, leave the input in
+  place, and avoid authoring, grading, and post-hook model calls.
+- `agent ingest` / `add` gain `--memory-evolve` and
+  `--contradiction-alert`, making those model-backed enrichment passes explicit
+  opt-ins alongside the existing `--claim-overlap` switch.
+
+### Changed
+
+- Target-claim extraction is now part of the automatic-promotion contract:
+  unavailable or empty extraction and any missed critical target claim block
+  promotion. One critical miss is enough to trigger revision, while ordinary
+  structural gaps retain the two-gap threshold. Long healthy PDFs use a
+  document-stratified sample, and target extraction supplies 5–10 source-derived
+  keywords so the normal path avoids a separate keyword call.
+- Required claim-grade persistence runs immediately after promotion. Optional
+  model-backed maintenance runs only for promoted pages, under the ingest budget,
+  and cannot turn an already-landed paper into a failed ingest.
+- Ingest receipts now distinguish review-required sandbox output from published
+  pages and state that supplementary files are attached but not analyzed during
+  authoring.
 
 - Multi-PDF `agent ingest` / `add`, `import apply` and `researchwiki ingest -w N`
   runs now default to one worker when a phase that command can reach uses
@@ -53,6 +114,18 @@ the reasoning behind any line below.
   pins all three.
 
 ### Fixed
+
+- An arXiv/preprint-only DOI no longer inherits a formal journal or conference
+  venue from a merged Semantic Scholar record. Reconciliation now defers to
+  Crossref and the PDF, preventing contradictory `publication_status:
+  arxiv-preprint` plus formal-venue frontmatter.
+- Reconcile and cross-link model usage is retained in ingest telemetry, including
+  cache-read and cache-write token subsets. The cross-link persistence call now
+  uses the database API's `cost_cache_*` field names; the incorrect names were
+  caught in a live six-paper chat-relay ingest before release.
+- Promotion diagnostics retain the terminal outcome and critical-target failure
+  details, while insights distinguish all recorded events from model-backed
+  events instead of treating local bookkeeping as model work.
 
 - Chat-relay response timeouts now remain typed environment failures (exit 2)
   through `agent ingest`, so batch checkpoints retry them on `--resume` instead
@@ -2073,7 +2146,8 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/johapark/research-wiki/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/johapark/research-wiki/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/johapark/research-wiki/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/johapark/research-wiki/compare/v0.4.2...v0.4.3

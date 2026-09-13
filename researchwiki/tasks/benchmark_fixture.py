@@ -147,12 +147,12 @@ def _run_retrieval_fixture(fixture: RetrievalFixture, args) -> int:
     # Warn on coverage-only flags that don't apply.
     for flag in ("page", "repeat", "with_grader", "with_style", "llm"):
         if getattr(args, flag, None):
-            print(
-                f"warning: --{flag.replace('_', '-')} doesn't apply to "
-                f"retrieval fixtures (ignored)", file=sys.stderr,
-            )
+            print(f"warning: --{flag.replace('_', '-')} doesn't apply to retrieval "
+                  "fixtures (ignored)", file=sys.stderr)
 
-    backend = args.retrieval_backend
+    from ..benchmark.retrieval_preflight import preflight_or_report
+    if not preflight_or_report(fixture, as_json=args.json):
+        return 2
 
     # Mode B: A/B diff. Per-side prefix / trust_remote_code flags so two
     # models with different conventions are compared fairly. The bare
@@ -170,10 +170,10 @@ def _run_retrieval_fixture(fixture: RetrievalFixture, args) -> int:
         }
         try:
             baseline = score_retrieval(
-                fixture, args.baseline_embedding, backend, **baseline_extra,
+                fixture, args.baseline_embedding, args.retrieval_backend, **baseline_extra,
             )
             candidate = score_retrieval(
-                fixture, args.candidate_embedding, backend, **candidate_extra,
+                fixture, args.candidate_embedding, args.retrieval_backend, **candidate_extra,
             )
             diff = diff_retrieval_scores(baseline, candidate)
         except Exception as e:
@@ -205,7 +205,7 @@ def _run_retrieval_fixture(fixture: RetrievalFixture, args) -> int:
         "query_prefix": args.embedding_query_prefix or "",
     }
     try:
-        score = score_retrieval(fixture, embedding, backend, **extra)
+        score = score_retrieval(fixture, embedding, args.retrieval_backend, **extra)
     except Exception as e:
         print(f"error: {type(e).__name__}: {e}", file=sys.stderr)
         return 2

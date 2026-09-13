@@ -1,0 +1,15 @@
+fixture_id: comprehensive-academic-paper-search
+fixture_type: pages
+query: "LLM agent comprehensive academic paper search reading and analysis"
+k: 5
+expected_pages:
+  - paper_stem: he-2025-pasa-an-llm-agent-for-comprehensive
+    importance: critical
+    expected_rank: 1
+    rationale: "PaSa directly integrates academic search, reading, and analysis."
+  - paper_stem: liang-2025-surveyx-academic-survey-automation-via
+    importance: high
+    rationale: "SurveyX searches, reads, organizes, and synthesizes academic papers."
+must_not_appear:
+  - paper_stem: park-2023-generative-agents-interactive-simulacra-of-human
+    rationale: "The paper is about simulated agents rather than literature search."
