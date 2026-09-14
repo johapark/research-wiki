@@ -881,6 +881,41 @@ Transfer proposals must cite source and target evidence and map a source method
 to the target problem; otherwise they should abstain. Feedback-driven revisions
 must retain their parent ID. See [`prompts/proposal-workflow.md`](./prompts/proposal-workflow.md).
 
+### Evaluating proposal quality
+
+The [proposal benchmark](./benchmark-fixtures/proposals/README.md) freezes twelve
+personal-corpus cases: eight development and four source-disjoint held-out cases.
+It assesses evidence, insight, contribution, decision value, and proportionality,
+with explicit restraint and feedback checks. Direct reviewer decisions determine
+usefulness; the numerical threshold remains diagnostic. The initial calibration
+was delegated to the agent, not validated against human preferences. Scored blocks
+must identify the reviewer and distinguish `reviewer_kind: human` from `agent`.
+
+```bash
+python -m researchwiki.benchmark.proposals prepare --out output/proposal-benchmark-v2
+python -m researchwiki.benchmark.proposals check --pack output/proposal-benchmark-v2
+python -m researchwiki.benchmark.proposals score --pack output/proposal-benchmark-v2 --reviews output/reviews.json
+```
+
+These offline commands freeze local evidence and aggregate complete attributed reviews;
+they do not generate proposals, call a judge, or mutate the wiki. Keep evaluator
+criteria outside generator context, report fixed-packet and end-to-end modes
+separately, and calibrate on development cases before running holdouts. Held-out
+restraint/feedback coverage is not yet included. See the
+[scoring handbook](./benchmark-fixtures/proposals/SCORING.md) for denominators,
+review anchors, and baseline comparisons.
+
+For the first live development comparison, use
+`python -m researchwiki.benchmark.proposal_run plan --pack <pack> --out <plan-dir>`.
+This offline step freezes 16 requests (two system-prompt policies over eight
+identical packets) and reports the model and destination. After reviewing and
+approving that data transmission, `proposal_run run --plan <plan-dir>
+--approve-plan <plan-id>` executes the requests and saves raw responses, failures,
+usage, and identity-hidden review templates. No held-out generation, retrieval,
+automatic judging, wiki edits, or silent replay of interrupted runs. See the
+[runner instructions](./benchmark-fixtures/proposals/README.md#development-comparison-runner)
+for provider retries, review separation, and failure accounting.
+
 ### Why the thresholds are what they are
 
 These numbers are the reason the tiers are shaped this way, and every one of them

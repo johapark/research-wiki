@@ -1,8 +1,14 @@
-# Benchmark fixtures — self-contained corpus
+# Benchmark fixtures
 
 Hand-curated fixtures that score the `researchwiki agent ingest` pipeline. Each fixture pairs a paper PDF with a structured YAML declaring what a thorough wiki page **should** capture: headline claims, capabilities, limitations, related-paper links.
 
-The harness is **portable**: six CC-BY-4.0 OA papers are committed under `pdfs/` so anyone with a fresh clone can run every benchmark without a pre-existing corpus. Attribution: see [`LICENSES.md`](./LICENSES.md).
+The ingest harness is **portable**: six CC-BY-4.0 OA papers are committed under `pdfs/` so anyone with a fresh clone can run its bundled content benchmarks without a pre-existing corpus. Attribution: see [`LICENSES.md`](./LICENSES.md).
+
+The separate [proposal/ideation suite](./proposals/README.md) contains twelve
+personal-corpus cases, an anchored human rubric, and offline preparation/checking/
+scoring commands. It requires the specified local papers and is not dispatched
+through `researchwiki benchmark-fixture`. Its rubric is agent-calibrated, not human-validated;
+preparation does not run models or change the wiki.
 
 ```
 benchmark-fixtures/
@@ -11,6 +17,7 @@ benchmark-fixtures/
 ├── pdfs/                      # bundled CC-BY-4.0 OA papers (committed)
 │   └── {stem}.pdf
 ├── {stem}.yaml                # content-coverage fixtures (this dir)
+├── proposals/                # personal-corpus proposal quality suite + handbook
 └── retrieval/
     ├── claims/{slug}.yaml     # claim-level retrieval fixtures
     └── pages/{slug}.yaml      # page-level retrieval fixtures

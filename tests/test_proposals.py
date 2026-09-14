@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
 from types import SimpleNamespace
 
 from researchwiki.db.connection import init_schema
@@ -455,7 +454,7 @@ def test_planner_contract_rejects_missing_fields_before_search(monkeypatch):
     for response, error in [({"queries": ["graph preservation"]}, "target_problem"),
                             ({"target_problem": "loss", "queries": ["graph preservation"]}, "required_capabilities"),
                             ({"target_problem": "loss", "required_capabilities": [""], "queries": ["graph"]}, "required_capabilities")]:
-        def call(**kwargs):
+        def call(response=response, **kwargs):
             schema = json.loads(kwargs["system"].split("REQUIRED OUTPUT JSON SCHEMA:\n")[1])
             assert schema == generation._SEARCH_PLAN_SCHEMA
             assert "domain-independent" in kwargs["system"]

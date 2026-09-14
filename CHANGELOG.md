@@ -28,6 +28,21 @@ the reasoning behind any line below.
 - Category bootstrap previews now save the exact validated proposal under
   `.ingest/`; `--apply` reuses that receipt without another model call and
   refuses stale proposals after the inbox changes.
+- An offline proposal/ideation benchmark defines twelve personal-corpus cases
+  with source-disjoint development/held-out splits, synthetic feedback, explicit
+  abstention cases, and a five-axis reviewer rubric. Agent calibration of saved
+  outputs tightened prompt-delta, simpler-baseline, and executable-test checks;
+  it is explicitly not human validation. Scored blocks preserve reviewer identity
+  and kind so agent assessments cannot be mislabeled as human judgments.
+  `python -m researchwiki.benchmark.proposals` prepares hash-verified evidence
+  packs and scores attributed reviews; operational failures cannot count as correct
+  abstention or useful outputs. Preparation and scoring make no model calls or wiki writes.
+- A development-only proposal comparison runner freezes a simple prompt baseline
+  and the production policy against identical packets and model settings. Live
+  execution requires the reviewed plan ID and refuses changed prompts/routing.
+  Raw responses survive validation failures, interrupted runs cannot silently
+  replay, and identity-hidden review templates keep reviewer judgments separate
+  from model/usage metadata. No automatic judge or held-out execution.
 - A Markdown-first proposal workflow can now generate at most three bounded,
   claim-grounded synthesis or idea candidates across tension, shared-mechanism,
   complementary-limitation, boundary-condition, and cross-category-application

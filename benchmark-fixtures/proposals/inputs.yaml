@@ -1,0 +1,231 @@
+# Inputs only. Evaluator expectations live in expectations.yaml.
+version: 1
+suite_id: proposal-quality-v2
+max_proposals: 3
+source_groups:
+  agent-evidence:
+    raptor: sarthi-2024-raptor-recursive-abstractive-processing-for-tree-organized
+    graphrag: edge-2025-from-local-to-global-a-graphrag
+    hipporag: gutierrez-2024-hipporag-neurobiologically-inspired-long-term-memory
+    graph-memory: yang-2026-graph-based-agent-memory-taxonomy-techniques
+    amem: xu-2025-a-mem-agentic-memory-for-llm
+    agents: park-2023-generative-agents-interactive-simulacra-of-human
+    memgpt: packer-2023-memgpt-towards-llms-as-operating
+    ace: chen-2026-to-retrieve-or-to-think
+    compactrag: yang-2026-compactrag-reducing-llm-calls-and-token
+    hickey: hickey-2023-pangenome-graph-construction-from-genome
+    ashraf: ashraf-2026-building-and-applying-pangenome-references
+    pasa: he-2025-pasa-an-llm-agent-for-comprehensive
+  chromatin:
+    change: lazzarotto-2020-change-seq-reveals-genetic-and-epigenetic
+    dig: kim-2018-dig-seq-a-genome-wide-crispr-off-target
+  reference-mapping:
+    symphony: kang-2020-efficient-and-precise-single-cell-reference
+    scarches: lotfollahi-2021-mapping-single-cell-data-to-reference
+  pixel-optimization:
+    pia: gerstner-2012-pixelated-image-abstraction-with-integrated
+    fastslic: kim-2019-fastslic-optimized-slic-superpixel
+  clustering-stability:
+    sclens: kim-2024-sclens-data-driven-signal-detection-for-unbiased
+    scice: kim-2025-scice-enhancing-clustering-reliability-and-efficiency
+
+# Explicit anchors freeze the authored packet. No retrieval or author calls
+# are made while preparing it. The complete source pages form the local corpus.
+evidence_sets:
+  retrieval:
+    raptor: [kc-2580eca4, kc-deba2b3e, lim-f1af8d90]
+    graphrag: [kc-3d474937, met-9b0f24c7, met-ae776631]
+    hipporag: [kc-cae84f51, met-9d805c63, lim-323dc5a7]
+    graph-memory: [lim-6acd78e2]
+  memory:
+    agents: [met-ab553c25]
+    amem: [kc-a59119f7, lim-a011555a, met-b4230cf3]
+    memgpt: [kc-8ec82986, kc-72e8ff1c]
+    graph-memory: [res-e6664c3a]
+    pasa: [kc-4124d304]
+  pangenome-transfer:
+    hickey: [kc-6884aae6, met-18970669, lim-48d6bf00]
+    ashraf: [kc-da8e15a3, res-b7b2147c]
+    graph-memory: [kc-8892eef2, lim-45b25ab3]
+  unrelated:
+    amem: [kc-a59119f7]
+    graphrag: [met-9b0f24c7]
+    compactrag: [kc-456545aa]
+  allocation:
+    ace: [met-3e25a93c, kc-ad57eb1a, lim-f84eda01]
+    compactrag: [kc-456545aa, kc-67be13b2, kc-94cfa5a5]
+    graph-memory: [res-3dc538bc, lim-45b25ab3]
+  chromatin:
+    change: [kc-24411a95, kc-2400cd25, kc-9b3e06cc]
+    dig: [kc-3e109ca9, kc-0f2e9e9a, lim-bda9dcc9, lim-764ea976]
+  mapping:
+    symphony: [kc-a777ee3a, met-41a3778c, met-c1e5bf21, lim-2e9076b1]
+    scarches: [kc-bff321f4, met-169e42b1, met-00cf033b, kc-4516368e]
+  pixels:
+    pia: [kc-169c160f, kc-83046952, met-1d77090a, kc-c08d434d]
+    fastslic: [kc-53866759, met-0a387365, met-98a18c11, lim-355f5840]
+  stability:
+    sclens: [kc-8b3067c3, met-ab180fb2, met-a6084556]
+    scice: [kc-0ddf198a, met-372550fd, met-a3f530cd, lim-06643021]
+
+histories:
+  allocation-rejected:
+    - proposal_id: prop-b00000000001
+      title: Retrieve, restructure, or reason?
+      question: When should evidence systems retrieve more passages, reason, or restructure their corpus?
+      thesis: A general decision framework for evidence access.
+      status: rejected
+      latest_feedback: >-
+        Do not repeat a general decision framework or infer a winner from different
+        benchmarks. Reconsider only a narrow controlled experiment on one task,
+        with simpler baselines, an explicit rejection criterion, and separate
+        accounting of online and amortized offline costs.
+  memory-deferred:
+    - proposal_id: prop-b00000000002
+      title: Preserve every event and rebuild all derived memory after each correction
+      question: Can versioned event storage prevent stale memory after a correction?
+      thesis: Recompute all summaries and links after every correction.
+      status: deferred
+      latest_feedback: >-
+        Full rebuilds and unlimited raw-event retention are unacceptable for this
+        pilot. Narrow this to correcting a small user-selected memory subset with
+        bounded retention and measured update work. Compare with a manual
+        correction plus targeted retrieval baseline. Revise this proposal rather
+        than proposing an independent memory architecture.
+
+cases:
+  - id: S01
+    split: development
+    group: agent-evidence
+    family: synthesis
+    evidence_set: retrieval
+    target_category: ai
+    topic: >-
+      Propose a synthesis that helps choose among GraphRAG, RAPTOR, and HippoRAG
+      for a research question. Identify a consequential distinction supported
+      by the supplied evidence and explain the limits of the comparison.
+    existing_pages: [synthesis/long-term-memory-systems-for-llm-agents]
+  - id: I01
+    split: development
+    group: agent-evidence
+    family: idea
+    evidence_set: memory
+    target_category: ai
+    topic: >-
+      Suggest an idea for durable, correctable agent memory beyond the context
+      window. The general architecture survey already exists; find a narrower
+      unresolved design question and a test that could reject your hypothesis.
+    existing_pages: [synthesis/long-term-memory-systems-for-llm-agents, ideas/framework-upgrades-from-agent-memory-and-rag-literature]
+  - id: X01
+    split: development
+    group: agent-evidence
+    family: transfer
+    evidence_set: pangenome-transfer
+    cross_category: true
+    target_category: compbio
+    topic: >-
+      Can a method from a different category help preserve nested variant
+      relationships during graph-to-VCF conversion? Propose only an explicit
+      source-method transfer grounded in this packet, with a simpler baseline.
+  - id: R01
+    split: development
+    group: agent-evidence
+    family: restraint
+    evidence_set: unrelated
+    target_category: ai
+    topic: >-
+      Suggest a synthesis comparing fabrication conditions for
+      superconducting qubits using measured coherence times and material defects.
+      Stay within this topic and the supplied evidence; abstain if unsupported.
+  - id: F01
+    split: development
+    group: agent-evidence
+    family: feedback
+    evidence_set: allocation
+    history: allocation-rejected
+    target_category: ai
+    topic: >-
+      Revisit the rejected retrieve/reason/restructure proposal in light of its
+      feedback. Propose a material revision only if the supplied evidence supports it.
+  - id: X02
+    split: development
+    group: agent-evidence
+    family: transfer
+    evidence_set: pangenome-transfer
+    # Paired evidence removal: retain the target, remove the only source method.
+    exclude_sources: [graph-memory]
+    paired_with: X01
+    pair_change: source_method_removed
+    cross_category: true
+    target_category: compbio
+    topic: >-
+      Can a method from a different category help preserve nested variant
+      relationships during graph-to-VCF conversion? Propose only an explicit
+      source-method transfer grounded in this packet, with a simpler baseline.
+  - id: R02
+    split: development
+    group: agent-evidence
+    family: restraint
+    evidence_set: memory
+    paired_with: I01
+    pair_change: scope_closed_to_existing_page
+    target_category: ai
+    topic: >-
+      Suggest a new general synthesis of durable LLM-agent memory only if the
+      supplied existing synthesis does not already cover the external-store,
+      writing, retrieval, and representation blueprint. Do not suggest narrower
+      design ideas or extend the scope. Return no proposals if it is covered.
+    existing_pages: [synthesis/long-term-memory-systems-for-llm-agents]
+  - id: F02
+    split: development
+    group: agent-evidence
+    family: feedback
+    evidence_set: memory
+    history: memory-deferred
+    paired_with: I01
+    pair_change: bounded_correction_feedback
+    target_category: ai
+    topic: >-
+      Revise the deferred memory-correction proposal to satisfy the attached
+      feedback. Keep the pilot small, bound retained data and update work, and
+      explain how its comparison could show that the extra mechanism is unnecessary.
+  - id: S02
+    split: heldout
+    group: chromatin
+    family: synthesis
+    evidence_set: chromatin
+    target_category: compbio
+    topic: >-
+      Suggest a synthesis explaining how the substrate used for off-target
+      discovery changes what a cleavage assay can tell us about editing in cells.
+      Compare the supplied assays and identify what still needs cellular validation.
+  - id: S03
+    split: heldout
+    group: reference-mapping
+    family: synthesis
+    evidence_set: mapping
+    target_category: single-cell
+    topic: >-
+      Suggest a synthesis that helps choose between the supplied single-cell
+      atlas-mapping approaches for unfamiliar query biology. Identify a
+      consequential methodological distinction and the limits of the evidence.
+  - id: I02
+    split: heldout
+    group: pixel-optimization
+    family: idea
+    evidence_set: pixels
+    target_category: ai
+    topic: >-
+      Propose one narrowly testable way to accelerate palette-constrained pixel
+      abstraction using the supplied optimization work. Preserve the output grid
+      and user palette constraints; establish whether the speedup survives those requirements.
+  - id: I03
+    split: heldout
+    group: clustering-stability
+    family: idea
+    evidence_set: stability
+    target_category: single-cell
+    topic: >-
+      Propose one narrowly testable idea for improving confidence in single-cell
+      clustering using the supplied methods. Explain what could make the reported
+      stability misleading and how your test would detect that problem.

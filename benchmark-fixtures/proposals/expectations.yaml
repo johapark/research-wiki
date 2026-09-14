@@ -1,0 +1,174 @@
+# Evaluator-only information. Never send this file to the generator.
+version: 1
+suite_id: proposal-quality-v2
+review_status: agent_calibrated_not_human_validated
+rubric_version: 2
+cases:
+  S01:
+    expectation: opportunity
+    acceptable_types: [synthesis]
+    direction_examples: [complementary-limitations, boundary-condition]
+    essential_refs: [raptor#kc-2580eca4, graphrag#kc-3d474937, hipporag#kc-cae84f51]
+    shortlist_conditions:
+      - Explain an evidence-organization distinction across the three architectures.
+      - Separate a plausible routing rule from established comparative superiority.
+      - State a discriminating comparison or observation that could update the synthesis.
+    unacceptable_shortcuts:
+      - A catalog of three systems without an explanatory axis.
+      - Treating unrelated benchmark scores as a head-to-head ranking.
+    acceptable_approaches:
+      - Compare community coverage, entity-linked evidence, and mixed abstraction levels.
+      - Explain why hierarchical indexing does not itself establish a scope-routing policy.
+  I01:
+    expectation: opportunity
+    acceptable_types: [idea]
+    direction_examples: [tension, shared-mechanism]
+    essential_refs: [amem#lim-a011555a, agents#met-ab553c25]
+    shortlist_conditions:
+      - Identify a narrower unresolved memory design issue beyond the existing survey.
+      - Explain the mechanism, baseline, uncertainty, and a rejecting experiment.
+      - Acknowledge overlap with the existing idea page if proposing immutable receipts.
+      - State the specific decision or experiment added beyond the supplied prompt and existing pages.
+    unacceptable_shortcuts:
+      - Repeat the external-store architecture survey.
+      - Assert that retaining all history necessarily improves recall.
+    acceptable_approaches:
+      - Compare replacement updates with versioned interpretations and bounded evidence recovery.
+      - Test correction propagation or stale-memory detection under a fixed retention budget.
+  X01:
+    expectation: opportunity
+    acceptable_types: [idea]
+    direction_examples: [cross-category-application]
+    essential_refs: [hickey#lim-48d6bf00, graph-memory#kc-8892eef2]
+    shortlist_conditions:
+      - Ground a source method outside compbio and identify the target relationship to preserve.
+      - Map a source operation to a target operation and state adaptation assumptions.
+      - Compare with a simpler representation and state when added complexity is unnecessary.
+      - Specify a relationship query and an advantage worth paying for; matching pairwise links alone is not success.
+    unacceptable_shortcuts:
+      - A target-domain export design with no actual source-method transfer.
+      - Claim that hypergraphs are necessary without testing pairwise alternatives.
+    acceptable_approaches:
+      - Test higher-order relationship preservation against pairwise links and flat export.
+    curator_note: Review-level method evidence supports an exploratory test, not demonstrated transfer performance.
+  X02:
+    expectation: abstain
+    acceptable_types: []
+    essential_refs: []
+    shortlist_conditions: []
+    unacceptable_shortcuts:
+      - Invent source-category evidence or import a method from model memory as a paper finding.
+      - Relabel a within-domain design as a cross-category application.
+    acceptable_approaches: [Return an empty proposal set because the sole source-method evidence was removed.]
+    curator_note: The fixed packet has no source method; end-to-end retrieval may NOT search the positive twin's corpus.
+  R01:
+    expectation: abstain
+    acceptable_types: []
+    essential_refs: []
+    shortlist_conditions: []
+    unacceptable_shortcuts:
+      - Substitute an agent-memory or retrieval proposal for the requested fabrication question.
+      - Treat shared words such as memory or graph as evidence about qubit fabrication.
+    acceptable_approaches: [Return an empty proposal set.]
+  R02:
+    expectation: abstain
+    acceptable_types: []
+    essential_refs: []
+    shortlist_conditions: []
+    unacceptable_shortcuts:
+      - Repeat the supplied synthesis under a new title.
+      - Escape the explicitly closed scope by proposing an experiment or narrower idea.
+    acceptable_approaches: [Return an empty proposal set because the requested survey scope is covered.]
+  F01:
+    expectation: opportunity
+    acceptable_types: [idea]
+    essential_refs: [ace#met-3e25a93c, compactrag#kc-456545aa]
+    shortlist_conditions:
+      - Isolate one task or failure condition with a controlled comparison.
+      - Define a rejecting observation and account for offline and online costs separately.
+      - Explain the substantive change from the rejected framework.
+    feedback_requirements:
+      - No universal ranking inferred from different benchmarks.
+      - A material revision into one bounded task or failure condition, not a renamed general framework.
+      - A concrete controlled comparison with credible baselines.
+      - An explicit, interpretable rejection criterion.
+      - Separate online and amortized offline costs; use compatible units or separate limits for distinct resources.
+    expected_parent: prop-b00000000001
+    unacceptable_shortcuts: [Keep the old framework and merely acknowledge the rejection.]
+    acceptable_approaches:
+      - Test temporal consistency under matched evidence and compute limits.
+      - Test redundancy as a moderator of the value of extra retrieval or preprocessing.
+  F02:
+    expectation: opportunity
+    acceptable_types: [idea]
+    essential_refs: [amem#lim-a011555a, memgpt#kc-72e8ff1c]
+    shortlist_conditions:
+      - Revise the supplied correction proposal into a bounded pilot.
+      - Test whether its mechanism improves over targeted manual correction and retrieval.
+      - Define limits on retained data and update work.
+      - Specify what happens at the retention limit; immutable evidence does not imply retaining everything forever.
+    feedback_requirements:
+      - No full rebuild after every edit.
+      - No unlimited event retention.
+      - Include the requested simple baseline and preserve revision lineage.
+    expected_parent: prop-b00000000002
+    unacceptable_shortcuts: [Rename the unlimited ledger while leaving its operating requirements unchanged.]
+    acceptable_approaches:
+      - Test bounded invalidation or version tracking for a selected memory subset.
+  S02:
+    expectation: opportunity
+    acceptable_types: [synthesis]
+    direction_examples: [boundary-condition, complementary-limitations]
+    essential_refs: [change#kc-24411a95, dig#lim-bda9dcc9]
+    shortlist_conditions:
+      - Connect assay substrate to the interpretation of candidate cleavage sites.
+      - Distinguish in-vitro cleavage potential from observed cellular editing.
+      - Preserve the need for cell-based confirmation and the limits of tested guides/cell types.
+    unacceptable_shortcuts:
+      - Infer superior sensitivity from different numbers of reported sites.
+      - Treat cleavage profiles as clinical safety guarantees or mutation frequencies.
+    acceptable_approaches:
+      - Map biochemical discovery, chromatin-context filtering, and cellular validation as different questions.
+  S03:
+    expectation: opportunity
+    acceptable_types: [synthesis]
+    direction_examples: [shared-mechanism, boundary-condition]
+    essential_refs: [symphony#met-c1e5bf21, scarches#met-169e42b1, scarches#met-00cf033b]
+    shortlist_conditions:
+      - Explain what remains fixed and what changes in each mapping procedure.
+      - Distinguish efficient mapping from established handling of every novel biological state.
+      - Identify a comparison that could invalidate the proposed design-fit distinction.
+    unacceptable_shortcuts:
+      - Describe scArches as retraining all reference weights.
+      - Treat lack of raw-data sharing as a formal privacy guarantee.
+    acceptable_approaches:
+      - Compare projection onto a fixed compressed reference with adaptation through new query parameters.
+  I02:
+    expectation: opportunity
+    acceptable_types: [idea]
+    direction_examples: [complementary-limitations]
+    essential_refs: [pia#kc-169c160f, pia#met-1d77090a, fastslic#met-0a387365]
+    shortlist_conditions:
+      - Preserve one output pixel per region and the palette-dependent reassignment rule.
+      - Test a specific optimization with a reference implementation and output-quality constraints.
+      - Measure end-to-end speed rather than importing a standalone SLIC speedup.
+    unacceptable_shortcuts:
+      - Assume FastSLIC is a drop-in replacement with identical output semantics.
+      - Claim an unmeasured speedup for palette-constrained abstraction.
+    acceptable_approaches:
+      - Ablate cached distance computation, quantization, or subsampling against a faithful baseline.
+  I03:
+    expectation: opportunity
+    acceptable_types: [idea]
+    direction_examples: [boundary-condition, tension]
+    essential_refs: [sclens#met-ab180fb2, scice#met-372550fd, scice#kc-0ddf198a]
+    shortlist_conditions:
+      - Identify an unresolved stability failure mode; if comparing data and seed perturbations, keep them distinct interventions.
+      - Acknowledge that the published scICE pipeline already uses scLENS.
+      - Measure biological validity independently of the stability measure being optimized.
+    curator_note: A crossed perturbation-and-seed design is one acceptable route, not an exact-match answer. Other supported failure-isolation tests may qualify.
+    unacceptable_shortcuts:
+      - Present combining scLENS and scICE as a new method.
+      - Equate stable clusters with biologically correct clusters.
+    acceptable_approaches:
+      - A crossed perturbation-and-seed experiment with fixed compute and independent labels or validation evidence.

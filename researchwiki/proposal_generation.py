@@ -412,7 +412,8 @@ def expand_cross_category(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def generate_proposals(packet: dict[str, Any]) -> tuple[list[dict], dict[str, Any]]:
+def proposal_request(packet: dict[str, Any]) -> dict[str, Any]:
+    """Build the production request without retrieval, provider calls, or writes."""
     evidence = packet.get("evidence") or []
     if not evidence:
         raise ValueError("no evidence available for proposal generation")
@@ -438,18 +439,25 @@ def generate_proposals(packet: dict[str, Any]) -> tuple[list[dict], dict[str, An
             "A target-domain design alone is NOT a transfer. If no supplied source "
             "method supports a defensible transfer, return {\"proposals\": []}."
         )
-    from .agents import llm
-    response = llm.call(
-        phase="proposal_generation",
-        system=_with_contract(_PROPOSAL_SYSTEM, _PROPOSAL_SCHEMA),
-        prompt=prompt,
-        schema=_PROPOSAL_SCHEMA,
-    )
-    parsed = _parse_json(response.text)
+    return {"phase": "proposal_generation",
+            "system": _with_contract(_PROPOSAL_SYSTEM, _PROPOSAL_SCHEMA),
+            "prompt": prompt, "schema": _PROPOSAL_SCHEMA}
+
+
+def parse_proposal_response(text: str, packet: dict[str, Any]) -> list[dict]:
+    """Apply the same parsing and validation to ordinary and benchmark runs."""
+    parsed = _parse_json(text)
     proposals = parsed.get("proposals")
     if not isinstance(proposals, list) or len(proposals) > MAX_PROPOSALS:
         raise ValueError("proposal response must contain at most three proposals")
     validate_candidates(proposals, packet)
+    return proposals
+
+
+def generate_proposals(packet: dict[str, Any]) -> tuple[list[dict], dict[str, Any]]:
+    from .agents import llm
+    response = llm.call(**proposal_request(packet))
+    proposals = parse_proposal_response(response.text, packet)
     usage = {
         "model": response.model,
         "input_tokens": response.input_tokens,
