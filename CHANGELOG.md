@@ -48,7 +48,8 @@ the reasoning behind any line below.
 - Classifier evaluation preserves the requested mode across every held-out
   paper and its report. Per-paper outcomes no longer overwrite the mode and
   silently switch default/local kNN evaluation to the model-backed classifier;
-  explicit LLM runs also retain the correct confidence explanation.
+  explicit LLM runs also retain the correct confidence explanation and no
+  longer silently fall back to kNN.
 - Retrieval fixtures whose expected anchors are absent now report `unavailable`
   and exit 2 instead of emitting misleading zero-quality scores. Inactive
   negative anchors are reported separately without blocking positive scoring.

@@ -134,24 +134,35 @@ def run_eval(monkeypatch, capsys):
         by_title = {f"T{i}": sug for i, (_, sug) in enumerate(cases)}
         expected_mode = mode or "knn"
         selected_name = ("suggest_category_knn" if expected_mode == "knn"
-                         else "suggest_category")
-        unexpected_name = ("suggest_category" if expected_mode == "knn"
-                           else "suggest_category_knn")
+                         else "suggest_category_llm")
+        unexpected_names = (
+            ("suggest_category_llm", "suggest_category")
+            if expected_mode == "knn"
+            else ("suggest_category_knn", "suggest_category")
+        )
         calls = []
 
         def selected_classifier(backend, title, seed):
             calls.append(title)
             return by_title[title]
 
-        def unexpected_classifier(backend, title, seed):
-            pytest.fail(f"{unexpected_name} selected during {expected_mode} evaluation",
-                        pytrace=False)
-
         monkeypatch.setattr(ec, "build_documents_from_wiki", lambda: docs)
         monkeypatch.setattr(ec, "TantivySearchBackend",
                             lambda path=None: type("B", (), {"build": lambda s, d: None})())
         monkeypatch.setattr(ec, selected_name, selected_classifier)
-        monkeypatch.setattr(ec, unexpected_name, unexpected_classifier)
+        for unexpected_name in unexpected_names:
+            def unexpected_classifier(backend, title, seed, *, name=unexpected_name):
+                pytest.fail(
+                    f"{name} selected during {expected_mode} evaluation",
+                    pytrace=False,
+                )
+
+            # `suggest_category` is not imported by the implementation; adding
+            # the trap keeps this test hermetic if the fallback wrapper is ever
+            # reintroduced.
+            monkeypatch.setattr(
+                ec, unexpected_name, unexpected_classifier, raising=False,
+            )
         # Omitting the keyword pins evaluate()'s actual default as well.
         kwargs = {} if mode is None else {"mode": mode}
         assert ec.evaluate(**kwargs) == 0
@@ -246,7 +257,7 @@ def test_knn_never_switches_to_llm_after_a_result(run_eval, mode, first_case):
     ], mode=mode)
 
 
-def test_explicit_llm_classifies_every_paper_with_the_llm_path(run_eval):
+def test_explicit_llm_uses_the_strict_llm_path_for_every_paper(run_eval):
     run_eval([
         ("compbio", _suggestion("compbio")),
         ("ai", _suggestion("compbio")),

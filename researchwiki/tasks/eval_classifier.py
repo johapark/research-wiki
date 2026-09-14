@@ -25,7 +25,11 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from ..index.pages_bm25 import TantivySearchBackend
-from ..search import build_documents_from_wiki, suggest_category, suggest_category_knn
+from ..search import (
+    build_documents_from_wiki,
+    suggest_category_knn,
+    suggest_category_llm,
+)
 
 
 def main(argv: list[str]) -> int:
@@ -44,8 +48,11 @@ def main(argv: list[str]) -> int:
 def evaluate(*, mode: str = "knn") -> int:
     if mode not in {"knn", "llm"}:
         raise ValueError(f"unknown classifier evaluation mode: {mode}")
-    # The requested mode belongs to the whole run, not a per-paper outcome.
-    classifier = suggest_category_knn if mode == "knn" else suggest_category
+    # Evaluate the requested classifier itself. The top-level
+    # `suggest_category` helper is intentionally not used here because its
+    # LLM-first path silently falls back to kNN, which would mix classifier
+    # types while still reporting the run as `--mode llm`.
+    classifier = suggest_category_knn if mode == "knn" else suggest_category_llm
     docs = build_documents_from_wiki()
     papers = [d for d in docs if d.page_type == "paper"]
     if not papers:
