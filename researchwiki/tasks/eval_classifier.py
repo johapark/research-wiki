@@ -2,13 +2,14 @@
 
 For each paper in the wiki:
   - Rebuild the index excluding that paper
-  - Ask suggest_category() to classify it from title + summary
+  - Ask the selected classifier to classify it from title + summary
   - Record (actual, predicted, confidence)
 
 Report: overall accuracy, per-category precision/recall, confusion matrix,
 abstention rate. No side effects — the held-out indexes are temporary.
 
-Run: `researchwiki eval classifier`. Read-only over the wiki state.
+Run: `researchwiki eval classifier`. Read-only over the wiki state; local kNN
+by default, with model-backed classification only under `--mode llm`.
 
 The `eval-classifier` spelling still works and delegates here — kept because
 `CONTRIBUTING.md` counts the CLI as a published surface, so removing a command
@@ -43,6 +44,8 @@ def main(argv: list[str]) -> int:
 def evaluate(*, mode: str = "knn") -> int:
     if mode not in {"knn", "llm"}:
         raise ValueError(f"unknown classifier evaluation mode: {mode}")
+    # The requested mode belongs to the whole run, not a per-paper outcome.
+    classifier = suggest_category_knn if mode == "knn" else suggest_category
     docs = build_documents_from_wiki()
     papers = [d for d in docs if d.page_type == "paper"]
     if not papers:
@@ -54,7 +57,7 @@ def evaluate(*, mode: str = "knn") -> int:
     print()
 
     rows: list[tuple[str, str, str | None, float, str]] = []
-    # (stem, actual, predicted, confidence, mode), mode ∈
+    # (stem, actual, predicted, confidence, outcome), outcome ∈
     #   correct       — committed to a category, and it was right
     #   wrong         — committed to a category, and it was wrong
     #   abstain-right — declined, and the paper does live in `other`
@@ -75,7 +78,6 @@ def evaluate(*, mode: str = "knn") -> int:
             # Match the real ingest signal: title from S2, abstract from S2.
             # The summary section is our proxy for abstract.
             seed_text_abstract = held_out.summary or held_out.body[:500]
-            classifier = suggest_category_knn if mode == "knn" else suggest_category
             suggestion = classifier(backend, held_out.title, seed_text_abstract)
         # An abstention still *places* the paper: `suggest_category_llm` returns
         # category="other", and `promote` files it there. So `predicted` stays
@@ -86,14 +88,14 @@ def evaluate(*, mode: str = "knn") -> int:
             rows.append((held_out.stem, held_out.category, None, 0.0, "abstain-miss"
                          if held_out.category != "other" else "abstain-right"))
         elif suggestion.abstained:
-            mode = "abstain-right" if held_out.category == "other" else "abstain-miss"
+            outcome = "abstain-right" if held_out.category == "other" else "abstain-miss"
             rows.append((held_out.stem, held_out.category, "other",
-                         suggestion.confidence, mode))
+                         suggestion.confidence, outcome))
         else:
-            mode = "correct" if suggestion.category == held_out.category else "wrong"
+            outcome = "correct" if suggestion.category == held_out.category else "wrong"
             rows.append((
                 held_out.stem, held_out.category, suggestion.category,
-                suggestion.confidence, mode,
+                suggestion.confidence, outcome,
             ))
 
     total = len(rows)
@@ -107,9 +109,9 @@ def evaluate(*, mode: str = "knn") -> int:
     baseline_correct = sum(1 for d in papers if d.category == modal)
 
     print("## Per-paper results")
-    for stem, actual, pred, conf, mode in rows:
+    for stem, actual, pred, conf, outcome in rows:
         marker = {"correct": "✓", "wrong": "✗",
-                  "abstain-right": "?", "abstain-miss": "?"}[mode]
+                  "abstain-right": "?", "abstain-miss": "?"}[outcome]
         pred_s = (f"{pred:>10s} ({conf:.0%})" if pred
                   else f"{'abstain':>10s} ({conf:.0%})")
         print(f"  {marker}  actual={actual:>10s}  pred={pred_s}  {stem[:55]}")

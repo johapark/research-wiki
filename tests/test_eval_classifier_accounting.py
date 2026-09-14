@@ -122,8 +122,8 @@ def test_a_deliberate_other_is_not_an_abstention(monkeypatch):
 
 @pytest.fixture
 def run_eval(monkeypatch, capsys):
-    """Drive `evaluate()` over a fixed set of (actual, suggestion) pairs."""
-    def _run(cases):
+    """Drive `evaluate()` without hiding accidental classifier switches."""
+    def _run(cases, *, mode=None):
         from researchwiki.tasks import eval_classifier as ec
 
         docs = [
@@ -131,18 +131,31 @@ def run_eval(monkeypatch, capsys):
                            "summary": "s", "body": "b", "page_type": "paper"})()
             for i, (actual, _) in enumerate(cases)
         ]
-        by_stem = {f"p{i}": sug for i, (_, sug) in enumerate(cases)}
+        by_title = {f"T{i}": sug for i, (_, sug) in enumerate(cases)}
+        expected_mode = mode or "knn"
+        selected_name = ("suggest_category_knn" if expected_mode == "knn"
+                         else "suggest_category")
+        unexpected_name = ("suggest_category" if expected_mode == "knn"
+                           else "suggest_category_knn")
+        calls = []
+
+        def selected_classifier(backend, title, seed):
+            calls.append(title)
+            return by_title[title]
+
+        def unexpected_classifier(backend, title, seed):
+            pytest.fail(f"{unexpected_name} selected during {expected_mode} evaluation",
+                        pytrace=False)
 
         monkeypatch.setattr(ec, "build_documents_from_wiki", lambda: docs)
         monkeypatch.setattr(ec, "TantivySearchBackend",
                             lambda path=None: type("B", (), {"build": lambda s, d: None})())
-        monkeypatch.setattr(
-            ec, "suggest_category",
-            lambda backend, title, seed: by_stem[f"p{docs.index(next(d for d in docs if d.title == title))}"])
-        monkeypatch.setattr(
-            ec, "suggest_category_knn",
-            lambda backend, title, seed: by_stem[f"p{docs.index(next(d for d in docs if d.title == title))}"])
-        ec.evaluate()
+        monkeypatch.setattr(ec, selected_name, selected_classifier)
+        monkeypatch.setattr(ec, unexpected_name, unexpected_classifier)
+        # Omitting the keyword pins evaluate()'s actual default as well.
+        kwargs = {} if mode is None else {"mode": mode}
+        assert ec.evaluate(**kwargs) == 0
+        assert calls == [d.title for d in docs]
         return capsys.readouterr().out
     return _run
 
@@ -216,6 +229,50 @@ def test_other_precision_notes_how_much_came_from_abstention(run_eval):
     assert "via abstention" in out
 
 
-def test_confidence_is_labelled_as_self_reported(run_eval):
-    out = run_eval([("compbio", _suggestion("compbio"))])
-    assert "self-report" in out
+# ---------- execution mode must survive result accounting and reporting ----------
+
+@pytest.mark.parametrize("mode", [None, "knn"], ids=["default", "explicit-knn"])
+@pytest.mark.parametrize("first_case", [
+    ("compbio", _suggestion("compbio")),
+    ("ai", _suggestion("compbio")),
+    ("other", _suggestion("other", 0.2, abstained=True)),
+    ("single-cell", _suggestion("other", 0.2, abstained=True)),
+], ids=["correct", "wrong", "abstain-right", "abstain-miss"])
+def test_knn_never_switches_to_llm_after_a_result(run_eval, mode, first_case):
+    run_eval([
+        first_case,
+        ("compbio", _suggestion("compbio")),
+        ("other", _suggestion("other")),
+    ], mode=mode)
+
+
+def test_explicit_llm_classifies_every_paper_with_the_llm_path(run_eval):
+    run_eval([
+        ("compbio", _suggestion("compbio")),
+        ("ai", _suggestion("compbio")),
+        ("other", _suggestion("other", 0.2, abstained=True)),
+        ("single-cell", _suggestion("other", 0.2, abstained=True)),
+    ], mode="llm")
+
+
+_CONFIDENCE_NOTES = {
+    "knn": ("  Confidence is the top-category share among local BM25 neighbors,\n"
+            "  not a model self-report."),
+    "llm": ("  Confidence is the classifier's own self-report, not a vote share —\n"
+            "  LLM mode makes one provider call per held-out paper."),
+}
+
+
+@pytest.mark.parametrize("mode", [None, "knn", "llm"],
+                         ids=["default", "explicit-knn", "explicit-llm"])
+@pytest.mark.parametrize("no_answer", [False, True], ids=["prediction", "all-none"])
+def test_confidence_note_matches_execution_mode(run_eval, mode, no_answer):
+    # None never overwrites the mode during classification: an all-None run
+    # isolates the separate overwrite in the per-paper reporting loop.
+    cases = ([("compbio", None), ("other", None)] if no_answer
+             else [("compbio", _suggestion("compbio"))])
+    out = run_eval(cases, mode=mode)
+    expected_mode = mode or "knn"
+    unexpected_mode = "llm" if expected_mode == "knn" else "knn"
+    assert _CONFIDENCE_NOTES[expected_mode] in out
+    assert _CONFIDENCE_NOTES[unexpected_mode] not in out
