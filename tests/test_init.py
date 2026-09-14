@@ -1638,12 +1638,12 @@ def test_views_template_contract():
     assert "file.ctime" not in template
     assert 'WHERE type = "paper" AND ingested_at' in template
     assert 'WHERE type = "synthesis" AND generated_at' in template
-    assert 'WHERE type = "concept" AND generated_at' in template
+    assert 'WHERE type = "proposal" AND created_at' in template
     assert 'WHERE type = "idea" AND generated_at' in template
     assert template.index("## Recent papers") < template.index("## Recent ideas")
     assert template.index("## Recent ideas") < template.index("## Recent synthesis pages")
     assert template.index("## Recent synthesis pages") < template.index(
-        "## Recent concept hubs"
+        "## Recent proposals"
     )
     ideas = template.split("## Recent ideas", 1)[1].split(
         "## Recent synthesis pages", 1
@@ -1654,27 +1654,26 @@ def test_views_template_contract():
     assert "short_name" not in paper
     assert paper.index('AS "Category"') < paper.index('AS "Journal"')
     assert 'venue AS "Journal"' in paper
-    # Synthesis stays JavaScript-free and has no duplicate member registry;
-    # concepts own an explicit spoke registry and can count it directly.
+    # Synthesis stays JavaScript-free and has no duplicate member registry.
     assert "```dataviewjs" not in template
     synthesis = template.split("## Recent synthesis pages", 1)[1].split(
-        "## Recent concept hubs", 1
+        "## Recent proposals", 1
     )[0]
     assert "Members" not in synthesis
     assert "referenced_papers" not in synthesis
-    concept = template.split("## Recent concept hubs", 1)[1].split(
-        "## Recent ideas", 1
-    )[0]
-    assert 'length(referenced_papers) AS "Members"' in concept
+    proposals = template.split("## Recent proposals", 1)[1]
+    assert 'proposed_page_type AS "For"' in proposals
+    assert 'direction AS "Direction"' in proposals
+    assert 'status AS "Status"' in proposals
 
 
 def test_dashboard_prompt_matches_executable_member_contract():
     prompt = (ROOT / "prompts" / "init.md").read_text(encoding="utf-8")
     for signal in (
         "Keep this dashboard JavaScript-free",
-        "No synthesis member-count column",
-        "canonical spoke registry",
-        'WHERE type = "concept" AND generated_at',
+        "no synthesis\nmember-count column",
+        "intended page type, direction, and status",
+        'WHERE type = "proposal" AND created_at',
     ):
         assert signal in prompt
 

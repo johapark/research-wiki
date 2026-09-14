@@ -28,6 +28,33 @@ the reasoning behind any line below.
 - Category bootstrap previews now save the exact validated proposal under
   `.ingest/`; `--apply` reuses that receipt without another model call and
   refuses stale proposals after the inbox changes.
+- A Markdown-first proposal workflow can now generate at most three bounded,
+  claim-grounded synthesis or idea candidates across tension, shared-mechanism,
+  complementary-limitation, boundary-condition, and cross-category-application
+  directions. `proposals feedback` appends durable user decisions; disposable
+  `proposals` and `proposal_feedback` database tables rebuild from those pages.
+- Proposal previews now retain full evidence and author provenance in portable
+  JSON receipts; `proposals accept <file> --select ...` saves exact reviewed
+  entries without regeneration or duplicate acceptance, including chat-authored
+  receipts. Generation receives bounded existing-page context, rejects unknown
+  or evidence-free explicit papers, and separates cross-category planning from
+  the model-call-free `--prepare-only` step.
+- Proposal evidence from explicitly selected papers now follows query relevance
+  before per-paper caps, preventing early contribution claims from crowding out
+  retrieved methods or limitations. Existing-page and proposal-history context
+  share stopword filtering and metadata-anchored multi-term matching, allowing
+  empty context instead of filling it with incidental word matches. No added
+  model calls or larger evidence budgets.
+- Proposal and cross-category planner prompts now carry their exact JSON
+  contracts across providers, including the empty-proposal envelope. Planner
+  validation requires the target problem and capabilities, not only queries.
+  Transfer mode explicitly requires a source method and source/target evidence;
+  feedback-driven revisions must identify their parent. JSON parsing rejects
+  incorrectly wrapped arrays instead of extracting an object from inside them.
+- Proposal pages have a lint contract and appear in the default Obsidian
+  dashboard. Cross-category generation begins with the target problem, plans
+  capability queries, and searches outside the target category before drafting
+  an explicit transfer mapping, mechanism, assumptions, baseline, and first experiment.
 - Page search has an explicit, bounded `--llm-rerank` mode: one low-reasoning
   classifier call reorders at most 12 locally retrieved candidates using bounded
   summaries and claims, reports model and token usage in JSON, rejects invented
@@ -41,6 +68,10 @@ the reasoning behind any line below.
 
 ### Changed
 
+- Proposals replace concept hubs as the default page-discovery surface. Fresh
+  scaffolds create `wiki/proposals/`; `status` reports its review queue, and
+  ingest no longer mutates concept hubs automatically. Existing concept pages
+  and manual commands remain available as a legacy workflow.
 - Coverage checks fuse BM25 page, semantic page, and semantic contribution-claim
   evidence with reciprocal-rank fusion. BM25 candidates remain eligible; new
   semantic-only candidates require corroboration from both vector signals and a

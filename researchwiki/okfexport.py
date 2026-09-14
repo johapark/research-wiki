@@ -4,7 +4,7 @@
 
 `refexport` emits a *bibliography*: a list of documents somebody else published,
 so it carries only `paper`/`commentary`/`whitepaper`/`guidance`/`book` and there is
-deliberately no flag to include synthesis, idea or concept pages — a BibTeX entry
+deliberately no flag to include synthesis, idea, proposal or concept pages — a BibTeX entry
 for one would assert a publication that does not exist.
 
 OKF has the opposite scope. Its unit is a **concept**: "anything you want to
@@ -323,7 +323,7 @@ def _okf_frontmatter(
         report.description_missing.append(page.key)
 
     # `resource` is a URI for the underlying asset, absent for abstract concepts
-    # (§4.1) — which is the honest state for synthesis/idea/concept pages.
+    # (§4.1) — honest for synthesis/idea/proposal/concept pages.
     doi = page.str_field("doi").strip().strip('"').strip("'")
     if doi and doi.lower() not in ("todo", "none"):
         fm["resource"] = f"https://doi.org/{doi}"

@@ -661,7 +661,7 @@ def _run_verify(args: argparse.Namespace) -> int:
     print("\n  Wiring the new pages into the graph (each is free or cheap):")
     print("    researchwiki claim-overlap --backlog --dry-run   # reciprocal links")
     print("    researchwiki scout --json                        # citation-graph gaps")
-    print("    researchwiki candidates concepts --bridges       # cross-category hubs")
+    print("    researchwiki proposals generate \"<question>\"     # cross-paper page ideas")
     print("    researchwiki candidates synthesis                # dense clusters")
     return 0
 

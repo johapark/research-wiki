@@ -8,7 +8,7 @@ The agent operates the CLI for you: it reads the source PDF, writes and grades t
 
 - **Grounded in local PDFs.** Wiki prose comes from your papers, not web summaries. Answers start from the wiki and return to the PDFs when more detail is needed.
 - **Claim-level verification.** Claims are graded against their source and exposed through durable `[[paper#claim]]` anchors. Cross-paper pages (syntheses, concepts, and ideas) are also checked for complete citations and source fidelity.
-- **Connected knowledge.** Citation-supported links, concept hubs, synthesis pages, claim relationships, and evolution proposals turn isolated summaries into a research map.
+- **Connected knowledge.** Citation-supported links, synthesis pages, claim relationships, and a synced proposal/feedback ledger turn isolated summaries into a research map.
 - **Agent-operated workflows.** The agent coordinates ingestion, synthesis, verification, linking, indexing, and recovery through the CLI.
 - **Search and discovery.** BM25 and semantic search, citation/recommendation neighbors, gap detection, and an interactive graph help you find papers and missing literature.
 - **Portable and local-first.** Your wiki is plain Markdown, your library is gitignored, and the content directories can sync independently of the framework.
@@ -145,13 +145,14 @@ Open the directory containing both `wiki/` and `papers/` as an [Obsidian](https:
 | `wiki/log.md` | Chronological ingest and authoring history |
 | `wiki/{category}/` | Paper and commentary pages |
 | `wiki/synthesis/` | Retrospective cross-paper analyses |
-| `wiki/concepts/` | Grounded hub notes spanning recurring concepts |
 | `wiki/ideas/` | Forward-looking, reviewable design proposals |
+| `wiki/proposals/` | Synced candidates and user-feedback history for future synthesis/idea pages |
+| `wiki/concepts/` | Legacy grounded concept hubs, when present |
 | `wiki/references/` | Guidance, protocols, whitepapers, and books |
 
 Paper pages are generated from PDFs. Commentary pages are explicitly attributed and carry no findings of their own. Synthesis and concept pages are strictly grounded; idea pages allow marked model priors only in their design sections. See [CLAUDE.md](./CLAUDE.md) for the full page contracts.
 
-Useful discovery commands include `researchwiki search`, `researchwiki neighbors`, `researchwiki candidates synthesis`, `researchwiki candidates concepts`, and `researchwiki claim-graph`. `researchwiki visualize` writes a self-contained interactive graph to `output/graph.html`.
+Use `researchwiki proposals generate "<question>"` to preview up to three evidence-backed synthesis or idea candidates. Review the saved JSON receipt, then `researchwiki proposals accept <file> --select 1` saves that exact choice without regeneration. `--prepare-only` makes no model calls. `--target-category CAT --cross-category` searches other categories for transferable methods. `researchwiki proposals feedback` records decisions in Markdown so they sync and influence later runs. Other discovery commands include `researchwiki search`, `researchwiki neighbors`, `researchwiki candidates synthesis`, and `researchwiki claim-graph`. `researchwiki visualize` writes a self-contained interactive graph to `output/graph.html`.
 
 ## Import and export
 
@@ -165,7 +166,7 @@ researchwiki export --format ris > refs.ris
 researchwiki export --format okf --out output/okf
 ```
 
-Bibliography exports include published resources; OKF also carries synthesis, concept, and idea pages as portable knowledge. See the [export guide](./prompts/export-bibliography.md).
+Bibliography exports include published resources; OKF also carries synthesis, idea, proposal, and legacy concept pages as portable knowledge. See the [export guide](./prompts/export-bibliography.md).
 
 ## Sync across computers
 

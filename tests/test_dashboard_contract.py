@@ -59,10 +59,10 @@ def test_custom_prose_and_extra_columns_are_allowed(tmp_path):
         ),
         (
             lambda text: text.replace(
-                'length(referenced_papers) AS "Members"',
-                'file.size AS "Members"',
+                'WHERE type = "proposal" AND created_at',
+                'WHERE type = "proposal"',
             ),
-            "dashboard_concept_members",
+            "dashboard_proposal_query",
         ),
         (
             lambda text: text.replace(
@@ -91,12 +91,12 @@ def test_contract_drift_is_reported(tmp_path, mutate, expected_kind):
 def test_table_order_drift_is_reported(tmp_path):
     prefix, after_idea = VIEWS_MD_TEMPLATE.split("## Recent ideas", 1)
     idea, after_synthesis = after_idea.split("## Recent synthesis pages", 1)
-    synthesis, concept = after_synthesis.split("## Recent concept hubs", 1)
+    synthesis, proposals = after_synthesis.split("## Recent proposals", 1)
     reordered = (
         prefix
         + "## Recent synthesis pages" + synthesis
         + "## Recent ideas" + idea
-        + "## Recent concept hubs" + concept
+        + "## Recent proposals" + proposals
     )
 
     assert "dashboard_section_order" in _kinds(_check(tmp_path, reordered))

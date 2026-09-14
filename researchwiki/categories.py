@@ -8,8 +8,8 @@ starts with none and derives its own from the user's papers.
 
 Only the universal *scaffold* is fixed in code:
 
-  - `PAGE_TYPE_DIRS` — `synthesis`, `ideas`, `references`, `concepts`. Structural page-type
-    directories present in every wiki. They hold their own page types and are
+  - `PAGE_TYPE_DIRS` — `synthesis`, `ideas`, `references`, `proposals`, plus
+    recognized legacy `concepts`. They hold their own page types and are
     NEVER content categories: the research-paper classifier must not target
     them, and `is_valid()` rejects them.
   - `other` — the always-present content-category bucket and the classifier's
@@ -41,16 +41,18 @@ import time
 from pathlib import Path
 
 # Structural page-type directories — universal scaffold, NEVER content
-# categories. They hold synthesis pages / idea pages / reference docs /
-# concept hub notes.
+# categories. Concept hubs remain readable for backwards compatibility but
+# proposals replace them in the scaffold for new wikis.
 PAGE_TYPE_DIRS: frozenset[str] = frozenset(
-    {"synthesis", "ideas", "references", "concepts"}
+    {"synthesis", "ideas", "references", "proposals", "concepts"}
 )
 
 # Default subdirs every wiki has regardless of domain: the page-type dirs plus
 # `other` (the always-present content-category abstention bucket). Created by
 # `paths.ensure_scaffold()`; nothing under wiki/ is committed.
-DEFAULT_DIRS: frozenset[str] = PAGE_TYPE_DIRS | frozenset({"other"})
+DEFAULT_DIRS: frozenset[str] = frozenset(
+    {"synthesis", "ideas", "references", "proposals", "other"}
+)
 
 
 def content_categories() -> frozenset[str]:

@@ -626,7 +626,8 @@ the `inspect` you read. There is no journal and no staging directory here, unlik
 Per-paper cost is ordinary `agent ingest` cost (see *Costs and trade-offs*), so
 budget by wave size. Ingest-time citation links still apply. The separate
 claim-overlap sweep is not an import phase, and `verify` names the follow-ups
-(`claim-overlap --backlog`, `candidates concepts --bridges`) rather than spending
+(`claim-overlap --backlog`, then a question-driven `proposals generate` review)
+rather than spending
 a judge call per pair inline.
 
 There is deliberately **no `--category`**. Category is chosen per paper by
@@ -837,21 +838,48 @@ cost-bearing comparison, not part of the default evaluation path.
 ## Bottom-up discovery — when the wiki proposes the page
 
 Everything above is top-down: you ask, the wiki answers. This is the inverse —
-the corpus surfacing a cluster nobody went looking for. Four tiers propose work
+the corpus surfacing a connection nobody went looking for. Five tiers propose work
 for a human to accept or decline; none edits authored wiki prose automatically.
 
 | Tier | Command | Cost | What it ranks |
 |---|---|---|---|
-| Concept hubs | `candidates concepts [--bridges]` | local, sub-second | recurring terms in ≥3 papers' contribution claims with no hub yet |
+| Page proposals | `proposals generate "<question>" [--write]` | local retrieval + one configured-model call | discriminating synthesis/idea theses grounded in a bounded claim packet |
 | Claim pairs | `candidates pairs [--cross-category]` | local, sub-second | cross-paper claim pairs *below* the auto-link threshold |
 | Paper clusters | `candidates synthesis [--judge] [--write-proposals]` | local preview; configured-model calls only with `--judge` | dense clusters no synthesis page covers |
 | Typed relations | `claim-graph [--tensions]` | local (edges already judged) | how papers relate, not merely that they overlap |
+| Legacy concept hubs | `candidates concepts [--bridges]` | local, sub-second | recurring terms for users maintaining existing hubs |
 
-`status` auto-surfaces the first two once they cross a threshold (bridge terms;
-15 unreviewed cross-category pairs, 14-day decay). The third is noisier and is
-run deliberately. Each pair row prints the judged exact-claim path,
+`status` surfaces saved proposals awaiting feedback and claim-pair discovery
+once 15 unreviewed cross-category pairs accumulate (14-day decay). Paper
+clusters and legacy concepts are run deliberately. Each pair row prints the judged exact-claim path,
 `claim-overlap --pair A#slug B#slug`; decline one permanently with
 `candidates pairs --decline A B --reason "…"`.
+
+Proposal generation is question-first, not term-first. It retrieves at most
+eight papers with at most five claims each, includes relevant prior proposal
+decisions and up to three relevant existing synthesis/idea summaries, and returns
+at most three options. Its five directions are tension,
+shared mechanism, complementary limitations, boundary condition, and
+cross-category application. Preview is the default and saves a complete local
+`.proposal-cache/<hash>.json` receipt. Review it, then run `proposals accept <file>
+--select 1 2` to save exact selections without model calls; repeated acceptance
+preserves existing records and feedback. `--write` generates and saves a new set.
+Accepted Markdown under `wiki/proposals/` remains canonical and syncable.
+Explicit papers must exist and contain claims (up to eight; cross-category accepts
+up to four target-category papers). For explicit papers, query-ranked claims
+precede lexical fallback claims before
+the per-paper quota is filled. Existing-page and feedback context require
+meaningful lexical overlap anchored in titles/questions/topic seeds and can
+be empty; these matches do not establish corpus coverage or semantic novelty.
+`--prepare-only` makes no model calls; in cross-category mode it returns only
+target evidence with planning marked pending.
+For cross-category transfer, pass
+`--target-category CAT --cross-category`: a small planning call translates the
+target problem into method capabilities, then retrieval searches other
+categories. Both prompts include the exact output contract regardless of provider.
+Transfer proposals must cite source and target evidence and map a source method
+to the target problem; otherwise they should abstain. Feedback-driven revisions
+must retain their parent ID. See [`prompts/proposal-workflow.md`](./prompts/proposal-workflow.md).
 
 ### Why the thresholds are what they are
 
@@ -1010,7 +1038,7 @@ the bill.
 `lint` reports orphans, broken wikilinks, missing back-links, stale
 syntheses (by source ingest date, by content via topic-seed search, and by audit-count
 drift), missing keywords, missing DOIs, stem↔YAML year drift, stale
-evolution proposals (≥7 days old), concept candidates, page-type
+evolution proposals (≥7 days old), proposal-page contract drift, page-type
 mismatches, invalid YAML frontmatter, and supplementary-file consistency
 (missing-on-disk + orphaned files in `papers/{stem}.supp/`). Pass `--fix` for
 the deterministic repairs: insert missing back-links, recover blank
@@ -1588,14 +1616,15 @@ discovery-only and never become wiki evidence. See
 | Want to score a paper page against its PDF | `researchwiki grade paper <stem>` |
 | Want to backfill grading for un-graded papers only | `researchwiki grade regression --missing-only` |
 | Want to re-grade every paper and detect drift | `researchwiki grade regression` (or `--no-persist` for diff-only) |
-| Authored or revised a synthesis, idea, or concept page | `researchwiki db rebuild`, then `check-grounding <page>` and `grade synthesis <page>` (both exit 0), followed by advisory `check-coverage <page>` and `reindex`. |
+| Authored or revised a synthesis, idea, or legacy concept page | `researchwiki db rebuild`, then `check-grounding <page>` and `grade synthesis <page>` (both exit 0), followed by advisory `check-coverage <page>` and `reindex`. |
 | Want to verify a synthesis page's claims trace to cited papers | `researchwiki grade synthesis <page>` (pair with structural `check-grounding`). |
 | Want to check that every claim has a citation | `researchwiki check-grounding <page>` |
 | Want to benchmark page authoring against a curated fixture | `researchwiki benchmark-fixture <stem>` |
 | Want to compare retrieval backends without false scores from absent papers | `researchwiki benchmark-fixture <retrieval-fixture> --retrieval-backend bm25\|semantic\|hybrid`; unavailable expected anchors exit 2. |
 | Want to evaluate category assignment | `researchwiki eval classifier` locally; use `--mode llm` only for the paid comparison. |
-| Want the wiki to propose a page instead of answering one | `researchwiki candidates concepts --bridges`, then `candidates pairs --cross-category` (see *Bottom-up discovery*) |
-| `status` printed a bridge-term or claim-pair count | Run `researchwiki candidates concepts --bridges` or `researchwiki candidates pairs --cross-category`, respectively. |
+| Want the wiki to propose a page instead of answering one | `researchwiki proposals generate "<question>"`; use `--target-category CAT --cross-category` for method transfer. |
+| Want proposals and feedback on another computer | Sync `wiki/`, then run `researchwiki db rebuild`; Markdown is canonical. |
+| `status` printed a proposal or claim-pair count | Run `researchwiki proposals list --status proposed` or `researchwiki candidates pairs --cross-category`, respectively. |
 | Want to act on a proposed claim pair | Copy that row's `researchwiki claim-overlap --pair A#slug B#slug` command (the exact judged path); `candidates pairs --decline A B --reason "…"` to reject it for good |
 | Want to see which papers disagree | `researchwiki claim-graph --tensions`; `researchwiki visualize --open` to see whether tensions cluster on one paper |
 | Want to retract a paper | `researchwiki remove <stem>` (dry run), then `--apply` (see `prompts/remove-paper.md`) |

@@ -177,15 +177,20 @@ def test_find_missing_backlinks_excludes_synthesis(tmp_wiki):
     assert find_missing_backlinks(out_links) == []
 
 
-def test_find_missing_backlinks_excludes_index_and_ideas(tmp_wiki):
-    """The index catalogue and idea-page grounding links are asymmetric by
-    design — a paper must not be forced to back-link them."""
+def test_find_missing_backlinks_excludes_index_ideas_and_proposals(tmp_wiki):
+    """Catalog, idea, and proposal evidence links are asymmetric by design."""
     idx = _mkpage(tmp_wiki, "index", "[[cgt/a]]")
     idea = _mkpage(tmp_wiki, "ideas/plan", "[[cgt/a]]")
+    proposal = _mkpage(tmp_wiki, "proposals/candidate", "[[cgt/a#kc-deadbeef]]")
     a = _mkpage(tmp_wiki, "cgt/a", "")
-    pages = [idx, idea, a]
-    pages_prose = {idx: "[[cgt/a]]", idea: "[[cgt/a]]", a: ""}
-    known = {page_key(idx), page_key(idea), page_key(a)}
+    pages = [idx, idea, proposal, a]
+    pages_prose = {
+        idx: "[[cgt/a]]",
+        idea: "[[cgt/a]]",
+        proposal: "[[cgt/a#kc-deadbeef]]",
+        a: "",
+    }
+    known = {page_key(idx), page_key(idea), page_key(proposal), page_key(a)}
     out_links, _, _ = build_link_graph(pages, pages_prose, known)
     assert find_missing_backlinks(out_links) == []
 

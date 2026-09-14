@@ -55,7 +55,7 @@ _STEM_YEAR_RE = re.compile(r"^[a-z0-9-]+?-(\d{4})[a-z]?-")
 # else under a category dir is catalogued and does. Exempting by explicit type
 # (rather than requiring by type) keeps the 23 pages that predate the `type:`
 # requirement in scope instead of silently excusing them.
-HOOK_EXEMPT_TYPES = ("meta", "dashboard")
+HOOK_EXEMPT_TYPES = ("meta", "dashboard", "proposal")
 
 # Advisory `hook:` ceilings in characters, by page type — mirrors the spec table
 # in CLAUDE.md Step 3, itself derived from observed practice. Reported, never
@@ -169,6 +169,7 @@ def find_page_type_mismatches(
         in_synthesis = md.parent.name == "synthesis"
         in_references = md.parent.name == "references"
         in_concepts = md.parent.name == "concepts"
+        in_proposals = md.parent.name == "proposals"
         if in_synthesis and ptype == "paper":
             out.append((key, f"in synthesis/ but type={ptype}"))
         if not in_synthesis and ptype == "synthesis":
@@ -177,6 +178,10 @@ def find_page_type_mismatches(
             out.append((key, f"in concepts/ but type={ptype}"))
         if not in_concepts and ptype == "concept":
             out.append((key, f"type={ptype} but not in concepts/"))
+        if in_proposals and ptype != "proposal":
+            out.append((key, f"in proposals/ but type={ptype}"))
+        if not in_proposals and ptype == "proposal":
+            out.append((key, f"type={ptype} but not in proposals/"))
         if in_references and ptype not in REFERENCE_TYPES:
             out.append((key, f"in references/ but type={ptype} (expected one of {REFERENCE_TYPES})"))
         if not in_references and ptype in REFERENCE_TYPES:
@@ -365,7 +370,7 @@ def find_missing_keywords(
     """
     out: list[tuple[str, int]] = []
     for md in pages:
-        if md.parent.name in ("synthesis", "concepts", "ideas"):
+        if md.parent.name in ("synthesis", "concepts", "ideas", "proposals"):
             continue
         if _is_root_bookkeeping(md):
             continue

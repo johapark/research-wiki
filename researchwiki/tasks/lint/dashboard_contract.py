@@ -3,8 +3,8 @@
 ``wiki/views.md`` is scaffolded once and deliberately left user-editable, so
 comparing it byte-for-byte with the init template would turn harmless prose or
 extra columns into noise.  These checks pin only the semantics that other repo
-contracts rely on: table order, provenance timestamps, limits, and the distinct
-membership models for synthesis and concept pages.
+contracts rely on: table order, provenance timestamps, limits, and the proposal
+review queue that replaced concept-hub scaffolding.
 
 The check is lightweight and runs only when ``researchwiki lint`` is invoked.
 Findings are advisory: lint keeps its exit-code-0 reporting contract.
@@ -26,7 +26,7 @@ _SECTIONS = (
     ("papers", "recent papers"),
     ("ideas", "recent ideas"),
     ("synthesis", "recent synthesis"),
-    ("concepts", "recent concept hubs"),
+    ("proposals", "recent proposals"),
 )
 
 
@@ -79,7 +79,7 @@ def find_dashboard_contract_violations(views_path: Path | None = None) -> list[d
     if len(order) == len(expected_order) and order != expected_order:
         violations.append(_violation(
             path, "dashboard_section_order",
-            "expected papers → ideas → synthesis → concept hubs",
+            "expected papers → ideas → synthesis → proposals",
         ))
 
     if _DATAVIEWJS_RE.search(text):
@@ -141,18 +141,12 @@ def find_dashboard_contract_violations(views_path: Path | None = None) -> list[d
                 "synthesis requires generated_at, descending sort, and LIMIT 10",
             ))
 
-    concept = queries.get("concepts", "")
-    if concept:
-        if 'length(referenced_papers) as "members"' not in concept:
-            violations.append(_violation(
-                path, "dashboard_concept_members",
-                "concept Members must count the referenced_papers spoke registry",
-            ))
-        if ('where type = "concept" and generated_at' not in concept
-                or "sort generated_at desc" not in concept or "limit 10" not in concept):
-            violations.append(_violation(
-                path, "dashboard_concept_query",
-                "concept hubs require generated_at, descending sort, and LIMIT 10",
-            ))
+    proposal = queries.get("proposals", "")
+    if proposal and ('where type = "proposal" and created_at' not in proposal
+                     or "sort created_at desc" not in proposal or "limit 15" not in proposal):
+        violations.append(_violation(
+            path, "dashboard_proposal_query",
+            "proposals require created_at, descending sort, and LIMIT 15",
+        ))
 
     return violations

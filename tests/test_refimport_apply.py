@@ -522,7 +522,7 @@ def test_verify_names_the_graph_wiring_followups(wiki, capsys):
     import_task.main(["verify", "--run", str(run)])
     out = capsys.readouterr().out
     assert "claim-overlap --backlog" in out
-    assert "candidates concepts --bridges" in out
+    assert 'proposals generate "<question>"' in out
 
 
 # ---------- dry-run must predict what apply does ----------

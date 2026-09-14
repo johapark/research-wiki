@@ -20,7 +20,7 @@ correct for their own target. The difference is not configurable, because it
 follows from what each format asserts.
 
 **Bibliography scope — published documents only.** `paper`, `commentary`,
-`whitepaper`, `guidance`, `book`. Synthesis, idea and concept pages are the user's
+`whitepaper`, `guidance`, `book`. Synthesis, idea, proposal and concept pages are the user's
 own unpublished analysis with no DOI, venue or year of record, so a BibTeX entry
 for one would assert a publication that does not exist. There is deliberately no
 flag to include them.
@@ -171,7 +171,7 @@ def _run_okf(args) -> int:
     if report.verified_absent_no_gate_record:
         # Not a defect in the bundle — a gap in what this repo records. Named here
         # because a reader would otherwise read "unverified" as "ungraded".
-        print(f"  {len(report.verified_absent_no_gate_record)} synthesis/idea/concept "
+        print(f"  {len(report.verified_absent_no_gate_record)} synthesis/idea/proposal/concept "
               f"page(s) carry no `verified`: gate runs aren't persisted, so no trust "
               f"tier can be claimed for them", file=sys.stderr)
     if report.generated_missing_actor:

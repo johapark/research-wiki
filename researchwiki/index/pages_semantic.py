@@ -62,6 +62,9 @@ _INDEX_SECTIONS: dict[str, tuple[str, ...]] = {
     "commentary": ("Summary", "Key Contributions"),
     "concept":    ("Definition", "How it appears across the corpus",
                    "Cross-domain connections"),
+    "proposal":   ("Question", "Provisional thesis or hypothesis",
+                   "Why this connection matters", "Evidence and reasoning",
+                   "Transfer mapping", "Decisive uncertainty"),
     "idea":       ("Verdict", "Background", "Opportunities"),
     "synthesis":  ("Short answer", "Question", "Evidence from the wiki", "Summary"),
 }
@@ -78,12 +81,12 @@ _INDEX_SECTIONS_DEFAULT = ("Summary", "Key Contributions", "Definition")
 #: where a real vocabulary accumulated (`dna-foundation-model`, `pangenome`,
 #: `deep-mutational-scanning`, `ldl-c`), at 2.0 / 7.9 / 3.5 tags per page against
 #: the paper pages' 1.9 that are mostly one provenance marker.
-_TAGS_CARRY_SIGNAL = frozenset({"concept", "idea", "synthesis"})
+_TAGS_CARRY_SIGNAL = frozenset({"concept", "idea", "synthesis", "proposal"})
 
 #: Tags that describe the pipeline rather than the paper. Stripped even on the
 #: types above, so a stray provenance marker can't dilute a small vector.
 _FRAMEWORK_TAGS = frozenset({
-    "ingested-via-agent", "migrated", "synthesis", "concept", "idea",
+    "ingested-via-agent", "migrated", "synthesis", "concept", "idea", "proposal",
     "whitepaper", "guidance", "protocol", "book", "paper", "commentary",
 })
 

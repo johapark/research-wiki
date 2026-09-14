@@ -119,13 +119,11 @@ def test_status_suggests_triage_above_threshold(monkeypatch, capsys):
     assert "extraction noise" in out
 
 
-def test_status_module_renders_the_failed_scan_branch(monkeypatch, capsys):
-    """Belt-and-braces: the branch above is a transcription of `status.py`'s.
-    Assert the real module still contains all three arms, so a refactor that
-    drops the None arm doesn't leave this file testing a fiction."""
+def test_status_module_uses_the_synced_proposal_queue():
+    """Concept discovery remains callable, but proposals own the status nudge."""
     from pathlib import Path
     src = Path(concepts.__file__).parent.parent / "tasks" / "status.py"
     text = src.read_text()
-    assert "if n_bridges is None:" in text
-    assert "scan failed" in text
-    assert "elif n_bridges > 0:" in text
+    assert "from ..proposals import load_proposals" in text
+    assert "Proposal queue:" in text
+    assert "Concept-hub candidates:" not in text

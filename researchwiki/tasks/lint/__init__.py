@@ -4,9 +4,8 @@
    missing back-links, stale syntheses). Agents: pass `--json` for
    machine-parseable output. Pass `--fix` to auto-insert missing back-links.
 ❌ Don't use: for a one-screen dashboard (use `status`). Not a search tool.
-   Concept-hub candidates — an *opportunity* signal, not a defect — live
-   at `researchwiki candidates concepts` so `lint`'s output can stay a
-   pure defect list.
+   Creative page proposals live at `researchwiki proposals`; legacy concept
+   candidates remain under `researchwiki candidates concepts`.
 
 This subpackage groups checks by what they read so each module is
 focused and individually testable:
@@ -20,6 +19,7 @@ focused and individually testable:
   audit_p2        — Priority-2 entries with audit anchor hits
   index_checks    — thin_index_text (what the embedder will see)
   dashboard_contract — advisory semantic drift in wiki/views.md
+  proposal_contract — canonical proposal/feedback Markdown shape
   db_checks       — ungraded_papers, zero_claim_papers,
                     stems_missing_claim_overlap, duplicate_claim_sets,
                     db_drift
@@ -54,6 +54,7 @@ from .claim_anchors import find_dangling_claim_anchors
 from .concept_contract import find_concept_contract_violations
 from .dashboard_contract import find_dashboard_contract_violations
 from .idea_contract import find_idea_contract_violations
+from .proposal_contract import find_proposal_contract_violations
 from ...eval.pointers import broken as broken_prompt_pointers
 from ...eval.pointers import orphans as orphan_prompt_files
 from .db_checks import (
@@ -137,7 +138,8 @@ def main(argv: list[str]) -> int:
                              "duplicate_claim_sets, "
                              "dangling_claim_anchors, "
                              "concept_contract_violations, "
-                             "idea_contract_violations, dashboard_contract_violations, "
+                             "idea_contract_violations, proposal_contract_violations, "
+                             "dashboard_contract_violations, "
                              "orphan_prompts, "
                              "broken_prompt_pointers, db_drift, "
                              "cross_paper_contradictions, fix_applied.")
@@ -219,6 +221,7 @@ def main(argv: list[str]) -> int:
     dangling_anchors = find_dangling_claim_anchors(pages_body)
     concept_contract = find_concept_contract_violations(pages, pages_body, pages_fm)
     idea_contract = find_idea_contract_violations(pages, pages_body, pages_fm)
+    proposal_contract = find_proposal_contract_violations(pages, pages_body, pages_fm)
     dashboard_contract = find_dashboard_contract_violations()
     # Docs-layer reachability. Same class of check as broken_wikilinks, one
     # layer up: a prompt no CLAUDE.md pointer reaches is a procedure the agent
@@ -288,6 +291,7 @@ def main(argv: list[str]) -> int:
             dangling_anchors=dangling_anchors,
             concept_contract=concept_contract,
             idea_contract=idea_contract,
+            proposal_contract=proposal_contract,
             dashboard_contract=dashboard_contract,
             orphan_prompts=orphan_prompts,
             broken_prompt_pointers=broken_pointers,
@@ -323,6 +327,7 @@ def main(argv: list[str]) -> int:
         dangling_anchors=dangling_anchors,
         concept_contract=concept_contract,
         idea_contract=idea_contract,
+        proposal_contract=proposal_contract,
         dashboard_contract=dashboard_contract,
         orphan_prompts=orphan_prompts,
         broken_prompt_pointers=broken_pointers,
