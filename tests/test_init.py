@@ -236,7 +236,7 @@ def test_endpoint_change_replaces_key_owned_by_selected_profile(
         monkeypatch, profile, OPENAI_API_KEY="old-provider-secret"
     )
     monkeypatch.setattr(init, "_confirm", lambda *args, **kwargs: False)
-    monkeypatch.setattr(init, "_ask", lambda *args, **kwargs: "new-provider-secret")
+    monkeypatch.setattr(init, "_ask_secret", lambda *args: "new-provider-secret")
 
     proceed, replacement = init._choose_openai_api_key(
         profile,
@@ -474,7 +474,7 @@ def test_categories_defer_until_corpus_reaches_bootstrap_threshold(
 
     out = capsys.readouterr().out
     assert "Using wiki/other/ for now" in out
-    assert "bootstrap-categories --apply" in out
+    assert "bootstrap-categories` to preview" in out
 
 
 def test_confirm_does_not_offer_ingest_while_doctor_is_blocked(
@@ -508,6 +508,69 @@ def test_ask_choice_empty_takes_the_default(monkeypatch):
     assert init._ask_choice(5) == 0
 
 
+def test_secret_prompt_uses_hidden_input(monkeypatch, capsys):
+    seen = []
+    monkeypatch.setattr(
+        _provider_setup.getpass,
+        "getpass",
+        lambda prompt: seen.append(prompt) or "never-print-this-secret",
+    )
+
+    assert init._ask_secret("Provider API key") == "never-print-this-secret"
+    assert seen == ["Provider API key: "]
+    assert "never-print-this-secret" not in capsys.readouterr().out
+
+
+def test_secret_prompt_refuses_getpass_echo_fallback(monkeypatch, capsys):
+    def insecure_fallback(_prompt):
+        import warnings
+
+        warnings.warn("cannot control echo", _provider_setup.getpass.GetPassWarning)
+        pytest.fail("warning-as-error must stop before visible input")
+
+    monkeypatch.setattr(_provider_setup.getpass, "getpass", insecure_fallback)
+
+    assert init._ask_secret("Provider API key") == ""
+    assert "Secure credential input is unavailable" in capsys.readouterr().out
+
+
+def test_storage_sync_choice_pauses_before_creating_paths(
+    tmp_path, monkeypatch, capsys,
+):
+    monkeypatch.setattr(init, "_confirm", lambda *args, **kwargs: True)
+
+    assert init._step_storage(tmp_path) is False
+    assert not any((tmp_path / name).exists() for name in ("wiki", "papers", "inbox"))
+    out = capsys.readouterr().out
+    assert "No content directories were created" in out
+    assert "SYNC_ROOT=" in out
+
+
+def test_storage_local_choice_allows_scaffold_without_writing(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(init, "_confirm", lambda *args, **kwargs: False)
+
+    assert init._step_storage(tmp_path) is True
+    assert not any((tmp_path / name).exists() for name in ("wiki", "papers", "inbox"))
+
+
+def test_storage_rejects_partial_or_mixed_layouts(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        init,
+        "_confirm",
+        lambda *args, **kwargs: pytest.fail("existing layout should not prompt"),
+    )
+    (tmp_path / "wiki").mkdir()
+    assert init._step_storage(tmp_path) is False
+
+    (tmp_path / "papers").mkdir()
+    external = tmp_path / "external-inbox"
+    external.mkdir()
+    (tmp_path / "inbox").symlink_to(external)
+    assert init._step_storage(tmp_path) is False
+
+
 def test_bootstrap_threshold_is_not_restated(monkeypatch, tmp_path, capsys):
     """The wizard must source the PDF threshold from `bootstrap_categories`,
     not restate it. It hardcoded 5 against the real value of 3, so users with
@@ -520,13 +583,43 @@ def test_bootstrap_threshold_is_not_restated(monkeypatch, tmp_path, capsys):
         (inbox / f"p{i}.pdf").write_bytes(b"%PDF-1.4\n")
     monkeypatch.setattr(init, "inbox_dir", lambda: inbox)
 
-    called = {}
+    called = []
     import researchwiki.tasks.bootstrap_categories as bc
-    monkeypatch.setattr(bc, "main", lambda argv: called.setdefault("argv", argv))
+    proposal = object()
+    monkeypatch.setattr(
+        bc, "_propose_taxonomy", lambda: (called.append("propose") or (0, proposal))
+    )
+    monkeypatch.setattr(
+        bc, "_print_proposal", lambda value, **kwargs: called.append((value, kwargs))
+    )
+    monkeypatch.setattr(init, "_confirm", lambda *args, **kwargs: False)
 
     init._bootstrap_categories()
-    assert called.get("argv") == ["--apply"], "threshold blocked a valid PDF count"
+    assert called == [
+        "propose",
+        (proposal, {"show_apply_hint": False}),
+    ], "threshold blocked a valid PDF count"
     assert "manually" not in capsys.readouterr().out
+
+
+def test_wizard_applies_the_same_reviewed_proposal(monkeypatch, tmp_path):
+    from researchwiki.tasks import bootstrap_categories as bc
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    for i in range(bc.MIN_INBOX_FOR_BOOTSTRAP):
+        (inbox / f"p{i}.pdf").write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(init, "inbox_dir", lambda: inbox)
+    proposal = object()
+    monkeypatch.setattr(bc, "_propose_taxonomy", lambda: (0, proposal))
+    monkeypatch.setattr(bc, "_print_proposal", lambda *args, **kwargs: None)
+    applied = []
+    monkeypatch.setattr(bc, "_apply_taxonomy", applied.append)
+    monkeypatch.setattr(init, "_confirm", lambda *args, **kwargs: True)
+
+    init._bootstrap_categories()
+
+    assert applied == [proposal]
 
 
 # ── _write_models_config ─────────────────────────────────────────────────────
@@ -657,10 +750,10 @@ def test_generic_template_validation_happens_before_active_config_overwrite(
     monkeypatch.setattr(init, "_effective_provider", lambda _models: None)
     monkeypatch.setattr(init, "_effective_openai_base_url", lambda: None)
     monkeypatch.setattr(init, "_ask_choice", lambda _n: 1)
+    monkeypatch.setattr(init, "_ask_secret", lambda *args: "")
     _answers(
         monkeypatch,
         "https://api.groq.com/openai/v1",
-        "",
         "llama-quality",
         "llama-fast",
     )
@@ -695,10 +788,10 @@ def test_generic_reconfigure_replaces_selected_profile_key(
     )
     monkeypatch.setattr(init, "_ask_choice", lambda _n: 1)
     monkeypatch.setattr(init, "_confirm", lambda *args, **kwargs: False)
+    monkeypatch.setattr(init, "_ask_secret", lambda *args: "new-provider-secret")
     _answers(
         monkeypatch,
         "https://api.groq.com/openai/v1",
-        "new-provider-secret",
         "llama-quality",
         "llama-fast",
         "config/profiles/provider.yaml",
@@ -741,7 +834,7 @@ def test_named_openai_profile_never_removes_global_config(
     monkeypatch.setattr(init, "_effective_openai_base_url", lambda: None)
     monkeypatch.setattr(init, "_ask_choice", lambda _n: 0)
     monkeypatch.setattr(init, "_confirm", lambda *args, **kwargs: False)
-    _answers(monkeypatch, "openai-secret")
+    monkeypatch.setattr(init, "_ask_secret", lambda *args: "openai-secret")
     monkeypatch.setattr(init, "_report_readiness", lambda _provider: None)
     monkeypatch.setattr(init, "_warn_gitignore", lambda _root, _path: None)
 
@@ -788,10 +881,10 @@ def test_generic_reconfigure_migrates_tracked_template_to_profile_config(
     monkeypatch.setattr(
         init, "_confirm", lambda *args, **kwargs: next(decisions)
     )
+    monkeypatch.setattr(init, "_ask_secret", lambda *args: "new-provider-secret")
     _answers(
         monkeypatch,
         "http://10.212.23.212/v1",
-        "new-provider-secret",
         "llama-quality",
         "llama-fast",
         "config/profiles/provider.yaml",
@@ -903,7 +996,9 @@ def test_anthropic_reselect_replaces_key_and_removes_profile_endpoint(
     monkeypatch.setattr(init, "_effective_openai_base_url", lambda: None)
     monkeypatch.setattr(init, "_ask_choice", lambda _n: 2)
     monkeypatch.setattr(init, "_confirm", lambda *args, **kwargs: False)
-    _answers(monkeypatch, "official-anthropic-secret")
+    monkeypatch.setattr(
+        init, "_ask_secret", lambda *args: "official-anthropic-secret"
+    )
     monkeypatch.setattr(init, "_report_readiness", lambda _provider: None)
     monkeypatch.setattr(init, "_warn_gitignore", lambda _root, _path: None)
 
@@ -1394,6 +1489,45 @@ def test_scaffold_only_creates_dashboard_without_overwriting_it(
     assert init._scaffold(quiet=True) == 0
     assert views.read_text(encoding="utf-8") == "personal dashboard\n"
 
+
+def test_scaffold_permission_failure_is_environment_error(
+    tmp_path, monkeypatch, capsys,
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        init,
+        "ensure_scaffold",
+        lambda: (_ for _ in ()).throw(PermissionError("read-only mount")),
+    )
+
+    assert init._scaffold() == 2
+    err = capsys.readouterr().err
+    assert "cannot create the content scaffold" in err
+    assert "read-only mount" in err
+
+
+def test_init_rejects_non_checkout_before_scaffold(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        init,
+        "_scaffold",
+        lambda *args, **kwargs: pytest.fail("must validate before writing"),
+    )
+
+    assert init.main(["--scaffold-only"]) == 2
+    assert not any((tmp_path / name).exists() for name in ("wiki", "papers", "inbox"))
+    assert "not a complete research-wiki checkout" in capsys.readouterr().err
+
+
+def test_init_help_works_outside_checkout_without_writing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        init.main(["--help"])
+
+    assert exc.value.code == 0
+    assert not any((tmp_path / name).exists() for name in ("wiki", "papers", "inbox"))
+
 def test_unignored_credential_profile_is_rejected_before_config_change(
     tmp_path, monkeypatch, capsys,
 ):
@@ -1413,7 +1547,7 @@ def test_unignored_credential_profile_is_rejected_before_config_change(
     monkeypatch.setattr(init, "_effective_provider", lambda _models: None)
     monkeypatch.setattr(init, "_effective_openai_base_url", lambda: None)
     monkeypatch.setattr(init, "_ask_choice", lambda _n: 0)
-    _answers(monkeypatch, "new-secret")
+    monkeypatch.setattr(init, "_ask_secret", lambda *args: "new-secret")
     monkeypatch.setattr(init, "_confirm", lambda *args, **kwargs: False)
     monkeypatch.setattr(
         init,
@@ -1513,6 +1647,15 @@ def test_no_orphaned_wizard_steps():
 
 def _isolated_wiki(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='test'\n")
+    for relative in (
+        "researchwiki/__init__.py",
+        "config/pricing.yaml",
+        "prompts/author-system-research.md",
+    ):
+        marker = tmp_path / relative
+        marker.parent.mkdir(exist_ok=True)
+        marker.write_text("")
     (tmp_path / "wiki").mkdir()
     return tmp_path / "wiki" / "views.md"
 

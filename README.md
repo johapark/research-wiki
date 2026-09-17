@@ -59,7 +59,7 @@ Choose one guided setup path:
 - Open the clone in Claude Code, Codex, or another compatible shell-enabled chat agent, then say: **“Initialize this research wiki.”**
 - Run the interactive wizard: `researchwiki init`.
 
-Both paths configure the provider and create the wiki directories and dashboard. The wizard creates or updates the root `.env` directly and restricts it to mode `0600`; you do not need to copy `.env.template` first. That template is for manual configuration and for creating named profiles. For non-interactive setup, `researchwiki init --scaffold-only` creates the directory and dashboard scaffold without configuring a provider or asking questions. On an existing wiki, `researchwiki init --refresh-dashboard` adopts the current dashboard template and backs your copy up under `.ingest/`; nothing overwrites a dashboard unless you ask.
+Both paths decide the storage layout before creating the wiki directories and dashboard, then configure the provider. The interactive wizard pauses without writing if you choose cross-device sync, so you can create the three durable directories in the synced location and link them into the checkout first. It creates or updates the root `.env` directly, prompts for credentials without terminal echo, and restricts the file to mode `0600`; you do not need to copy `.env.template` first. That template is for manual configuration and for creating named profiles. For non-interactive setup, `researchwiki init --scaffold-only` creates the directory and dashboard scaffold without configuring a provider or asking questions; decide the storage layout before invoking it. On an existing wiki, `researchwiki init --refresh-dashboard` adopts the current dashboard template and backs your copy up under `.ingest/`; nothing overwrites a dashboard unless you ask.
 
 Then run the local, free readiness check:
 
@@ -69,7 +69,7 @@ researchwiki doctor
 
 It checks paths, dependencies, provider configuration, the state DB, search state, and the semantic-model cache without contacting the provider or downloading anything. `researchwiki doctor --probe` is an explicit one-call connectivity test and may spend tokens.
 
-No taxonomy is predefined, and you do not need to invent one before the first paper. New papers use `other/` until at least three PDFs are available; then `researchwiki bootstrap-categories` can propose categories from the corpus. As it grows, the agent suggests useful splits for review; nothing changes automatically.
+No taxonomy is predefined, and you do not need to invent one before the first paper. New papers use `other/` until at least three PDFs are available. Then run `researchwiki bootstrap-categories` to preview and save a corpus-grounded proposal; after review, `researchwiki bootstrap-categories --apply` creates exactly those directories without a second model call. If `inbox/` changed, preview again. As the corpus grows, the agent suggests useful splits for review; nothing changes automatically.
 
 ### First ingest
 

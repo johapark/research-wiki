@@ -1,10 +1,10 @@
-"""Interactive first-time setup wizard (provider + categories).
+"""Interactive first-time setup wizard (storage + provider + categories).
 
-Human-runnable cold-start for a fresh clone. Walks the user through the two
-settings a new wiki actually needs — an LLM **provider** and an initial
-**category** taxonomy — then scaffolds the Dataview dashboard and confirms via
-`status`. Everything it writes is reversible; each step prints how to change it
-later.
+Human-runnable cold-start for a fresh clone. Confirms the durable **storage**
+layout before writing, configures an LLM **provider**, and defers or reviews an
+initial **category** taxonomy before scaffolding the Dataview dashboard and
+running the local readiness checks. Everything it writes is reversible; each
+step prints how to change it later.
 
 This is the scripted complement to `prompts/init.md` (the LLM-guided
 conversational path). Neither supersedes the other: use this when you want to
@@ -46,12 +46,21 @@ from ..env_profiles import (
 from ..errors import EnvironmentFailure
 from .init_dashboard import VIEWS_MD_TEMPLATE, refresh_dashboard
 from ..fsatomic import write_text_atomic
-from ..paths import ensure_scaffold, inbox_dir, wiki_dir, wiki_root
+from ..paths import (
+    ensure_scaffold,
+    inbox_dir,
+    missing_checkout_assets,
+    wiki_dir,
+    wiki_root,
+)
+from ._init_storage import confirm_storage_layout
 from ._provider_setup import (
+    ask_secret as _ask_secret,
     choose_endpoint_api_key as _choose_endpoint_api_key,
     customize_openai_compatible_text as _customize_openai_compatible_text,
     provider_config_target as _provider_config_target,
     profile_controls_env_key as _profile_controls_env_key,
+    report_readiness as _report_readiness,
     same_endpoint as _same_endpoint,
     stale_routing_keys as _stale_routing_keys,
 )
@@ -321,7 +330,7 @@ def _choose_openai_api_key(
         previous_endpoint=previous_endpoint,
         selected_endpoint=selected_endpoint,
         prompt=prompt,
-        ask=_ask,
+        ask=_ask_secret,
         confirm=_confirm,
     )
 
@@ -339,7 +348,7 @@ def _choose_anthropic_api_key(
         previous_endpoint=previous_endpoint,
         selected_endpoint=_ANTHROPIC_DEFAULT_BASE_URL,
         prompt=prompt,
-        ask=_ask,
+        ask=_ask_secret,
         confirm=_confirm,
     )
 
@@ -449,6 +458,10 @@ def _header(title: str) -> None:
 
 # ── Steps ────────────────────────────────────────────────────────────────────
 
+def _step_storage(root: Path) -> bool:
+    _header("Step 1 — Storage layout")
+    return confirm_storage_layout(root, confirm=_confirm)
+
 def _current_provider(models_yaml: Path) -> str | None:
     """Best-effort read of the active provider from config/models.yaml — the
     first `provider:` value. Returns None if the file is absent/unreadable."""
@@ -462,7 +475,7 @@ def _current_provider(models_yaml: Path) -> str | None:
 
 
 def _step_provider(root: Path) -> None:
-    _header("Step 1 — LLM provider")
+    _header("Step 2 — LLM provider")
     config_dir = root / "config"
     default_models_yaml = config_dir / "models.yaml"
     env_path = _active_env_path(root)
@@ -831,38 +844,8 @@ def _warn_gitignore(root: Path, env_path: Path) -> bool:
     return False
 
 
-def _report_readiness(provider: str) -> None:
-    """Report whether the provider just configured can actually run.
-
-    Uses the same provider-aware check `agent ingest` preflights with, so the
-    wizard's verdict and the first ingest's outcome can't disagree. The check
-    this replaced (`has_synchronous_llm`) answered "is any key set anywhere",
-    and so printed a ✓ for an Anthropic key against an OpenAI-routed config —
-    the precise mix-up this step exists to catch.
-    """
-    try:
-        from ..agents.llm import missing_provider_credentials
-    except Exception:  # pragma: no cover - defensive; llm deps optional
-        return
-    # Use the public reset so warning latches and every present/future routing
-    # cache move together; reaching into three private cached functions drifted
-    # as soon as model_config gained another piece of cached state.
-    model_config.clear_caches()
-
-    problems = missing_provider_credentials()
-    if not problems:
-        if provider == "chat-relay":
-            print("✓ Chat-relay configured — no key needed; a chat agent answers "
-                  "each prompt from .llm-relay/pending/.")
-        else:
-            print("✓ Provider configured — every role has the credentials it needs.")
-        return
-    for p in problems:
-        print(f"… Not ready yet — {p}")
-
-
 def _step_categories(root: Path) -> None:
-    _header("Step 2 — Initial categories")
+    _header("Step 3 — Initial categories")
     existing = sorted(content_categories())
     from .bootstrap_categories import MIN_INBOX_FOR_BOOTSTRAP
     n_pdfs = len(list(inbox_dir().glob("*.pdf")))
@@ -873,7 +856,7 @@ def _step_categories(root: Path) -> None:
     if existing == ["other"] and n_pdfs < MIN_INBOX_FOR_BOOTSTRAP:
         print(f"Using wiki/other/ for now ({n_pdfs} PDF(s) in inbox/).")
         print(f"After {MIN_INBOX_FOR_BOOTSTRAP} PDFs, run `researchwiki "
-              "bootstrap-categories --apply` to propose categories from your papers.")
+              "bootstrap-categories` to preview categories from your papers.")
         return
 
     print(f"Current content categories: {existing}")
@@ -905,14 +888,24 @@ def _bootstrap_categories() -> None:
     if n_pdfs < MIN_INBOX_FOR_BOOTSTRAP:
         print(f"Only {n_pdfs} PDF(s) in inbox/ — bootstrap needs "
               f"≥{MIN_INBOX_FOR_BOOTSTRAP}. Drop more PDFs and "
-              f"re-run `researchwiki bootstrap-categories --apply`, or set categories "
+              f"re-run `researchwiki bootstrap-categories`, or set categories "
               f"manually now.")
         if _confirm("Set categories manually instead?", default=True):
             _manual_categories(wiki_root())
         return
     print("Running the taxonomy proposer (this calls your provider)…")
     from . import bootstrap_categories
-    bootstrap_categories.main(["--apply"])
+    rc, proposal = bootstrap_categories._propose_taxonomy()
+    if rc or proposal is None:
+        return
+    bootstrap_categories._print_proposal(proposal, show_apply_hint=False)
+    if _confirm("Create exactly these category directories?", default=False):
+        bootstrap_categories._apply_taxonomy(proposal)
+    else:
+        print(
+            "No categories were created. The reviewed proposal was saved; apply "
+            "it later with `researchwiki bootstrap-categories --apply`."
+        )
 
 
 def _manual_categories(root: Path) -> None:
@@ -945,13 +938,13 @@ def _manual_categories(root: Path) -> None:
 def _print_category_help() -> None:
     print("\nHow to change categories later:")
     print("  • Add one:    mkdir wiki/<slug>/  (then `researchwiki reindex`) — or ask your LLM.")
-    print("  • Propose from papers: `researchwiki bootstrap-categories` (print-only) / `--apply`.")
+    print("  • Propose from papers: preview with `researchwiki bootstrap-categories`, then `--apply`.")
     print("  • When `other` grows: `researchwiki suggest-splits` proposes promotions.")
     print("  • Move a paper: follow prompts/recategorize.md.")
 
 
 def _step_confirm() -> int:
-    _header("Step 3 — Confirm")
+    _header("Step 4 — Confirm")
     try:
         from . import doctor
         rc = doctor.main([])
@@ -994,6 +987,13 @@ def _scaffold(quiet: bool = False) -> int:
     except FileExistsError as e:
         print(f"researchwiki init: {e}", file=sys.stderr)
         return 2
+    except OSError as e:
+        print(
+            f"researchwiki init: cannot create the content scaffold under "
+            f"{wiki_root()}: {e}",
+            file=sys.stderr,
+        )
+        return 2
     if quiet:
         return 0
     if created:
@@ -1020,6 +1020,17 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
+    root = wiki_root()
+    missing = missing_checkout_assets(root)
+    if missing:
+        print(
+            "researchwiki init: not a complete research-wiki checkout under "
+            f"{root}; missing: {', '.join(missing)}. Change to the cloned "
+            "repository root and rerun init.",
+            file=sys.stderr,
+        )
+        return 2
+
     if args.refresh_dashboard:
         return refresh_dashboard()
 
@@ -1033,10 +1044,12 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 2
 
-    root = wiki_root()
     _header("Research Wiki — setup")
     print("This wizard configures your LLM provider and confirms that the wiki is ready. "
           "Categories grow from your papers; every setting is reversible.")
+
+    if not _step_storage(root):
+        return 2
 
     rc = _scaffold(quiet=True)
     if rc:

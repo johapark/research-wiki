@@ -12,6 +12,19 @@ that need it span packages.
 from pathlib import Path
 
 
+# A research-wiki installation is clone-first: model configs and prompt files
+# intentionally live beside the package rather than inside an installed wheel.
+# `wiki/` cannot be the checkout marker because `init` is precisely the command
+# that creates it. Keep this list small and structural so source archives remain
+# supported even when `.git/` is absent.
+_CHECKOUT_MARKERS: tuple[tuple[str, str], ...] = (
+    ("pyproject.toml", "file"),
+    ("researchwiki/__init__.py", "file"),
+    ("config/pricing.yaml", "file"),
+    ("prompts/author-system-research.md", "file"),
+)
+
+
 def canonical(p: Path | str) -> Path:
     """One spelling per file, so two callers that reach it compare equal.
 
@@ -39,6 +52,24 @@ def wiki_root() -> Path:
     behaviour). If a caller wants a different root, they can set CWD first.
     """
     return Path.cwd()
+
+
+def missing_checkout_assets(root: Path | None = None) -> list[str]:
+    """Required clone assets absent from ``root``.
+
+    The CLI cannot operate from a directory containing only a hand-created
+    ``wiki/`` tree: authoring loads prompts and model templates relative to the
+    checkout. Returning display names rather than raising lets both ``init`` and
+    ``doctor`` provide their own exit-code-appropriate diagnostics.
+    """
+    root = Path(root) if root is not None else wiki_root()
+    missing: list[str] = []
+    for name, kind in _CHECKOUT_MARKERS:
+        path = root / name
+        present = path.is_file() if kind == "file" else path.is_dir()
+        if not present:
+            missing.append(name + ("/" if kind == "dir" else ""))
+    return missing
 
 
 def wiki_dir() -> Path:

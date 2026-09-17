@@ -98,6 +98,19 @@ def test_doctor_ready_with_nonblocking_warning(monkeypatch, capsys):
     assert "Provider connectivity was not tested" in out
 
 
+def test_doctor_blocks_a_content_tree_outside_the_checkout(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    for name in ("wiki", "papers", "inbox"):
+        (tmp_path / name).mkdir()
+
+    checks = doctor._content_checks()
+
+    checkout = [check for check in checks if check.label == "Checkout"]
+    assert len(checkout) == 1
+    assert checkout[0].level == "block"
+    assert "prompts/" in checkout[0].detail
+
+
 def test_success_receipt_names_page_pdf_claims_and_trace(
     tmp_path, monkeypatch, capsys,
 ):

@@ -23,6 +23,7 @@ respecting that cap.
 - **Number of entries**: between 2 and the cap given in the user message, inclusive of `other`. The cap scales with corpus size — small inboxes get tight caps. **Cohesive corpora can and should propose only 2** (one real category + `other`); don't pad to fill the cap.
 - **Always include a `"other"` category** as the catch-all bucket. The user's framework treats `other` as the structured "uncategorized backlog" — papers that abstain from the classifier or don't yet warrant their own category live here, and a separate tool surfaces splits when `other` accumulates enough papers.
 - **Slugs**: lowercase, alphanumeric + hyphens only. No spaces, no underscores. Keep them short (1–3 words).
+- **Reserved names are forbidden**: `synthesis`, `ideas`, `concepts`, and `references` are page-type directories, not content categories. Never propose them.
 - **Scopes**: one specific sentence. "Methods/algorithms explained generically" is too vague. "AI/ML applied to biology — protein/RNA structure prediction, sequence foundation models, multi-omics" is good.
 - **Avoid generic slugs** like `misc`, `general`, `papers` — prefer specific ones the user can defend at a glance.
 - **Pick durable category cuts.** Two shapes work: (1) a **method or technique** (e.g., `prime-editing`, `transformer-models`) — survives when topics within the method shift; (2) a **research field or discipline** (e.g., `immunology`, `rna-biology`, `computer-vision`) — survives when methods within the field shift. Avoid transient topic-surface slugs (`alphafold-class-papers`, `chatgpt-papers`) that age the moment the field's vocabulary moves. A good taxonomy blends both shapes — in one biology + ML wiki the author landed on `genomics` and `cgt` (field-shaped) alongside `compbio` and `ai` (method-shaped). That is an illustration of the mix, not a set to reproduce: propose from the PDFs in front of you.
@@ -32,6 +33,6 @@ respecting that cap.
 
 - If all papers cluster around **one coherent theme** → propose 2: that theme + `other`.
 - If they split into **2–3 distinct areas** → propose 3 or 4 (one per area + `other`).
-- If they **span a broad biology + ML landscape** → up to the cap. A reasonable default in that case: some subset of `genomics`, `compbio`, `cgt`, `ai`, `references`, `other`.
+- If they **span a broad biology + ML landscape** → up to the cap. A reasonable default in that case: some subset of `genomics`, `compbio`, `cgt`, `ai`, `protein-science`, `other`.
 
 The rationale should explain why this particular cut works for this particular corpus — what natural seams the papers form, or why no seams exist (justifying a 2-category proposal). Avoid generic framing; reference the actual papers when justified.

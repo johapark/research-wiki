@@ -22,6 +22,12 @@ the reasoning behind any line below.
 
 ### Added
 
+- First-run setup now validates that it is running from the clone before any
+  scaffold write, asks about cross-device storage before creating content
+  directories, and reads provider credentials without terminal echo.
+- Category bootstrap previews now save the exact validated proposal under
+  `.ingest/`; `--apply` reuses that receipt without another model call and
+  refuses stale proposals after the inbox changes.
 - Page search has an explicit, bounded `--llm-rerank` mode: one low-reasoning
   classifier call reorders at most 12 locally retrieved candidates using bounded
   summaries and claims, reports model and token usage in JSON, rejects invented
@@ -45,6 +51,12 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- The category proposer no longer recommends or accepts `references` (or any
+  other page-type directory) as a content category, and the setup wizard no
+  longer applies an unseen taxonomy automatically.
+- Scaffold permission failures now remain actionable environment errors instead
+  of escaping as internal bugs, and `doctor` reports a content tree that is not
+  accompanied by the checkout's required configs and prompts.
 - Classifier evaluation preserves the requested mode across every held-out
   paper and its report. Per-paper outcomes no longer overwrite the mode and
   silently switch default/local kNN evaluation to the model-backed classifier;

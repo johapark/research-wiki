@@ -92,12 +92,14 @@ At three or more PDFs, offer:
 
 ```bash
 researchwiki bootstrap-categories            # preview
-researchwiki bootstrap-categories --apply    # create approved directories
+researchwiki bootstrap-categories --apply    # apply that exact reviewed proposal
 ```
 
-Categories are local and review-gated. `other/` remains the abstention bucket;
-later, `researchwiki suggest-splits` can propose refinements. Manual category
-creation (`mkdir wiki/<slug>/`) is an advanced option, not the default path.
+The preview saves a receipt under `.ingest/`; apply reads that exact proposal
+without a second model call and refuses if `inbox/` changed. Categories are
+local and review-gated. `other/` remains the abstention bucket; later,
+`researchwiki suggest-splits` can propose refinements. Manual category creation
+(`mkdir wiki/<slug>/`) is an advanced option, not the default path.
 
 ## 5. Add the first paper
 

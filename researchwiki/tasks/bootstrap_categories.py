@@ -18,10 +18,11 @@ create the directories.
 Default mode: prints the proposed categories to stdout with the `mkdir`
 commands to create them.
 
-`--apply`: creates the `wiki/<slug>/` directories. Use after reviewing the
-proposal.
+The preview saves the exact validated proposal under `.ingest/`. `--apply`
+loads that receipt and creates its `wiki/<slug>/` directories without making a
+second, potentially different model call. If the inbox changed, preview again.
 
-Cold-start UX: if `inbox/` has fewer than 5 PDFs, exits early — too few
+Cold-start UX: if `inbox/` has fewer than 3 PDFs, exits early — too few
 papers to ground a taxonomy. The user can ingest those first (they'll land
 in `other`) and re-run when the corpus is bigger, or wait for `suggest-splits`
 to fire automatically.
@@ -33,16 +34,115 @@ import argparse
 import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..categories import PAGE_TYPE_DIRS, content_categories
+from ..errors import EnvironmentFailure
+from ..fsatomic import read_json, write_json_atomic
 from ..log import log
-from ..paths import inbox_dir, wiki_root
+from ..paths import inbox_dir, ingest_dir, wiki_root
 
 MIN_INBOX_FOR_BOOTSTRAP = 3   # below this, manual `--category` is fine
 MIN_CATEGORIES = 2            # always at least 1 real + `other`
 MAX_CATEGORIES = 10           # absolute ceiling regardless of inbox size
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$")
+PROPOSAL_RECEIPT_VERSION = 1
+PROPOSAL_RECEIPT_NAME = "bootstrap-categories-proposal.json"
+
+
+@dataclass(frozen=True)
+class TaxonomyProposal:
+    """One validated proposal tied to the inbox state it was generated from."""
+
+    categories: list[dict[str, str]]
+    rationale: str
+    n_papers: int
+    max_categories: int
+    inbox_fingerprint: list[dict[str, str | int]]
+
+    def as_json(self) -> dict:
+        return {
+            "version": PROPOSAL_RECEIPT_VERSION,
+            "categories": self.categories,
+            "rationale": self.rationale,
+            "n_papers": self.n_papers,
+            "max_categories": self.max_categories,
+            "inbox_fingerprint": self.inbox_fingerprint,
+        }
+
+
+def _proposal_receipt_path() -> Path:
+    return ingest_dir() / PROPOSAL_RECEIPT_NAME
+
+
+def _inbox_fingerprint(pdfs: list[Path]) -> list[dict[str, str | int]]:
+    """Cheap identity for the staged corpus; detects edits between review/apply."""
+    fingerprint: list[dict[str, str | int]] = []
+    for pdf in sorted(pdfs):
+        stat = pdf.stat()
+        fingerprint.append({
+            "name": pdf.name,
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+        })
+    return fingerprint
+
+
+def _save_proposal(proposal: TaxonomyProposal) -> None:
+    path = _proposal_receipt_path()
+    try:
+        write_json_atomic(path, proposal.as_json())
+    except OSError as exc:
+        raise EnvironmentFailure(f"cannot save category proposal receipt {path}: {exc}") from exc
+
+
+def _load_reviewed_proposal() -> tuple[TaxonomyProposal | None, str | None]:
+    """Load the exact preview receipt, rejecting corruption or inbox drift."""
+    path = _proposal_receipt_path()
+    data = read_json(path)
+    if not isinstance(data, dict):
+        return None, (
+            "no reviewed category proposal is available; run `researchwiki "
+            "bootstrap-categories` first"
+        )
+    if data.get("version") != PROPOSAL_RECEIPT_VERSION:
+        return None, "the saved category proposal uses an unsupported format; preview again"
+
+    categories = data.get("categories")
+    rationale = data.get("rationale")
+    n_papers = data.get("n_papers")
+    max_categories = data.get("max_categories")
+    fingerprint = data.get("inbox_fingerprint")
+    if not (
+        isinstance(categories, list)
+        and isinstance(rationale, str)
+        and isinstance(n_papers, int)
+        and n_papers >= MIN_INBOX_FOR_BOOTSTRAP
+        and isinstance(max_categories, int)
+        and MIN_CATEGORIES <= max_categories <= MAX_CATEGORIES
+        and isinstance(fingerprint, list)
+    ):
+        return None, "the saved category proposal is invalid; preview again"
+
+    normalized = _validate_categories({"categories": categories}, max_categories)
+    if normalized is None or normalized != categories:
+        return None, "the saved category proposal failed validation; preview again"
+
+    try:
+        current = _inbox_fingerprint(sorted(inbox_dir().glob("*.pdf")))
+    except OSError as exc:
+        raise EnvironmentFailure(f"cannot inspect inbox PDFs before applying categories: {exc}") from exc
+    if current != fingerprint:
+        return None, "inbox/ changed after the proposal was reviewed; preview again"
+
+    return TaxonomyProposal(
+        categories=categories,
+        rationale=rationale,
+        n_papers=n_papers,
+        max_categories=max_categories,
+        inbox_fingerprint=fingerprint,
+    ), None
 
 
 def _adaptive_max_categories(n_papers: int) -> int:
@@ -213,6 +313,12 @@ def _validate_categories(parsed: dict, max_cats: int) -> list[dict] | None:
             print(f"WARN: dropping invalid slug `{slug}` (must be lowercase, "
                   f"alphanumeric/hyphen)", file=sys.stderr)
             continue
+        if slug in PAGE_TYPE_DIRS:
+            print(
+                f"WARN: dropping reserved page-type directory `{slug}`",
+                file=sys.stderr,
+            )
+            continue
         if slug in seen_slugs:
             print(f"WARN: dropping duplicate slug `{slug}`", file=sys.stderr)
             continue
@@ -244,46 +350,54 @@ def _content_slugs(cats: list[dict]) -> list[str]:
             if c["slug"] != "other" and c["slug"] not in PAGE_TYPE_DIRS]
 
 
-def _print_proposal(cats: list[dict], rationale: str, n_papers: int) -> None:
+def _print_proposal(
+    proposal: TaxonomyProposal, *, show_apply_hint: bool = True,
+) -> None:
     print()
-    print(f"Proposed taxonomy for {n_papers} paper(s) in inbox/:")
+    print(f"Proposed taxonomy for {proposal.n_papers} paper(s) in inbox/:")
     print()
-    for c in cats:
+    for c in proposal.categories:
         print(f"  {c['slug']:<16} {c['scope'][:90]}")
     print()
-    if rationale:
-        print(f"Rationale: {rationale}")
+    if proposal.rationale:
+        print(f"Rationale: {proposal.rationale}")
         print()
-    slugs = _content_slugs(cats)
+    slugs = _content_slugs(proposal.categories)
     print("A category is valid once its directory exists. Create them with:")
     print("  mkdir -p " + " ".join(f"wiki/{s}" for s in slugs))
     print()
-    print("Or re-run with `--apply` to create the directories automatically.")
-    print()
+    if show_apply_hint:
+        print("After review, run `researchwiki bootstrap-categories --apply`.")
+        print()
 
 
-def _apply_taxonomy(cats: list[dict], rationale: str) -> int:
+def _apply_taxonomy(proposal: TaxonomyProposal) -> int:
     """Create the content-category directories under wiki/. A content category
     is defined solely by the existence of `wiki/<slug>/` — there is no
     frozenset or CLAUDE.md table to rewrite. `other` and the page-type scaffold
     dirs are skipped (they already exist)."""
     root = wiki_root()
     wiki = root / "wiki"
-    slugs = _content_slugs(cats)
+    slugs = _content_slugs(proposal.categories)
     created: list[str] = []
     for s in slugs:
         d = wiki / s
         if d.exists():
             print(f"exists  {d.relative_to(root)}/")
         else:
-            d.mkdir(parents=True, exist_ok=True)
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise EnvironmentFailure(
+                    f"cannot create category directory {d}: {exc}"
+                ) from exc
             print(f"created {d.relative_to(root)}/")
             created.append(s)
 
     log_msg = (f"bootstrap-categories | created {len(created)} categor(ies): "
                f"{', '.join(created) or '(none new)'}")
-    if rationale:
-        log_msg += f"\nRationale: {rationale[:200]}"
+    if proposal.rationale:
+        log_msg += f"\nRationale: {proposal.rationale[:200]}"
     log(log_msg, tag="bootstrap-categories")
     print()
     print("Done — categories are valid now that their wiki/<slug>/ dirs exist.")
@@ -291,18 +405,8 @@ def _apply_taxonomy(cats: list[dict], rationale: str) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(
-        prog="researchwiki bootstrap-categories",
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument("--apply", action="store_true",
-                        help="Create the proposed wiki/<slug>/ directories (which "
-                             "is what makes each category valid). Without this flag, "
-                             "prints the proposal and the mkdir commands to stdout.")
-    args = parser.parse_args(argv)
-
+def _propose_taxonomy() -> tuple[int, TaxonomyProposal | None]:
+    """Generate, validate, and persist one proposal without applying it."""
     inbox = inbox_dir()
     pdfs = sorted(inbox.glob("*.pdf"))
     if len(pdfs) < MIN_INBOX_FOR_BOOTSTRAP:
@@ -314,28 +418,76 @@ def main(argv: list[str]) -> int:
         print("`suggest-splits` will propose promotions once that bucket grows.")
         print()
         print(f"Current categories: {sorted(content_categories())}")
-        return 0
+        return 0, None
+
+    try:
+        starting_fingerprint = _inbox_fingerprint(pdfs)
+    except OSError as exc:
+        raise EnvironmentFailure(f"cannot inspect inbox PDFs for category proposal: {exc}") from exc
 
     print(f"Reconciling metadata for {len(pdfs)} PDF(s)...", file=sys.stderr)
     bag = _gather_inbox_metadata(pdfs)
     if len(bag) < MIN_INBOX_FOR_BOOTSTRAP:
         print(f"only {len(bag)} PDF(s) had extractable metadata — too few "
               f"to ground a taxonomy.", file=sys.stderr)
-        return 1
+        return 1, None
 
     max_cats = _adaptive_max_categories(len(bag))
     print(f"Calling classifier with {len(bag)} paper(s) "
           f"(taxonomy cap: {max_cats})...", file=sys.stderr)
     parsed = _call_proposer(bag, max_cats)
     if parsed is None:
-        return 1
+        return 1, None
 
     cats = _validate_categories(parsed, max_cats)
     if cats is None:
-        return 1
+        return 1, None
 
-    rationale = (parsed.get("rationale") or "").strip()
+    rationale_value = parsed.get("rationale")
+    rationale = rationale_value.strip() if isinstance(rationale_value, str) else ""
+    try:
+        current_pdfs = sorted(inbox.glob("*.pdf"))
+        current_fingerprint = _inbox_fingerprint(current_pdfs)
+    except OSError as exc:
+        raise EnvironmentFailure(f"cannot verify inbox PDFs after category proposal: {exc}") from exc
+    if current_fingerprint != starting_fingerprint:
+        print(
+            "inbox/ changed while the taxonomy was being proposed; preview again",
+            file=sys.stderr,
+        )
+        return 1, None
+
+    proposal = TaxonomyProposal(
+        categories=cats,
+        rationale=rationale,
+        n_papers=len(bag),
+        max_categories=max_cats,
+        inbox_fingerprint=current_fingerprint,
+    )
+    _save_proposal(proposal)
+    return 0, proposal
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="researchwiki bootstrap-categories",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--apply", action="store_true",
+                        help="apply the exact proposal saved by the preceding preview; "
+                             "does not make another model call")
+    args = parser.parse_args(argv)
+
     if args.apply:
-        return _apply_taxonomy(cats, rationale)
-    _print_proposal(cats, rationale, len(bag))
-    return 0
+        proposal, problem = _load_reviewed_proposal()
+        if proposal is None:
+            print(f"researchwiki bootstrap-categories: {problem}", file=sys.stderr)
+            return 1
+        _print_proposal(proposal, show_apply_hint=False)
+        return _apply_taxonomy(proposal)
+
+    rc, proposal = _propose_taxonomy()
+    if proposal is not None:
+        _print_proposal(proposal)
+    return rc

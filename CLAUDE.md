@@ -143,7 +143,7 @@ Categories are **local and derived from your papers, never predefined.** Valid i
 
 - **Scaffold**: `synthesis`, `ideas`, `concepts`, `references`, `other` — created by `researchwiki init` (`categories.DEFAULT_DIRS`), not committed. First four are **page-type dirs**, not content categories; `other` is the classifier's abstention bucket.
 - **Growth is explicit**: a new category exists only once `wiki/<category>/` is created. `--category X` rejected if dir doesn't exist; classifier abstains to `other`. Typos can't spawn categories.
-- **Cold start**: `researchwiki bootstrap-categories` reads `inbox/` and proposes+creates dirs. See Operations → Initialization.
+- **Cold start**: `researchwiki bootstrap-categories` previews and saves a proposal from `inbox/`; `--apply` creates that exact reviewed proposal only while the inbox fingerprint still matches. See Operations → Initialization.
 - **At ingest**: classifier picks existing category or abstains. `wiki/other/` ≥10 papers → `status` flags it, `suggest-splits` proposes splits (new category / reassign / stay).
 - **Divergence (populated category)**: a category can grow a sub-cluster distinct enough to speciate into a sibling. `status` surfaces a cluster-verified, decay-stamped nudge; `researchwiki suggest-splits --category <cat>` (or `--all`) judges each separable sub-cluster `split_out` vs `stay` and prints migration steps. Same review-gated, human-applied model as the `other`-bucket splits — nothing auto-creates a category.
 

@@ -7,14 +7,57 @@ consent, and a shell-owned value cannot be replaced by editing a dotenv file.
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import re
+import warnings
 from pathlib import Path
 from typing import Callable
 
+from ..agents import model_config
 from ..env_profiles import effective_assignment_value, loaded_from_profile, snapshot_profile
 from ..fsatomic import write_text_atomic
+
+
+def ask_secret(prompt: str) -> str:
+    """Read a credential without ever accepting getpass's echoed fallback."""
+    try:
+        with warnings.catch_warnings():
+            # `getpass` normally warns and then falls back to visible `input`
+            # when terminal echo control is unavailable. A credential prompt
+            # should fail closed instead of merely warning after disclosure.
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            return getpass.getpass(f"{prompt}: ").strip()
+    except (EOFError, getpass.GetPassWarning):
+        print(
+            "Secure credential input is unavailable in this terminal. Leave the "
+            "key unset and add it to the selected .env profile manually."
+        )
+        return ""
+
+
+def report_readiness(provider: str) -> None:
+    """Refresh provider state and print credential readiness."""
+    try:
+        from ..agents.llm import missing_provider_credentials
+    except Exception:  # pragma: no cover - defensive; llm deps optional
+        return
+    # Use the public reset so warning latches and every present/future routing
+    # cache move together; reaching into private cached functions drifts as soon
+    # as model_config gains another piece of cached state.
+    model_config.clear_caches()
+
+    problems = missing_provider_credentials()
+    if not problems:
+        if provider == "chat-relay":
+            print("✓ Chat-relay configured — no key needed; a chat agent answers "
+                  "each prompt from .llm-relay/pending/.")
+        else:
+            print("✓ Provider configured — every role has the credentials it needs.")
+        return
+    for problem in problems:
+        print(f"… Not ready yet — {problem}")
 
 
 def customize_openai_compatible_text(

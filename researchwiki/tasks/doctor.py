@@ -28,6 +28,14 @@ class Check:
 
 def _content_checks() -> list[Check]:
     checks: list[Check] = []
+    missing_checkout = paths.missing_checkout_assets()
+    if missing_checkout:
+        checks.append(Check(
+            "block", "Checkout",
+            f"not a complete research-wiki checkout; missing: {', '.join(missing_checkout)}",
+            "cd to the cloned research-wiki repository and rerun `researchwiki doctor`",
+        ))
+
     required = (paths.wiki_dir(), paths.papers_dir(), paths.inbox_dir())
     dangling = [p for p in required if p.is_symlink() and not p.exists()]
     if dangling:

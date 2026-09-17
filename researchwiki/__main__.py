@@ -227,9 +227,12 @@ def main(argv: list[str] | None = None) -> int:
     # minted a fresh per-repo state.db keyed on the wrong cwd. Environment
     # error (exit 2): the fix is `cd` to the wiki root, not editing flags.
     # `init` is exempt — it's the one command meant for a not-yet-a-wiki dir.
+    # The task itself still verifies the clone assets before writing anything;
+    # exemption here means "missing wiki inside a checkout", not "any cwd".
     if command != "init" and not (Path.cwd() / "wiki").is_dir():
         print(f"researchwiki {command}: no wiki/ directory under {Path.cwd()} — "
-              f"run from the wiki root (or `researchwiki init` to create one here).",
+              "run from the cloned repository root; if it is not initialized, "
+              "run `researchwiki init` there.",
               file=sys.stderr)
         return 2
     try:
