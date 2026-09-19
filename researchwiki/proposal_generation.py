@@ -489,7 +489,7 @@ def validate_candidates(proposals: list[dict], packet: dict[str, Any]) -> None:
             raise ValueError("proposal must connect evidence from at least two papers")
         if packet.get("cross_category") and proposal["direction"] != "cross-category-application":
             raise ValueError("cross-category generation returned a non-transfer proposal")
-        if packet.get("cross_category"):
+        if proposal["direction"] == "cross-category-application":
             used_categories = {
                 str(evidence_by_id[evidence_id].get("category") or "")
                 for evidence_id in used_ids

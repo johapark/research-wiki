@@ -6,6 +6,8 @@ import json
 import sqlite3
 from types import SimpleNamespace
 
+import pytest
+
 from researchwiki.db.connection import init_schema
 from researchwiki.db.rebuild import _upsert_one
 from researchwiki.proposals import (
@@ -48,9 +50,9 @@ def _proposal() -> dict:
 def _evidence() -> list[dict]:
     return [
         {"id": "e01", "paper_stem": "a-2026-method", "claim_slug": "kc-aaaa",
-         "text": "A method claim."},
+         "text": "A method claim.", "category": "systems"},
         {"id": "e02", "paper_stem": "b-2026-target", "claim_slug": "lim-bbbb",
-         "text": "A target limitation."},
+         "text": "A target limitation.", "category": "ai"},
     ]
 
 
@@ -121,6 +123,45 @@ def test_db_rows_are_rebuilt_entirely_from_proposal_markdown(tmp_path, monkeypat
         page, _ = _upsert_one(conn, record.path, 124)
     assert page is not None
     assert conn.execute("SELECT COUNT(*) FROM proposals").fetchone()[0] == 0
+    conn.close()
+
+
+def test_feedback_headings_preserve_reasons_and_later_decisions(tmp_path, monkeypatch):
+    import researchwiki.proposals as ledger
+    from researchwiki.proposal_generation import _relevant_history
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ledger, "commit_page", lambda _path: None)
+    record = create_proposal(
+        _proposal(), evidence_items=_evidence(), topic_seed="selective retrieval",
+        target_category="ai", author_model="test-model",
+    )
+    first = append_feedback(
+        record.proposal_id, decision="deferred",
+        reason="Needs revision.\n\n## Required controls\n\nCompare equal evidence budgets.",
+    )
+    second = append_feedback(
+        record.proposal_id, decision="shortlisted",
+        reason="# Decision\n\nControls added.\n\n### Next step\n\nProceed to scoping.",
+    )
+    page = read_page(record.path)
+    reparsed = parse_proposal(page)
+    assert reparsed.feedback == [first, second]
+    assert reparsed.status == "shortlisted"
+    assert find_proposal_contract_violations(
+        [record.path], {record.path: page.body}, {record.path: page.fm},
+    ) == []
+    assert _relevant_history("selective retrieval")[0]["latest_feedback"] == second.reason
+
+    conn = sqlite3.connect(tmp_path / "rebuilt.db")
+    conn.row_factory = sqlite3.Row
+    init_schema(conn)
+    with conn:
+        _upsert_one(conn, record.path, 123)
+    rows = conn.execute("SELECT feedback_id, decision, reason FROM proposal_feedback").fetchall()
+    assert {row["feedback_id"]: (row["decision"], row["reason"]) for row in rows} == {
+        event.feedback_id: (event.decision, event.reason) for event in (first, second)
+    }
     conn.close()
 
 
@@ -327,7 +368,7 @@ def test_generate_then_accept_cli_uses_receipt(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(ledger, "commit_page", lambda _path: None)
     evidence = _evidence()
     for item in evidence:
-        item.update(category="ai", section="methodology",
+        item.update(section="methodology",
                     citation=f"[[{item['paper_stem']}#{item['claim_slug']}]]")
     packet = {"topic": "routing", "target_category": "ai", "evidence": evidence,
               "existing_pages": [{"title": "Prior routing synthesis", "summary": "Covered comparison"}],
@@ -473,10 +514,30 @@ def test_json_envelope_is_not_extracted_from_wrong_shape():
     assert _parse_json('```json\n{"proposals": []}\n```') == {"proposals": []}
 
 
-def test_transfer_requires_both_categories_even_with_valid_schema():
-    import pytest
+@pytest.mark.parametrize("cross_category", [True, False, None])
+@pytest.mark.parametrize("categories", [("ai", "ai"), ("systems", "methods"), ("ai", "")])
+def test_transfer_requires_both_categories_even_with_valid_schema(cross_category, categories):
     from researchwiki.proposal_generation import validate_candidates
-    evidence = [{**item, "category": "ai"} for item in _evidence()]
+    evidence = [{**item, "category": category} for item, category in zip(_evidence(), categories)]
+    packet = {"evidence": evidence, "target_category": "ai"}
+    if cross_category is not None:
+        packet["cross_category"] = cross_category
     with pytest.raises(ValueError, match="target and source-category"):
-        validate_candidates([_proposal()], {"evidence": evidence, "cross_category": True,
-                                           "target_category": "ai"})
+        validate_candidates([_proposal()], packet)
+
+
+def test_accept_rejects_same_category_transfer_without_writing(tmp_path, monkeypatch):
+    from researchwiki.proposal_preview import accept_preview
+
+    monkeypatch.chdir(tmp_path)
+    evidence = [{**item, "category": "ai",
+                 "citation": f"[[{item['paper_stem']}#{item['claim_slug']}]]"}
+                for item in _evidence()]
+    receipt = {"version": 1, "packet": {"topic": "retrieval", "target_category": "ai",
+                                         "evidence": evidence},
+               "proposals": [_proposal()], "usage": {"model": "test-model"}}
+    path = tmp_path / "preview.json"
+    path.write_text(json.dumps(receipt))
+    with pytest.raises(ValueError, match="target and source-category"):
+        accept_preview(path, [1])
+    assert not (tmp_path / "wiki").exists()

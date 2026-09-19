@@ -126,6 +126,11 @@ the reasoning behind any line below.
 - Scaffold permission failures now remain actionable environment errors instead
   of escaping as internal bugs, and `doctor` reports a content tree that is not
   accompanied by the checkout's required configs and prompts.
+- Proposal feedback preserves Markdown headings and subsequent decisions when
+  parsing the append-only ledger, so database rebuilds and generation history
+  retain the complete reasons. Cross-category applications require cited evidence
+  from both target and source categories in ordinary generation and receipt
+  acceptance as well as explicit transfer mode.
 - Classifier evaluation preserves the requested mode across every held-out
   paper and its report. Per-paper outcomes no longer overwrite the mode and
   silently switch default/local kNN evaluation to the model-backed classifier;

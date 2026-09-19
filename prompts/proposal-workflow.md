@@ -101,6 +101,12 @@ Statuses are `proposed`, `shortlisted`, `deferred`, `rejected`, `drafted`, and
 feedback, reducing repeated weak suggestions. Use `parent_proposal` only when a
 new proposal explicitly revises one of those supplied prior records.
 
+`## Feedback` is the final section: everything after it belongs to the ledger.
+Reasons may contain Markdown headings; event boundaries use the reserved
+`### fb-<id> — <decision>` format. Transfer proposals must cite both target and
+source-category evidence, including those returned by ordinary generation or
+accepted from a chat-authored receipt.
+
 ## Rebuild and verify
 
 Markdown is canonical. `state.db` tables `proposals` and `proposal_feedback`

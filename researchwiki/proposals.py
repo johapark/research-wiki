@@ -101,7 +101,13 @@ class ProposalRecord:
 
 
 def parse_feedback(body: str) -> list[Feedback]:
-    section = extract_section(body, "Feedback")
+    # Feedback is the terminal, append-only ledger. Reasons may contain Markdown
+    # headings, so the ordinary H2 section extractor would truncate a reason and
+    # hide every subsequent event. Reading to EOF also recovers existing entries.
+    heading = re.search(r"^##[ \t]+Feedback[ \t]*$", body, re.IGNORECASE | re.MULTILINE)
+    if heading is None:
+        return []
+    section = body[heading.end():]
     out: list[Feedback] = []
     for match in _FEEDBACK_RE.finditer(section):
         out.append(Feedback(
