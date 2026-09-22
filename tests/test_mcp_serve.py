@@ -62,3 +62,16 @@ def test_do_check_grounding_grounded_page(tmp_path):
     result = mcp_serve._do_check_grounding(str(page), strict=False)
     assert result["ungrounded_claims"] == 0
     assert "total_claims" in result
+
+
+def test_do_check_grounding_rejects_generic_author_model(tmp_path):
+    page = tmp_path / "generic.md"
+    page.write_text(
+        "---\ntitle: X\ntype: synthesis\nauthor_model: gpt-5\n---\n\n"
+        "## Findings\n\nGrounded claim [[cgt/chen-2023-fake]].\n",
+        encoding="utf-8",
+    )
+
+    result = mcp_serve._do_check_grounding(str(page), strict=False)
+
+    assert result["finding"] == "missing_author_model"

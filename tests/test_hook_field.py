@@ -374,10 +374,9 @@ def test_the_whole_frontmatter_block_parses_with_a_colon_venue():
 
 # --- author_model: provenance for the page's own prose -----------------------
 #
-# Non-idea authored pages require a real model id. Idea pages are intentionally
-# exempt because they are living documents that may be revised by several
-# authors/models; legacy paper pages without an ingest stamp remain out of scope
-# because their provenance cannot be recovered honestly.
+# Every content document requires a real model id. Meta/dashboard bookkeeping
+# pages remain exempt, and unrecoverable legacy provenance must be acknowledged
+# explicitly rather than fabricated.
 
 def test_missing_author_model_flags_an_ingested_page_without_one(tmp_wiki):
     _mkpage(tmp_wiki, "genomics/a-2026-x",
@@ -392,29 +391,51 @@ def test_an_ingested_page_carrying_the_field_is_clean(tmp_wiki):
     assert find_missing_author_model(*_walk(tmp_wiki)) == []
 
 
-def test_a_page_predating_the_pipeline_is_out_of_scope(tmp_wiki):
-    """No `ingested_at:` means no ingest run wrote this page, so nothing was
-    ever in a position to record the model. `park-2023` in the real corpus is
-    exactly this shape — flagging it would be noise, not a finding."""
+def test_a_page_predating_the_pipeline_is_still_in_scope(tmp_wiki):
     _mkpage(tmp_wiki, "genomics/legacy-2019-z", "type: paper\ntitle: Legacy")
-    assert find_missing_author_model(*_walk(tmp_wiki)) == []
+    assert find_missing_author_model(*_walk(tmp_wiki)) == [
+        "genomics/legacy-2019-z"
+    ]
 
 
-@pytest.mark.parametrize("ptype", ["synthesis", "concept", "whitepaper", "guidance", "protocol", "book"])
-def test_authored_non_idea_pages_are_in_scope(tmp_wiki, ptype):
+@pytest.mark.parametrize(
+    "ptype",
+    [
+        "commentary",
+        "synthesis",
+        "concept",
+        "idea",
+        "whitepaper",
+        "guidance",
+        "protocol",
+        "book",
+    ],
+)
+def test_all_content_document_types_are_in_scope(tmp_wiki, ptype):
     _mkpage(tmp_wiki, f"genomics/p-2026-{ptype}",
             f"type: {ptype}\ntitle: P")
     assert find_missing_author_model(*_walk(tmp_wiki)) == [f"genomics/p-2026-{ptype}"]
 
 
-def test_idea_pages_are_exempt(tmp_wiki):
-    _mkpage(tmp_wiki, "ideas/living-idea", "type: idea\ntitle: I")
+@pytest.mark.parametrize("ptype", ["meta", "dashboard"])
+def test_meta_and_dashboard_pages_are_exempt(tmp_wiki, ptype):
+    _mkpage(tmp_wiki, f"bookkeeping/{ptype}", f"type: {ptype}\ntitle: B")
     assert find_missing_author_model(*_walk(tmp_wiki)) == []
 
 
 def test_placeholder_author_model_counts_as_missing(tmp_wiki):
     _mkpage(tmp_wiki, "synthesis/a-topic",
             'type: synthesis\ntitle: S\nauthor_model: "TODO"')
+    assert find_missing_author_model(*_walk(tmp_wiki)) == ["synthesis/a-topic"]
+
+
+@pytest.mark.parametrize("model", ["gpt-5", "gpt-5.6", "codex/gpt-5.6"])
+def test_generic_author_model_counts_as_missing(tmp_wiki, model):
+    _mkpage(
+        tmp_wiki,
+        "synthesis/a-topic",
+        f'type: synthesis\ntitle: S\nauthor_model: "{model}"',
+    )
     assert find_missing_author_model(*_walk(tmp_wiki)) == ["synthesis/a-topic"]
 
 

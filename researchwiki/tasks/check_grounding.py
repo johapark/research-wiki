@@ -41,6 +41,8 @@ import sys
 from pathlib import Path
 
 from ..grade import grounding
+from ..provenance import author_model_requirement_satisfied
+from ..wiki import read_page
 
 
 def main(argv: list[str]) -> int:
@@ -71,11 +73,27 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     permissive = not args.strict
 
+    path = Path(args.path) if args.path else None
     try:
-        text = Path(args.path).read_text(encoding="utf-8") if args.path else sys.stdin.read()
+        text = path.read_text(encoding="utf-8") if path else sys.stdin.read()
     except (OSError, UnicodeDecodeError) as e:
         print(f"researchwiki check-grounding: {e}", file=sys.stderr)
         return 2
+
+    page = read_page(path) if path else None
+    if page is not None and not author_model_requirement_satisfied(page.fm):
+        message = (
+            f"{path}: missing or underspecified `author_model`; "
+            "record the exact model variant before completing this page"
+        )
+        if args.json:
+            print(json.dumps({
+                "error": message,
+                "finding": "missing_author_model",
+            }, ensure_ascii=False, indent=2))
+        else:
+            print(f"researchwiki check-grounding: {message}", file=sys.stderr)
+        return 1
 
     if not text.strip():
         return 0

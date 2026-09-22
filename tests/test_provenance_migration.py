@@ -68,6 +68,58 @@ def test_plan_is_read_only_and_only_preselects_exact_telemetry(corpus, monkeypat
     assert (run / "manifest.json").is_file()
 
 
+def test_plan_covers_ideas_and_legacy_papers_but_not_bookkeeping(corpus):
+    _root, wiki = corpus
+    legacy = wiki / "ai/legacy-2024-x.md"
+    legacy.write_text(
+        "---\ntitle: Legacy\ntype: paper\nyear: 2024\n---\n\n## Summary\n\nBody.\n",
+        encoding="utf-8",
+    )
+    _page(wiki, "ideas/design", ptype="idea")
+    _page(wiki, "meta", ptype="meta")
+    _page(wiki, "views", ptype="dashboard")
+
+    _run, document = provenance.create_plan()
+
+    assert [item["page"] for item in document["items"]] == [
+        "ai/legacy-2024-x",
+        "ideas/design",
+    ]
+
+
+def test_plan_treats_generic_model_alias_as_unresolved(corpus, monkeypatch):
+    _root, wiki = corpus
+    _page(
+        wiki,
+        "synthesis/generic",
+        ptype="synthesis",
+        extra='author_model: "gpt-5"\n',
+    )
+    monkeypatch.setattr(
+        "researchwiki.tasks.lint.provenance.telemetry_author_models",
+        lambda: {"generic": "gpt-5"},
+    )
+
+    _run, document = provenance.create_plan()
+
+    assert document["items"][0]["page"] == "synthesis/generic"
+    assert document["items"][0]["decision"] == "pending"
+    assert document["items"][0]["telemetry_author_model"] is None
+
+
+def test_apply_rejects_generic_attested_model(corpus):
+    _root, wiki = corpus
+    _page(wiki, "synthesis/page", ptype="synthesis")
+    run, document = provenance.create_plan()
+    document["items"][0].update(
+        decision="set-author-model", author_model="gpt-5"
+    )
+    write_json_atomic(run / "manifest.json", document)
+
+    with pytest.raises(provenance.ProvenanceMigrationError, match="exact author_model"):
+        provenance.apply_plan(run)
+
+
 def test_pending_decision_blocks_before_backup_or_page_writes(corpus):
     _root, wiki = corpus
     page = _page(wiki, "synthesis/unresolved", ptype="synthesis")

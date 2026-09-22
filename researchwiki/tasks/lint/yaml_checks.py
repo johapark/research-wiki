@@ -9,7 +9,7 @@ flags a structural mismatch.
   - missing_keywords: paper page with fewer than MIN_KEYWORDS keywords
   - missing_hook: catalog page with no `hook:` gloss
   - hook_too_long: `hook:` past its page type's advisory ceiling
-  - missing_author_model: authored non-idea page with no usable `author_model:`
+  - missing_author_model: content document with no usable `author_model:`
   - acknowledged_legacy_provenance: reviewed legacy pages whose model is unknowable
 """
 
@@ -472,7 +472,7 @@ def find_venue_suspect(
 def find_missing_author_model(
     pages: list[Path], pages_fm: dict[Path, dict],
 ) -> list[str]:
-    """Authored non-idea pages with no usable `author_model:`.
+    """Content documents with no usable `author_model:`.
 
     `author_model` names the LLM that wrote a page's prose, and it is the *only*
     field that does: `okfexport._actor_for` reads it alone to build OKF's
@@ -480,24 +480,18 @@ def find_missing_author_model(
     rather than inventing an actor. A page missing it therefore ships with no
     provenance for its own text.
 
-    The scope is intentional: all authored non-idea page types whose contracts
-    require provenance, with legacy paper pages excluded when they lack an
-    `ingested_at:` stamp because their model cannot be recovered honestly.
-
-    The check covers `paper` and `commentary` pages carrying `ingested_at:`
-    (legacy pages without that stamp stay out of scope), plus every
-    `synthesis`, `concept`, and reference page. `idea` pages are deliberately
-    exempt: they are living design documents and may be revised repeatedly by
-    a person or different models, so one frontmatter author would be
-    misleading. Root bookkeeping pages are also exempt. `TODO`, `TBD`, and
-    similar placeholders count as missing; merely having a YAML key is not
-    provenance.
+    The check covers every content document type: `paper`, `commentary`,
+    `synthesis`, `concept`, `idea`, and all reference-document types. It also
+    covers legacy paper/commentary pages without an `ingested_at:` stamp.
+    Mechanically maintained root `meta`/`dashboard` pages are exempt. `TODO`,
+    `TBD`, and similar placeholders count as missing; merely having a YAML key
+    is not provenance.
 
     Repaired by `lint --fix` only for telemetry-backed paper/commentary pages,
     which recovers the value from `ingest_iterations` rather than deriving it —
-    see `lint.provenance`. Hand-authored reference, synthesis, and concept
-    pages stay listed for manual completion; nothing on disk can prove which
-    model wrote them after the fact.
+    see `lint.provenance`. Hand-authored reference, synthesis, concept, and
+    idea pages stay listed for manual completion; nothing on disk can prove
+    which model wrote them after the fact.
     """
     out: list[str] = []
     for md in pages:

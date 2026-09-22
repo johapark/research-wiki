@@ -11,9 +11,10 @@ Synthesis pages must carry `author_model:` in YAML. Use the exact model
 identifier that wrote the current page (for example `gpt-5.6-luna`), quoted as
 a string; never leave `TODO`, a provider name, or a generic label.
 `researchwiki synthesize` emits a placeholder because the scaffold cannot know
-which model will fill the prose; replace it before committing. Idea pages are
-the deliberate exception because they are living documents and do not carry
-`author_model:`.
+which model will fill the prose; replace it before committing. Idea pages carry
+the same required property and update it when a substantial rewrite changes
+the authorship. Only mechanically maintained `meta` / `dashboard` pages are
+exempt.
 
 ## The format: one footnote per source paper
 

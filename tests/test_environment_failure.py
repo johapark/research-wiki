@@ -269,7 +269,10 @@ def test_grade_synthesis_lets_a_real_bug_propagate(tmp_path, monkeypatch):
     from researchwiki.tasks import _grade_synthesis as mod
 
     page = tmp_path / "page.md"
-    page.write_text("---\ntitle: x\n---\nbody\n")
+    page.write_text(
+        "---\ntitle: x\ntype: synthesis\n"
+        "author_model: gpt-5.6-terra\n---\nbody\n"
+    )
 
     def boom(*a, **kw):
         raise ValueError("not an environment failure")

@@ -132,6 +132,13 @@ def test_non_model_sentinels_are_not_recovered(wiki, sentinel):
     assert survey().recoverable == []
 
 
+@pytest.mark.parametrize("model", ["gpt-5", "gpt-5.6", "codex/gpt-5.6"])
+def test_generic_model_aliases_are_not_recovered(wiki, model):
+    _page(wiki, "a-2024-x")
+    _log(_committed("A1", "a-2024-x", model, REAL))
+    assert survey().recoverable == []
+
+
 def test_an_uncommitted_attempt_is_ignored(wiki):
     """A run that authored but never committed did not produce the page."""
     _page(wiki, "a-2024-x")

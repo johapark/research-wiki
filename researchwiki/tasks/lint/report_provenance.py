@@ -5,12 +5,16 @@ def print_author_provenance_sections(
     missing_author_model: list[str], acknowledged: list[str]
 ) -> None:
     if missing_author_model:
-        print(f"## Non-idea pages missing `author_model:` ({len(missing_author_model)})")
-        print("Authored paper/commentary, synthesis, concept, and reference pages "
-              "must name the exact model that wrote their prose. Idea pages are "
-              "intentionally exempt because they evolve over time. `lint --fix` "
+        print(
+            "## Documents missing an exact `author_model:` "
+            f"({len(missing_author_model)})"
+        )
+        print("Paper/commentary, synthesis, concept, idea, and reference pages "
+              "must name the exact model that wrote their prose. Meta and "
+              "dashboard pages are exempt. Generic family aliases count as "
+              "missing. `lint --fix` "
               "recovers only telemetry-backed paper/commentary pages; hand-authored "
-              "reference, synthesis, and concept pages need a manual value.")
+              "reference, synthesis, concept, and idea pages need a manual value.")
         for key in missing_author_model[:20]:
             print(f"- {key}")
         if len(missing_author_model) > 20:

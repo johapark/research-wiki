@@ -36,6 +36,8 @@ from pathlib import Path
 
 from ..grade.fidelity import grade_synthesis
 from ..log import log
+from ..provenance import author_model_requirement_satisfied
+from ..wiki import read_page
 
 
 def _format_text_report(report, show_advisory: bool) -> str:
@@ -124,6 +126,21 @@ def main(argv: list[str]) -> int:
         # `tests/test_exit_codes.py::test_page_gates_agree_on_missing_path` pins it.
         print(f"researchwiki grade synthesis: file not found: {path}", file=sys.stderr)
         return 2
+
+    page = read_page(path)
+    if page is not None and not author_model_requirement_satisfied(page.fm):
+        message = (
+            f"{path}: missing or underspecified `author_model`; "
+            "record the exact model variant before completing this page"
+        )
+        if args.json:
+            print(json.dumps({
+                "error": message,
+                "finding": "missing_author_model",
+            }, ensure_ascii=False, indent=2))
+        else:
+            print(f"researchwiki grade synthesis: {message}", file=sys.stderr)
+        return 1
 
     # No try/except around this call on purpose. An unreachable state.db or an
     # unbuilt index raises `EnvironmentFailure`, which the CLI funnel reports as

@@ -100,6 +100,17 @@ def _do_check_grounding(page_path: str, strict: bool) -> dict:
         text = p.read_text(encoding="utf-8")
     except OSError as e:
         return {"error": str(e)}
+    from ..provenance import author_model_requirement_satisfied
+    from ..wiki import read_page
+    page = read_page(p)
+    if page is not None and not author_model_requirement_satisfied(page.fm):
+        return {
+            "error": (
+                f"{p}: missing or underspecified `author_model`; record the "
+                "exact model variant before completing this page"
+            ),
+            "finding": "missing_author_model",
+        }
     permissive = not strict
     report = grounding.check(text, permissive=permissive)
     return {

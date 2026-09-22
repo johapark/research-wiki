@@ -61,6 +61,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ...fsatomic import write_text_atomic
+from ...provenance import specific_author_model
 from ...wiki import commit_page, read_pages
 
 #: `model_used` values that name a non-call rather than a model. `promote`
@@ -104,7 +105,12 @@ def _is_real_model(name: str) -> bool:
     would credit a placeholder run for a page it did not write.
     """
     n = (name or "").strip().lower()
-    return bool(n) and n not in _NOT_A_MODEL and not n.startswith("stub:")
+    return (
+        bool(n)
+        and n not in _NOT_A_MODEL
+        and not n.startswith("stub:")
+        and bool(specific_author_model(name))
+    )
 
 
 def _read_log() -> dict[str, tuple[int, str, int]]:
@@ -190,9 +196,8 @@ def survey() -> Survey:
     """Paper pages missing either field, split by whether the log can supply it.
 
     Scoped to telemetry-backed `paper` and `commentary` pages. Reference,
-    synthesis, and concept pages are authored outside the ingest telemetry path
-    and must be completed manually; idea pages intentionally do not require the
-    field.
+    synthesis, concept, and idea pages are authored outside the ingest telemetry
+    path and must be completed manually.
 
     `has_telemetry` is False when the log holds no committed ingest at all, which
     is the migrated-wiki case: every candidate then lands in `no_telemetry` and

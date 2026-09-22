@@ -251,6 +251,24 @@ def test_page_gates_reserve_1_for_findings():
             f"{module_name} documents code 2 as {line.strip()!r}, not bad input"
 
 
+@pytest.mark.parametrize("module_name", ["check_grounding", "_grade_synthesis"])
+def test_authored_page_gates_reject_generic_author_model(
+    module_name, tmp_path, capsys,
+):
+    import importlib
+
+    page = tmp_path / "page.md"
+    page.write_text(
+        "---\ntitle: X\ntype: synthesis\nauthor_model: gpt-5\n---\n\n"
+        "## Question\n\nNothing to grade.\n",
+        encoding="utf-8",
+    )
+    mod = importlib.import_module(f"researchwiki.tasks.{module_name}")
+
+    assert mod.main([str(page)]) == 1
+    assert "missing or underspecified" in capsys.readouterr().err
+
+
 # ---------- import ----------
 #
 # `import` is the counter-example to the page gates above: it is not a gate, so

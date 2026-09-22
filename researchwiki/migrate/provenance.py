@@ -30,7 +30,7 @@ from ..provenance import (
     author_provenance_required,
     has_usable_author_model,
     is_acknowledged_legacy,
-    normalized_author_model,
+    specific_author_model,
 )
 from ..wiki import Page, commit_page, read_pages
 
@@ -73,7 +73,7 @@ def _new_run_dir(base: Path | None = None) -> Path:
 
 
 def _manifest_item(page: Page, telemetry: dict[str, str]) -> dict[str, Any]:
-    model = normalized_author_model(telemetry.get(page.stem))
+    model = specific_author_model(telemetry.get(page.stem))
     return {
         "page": page.key,
         "page_type": page.page_type,
@@ -156,19 +156,19 @@ def _decision(item: dict[str, Any]) -> str:
 
 def _desired_model(item: dict[str, Any], decision: str) -> str:
     if decision == "recover":
-        model = normalized_author_model(item.get("telemetry_author_model"))
+        model = specific_author_model(item.get("telemetry_author_model"))
         if not model:
             raise ProvenanceMigrationError(
                 f"{item.get('page')}: recover requires telemetry_author_model"
             )
-        supplied = normalized_author_model(item.get("author_model"))
+        supplied = specific_author_model(item.get("author_model"))
         if supplied and supplied != model:
             raise ProvenanceMigrationError(
                 f"{item.get('page')}: recover cannot replace telemetry model {model!r}"
             )
         return model
     if decision == "set-author-model":
-        model = normalized_author_model(item.get("author_model"))
+        model = specific_author_model(item.get("author_model"))
         if not model:
             raise ProvenanceMigrationError(
                 f"{item.get('page')}: set-author-model requires an exact author_model"
@@ -270,7 +270,7 @@ def _already_desired(
     model: str,
 ) -> bool:
     if decision in {"recover", "set-author-model"}:
-        return normalized_author_model(frontmatter.get("author_model")) == model
+        return specific_author_model(frontmatter.get("author_model")) == model
     if decision == "acknowledge":
         return is_acknowledged_legacy(frontmatter)
     return decision == "skip"
@@ -289,8 +289,8 @@ def _validate_item(
     if not path.is_file():
         raise ProvenanceMigrationError(f"{key}: page no longer exists")
     model = _desired_model(item, decision)
-    exact_model = normalized_author_model(telemetry.get(path.stem))
-    planned_model = normalized_author_model(item.get("telemetry_author_model"))
+    exact_model = specific_author_model(telemetry.get(path.stem))
+    planned_model = specific_author_model(item.get("telemetry_author_model"))
     if decision == "recover" and (not exact_model or planned_model != exact_model):
         raise ProvenanceMigrationError(
             f"{key}: telemetry no longer verifies planned recovery {planned_model!r}"
@@ -302,7 +302,7 @@ def _validate_item(
         )
     text = path.read_text(encoding="utf-8")
     page = _parse_current_page(path)
-    current_model = normalized_author_model(page.fm.get("author_model"))
+    current_model = specific_author_model(page.fm.get("author_model"))
     if current_model and current_model != model:
         raise ProvenanceMigrationError(
             f"{key}: recorded author_model {current_model!r} conflicts with review"

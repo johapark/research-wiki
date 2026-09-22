@@ -401,6 +401,7 @@ def _promote(tmp_path, **over):
         short_name="Smith 2024",
         hook="Does a thing.",
         keywords=["a", "b", "c", "d", "e"],
+        author_model="gpt-5.6-terra",
     )
     kwargs.update(over)
     return pm.promote_to_wiki(**kwargs)
@@ -437,6 +438,16 @@ def test_real_promote_commits_the_happy_path(wiki_root):
     assert not (wiki_root / "inbox" / "in.pdf").exists(), "inbox PDF was moved"
     assert "smith-2024-a-paper" in (wiki_root / "wiki" / "index.md").read_text(encoding="utf-8")
     assert mut.pending_journals() == []
+
+
+@pytest.mark.parametrize("model", [None, "gpt-5", "gpt-5.6"])
+def test_real_promote_refuses_missing_or_generic_author_model(wiki_root, model):
+    res = _promote(wiki_root, author_model=model)
+
+    assert res.promoted is False
+    assert "exact model variant" in res.warnings[0]
+    assert not (wiki_root / "wiki" / "compbio" / "smith-2024-a-paper.md").exists()
+    assert (wiki_root / "inbox" / "in.pdf").exists()
 
 
 def test_real_promote_rolls_back_a_late_failure(wiki_root, monkeypatch):

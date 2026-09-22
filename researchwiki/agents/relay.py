@@ -26,7 +26,6 @@ import hashlib
 import itertools
 import json
 import os
-import re
 import sys
 import time
 from pathlib import Path
@@ -34,6 +33,7 @@ from typing import TYPE_CHECKING
 
 from ..errors import EnvironmentFailure
 from ..paths import wiki_root
+from ..provenance import specific_author_model
 
 # `LLMResponse` is imported lazily at runtime inside call_chat_relay to dodge the
 # llm.py ↔ relay.py cycle: llm.py imports `call_chat_relay` from us, so
@@ -520,11 +520,7 @@ def _check_response_shape(data, response_path: Path, schema: dict | None) -> Non
     # gpt-5.6 could be Sol/Terra/Luna; claude-4 could be Opus/Sonnet/Haiku;
     # and similarly for Gemini, Llama, and Qwen. Reject these known generic
     # shapes without imposing a vendor-specific registry on other providers.
-    if re.search(
-        r"(?<![\w.-])(?:gpt|claude|gemini|llama|qwen)[-_]?\d+(?:\.\d+)?(?![-\w.])",
-        via,
-        flags=re.IGNORECASE,
-    ):
+    if not specific_author_model(via):
         raise SchemaError(
             "via must name a specific model variant, not a family alias; "
             "use e.g. codex/gpt-5.6-terra or claude-code/opus-4-7"

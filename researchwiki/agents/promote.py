@@ -34,6 +34,7 @@ from .. import backlinks as _bl
 from ..fsatomic import write_text_atomic
 from ..mutation import mutation as _mutation
 from ..paths import inbox_dir, papers_dir, wiki_dir
+from ..provenance import specific_author_model
 from .category_selection import suggest_category_for_page as _suggest_category
 from .commentary import gate_reason as commentary_gate_reason
 
@@ -751,6 +752,16 @@ def promote_to_wiki(
     the paper half-landed. They now run inside a `mutation` journal, so either
     every step lands or the tree is restored (see `researchwiki/mutation.py`).
     """
+    exact_author_model = specific_author_model(author_model)
+    if not exact_author_model:
+        return PromotionResult(
+            promoted=False,
+            warnings=[
+                "promotion refused: author_model must name the exact model "
+                "variant that authored the page"
+            ],
+        )
+
     res = PromotionResult(promoted=True)
 
     # Category resolution.
@@ -793,7 +804,7 @@ def promote_to_wiki(
             hook=hook,
             category_strength=cat_strength,
             keywords=keywords,
-            author_model=author_model,
+            author_model=exact_author_model,
         )
         write_text_atomic(page_path, full_page)
         from ..wiki import commit_page as _commit_page

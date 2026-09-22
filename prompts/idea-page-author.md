@@ -2,9 +2,11 @@
 
 Trigger: when writing a new idea page (`wiki/ideas/<slug>.md`) or substantially editing an existing one (rewriting Opportunities/Plans, adding new design components, regenerating from a deeper conversation). Use this alongside CLAUDE.md §4 — that's the canonical reference; this file walks the actual authoring workflow.
 
-Idea pages intentionally omit `author_model:`. They are living design documents
-that may be revised repeatedly by a person or different models; record the
-page's evolution through `generated_at:` and git history instead.
+Idea pages require `author_model:` like every other content document. Set it to
+the exact model id that authored the current prose, and update it whenever a
+substantial rewrite changes that authorship. `generated_at:` and git history
+continue to record when and how the living document evolved. Mechanically
+maintained `meta` / `dashboard` pages are the only page-type exemptions.
 
 ## Section contract
 
@@ -87,9 +89,10 @@ What stays on the page:
 5. **Draft Caveats.** Two H3 sub-sections work well: limitations of the load-bearing dataset/method (cite invalidators) and *What would change the conclusion* (page-specific gap-listing — which missing papers would shift this idea's status, not the generic ingest-and-update-status instruction).
 6. **Draft Verdict last but place at the top.** After Caveats is settled (so you have an honest read on premises and invalidators), write the strength label and the tl;dr paragraph. Place the section *first* in the page, before Background. The label is the LLM's synthesis judgment over the whole page; the tl;dr summarizes the design in one paragraph and cites the load-bearing wiki anchors via the page's existing footnotes. Writing it last avoids "aspirational verdict" — the label has to honestly reflect the rest of the page. If you'd write **strong** but Caveats list real unresolved invalidators, the right label is **incremental** or **weak**. **Mirror the label into the YAML `verdict:` property** (`strong` | `incremental` | `weak`) so the index/log and any Dataview cut can triage on it without parsing prose — keep the frontmatter value and the section's label identical.
 7. **Classify the content category.** Set YAML `category:` to the design's dominant **content** field — the same category an ingested paper on this topic would get — *not* `ideas` (the directory already carries the page type). Classify it the way ingest does: pick the existing content category (`ls wiki/` for the valid set, e.g. `ai`, `single-cell`, `compbio`) that the design most centrally sits in, abstaining to `other` only when nothing fits. In practice the dominant category among the papers the idea cites (its body `[[wikilink]]`s / `## References` footnotes) is the answer — an idea whose principles all trace to `ai/` papers classifies as `ai`; one built on `single-cell/` papers classifies as `single-cell`. The page still lives in `wiki/ideas/` and `db rebuild` still records its DB category as `ideas`; the YAML value is content-grouping bookkeeping (Obsidian property view, `index.md`, `views.md`). Must be a valid content category or `lint`'s category-drift check flags it.
-8. **Ask the user for missing papers** — see § below. Do this *before* index/log so the user can iterate on the draft with new sources before it's wired in.
-9. **Update `wiki/index.md`** — append the page under `## ideas`. The index entry should lead with the verdict label so the index acts as a triage view.
-10. **Append to `wiki/log.md`** — `## [YYYY-MM-DD] idea | <title> [<verdict>] → wiki/ideas/<slug>.md`.
+8. **Record authorship.** Set YAML `author_model:` to the exact model id that authored the current page. Never leave `TODO`, substitute a provider name, or infer a historical model from prose or timestamps.
+9. **Ask the user for missing papers** — see § below. Do this *before* index/log so the user can iterate on the draft with new sources before it's wired in.
+10. **Update `wiki/index.md`** — append the page under `## ideas`. The index entry should lead with the verdict label so the index acts as a triage view.
+11. **Append to `wiki/log.md`** — `## [YYYY-MM-DD] idea | <title> [<verdict>] → wiki/ideas/<slug>.md`.
 
 ## Ask the user for missing papers
 
