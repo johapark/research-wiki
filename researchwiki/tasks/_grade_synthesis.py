@@ -36,8 +36,7 @@ from pathlib import Path
 
 from ..grade.fidelity import grade_synthesis
 from ..log import log
-from ..provenance import author_model_requirement_satisfied
-from ..wiki import read_page
+from ..provenance import completion_gate_blocker
 
 
 def _format_text_report(report, show_advisory: bool) -> str:
@@ -127,16 +126,13 @@ def main(argv: list[str]) -> int:
         print(f"researchwiki grade synthesis: file not found: {path}", file=sys.stderr)
         return 2
 
-    page = read_page(path)
-    if page is not None and not author_model_requirement_satisfied(page.fm):
-        message = (
-            f"{path}: missing or underspecified `author_model`; "
-            "record the exact model variant before completing this page"
-        )
+    blocker = completion_gate_blocker(path)
+    if blocker is not None:
+        finding, message = blocker
         if args.json:
             print(json.dumps({
                 "error": message,
-                "finding": "missing_author_model",
+                "finding": finding,
             }, ensure_ascii=False, indent=2))
         else:
             print(f"researchwiki grade synthesis: {message}", file=sys.stderr)

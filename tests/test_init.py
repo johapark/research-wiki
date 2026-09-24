@@ -555,19 +555,54 @@ def test_storage_local_choice_allows_scaffold_without_writing(
     assert not any((tmp_path / name).exists() for name in ("wiki", "papers", "inbox"))
 
 
-def test_storage_rejects_partial_or_mixed_layouts(tmp_path, monkeypatch):
+@pytest.fixture
+def no_storage_prompt(monkeypatch):
     monkeypatch.setattr(
         init,
         "_confirm",
         lambda *args, **kwargs: pytest.fail("existing layout should not prompt"),
     )
-    (tmp_path / "wiki").mkdir()
-    assert init._step_storage(tmp_path) is False
 
+
+def test_storage_rerun_accepts_a_partial_layout(tmp_path, no_storage_prompt, capsys):
+    """Deleting an empty `inbox/` must not lock a user out of re-running init:
+    the scaffold recreates it, exactly as it did before the storage step."""
+    (tmp_path / "wiki").mkdir()
     (tmp_path / "papers").mkdir()
-    external = tmp_path / "external-inbox"
-    external.mkdir()
-    (tmp_path / "inbox").symlink_to(external)
+
+    assert init._step_storage(tmp_path) is True
+    assert "inbox/: missing" in capsys.readouterr().out
+
+
+def test_storage_rerun_accepts_synced_content_with_a_local_inbox(
+    tmp_path, no_storage_prompt, capsys,
+):
+    """The layout prompts/migration-backfill.md describes: the two content dirs
+    linked into a synced folder, the inbox kept local."""
+    sync = tmp_path / "sync"
+    for name in ("wiki", "papers"):
+        (sync / name).mkdir(parents=True)
+        (tmp_path / name).symlink_to(sync / name)
+    (tmp_path / "inbox").mkdir()
+
+    assert init._step_storage(tmp_path) is True
+    out = capsys.readouterr().out
+    assert "wiki/: synced link" in out
+    assert "inbox/: ordinary directory" in out
+
+
+@pytest.mark.parametrize("broken", ["dangling", "file"])
+def test_storage_rejects_a_path_that_cannot_hold_content(
+    tmp_path, no_storage_prompt, broken,
+):
+    """An unmounted sync target or a stray file is still refused: replacing it
+    with an empty directory would strand the real content."""
+    (tmp_path / "papers").mkdir()
+    if broken == "dangling":
+        (tmp_path / "wiki").symlink_to(tmp_path / "unmounted")
+    else:
+        (tmp_path / "wiki").write_text("not a directory", encoding="utf-8")
+
     assert init._step_storage(tmp_path) is False
 
 

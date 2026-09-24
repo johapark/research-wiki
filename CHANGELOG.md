@@ -51,6 +51,29 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Exact bare-version model ids (`gpt-5`, `gpt-5.5`, `gpt-4.1` — any id
+  `config/pricing.yaml` lists) and Ollama tags (`qwen3:32b`) are no longer
+  rejected as family aliases. Promotion, `lint`, `migrate provenance`, and the
+  chat-relay `via` check had refused them, which blocked every ingest routed to
+  such a model.
+- An authoring model that cannot be attributed is now caught by `agent ingest`
+  preflight and `doctor` before any paid phase. A winning draft that still turns
+  out to be unattributable is sandboxed for review (exit 1) rather than failing
+  promotion with exit 2, which batch `--resume` retried by re-running the whole
+  pipeline. A promote refused before its first write no longer reports the paper
+  as partially landed.
+- `lint --fix` credits the draft the commit row names as the winner, so a
+  mixed-model tournament or a DEBUG repair is attributed to the model that wrote
+  the committed prose. A later run that cannot be attributed no longer falls
+  back to an older run's model. Placeholder and family-alias values that `lint`
+  reports as missing are replaced in place when the log refines them;
+  contradictions are reported and left.
+- `check-grounding`, `grade synthesis`, and the MCP grounding tool report
+  malformed frontmatter as `invalid_frontmatter` instead of demanding an
+  `author_model` the page already has.
+- Rerunning `init` on an existing wiki accepts a partial layout (for example a
+  deleted empty `inbox/`) and synced `wiki/` + `papers/` beside a local
+  `inbox/`. Only a dangling link or a file where a directory belongs is refused.
 - The category proposer no longer recommends or accepts `references` (or any
   other page-type directory) as a content category, and the setup wizard no
   longer applies an unseen taxonomy automatically.

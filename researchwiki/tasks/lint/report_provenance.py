@@ -12,8 +12,8 @@ def print_author_provenance_sections(
         print("Paper/commentary, synthesis, concept, idea, and reference pages "
               "must name the exact model that wrote their prose. Meta and "
               "dashboard pages are exempt. Generic family aliases count as "
-              "missing. `lint --fix` "
-              "recovers only telemetry-backed paper/commentary pages; hand-authored "
+              "missing. `lint --fix` recovers or refines these "
+              "only on telemetry-backed paper/commentary pages; hand-authored "
               "reference, synthesis, concept, and idea pages need a manual value.")
         for key in missing_author_model[:20]:
             print(f"- {key}")

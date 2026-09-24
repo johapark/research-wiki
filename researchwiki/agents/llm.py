@@ -54,6 +54,7 @@ from dataclasses import dataclass
 from . import model_config
 from .provider_errors import friendly_provider_error
 from ..errors import EnvironmentFailure
+from ..provenance import specific_author_model
 
 
 # --- Client-side rate limiting -------------------------------------------
@@ -309,6 +310,39 @@ def missing_provider_credentials() -> list[str]:
     return problems
 
 
+#: Phases whose output can become the committed page body, so their model is
+#: the one `promote` records as `author_model:`.
+AUTHORING_PHASES = ("author", "evolve", "debug")
+
+
+def unattributable_author_models() -> list[str]:
+    """Authoring phases routed to a model id a page cannot record as provenance.
+
+    `promote` refuses a page whose `author_model` is a family alias
+    (`gpt-5.6`) or a placeholder, and it only learns the model after extract,
+    author, critic and grading have all been paid for. The configured id is
+    known before the first call, so checking it here fails the run while it is
+    still free. Chat-relay is exempt: each relay response names its own exact
+    model in `via`, which the relay validates as it arrives.
+    """
+    problems: list[str] = []
+    for name in AUTHORING_PHASES:
+        try:
+            cfg = model_config.for_phase(name)
+        except model_config.PhaseNotRegistered:
+            continue
+        if model_config.canonical_provider_id(cfg.provider) == "chat-relay":
+            continue
+        if not specific_author_model(cfg.model):
+            problems.append(
+                f"{name}: model {cfg.model!r} is a family alias or placeholder, "
+                "not an exact model id, so a page it writes cannot record which "
+                "model authored it — set an exact variant (for example "
+                "gpt-5.6-terra) in the active model config."
+            )
+    return problems
+
+
 def preflight_providers() -> None:
     """Raise `ProviderUnavailable` before a run spends anything, if it can't run.
 
@@ -320,13 +354,18 @@ def preflight_providers() -> None:
     string `lm-studio`, so the diagnostic a new user actually got was a 401
     quoting a value they had never typed.
     """
-    problems = missing_provider_credentials()
+    credentials = missing_provider_credentials()
+    problems = credentials + unattributable_author_models()
     if not problems:
         return
     cfg = model_config.config_path()
     where = str(cfg) if cfg.exists() else f"{cfg} (missing — using built-in defaults)"
+    heading = (
+        "no usable LLM provider for this run." if credentials
+        else "the active model config cannot attribute authored pages."
+    )
     raise ProviderUnavailable(
-        "no usable LLM provider for this run.\n"
+        heading + "\n"
         + "\n".join(f"  - {p}" for p in problems)
         + f"\n  active model config: {where}"
         + "\n  fix: see README.md § Providers, or run `researchwiki init`."

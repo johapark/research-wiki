@@ -362,3 +362,69 @@ def test_stub_ingest_skips_preflight(tmp_path, monkeypatch, no_models_config):
     agent_cli.main(["ingest", str(pdf), "--stub"])
     # Reached the ingest without ever consulting the provider environment.
     assert seen == ["run_ingest"]
+
+
+# ---------- author-model attribution ----------
+#
+# `promote` refuses a page whose `author_model` is a family alias, and learned
+# that only after extract, author, critic and grading had all been paid for.
+# The configured authoring model is known before the first call.
+
+def _route_author_to(monkeypatch, model: str, provider: str = "openai-compatible"):
+    from researchwiki.agents.model_config import ModelConfig
+    real = llm.model_config.for_phase
+
+    def for_phase(name):
+        cfg = real(name)
+        if name in llm.AUTHORING_PHASES:
+            return ModelConfig(provider, model, cfg.temperature, cfg.max_tokens)
+        return cfg
+    monkeypatch.setattr(llm.model_config, "for_phase", for_phase)
+
+
+def test_default_authoring_models_are_attributable(no_models_config):
+    assert llm.unattributable_author_models() == []
+
+
+@pytest.mark.parametrize("model", ["gpt-5.6", "claude-4", "TODO"])
+def test_family_alias_author_model_fails_preflight(monkeypatch, no_models_config, model):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-whatever")
+    _route_author_to(monkeypatch, model)
+
+    with pytest.raises(llm.ProviderUnavailable) as e:
+        llm.preflight_providers()
+    msg = str(e.value)
+    assert "cannot attribute authored pages" in msg
+    assert f"{model!r}" in msg
+
+
+@pytest.mark.parametrize("model", ["gpt-5.5", "gpt-4.1", "qwen3:32b"])
+def test_exact_bare_version_author_model_passes_preflight(
+    monkeypatch, no_models_config, model,
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-whatever")
+    _route_author_to(monkeypatch, model)
+    llm.preflight_providers()  # must not raise
+
+
+def test_chat_relay_author_is_attributed_by_its_response(monkeypatch, no_models_config):
+    """The relay's `via` names the exact model per response, so the configured
+    `model:` is only a hint and must not block the run."""
+    _route_author_to(monkeypatch, "gpt-5.6", provider="chat-relay")
+    assert llm.unattributable_author_models() == []
+
+
+def test_alias_author_model_blocks_ingest_before_any_work(
+    tmp_path, monkeypatch, no_models_config,
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-whatever")
+    _route_author_to(monkeypatch, "gpt-5.6")
+    monkeypatch.setattr(
+        agent_cli, "run_ingest",
+        lambda *a, **k: pytest.fail("no paid phase may run for an unattributable model"),
+    )
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+
+    with pytest.raises(llm.ProviderUnavailable):
+        agent_cli.main(["ingest", str(pdf)])

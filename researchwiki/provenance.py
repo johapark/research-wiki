@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 import re
 from typing import Any, Mapping
+
+import yaml
 
 
 LEGACY_AUTHOR_PROVENANCE = "legacy-unrecorded"
@@ -25,11 +28,16 @@ AUTHOR_MODEL_PLACEHOLDERS = frozenset(
 AUTHOR_MODEL_GENERIC_LABELS = frozenset(
     {"model", "llm", "openai", "anthropic", "google", "codex"}
 )
-# A bare family/version does not identify the tier or variant that authored the
-# prose. Keep this intentionally shape-based: exact ids such as
-# ``gpt-5.6-sol`` and ``claude-opus-4-7`` pass without maintaining a registry.
-_GENERIC_MODEL_FAMILY = re.compile(
-    r"(?<![\w.-])(?:gpt|claude|gemini|llama|qwen)[-_]?\d+(?:\.\d+)?(?![-\w.])",
+# A bare family/version token (``gpt-5.6``, ``claude-4``, ``qwen3``) may not
+# identify the tier or variant that authored the prose: gpt-5.6 ships only as
+# Sol/Terra/Luna. The shape alone cannot tell such an alias from a vendor's
+# genuine bare-version id (``gpt-5.5``, ``gpt-4.1``), so a matching token counts
+# as generic only when the pricing table does not list it as an exact model —
+# see `_is_family_alias`. Suffixed ids (``gpt-5.6-sol``, ``claude-opus-4-7``)
+# never match, and neither does an Ollama ``:tag`` (``qwen3:32b``), which names
+# the variant.
+_FAMILY_VERSION_TOKEN = re.compile(
+    r"(?<![\w.-])(?:gpt|claude|gemini|llama|qwen)[-_]?\d+(?:\.\d+)?(?![-\w.:])",
     flags=re.IGNORECASE,
 )
 
@@ -40,13 +48,23 @@ def normalized_author_model(value: Any) -> str:
     return "" if model.lower() in AUTHOR_MODEL_PLACEHOLDERS else model
 
 
+def _is_family_alias(model: str) -> bool:
+    tokens = [m.group(0).lower() for m in _FAMILY_VERSION_TOKEN.finditer(model)]
+    if not tokens:
+        return False
+    from .agents.model_config import priced_model_ids
+
+    known = priced_model_ids()
+    return any(token not in known for token in tokens)
+
+
 def specific_author_model(value: Any) -> str:
     """Return an exact model id, or ``""`` for generic/placeholder values."""
     model = normalized_author_model(value)
     if (
         not model
         or model.lower() in AUTHOR_MODEL_GENERIC_LABELS
-        or _GENERIC_MODEL_FAMILY.search(model)
+        or _is_family_alias(model)
     ):
         return ""
     return model
@@ -103,4 +121,49 @@ def author_model_requirement_satisfied(frontmatter: Mapping[str, Any]) -> bool:
         not author_provenance_required(frontmatter)
         or has_usable_author_model(frontmatter)
         or is_acknowledged_legacy(frontmatter)
+    )
+
+
+def completion_gate_blocker(path: Path) -> tuple[str, str] | None:
+    """``(finding, message)`` when a page cannot pass a completion gate.
+
+    Parses the frontmatter strictly rather than through ``wiki.read_page``,
+    which maps malformed YAML to ``{}`` so one typo never drops a page from
+    search. For a gate that mapping is misleading: ``{}`` defaults to
+    ``type: paper`` with no ``author_model``, so a page carrying a valid model
+    beside an unrelated typo was told to record the model it already has, and
+    fixing the named field changed nothing. The real defect is reported
+    instead. ``None`` for text with no frontmatter block, which is not a wiki
+    page and has nothing to check.
+    """
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---\n"):
+        return None
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        return None
+    try:
+        frontmatter = yaml.safe_load(text[4:end])
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        # +2: PyYAML counts from 0 within the block; the file adds the fence.
+        where = f" at line {mark.line + 2}" if mark is not None else ""
+        detail = str(exc).split("\n")[0].strip()
+        return (
+            "invalid_frontmatter",
+            f"{path}: frontmatter is not valid YAML{where} ({detail}); fix it "
+            "before completing this page",
+        )
+    if not isinstance(frontmatter, dict):
+        return (
+            "invalid_frontmatter",
+            f"{path}: frontmatter is not a YAML mapping; fix it before "
+            "completing this page",
+        )
+    if author_model_requirement_satisfied(frontmatter):
+        return None
+    return (
+        "missing_author_model",
+        f"{path}: missing or underspecified `author_model`; record the exact "
+        "model variant before completing this page",
     )

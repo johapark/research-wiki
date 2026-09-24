@@ -68,7 +68,7 @@ Measured on this corpus by **file count** — which is what sync cost tracks, no
 | `.git/` | 288 | no — and rewritten on every command |
 | `papers/` + `wiki/` | 150 | **yes — this is the whole point** |
 
-**Recommended layout: put the checkout outside the synced folder and symlink the two content dirs in.** The daemon then sees markdown and PDFs only — no virtualenv, no SQLite, no search index, nothing rewritten mid-command:
+**Recommended layout: put the checkout outside the synced folder and symlink the content dirs in.** Link `wiki/` and `papers/` at minimum; `inbox/` may be linked too or stay a local directory, and `researchwiki init` accepts either on a rerun. The daemon then sees markdown and PDFs only — no virtualenv, no SQLite, no search index, nothing rewritten mid-command:
 
 ```bash
 SYNC="$HOME/<your-synced-folder>/research-wiki"   # holds wiki/ and papers/

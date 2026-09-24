@@ -40,7 +40,10 @@ def ask_secret(prompt: str) -> str:
 def report_readiness(provider: str) -> None:
     """Refresh provider state and print credential readiness."""
     try:
-        from ..agents.llm import missing_provider_credentials
+        from ..agents.llm import (
+            missing_provider_credentials,
+            unattributable_author_models,
+        )
     except Exception:  # pragma: no cover - defensive; llm deps optional
         return
     # Use the public reset so warning latches and every present/future routing
@@ -48,7 +51,10 @@ def report_readiness(provider: str) -> None:
     # as model_config gains another piece of cached state.
     model_config.clear_caches()
 
-    problems = missing_provider_credentials()
+    # The same two checks `agent ingest` preflights with, so a model name typed
+    # into the custom-backend prompt as a family alias is caught here, not at
+    # the first ingest.
+    problems = missing_provider_credentials() + unattributable_author_models()
     if not problems:
         if provider == "chat-relay":
             print("✓ Chat-relay configured — no key needed; a chat agent answers "

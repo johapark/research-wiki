@@ -46,6 +46,7 @@ from .runner_support import (
 from .relay import set_relay_identity
 from ..fsatomic import write_text_atomic
 from ..log import log
+from ..provenance import specific_author_model
 
 
 def _keyword_body_gaps(keywords: list[str], body_text: str) -> list[str]:
@@ -834,6 +835,26 @@ def _phase_commit(ctx: Context, conn) -> Path:
             log(f"promote  → --auto-promote forced over failed gates: {gate.reasons}", tag="agent")
             gate = promote_mod.GateResult(
                 promoted=True, reasons=gate.reasons, warnings=gate.warnings,
+            )
+
+    # `promote_to_wiki` refuses a page it cannot attribute, so no mode —
+    # `--auto-promote` included — can land one. Decide that here, where the
+    # sandbox branch keeps the paid draft for review and the run exits 1 as a
+    # review outcome. Reaching promote instead raised PromoteFailed: exit 2,
+    # which batch `--resume` retries by re-running the whole paid pipeline into
+    # the same refusal. Preflight normally stops a config like this before the
+    # first call; this catches what it cannot see.
+    if gate.promoted:
+        winner_model = ctx.winner.model if ctx.winner else None
+        if not specific_author_model(winner_model):
+            gate = promote_mod.GateResult(
+                promoted=False,
+                reasons=[
+                    f"author_model: winning draft's model {winner_model!r} is "
+                    "not an exact model id, so the page cannot record which "
+                    "model authored it"
+                ],
+                warnings=gate.warnings,
             )
 
     # Surface non-blocking warnings (e.g. drafter hallucinated wikilinks

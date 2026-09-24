@@ -923,6 +923,20 @@ def pricing_modifiers() -> dict:
     return dict(_pricing().get("modifiers") or {})
 
 
+def priced_model_ids() -> frozenset[str]:
+    """Exact model ids the pricing table lists, lowercased.
+
+    `provenance.specific_author_model` reads this to tell a vendor's genuine
+    bare-version id (`gpt-5.5`, `gpt-4.1`) from a family alias that ships only
+    as tiers (`gpt-5.6`) — a distinction no id shape can make. Exact keys only:
+    `rate_for`'s prefix match would price `gpt-5.6` as `gpt-5`.
+    """
+    table = _pricing().get("models") or {}
+    if not isinstance(table, dict):
+        return frozenset()
+    return frozenset(str(key).lower() for key in table)
+
+
 def _pick_dated_rate(entries: list, today: _dt.date) -> dict | None:
     """Choose among time-boxed entries for one model.
 

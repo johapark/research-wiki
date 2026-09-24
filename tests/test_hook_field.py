@@ -429,7 +429,7 @@ def test_placeholder_author_model_counts_as_missing(tmp_wiki):
     assert find_missing_author_model(*_walk(tmp_wiki)) == ["synthesis/a-topic"]
 
 
-@pytest.mark.parametrize("model", ["gpt-5", "gpt-5.6", "codex/gpt-5.6"])
+@pytest.mark.parametrize("model", ["gpt-5.6", "codex/gpt-5.6", "claude-4", "qwen3"])
 def test_generic_author_model_counts_as_missing(tmp_wiki, model):
     _mkpage(
         tmp_wiki,
@@ -437,6 +437,22 @@ def test_generic_author_model_counts_as_missing(tmp_wiki, model):
         f'type: synthesis\ntitle: S\nauthor_model: "{model}"',
     )
     assert find_missing_author_model(*_walk(tmp_wiki)) == ["synthesis/a-topic"]
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["gpt-5", "gpt-5.1", "gpt-5.5", "gpt-4.1", "llama3.1:8b", "qwen3:32b",
+     "gpt-5.6-terra", "claude-opus-4-7"],
+)
+def test_exact_author_model_ids_are_clean(tmp_wiki, model):
+    """Bare-version ids the pricing table lists, and Ollama `:tag` ids, each
+    name one model. Flagging them flagged every page such a model wrote."""
+    _mkpage(
+        tmp_wiki,
+        "synthesis/a-topic",
+        f'type: synthesis\ntitle: S\nauthor_model: "{model}"',
+    )
+    assert find_missing_author_model(*_walk(tmp_wiki)) == []
 
 
 def test_an_empty_author_model_counts_as_missing(tmp_wiki):

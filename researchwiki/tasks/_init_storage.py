@@ -27,6 +27,9 @@ def confirm_storage_layout(
     present = [path for path in paths if path.exists() or path.is_symlink()]
 
     if present:
+        # Only a path that cannot hold content blocks the rerun: a dangling
+        # sync link, or a file where a directory belongs. Replacing either would
+        # strand the real content, which is `ensure_scaffold`'s refusal too.
         invalid = [path for path in present if not path.is_dir()]
         if invalid:
             names = ", ".join(path.name for path in invalid)
@@ -36,26 +39,26 @@ def confirm_storage_layout(
                 "were made."
             )
             return False
-        if len(present) != len(paths):
-            names = ", ".join(path.name for path in paths if path not in present)
+        # Anything else is a layout the user already chose, and rerunning init
+        # must not refuse it. The wizard says it is safe to rerun. That covers
+        # a deleted empty `inbox/`, which the scaffold simply recreates, and
+        # synced `wiki/` + `papers/` beside a local `inbox/`, where only the two
+        # content dirs need to sit together in the vault.
+        for path in paths:
+            if path not in present:
+                print(f"  {path.name}/: missing; the scaffold creates it as an "
+                      "ordinary directory in this checkout.")
+            elif path.is_symlink():
+                print(f"  {path.name}/: synced link → {path.resolve()}")
+            else:
+                print(f"  {path.name}/: ordinary directory")
+        linked_missing = any(p.is_symlink() for p in present) and len(present) < len(paths)
+        if linked_missing:
             print(
-                f"Storage layout is incomplete; missing: {names}. Complete all "
-                "three durable paths before rerunning init. No scaffold changes "
-                "were made."
+                "To sync a missing directory as well, link it into your synced "
+                "folder before continuing (README.md § Sync across computers)."
             )
-            return False
-        link_flags = [path.is_symlink() for path in paths]
-        if any(link_flags) and not all(link_flags):
-            print(
-                "Storage layout mixes symlinks with ordinary directories. Link "
-                "wiki/, papers/, and inbox/ together, or keep all three local, "
-                "then rerun init. No scaffold changes were made."
-            )
-            return False
-        if all(link_flags):
-            print("Using the existing synced wiki/, papers/, and inbox/ links.")
-        else:
-            print("Using the existing local wiki/, papers/, and inbox/ directories.")
+        print("Using the existing storage layout.")
         return True
 
     if not confirm("Sync wiki/, papers/, and inbox/ across devices?", default=False):

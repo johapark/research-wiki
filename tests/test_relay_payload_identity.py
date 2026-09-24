@@ -120,9 +120,13 @@ def test_relay_rejects_an_ambiguous_model_family_alias(tmp_path, via):
         )
 
 
-def test_relay_accepts_an_exact_gpt_variant(tmp_path):
+@pytest.mark.parametrize(
+    "via", ["codex/gpt-5.6-terra", "codex/gpt-5.5", "ollama/qwen3:32b"],
+)
+def test_relay_accepts_an_exact_model_id(tmp_path, via):
+    """A priced bare-version id (`gpt-5.5`) or an Ollama tag names one model."""
     relay._check_response_shape(
-        {"via": "codex/gpt-5.6-terra", "response": "ok"},
+        {"via": via, "response": "ok"},
         tmp_path / "response.json",
         schema=None,
     )

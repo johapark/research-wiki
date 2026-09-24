@@ -409,6 +409,22 @@ def _cmd_ingest(args) -> int:
         )
         return 2
     except PromoteFailed as e:
+        if e.page_path is None:
+            # Promote refused before its first write (the author-model guard),
+            # so there is no partial state to inspect or delete.
+            print(
+                f"{_prog()}: promote refused — nothing was written.",
+                file=sys.stderr,
+            )
+            print(f"  stem: {e.stem}", file=sys.stderr)
+            for w in e.warnings:
+                print(f"  cause: {w}", file=sys.stderr)
+            print("  on disk: unchanged; the PDF is still in inbox/.", file=sys.stderr)
+            print(
+                "  fix: resolve the cause, then re-run this PDF.",
+                file=sys.stderr,
+            )
+            return 2
         # Known-failure mode: the wiki page landed but a later promote step
         # didn't. Print exactly what is on disk so the half-landed state can be
         # finished or undone by hand — no stack trace.

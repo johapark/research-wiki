@@ -95,7 +95,10 @@ def _dependency_checks() -> list[Check]:
 def _provider_checks() -> list[Check]:
     try:
         from ..agents import model_config
-        from ..agents.llm import missing_provider_credentials
+        from ..agents.llm import (
+            missing_provider_credentials,
+            unattributable_author_models,
+        )
 
         phases = model_config.list_phases()
         for phase in phases:
@@ -104,6 +107,7 @@ def _provider_checks() -> list[Check]:
         source = str(config) if config.exists() else "built-in OpenAI defaults"
         checks = [Check("ok", "Model routing", f"valid ({source})")]
         problems = missing_provider_credentials()
+        unattributable = unattributable_author_models()
     except Exception as e:
         return [Check(
             "block", "Model routing", str(e),
@@ -117,6 +121,11 @@ def _provider_checks() -> list[Check]:
         ))
     else:
         checks.append(Check("ok", "Provider", "credentials and local routing look usable"))
+    if unattributable:
+        checks.append(Check(
+            "block", "Author model", "\n".join(unattributable),
+            "name an exact model variant for the author, evolve, and debug phases",
+        ))
     return checks
 
 

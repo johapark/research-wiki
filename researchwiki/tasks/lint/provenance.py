@@ -10,8 +10,11 @@ Both fields are recoverable *facts* rather than derivations — every ingest wri
 Zero tokens, no network: one SQLite read and one atomic write per page.
 
 **The recovery rule.** For each stem, take the last committed attempt *that used
-a real model*, then read `ingested_at` from that commit row's `created_at` and
-`author_model` from the attempt's `author` row.
+a real model*. Read `ingested_at` from that commit row's `created_at`. Read
+`author_model` from the draft the commit row links to as its winner, falling
+back to the attempt's `author` rows on legacy logs that lack the link. When that
+attempt's author has no exact id, `author_model` is left blank. It is never
+taken from an older attempt, because an older attempt did not write the page.
 
 "Real model" is load-bearing, not a formality. `agents.llm` records
 `model=f"stub:{model}"` for a deterministic placeholder whose text begins "STUB
@@ -34,6 +37,9 @@ committed this paper*, which for a re-ingested page need not be the run that
 produced the page now on disk — a fine basis for filling a blank, a bad one for
 correcting a value a page already asserts. Pages with several committed attempts
 are flagged in the report so the imprecision is visible rather than implied.
+A placeholder (`TODO`) or family alias (`gpt-5.6`) is not an asserted value,
+because `lint` reports it as missing. It is replaced only by an exact id that
+refines it (`gpt-5.6` → `gpt-5.6-terra`); a contradiction is reported and left.
 
 **Recovered values are marked.** Both fields carry a trailing
 `# recovered from ingest_iterations` comment: YAML and Dataview ignore it, and a
@@ -61,7 +67,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ...fsatomic import write_text_atomic
-from ...provenance import specific_author_model
+from ...provenance import normalized_author_model, specific_author_model
 from ...wiki import commit_page, read_pages
 
 #: `model_used` values that name a non-call rather than a model. `promote`
@@ -105,25 +111,50 @@ def _is_real_model(name: str) -> bool:
     would credit a placeholder run for a page it did not write.
     """
     n = (name or "").strip().lower()
-    return (
-        bool(n)
-        and n not in _NOT_A_MODEL
-        and not n.startswith("stub:")
-        and bool(specific_author_model(name))
-    )
+    return bool(n) and n not in _NOT_A_MODEL and not n.startswith("stub:")
 
 
-def _read_log() -> dict[str, tuple[int, str, int]]:
-    """`{stem: (commit_epoch, author_model, n_committed_attempts)}`.
+def _attempt_author(
+    parent_model: str | None, attempt_models: set[str],
+) -> tuple[bool, str | None]:
+    """`(authored, model)` for one committed attempt.
 
-    The chosen attempt is the **last committed attempt that used a real model**,
-    not simply the last committed one — see `_is_real_model`. A stem whose every
-    committed attempt was a stub is omitted entirely: nothing about it can be
-    recovered honestly.
+    `authored` is False only when the attempt wrote nothing, i.e. a stub. Such
+    an attempt is skipped, so an earlier real run still stands. `model` is None
+    when a real model authored the page but no exact id can be named for it.
+    That case must *not* be skipped the same way: the older run it would fall
+    back to did not write the page now on disk.
 
-    An attempt running a tournament could carry several author models; where it
-    does, no single value is the page's author, so that attempt is passed over
-    rather than guessed at.
+    The commit row's `parent_iteration_id` names the draft that won, whether
+    that was an author, evolve, or debug output, so its model is the author.
+    Legacy rows without that link fall back to the attempt's author rows, and
+    are attributable only when they carry exactly one real model. A tournament
+    across several models without the link has no single author.
+    """
+    if parent_model is not None:
+        if not _is_real_model(parent_model):
+            return False, None
+        return True, specific_author_model(parent_model) or None
+    real = {m for m in attempt_models if _is_real_model(m)}
+    if not real:
+        return False, None
+    if len(real) > 1:
+        return True, None
+    return True, specific_author_model(next(iter(real))) or None
+
+
+def _read_log() -> dict[str, tuple[int, str | None, int]]:
+    """`{stem: (commit_epoch, author_model | None, n_committed_attempts)}`.
+
+    The chosen attempt is the **last committed attempt that a real model
+    authored**, not simply the last committed one — see `_is_real_model`. A stem
+    whose every committed attempt was a stub is omitted entirely: nothing about
+    it can be recovered honestly.
+
+    `author_model` is None when that attempt's author cannot be recorded
+    exactly, because it was an ambiguous tournament or used a family alias.
+    The commit date is still known, so `ingested_at` stays recoverable, but no
+    model is credited. That includes the model of an older run.
 
     Degrades to `{}` when the DB is missing or unreadable, which `survey` turns
     into the migration refusal.
@@ -136,10 +167,12 @@ def _read_log() -> dict[str, tuple[int, str, int]]:
         return {}
     try:
         commits = conn.execute(
-            "SELECT paper_stem, attempt_id, created_at FROM ingest_iterations "
-            " WHERE role = 'commit' AND decision LIKE 'committed%' "
-            "   AND paper_stem IS NOT NULL "
-            " ORDER BY created_at"
+            "SELECT c.paper_stem, c.attempt_id, c.created_at, w.model_used "
+            "  FROM ingest_iterations c "
+            "  LEFT JOIN ingest_iterations w ON w.id = c.parent_iteration_id "
+            " WHERE c.role = 'commit' AND c.decision LIKE 'committed%' "
+            "   AND c.paper_stem IS NOT NULL "
+            " ORDER BY c.created_at"
         ).fetchall()
         authors = conn.execute(
             "SELECT DISTINCT attempt_id, model_used FROM ingest_iterations "
@@ -152,17 +185,18 @@ def _read_log() -> dict[str, tuple[int, str, int]]:
 
     by_attempt: dict[str, set[str]] = {}
     for attempt, model in authors:
-        if _is_real_model(model):
-            by_attempt.setdefault(attempt, set()).add(model.strip())
+        by_attempt.setdefault(attempt, set()).add(model.strip())
 
-    out: dict[str, tuple[int, str, int]] = {}
+    out: dict[str, tuple[int, str | None]] = {}
     totals: dict[str, int] = {}
-    for stem, attempt, ts in commits:             # ascending, so later wins
+    for stem, attempt, ts, parent_model in commits:   # ascending, so later wins
         totals[stem] = totals.get(stem, 0) + 1
-        models = by_attempt.get(attempt, set())
-        if len(models) == 1:
-            out[stem] = (int(ts), next(iter(models)), 0)
-    return {s: (ts, m, totals[s]) for s, (ts, m, _) in out.items()}
+        authored, model = _attempt_author(
+            parent_model, by_attempt.get(attempt, set()),
+        )
+        if authored:
+            out[stem] = (int(ts), model)
+    return {s: (ts, m, totals[s]) for s, (ts, m) in out.items()}
 
 
 def telemetry_author_models() -> dict[str, str]:
@@ -170,8 +204,9 @@ def telemetry_author_models() -> dict[str, str]:
 
     Kept as a small public view so the reviewed provenance migration uses the
     same stub filtering and last-real-committed-attempt rule as ``lint --fix``.
+    Stems whose latest real attempt cannot be attributed exactly are absent.
     """
-    return {stem: row[1] for stem, row in _read_log().items()}
+    return {stem: row[1] for stem, row in _read_log().items() if row[1]}
 
 
 # ---------- candidate selection ----------
@@ -190,6 +225,22 @@ class Survey:
     recoverable: list[Recovery] = field(default_factory=list)
     no_telemetry: list[str] = field(default_factory=list)
     has_telemetry: bool = True
+    #: Pages whose recorded generic `author_model` the log contradicts rather
+    #: than refines. Left alone, because the log's last run need not be the
+    #: one that wrote the page.
+    conflicts: list[str] = field(default_factory=list)
+
+
+def _replaceable(recorded: str, recovered: str) -> bool:
+    """Whether a recovered exact id may replace what the page records.
+
+    A placeholder (`TODO`, blank) asserts nothing, so it is always replaceable.
+    A generic value such as `gpt-5.6` does assert a family. It may give way only
+    to an id that refines it, like `gpt-5.6-terra`. An unrelated id would be a
+    correction, which this repair never makes.
+    """
+    recorded = normalized_author_model(recorded)
+    return not recorded or recorded.lower() in recovered.lower()
 
 
 def survey() -> Survey:
@@ -210,9 +261,12 @@ def survey() -> Survey:
     for page in read_pages():
         if page.page_type not in ("paper", "commentary"):
             continue
-        missing = [f for f in ("ingested_at", "author_model")
-                   if not page.str_field(f).strip()]
-        if not missing:
+        # Same test `lint` reports with: a placeholder or family alias is not
+        # provenance, so `--fix` must be able to repair what the report lists.
+        recorded_model = page.str_field("author_model")
+        missing_model = not specific_author_model(recorded_model)
+        missing_date = not page.str_field("ingested_at").strip()
+        if not (missing_model or missing_date):
             continue
         entry = log.get(page.stem)
         if entry is None:
@@ -221,16 +275,20 @@ def survey() -> Survey:
         ts, model, n_attempts = entry
         rec = Recovery(path=page.path, key=page.key, stem=page.stem, attempts=n_attempts)
 
-        if not page.str_field("ingested_at").strip():
+        if missing_date:
             rec.ingested_at = datetime.fromtimestamp(ts).strftime("%Y-%m-%dT%H:%M:%S")
             rec.fields.append("ingested_at")
-        if not page.str_field("author_model").strip():
-            rec.author_model = model
-            rec.fields.append("author_model")
+        if missing_model and model:
+            if _replaceable(recorded_model, model):
+                rec.author_model = model
+                rec.fields.append("author_model")
+            else:
+                out.conflicts.append(page.key)
         if rec.fields:
             out.recoverable.append(rec)
     out.recoverable.sort(key=lambda r: r.key)
     out.no_telemetry.sort()
+    out.conflicts.sort()
     return out
 
 
@@ -268,8 +326,17 @@ def _apply(rec: Recovery) -> bool:
     # YAML timestamp there, because Dataview's date column will not parse a
     # string. The trailing comment does not change the parsed type.
     if rec.author_model:
-        lines.insert(_anchor("keywords", "tags", "year"),
-                     f'author_model: "{rec.author_model}"  {RECOVERED_MARKER}')
+        line = f'author_model: "{rec.author_model}"  {RECOVERED_MARKER}'
+        # A placeholder or family alias is replaced in place: inserting beside
+        # it would leave two `author_model:` keys, and YAML keeps the last.
+        existing = [i for i, text in enumerate(lines)
+                    if text.startswith("author_model:")]
+        if existing:
+            lines[existing[0]] = line
+            for i in reversed(existing[1:]):
+                del lines[i]
+        else:
+            lines.insert(_anchor("keywords", "tags", "year"), line)
     if rec.ingested_at:
         lines.insert(_anchor("author_model", "keywords", "tags", "year"),
                      f"ingested_at: {rec.ingested_at}  {RECOVERED_MARKER}")
@@ -333,4 +400,8 @@ def apply_provenance_fixes() -> dict[str, int]:
     if found.no_telemetry:
         print(f"  provenance: {len(found.no_telemetry)} page(s) left alone — no telemetry "
               f"for them (migrated or hand-written), e.g. {found.no_telemetry[0]}")
+    if found.conflicts:
+        print(f"  provenance: {len(found.conflicts)} page(s) left alone — the recorded "
+              f"generic author_model disagrees with the log's model, so only a "
+              f"reviewer can say which is right, e.g. {found.conflicts[0]}")
     return stats

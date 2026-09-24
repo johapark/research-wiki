@@ -26,6 +26,7 @@ Hermetic: fake task modules, no real command runs.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 import pytest
@@ -259,7 +260,7 @@ def test_authored_page_gates_reject_generic_author_model(
 
     page = tmp_path / "page.md"
     page.write_text(
-        "---\ntitle: X\ntype: synthesis\nauthor_model: gpt-5\n---\n\n"
+        "---\ntitle: X\ntype: synthesis\nauthor_model: gpt-5.6\n---\n\n"
         "## Question\n\nNothing to grade.\n",
         encoding="utf-8",
     )
@@ -267,6 +268,30 @@ def test_authored_page_gates_reject_generic_author_model(
 
     assert mod.main([str(page)]) == 1
     assert "missing or underspecified" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("module_name", ["check_grounding", "_grade_synthesis"])
+def test_authored_page_gates_name_malformed_yaml_not_author_model(
+    module_name, tmp_path, capsys,
+):
+    """A YAML typo elsewhere used to parse as `{}` — a `paper` with no model —
+    so the gate demanded an `author_model` the page already had, and fixing
+    the named field changed nothing."""
+    import importlib
+
+    page = tmp_path / "page.md"
+    page.write_text(
+        "---\ntitle: X\ntype: synthesis\nauthor_model: \"claude-opus-4-7\"\n"
+        "tags: [a, b\n---\n\n## Question\n\nNothing to grade.\n",
+        encoding="utf-8",
+    )
+    mod = importlib.import_module(f"researchwiki.tasks.{module_name}")
+
+    assert mod.main([str(page), "--json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["finding"] == "invalid_frontmatter"
+    assert "not valid YAML" in report["error"]
+    assert "author_model" not in report["error"]
 
 
 # ---------- import ----------

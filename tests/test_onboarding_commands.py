@@ -163,3 +163,19 @@ def test_already_present_receipt_is_explicit(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Paper already present" in out
     assert "Paper added" not in out
+
+
+def test_doctor_blocks_an_unattributable_author_model(monkeypatch):
+    from researchwiki.agents import llm
+
+    monkeypatch.setattr(llm, "missing_provider_credentials", lambda: [])
+    monkeypatch.setattr(
+        llm, "unattributable_author_models",
+        lambda: ["author: model 'gpt-5.6' is a family alias"],
+    )
+
+    checks = doctor._provider_checks()
+
+    blocked = [c for c in checks if c.level == "block"]
+    assert [c.label for c in blocked] == ["Author model"]
+    assert "gpt-5.6" in blocked[0].detail

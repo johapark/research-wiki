@@ -49,16 +49,27 @@ def _page(wiki, stem, extra: str = "", ptype: str = "paper") -> None:
 
 
 def _log(rows: list[tuple]) -> None:
-    """Seed `ingest_iterations` with (attempt, stem, role, decision, model, ts)."""
+    """Seed `ingest_iterations` with (attempt, stem, role, decision, model, ts).
+
+    A row may carry a seventh element, the 1-based position of an earlier row
+    in the same call, which is written as `parent_iteration_id`. The commit
+    row's parent is the winning draft, which is how the real runner links them.
+    """
     conn = sqlite3.connect(db_path())
     conn.execute("""CREATE TABLE IF NOT EXISTS ingest_iterations (
         id INTEGER PRIMARY KEY AUTOINCREMENT, attempt_id TEXT, paper_stem TEXT,
         pdf_filename TEXT, iteration INTEGER, role TEXT, decision TEXT,
-        model_used TEXT, created_at INTEGER)""")
-    conn.executemany(
-        "INSERT INTO ingest_iterations (attempt_id, paper_stem, role, decision, "
-        "model_used, created_at, pdf_filename, iteration) VALUES (?,?,?,?,?,?,'x.pdf',1)",
-        rows)
+        model_used TEXT, created_at INTEGER, parent_iteration_id INTEGER)""")
+    ids: list[int] = []
+    for row in rows:
+        attempt, stem, role, decision, model, ts, *parent = row
+        parent_id = ids[parent[0] - 1] if parent and parent[0] else None
+        cur = conn.execute(
+            "INSERT INTO ingest_iterations (attempt_id, paper_stem, role, decision, "
+            "model_used, created_at, pdf_filename, iteration, parent_iteration_id) "
+            "VALUES (?,?,?,?,?,?,'x.pdf',1,?)",
+            (attempt, stem, role, decision, model, ts, parent_id))
+        ids.append(cur.lastrowid)
     conn.commit()
     conn.close()
 
@@ -132,11 +143,95 @@ def test_non_model_sentinels_are_not_recovered(wiki, sentinel):
     assert survey().recoverable == []
 
 
-@pytest.mark.parametrize("model", ["gpt-5", "gpt-5.6", "codex/gpt-5.6"])
-def test_generic_model_aliases_are_not_recovered(wiki, model):
+@pytest.mark.parametrize("model", ["gpt-5.6", "codex/gpt-5.6", "claude-4"])
+def test_generic_model_aliases_are_not_credited(wiki, model):
+    """The date is still a recorded fact; only the model is unattributable."""
     _page(wiki, "a-2024-x")
     _log(_committed("A1", "a-2024-x", model, REAL))
-    assert survey().recoverable == []
+    rec = survey().recoverable[0]
+    assert rec.fields == ["ingested_at"] and rec.author_model is None
+
+
+@pytest.mark.parametrize("model", ["gpt-5", "gpt-5.5", "gpt-4.1", "qwen3:32b"])
+def test_exact_bare_version_ids_are_recovered(wiki, model):
+    """Priced bare-version ids and Ollama tags name one model, not a family."""
+    _page(wiki, "a-2024-x")
+    _log(_committed("A1", "a-2024-x", model, REAL))
+    assert survey().recoverable[0].author_model == model
+
+
+def test_an_unattributable_later_run_does_not_fall_back_to_an_older_one(wiki):
+    """The later run wrote the page, so the earlier run's model is not the
+    author even though the later one cannot be named exactly."""
+    _page(wiki, "a-2024-x")
+    _log(_committed("A1", "a-2024-x", "claude-sonnet-4-6", REAL)
+         + _committed("A2", "a-2024-x", "gpt-5.6", REAL + 5000))
+    rec = survey().recoverable[0]
+    assert rec.author_model is None
+    assert "author_model" not in rec.fields
+
+
+def test_the_committed_winner_is_credited_in_a_mixed_tournament(wiki):
+    """The commit row links to the winning draft; the losing author's model
+    must not be credited, and the mix must not make the attempt unattributable."""
+    _page(wiki, "a-2024-x")
+    _log([
+        ("A1", "a-2024-x", "author", "kept", "gpt-5", REAL),
+        ("A1", "a-2024-x", "author", "kept", "gpt-5.6-terra", REAL + 1),
+        ("A1", "a-2024-x", "commit", "committed-to-wiki", None, REAL + 10, 1),
+    ])
+    assert survey().recoverable[0].author_model == "gpt-5"
+
+
+def test_a_debug_winner_is_credited_over_the_original_author(wiki):
+    _page(wiki, "a-2024-x")
+    _log([
+        ("A1", "a-2024-x", "author", "kept", "gpt-5.6-luna", REAL),
+        ("A1", "a-2024-x", "debug", "kept", "gpt-5.6-terra", REAL + 1, 1),
+        ("A1", "a-2024-x", "commit", "committed-to-wiki", None, REAL + 10, 2),
+    ])
+    assert survey().recoverable[0].author_model == "gpt-5.6-terra"
+
+
+def test_a_legacy_tournament_without_a_winner_link_is_unattributable(wiki):
+    _page(wiki, "a-2024-x")
+    _log([
+        ("A1", "a-2024-x", "author", "kept", "gpt-5", REAL),
+        ("A1", "a-2024-x", "author", "kept", "gpt-5.6-terra", REAL + 1),
+        ("A1", "a-2024-x", "commit", "committed-to-wiki", None, REAL + 10),
+    ])
+    assert survey().recoverable[0].author_model is None
+
+
+@pytest.mark.parametrize("recorded", ["TODO", "gpt-5.6"])
+def test_a_placeholder_or_alias_is_replaced_in_place(wiki, recorded):
+    """`lint` reports these as missing, so `--fix` must repair them — by
+    replacing the line, since a second `author_model:` key would leave YAML
+    reading whichever comes last."""
+    _page(wiki, "a-2024-x",
+          f'author_model: "{recorded}"\ningested_at: 2026-01-01T00:00:00\n')
+    _log(_committed("A1", "a-2024-x", "gpt-5.6-terra", REAL))
+
+    stats = apply_provenance_fixes()
+    assert stats["author_model_keys"] == ["ai/a-2024-x"]
+    text = (wiki / "ai" / "a-2024-x.md").read_text(encoding="utf-8")
+    assert text.count("author_model:") == 1
+    assert f'author_model: "gpt-5.6-terra"  {RECOVERED_MARKER}' in text
+
+
+def test_a_contradicted_alias_is_reported_not_replaced(wiki, capsys):
+    """`gpt-5.6` → `claude-sonnet-4-6` would be a correction, not a refinement,
+    and the log's newest run need not be the page's author."""
+    _page(wiki, "a-2024-x",
+          'author_model: "gpt-5.6"\ningested_at: 2026-01-01T00:00:00\n')
+    _log(_committed("A1", "a-2024-x", "claude-sonnet-4-6", REAL))
+
+    found = survey()
+    assert found.recoverable == [] and found.conflicts == ["ai/a-2024-x"]
+    apply_provenance_fixes()
+    assert "disagrees with the log" in capsys.readouterr().out
+    text = (wiki / "ai" / "a-2024-x.md").read_text(encoding="utf-8")
+    assert 'author_model: "gpt-5.6"\n' in text
 
 
 def test_an_uncommitted_attempt_is_ignored(wiki):

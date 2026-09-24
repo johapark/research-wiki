@@ -93,11 +93,11 @@ def test_plan_treats_generic_model_alias_as_unresolved(corpus, monkeypatch):
         wiki,
         "synthesis/generic",
         ptype="synthesis",
-        extra='author_model: "gpt-5"\n',
+        extra='author_model: "gpt-5.6"\n',
     )
     monkeypatch.setattr(
         "researchwiki.tasks.lint.provenance.telemetry_author_models",
-        lambda: {"generic": "gpt-5"},
+        lambda: {"generic": "gpt-5.6"},
     )
 
     _run, document = provenance.create_plan()
@@ -112,12 +112,27 @@ def test_apply_rejects_generic_attested_model(corpus):
     _page(wiki, "synthesis/page", ptype="synthesis")
     run, document = provenance.create_plan()
     document["items"][0].update(
-        decision="set-author-model", author_model="gpt-5"
+        decision="set-author-model", author_model="gpt-5.6"
     )
     write_json_atomic(run / "manifest.json", document)
 
     with pytest.raises(provenance.ProvenanceMigrationError, match="exact author_model"):
         provenance.apply_plan(run)
+
+
+@pytest.mark.parametrize("model", ["gpt-5.5", "gpt-4.1", "qwen3:32b"])
+def test_apply_accepts_exact_bare_version_and_tagged_models(corpus, model):
+    """A priced bare-version id or an Ollama tag names one model. Refusing it
+    left only `skip` or a false `legacy-unrecorded` acknowledgment."""
+    _root, wiki = corpus
+    page = _page(wiki, "synthesis/page", ptype="synthesis")
+    run, document = provenance.create_plan()
+    document["items"][0].update(decision="set-author-model", author_model=model)
+    write_json_atomic(run / "manifest.json", document)
+
+    provenance.apply_plan(run)
+
+    assert f"author_model: {json.dumps(model)}" in page.read_text(encoding="utf-8")
 
 
 def test_pending_decision_blocks_before_backup_or_page_writes(corpus):

@@ -118,7 +118,9 @@ The `via` field is required. It is the source of `author_model:` for the
 committed page, so name the exact model variant that authored the response.
 Family labels are rejected for every provider: for example,
 `codex/gpt-5.6` and `claude-code/claude-4` are ambiguous. Write an exact
-variant such as `codex/gpt-5.6-terra` or `claude-code/opus-4-7`.
+variant such as `codex/gpt-5.6-terra` or `claude-code/opus-4-7`. A bare
+version the vendor ships as a model of its own (`gpt-5.5`, listed in
+`config/pricing.yaml`) is exact, as is an Ollama tag like `qwen3:32b`.
 Do not copy `model_hint` unless it is also the model you actually used.
 
 ### Atomic write

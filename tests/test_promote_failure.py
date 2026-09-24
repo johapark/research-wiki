@@ -144,6 +144,58 @@ def test_successful_promote_is_unaffected(ctx, commit_env, monkeypatch, tmp_path
     assert ctx.outcome == "promoted"
 
 
+@pytest.mark.parametrize("mode", ["auto", "always"])
+def test_unattributable_winner_is_sandboxed_not_promoted(
+    ctx, commit_env, monkeypatch, tmp_path, mode,
+):
+    """Promote would refuse this page, raising PromoteFailed (exit 2), and batch
+    `--resume` retries exit 2 by re-running the whole paid pipeline. Routing to
+    the sandbox keeps the draft for review and exits 1 — `--auto-promote`
+    included, since promote refuses the page regardless of gates."""
+    ctx.promote_mode = mode
+    ctx.winner.model = "gpt-5.6"
+    monkeypatch.setattr(
+        promote_mod, "promote_to_wiki",
+        lambda **kw: pytest.fail("an unattributable page must not reach promote"),
+    )
+    monkeypatch.setattr(promote_mod, "_suggest_category", lambda *a, **k: (None, None))
+
+    out = runner._phase_commit(ctx, conn=None)
+
+    assert out.parent == ctx.sandbox_dir
+    assert ctx.outcome == "sandboxed"
+    assert any("author_model" in r for r in ctx.gate_reasons)
+    commits = [r for r in commit_env if r.get("role") == "commit"]
+    assert commits[0]["decision"] == "committed-to-sandbox"
+
+
+def test_cli_reports_a_refused_promote_as_nothing_written(monkeypatch, capsys, tmp_path):
+    """A refusal before the first write must not tell the user the paper is
+    partially landed, or to delete a page that was never written."""
+    from researchwiki.tasks import agent as agent_cli
+    from researchwiki.agents import llm
+
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(llm, "preflight_providers", lambda: None)
+    monkeypatch.setattr(agent_cli, "_drain_pending_mutations", lambda: None)
+
+    def refuse(*a, **kw):
+        raise PromoteFailed(
+            stem="smith-2024-a-paper", page_path=None,
+            warnings=["promotion refused: author_model must name the exact model"],
+        )
+    monkeypatch.setattr(agent_cli, "run_ingest", refuse)
+
+    rc = agent_cli.main(["ingest", str(pdf)])
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "nothing was written" in err
+    assert "PARTIALLY" not in err
+    assert "delete the partial page" not in err
+
+
 def test_memory_evolution_is_off_by_default(ctx, commit_env, monkeypatch, tmp_path):
     page = tmp_path / "page.md"
     monkeypatch.setattr(promote_mod, "promote_to_wiki", lambda **kw:
@@ -440,7 +492,7 @@ def test_real_promote_commits_the_happy_path(wiki_root):
     assert mut.pending_journals() == []
 
 
-@pytest.mark.parametrize("model", [None, "gpt-5", "gpt-5.6"])
+@pytest.mark.parametrize("model", [None, "gpt-5.6", "claude-4"])
 def test_real_promote_refuses_missing_or_generic_author_model(wiki_root, model):
     res = _promote(wiki_root, author_model=model)
 
