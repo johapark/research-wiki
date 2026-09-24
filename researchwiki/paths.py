@@ -17,9 +17,14 @@ from pathlib import Path
 # `wiki/` cannot be the checkout marker because `init` is precisely the command
 # that creates it. Keep this list small and structural so source archives remain
 # supported even when `.git/` is absent.
+#
+# Only the assets the CLI loads relative to the working directory belong here.
+# The package itself comes from the install (`pip install .` copies it into
+# site-packages), so `pyproject.toml` / `researchwiki/__init__.py` in the
+# working directory prove nothing the CLI needs. Requiring them refused a
+# working tree that has every runtime asset, which is what the installed-CLI
+# acceptance lifecycle builds.
 _CHECKOUT_MARKERS: tuple[tuple[str, str], ...] = (
-    ("pyproject.toml", "file"),
-    ("researchwiki/__init__.py", "file"),
     ("config/pricing.yaml", "file"),
     ("prompts/author-system-research.md", "file"),
 )

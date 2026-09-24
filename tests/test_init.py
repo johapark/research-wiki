@@ -1554,6 +1554,21 @@ def test_init_rejects_non_checkout_before_scaffold(tmp_path, monkeypatch, capsys
     assert "not a complete research-wiki checkout" in capsys.readouterr().err
 
 
+def test_checkout_guard_needs_runtime_assets_not_package_source(tmp_path):
+    """The package is loaded from the install, so the working directory needs
+    only what the CLI reads relative to it. Requiring `pyproject.toml` refused
+    the installed-CLI acceptance tree, which has every runtime asset."""
+    from researchwiki.paths import missing_checkout_assets
+
+    for relative in ("config/pricing.yaml", "prompts/author-system-research.md"):
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relative).write_text("")
+
+    assert missing_checkout_assets(tmp_path) == []
+    (tmp_path / "config" / "pricing.yaml").unlink()
+    assert missing_checkout_assets(tmp_path) == ["config/pricing.yaml"]
+
+
 def test_init_help_works_outside_checkout_without_writing(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
@@ -1682,9 +1697,7 @@ def test_no_orphaned_wizard_steps():
 
 def _isolated_wiki(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "pyproject.toml").write_text("[project]\nname='test'\n")
     for relative in (
-        "researchwiki/__init__.py",
         "config/pricing.yaml",
         "prompts/author-system-research.md",
     ):

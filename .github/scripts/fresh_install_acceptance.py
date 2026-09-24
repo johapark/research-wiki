@@ -379,6 +379,22 @@ finally:
         hopper_stem,
     )
     synthesis = root / "wiki" / "synthesis" / "acceptance-pipeline-reliability.md"
+    # The scaffold cannot know which model will complete it, so it stamps
+    # `author_model: "TODO"` and the completion gates refuse it until an author
+    # records one. Pin both halves: the unedited scaffold fails, and it passes
+    # once the author step a real session performs has happened.
+    unfinished = run_cli(
+        root, env, "check-grounding", str(synthesis), "--json", expected=(1,),
+    )
+    assert json.loads(unfinished.stdout)["finding"] == "missing_author_model"
+    scaffold = synthesis.read_text(encoding="utf-8")
+    author_line = next(
+        line for line in scaffold.splitlines() if line.startswith("author_model:")
+    )
+    synthesis.write_text(
+        scaffold.replace(author_line, 'author_model: "gpt-5.6-terra"', 1),
+        encoding="utf-8",
+    )
     run_cli(root, env, "check-grounding", str(synthesis), "--quiet")
     run_cli(root, env, "grade", "synthesis", str(synthesis), "--no-semantic")
 
