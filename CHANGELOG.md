@@ -20,6 +20,8 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-25
+
 ### Added
 
 - Proposal opportunities are now surfaced to users who have never run
@@ -2304,7 +2306,8 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/johapark/research-wiki/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/johapark/research-wiki/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/johapark/research-wiki/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/johapark/research-wiki/compare/v0.4.3...v0.4.4
