@@ -6,10 +6,11 @@ Two public entry points:
                                     from a recurring term, gather member
                                     papers, add reciprocal `[[concepts/…]]`
                                     back-links.
-  - `attach_after_ingest(stem)`  — post-ingest hook: for every existing hub
-                                    whose term appears in the new paper's
-                                    contribution claims, add a spoke bullet
-                                    and reciprocal back-link.
+  - `attach_after_ingest(stem)`  — for every existing hub whose term
+                                    appears in the paper's contribution
+                                    claims, add a spoke bullet and reciprocal
+                                    back-link. Run by `concepts attach`;
+                                    ingest no longer calls it.
 
 Both share the term↔claim substrate in `term_claims`.
 """
@@ -387,8 +388,8 @@ def _attach_to_concept(
     linked). Returns True iff written.
     """
     def _splice(text: str) -> str:
-        # attach_after_ingest runs per-paper inside each batch subprocess, so
-        # two papers attaching to the same hub race on this page — the file lock in
+        # Two attaches to the same hub (concurrent `concepts attach` runs, or
+        # a scaffold alongside one) race on this page — the file lock in
         # update_locked serializes them. Returning `text` unchanged signals a
         # no-op (already linked, or structurally not a concept page).
         if f"[[{paper_key}]]" in text or f"[[{paper_key}#" in text:

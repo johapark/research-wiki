@@ -2,7 +2,8 @@
 
 Usage:
   researchwiki proposals generate "question or topic" [--papers STEM ...]
-      [--target-category CAT --cross-category] [--prepare-only] [--write] [--json]
+      [--target-category CAT --cross-category [--search-plan PLAN.json]]
+      [--prepare-only] [--write] [--json]
   researchwiki proposals accept PREVIEW.json --select 1 [2 3]
   researchwiki proposals list [--status STATUS] [--json]
   researchwiki proposals feedback ID --decision STATUS --reason TEXT [--actor NAME]
@@ -21,9 +22,34 @@ from pathlib import Path
 
 from ..categories import content_categories
 from ..log import append_log_md
-from ..proposal_generation import build_evidence_packet, expand_cross_category, generate_proposals
-from ..proposal_preview import save_preview, accept_preview
+from ..proposal_generation import (
+    apply_search_plan,
+    build_evidence_packet,
+    expand_cross_category,
+    generate_proposals,
+)
+from ..proposal_preview import PartialAccept, accept_preview, save_preview
 from ..proposals import STATUSES, append_feedback, load_proposals
+
+
+def _log_line(text: str, limit: int = 160) -> str:
+    """One line for a `log.md` entry, whose format is one `## ` H2 per event.
+
+    A multi-line reason can carry its own `## ` headings, and pasting it in
+    verbatim created spurious log entries. The full text stays in the
+    proposal page's ledger; the log only needs to point at it.
+    """
+    flat = " ".join(str(text).split())
+    return flat if len(flat) <= limit else flat[: limit - 1].rstrip() + "…"
+
+
+def _log_written(records: list, topic: str, verb: str) -> None:
+    if records:
+        append_log_md(
+            "proposal",
+            _log_line(f"{verb} {len(records)} proposal(s) for {topic}"),
+            ", ".join(record.proposal_id for record in records),
+        )
 
 
 def _generate(argv: list[str]) -> int:
@@ -39,6 +65,11 @@ def _generate(argv: list[str]) -> int:
                         help="Content category containing the target problem.")
     parser.add_argument("--cross-category", action="store_true",
                         help="Search other categories for methods matching the target problem.")
+    parser.add_argument("--search-plan", type=Path, default=None,
+                        help="Cross-category only: a JSON plan ({target_problem, "
+                             "required_capabilities, queries}) written by the chat "
+                             "agent. Replaces the planner call; with --prepare-only "
+                             "the packet then carries source evidence too.")
     parser.add_argument("--prepare-only", action="store_true",
                         help="Print the retrieved evidence packet without generating proposals.")
     parser.add_argument("--write", action="store_true",
@@ -57,6 +88,25 @@ def _generate(argv: list[str]) -> int:
         print("researchwiki proposals: --cross-category requires --target-category",
               file=sys.stderr)
         return 1
+    if args.search_plan and not args.cross_category:
+        print("researchwiki proposals: --search-plan requires --cross-category",
+              file=sys.stderr)
+        return 1
+    plan = None
+    if args.search_plan:
+        try:
+            plan = json.loads(args.search_plan.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"researchwiki proposals: cannot read --search-plan: {exc}",
+                  file=sys.stderr)
+            return 1
+    # Everything but --prepare-only makes a model call. Fail on missing
+    # credentials or an unattributable author model now, before retrieval, as
+    # `agent ingest` does — otherwise an alias like `gpt-5.6` is written into
+    # every saved proposal's `author_model:`.
+    if not args.prepare_only:
+        from ..agents.llm import preflight_providers
+        preflight_providers()
 
     try:
         packet = build_evidence_packet(
@@ -65,6 +115,13 @@ def _generate(argv: list[str]) -> int:
             target_category=args.target_category,
             cross_category=args.cross_category,
         )
+    except (ValueError, OSError) as exc:
+        print(f"researchwiki proposals: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        if plan is not None:
+            packet = apply_search_plan(packet, plan)
     except (ValueError, OSError) as exc:
         print(f"researchwiki proposals: {exc}", file=sys.stderr)
         return 1
@@ -83,19 +140,27 @@ def _generate(argv: list[str]) -> int:
         return 1
 
     written = []
-    if args.write:
-        for record in accept_preview(preview, list(range(1, len(generated) + 1))) if generated else []:
-            written.append({
-                "proposal_id": record.proposal_id,
-                "path": str(record.path),
-                "title": record.title,
-            })
-        if written:
-            append_log_md(
-                "proposal",
-                f"generated {len(written)} proposal(s) for {args.topic}",
-                ", ".join(item["proposal_id"] for item in written),
-            )
+    if args.write and generated:
+        try:
+            records = accept_preview(preview, list(range(1, len(generated) + 1)))
+        except PartialAccept as exc:
+            # Earlier entries are on disk; record them before reporting, so
+            # log.md does not silently miss pages that exist.
+            _log_written(exc.written, args.topic, "generated")
+            print(f"researchwiki proposals: {exc}", file=sys.stderr)
+            print(f"  saved before the failure: "
+                  f"{', '.join(str(r.path) for r in exc.written)}", file=sys.stderr)
+            print(f"  review the rest in {preview}", file=sys.stderr)
+            return 1
+        except (ValueError, OSError) as exc:
+            print(f"researchwiki proposals: {exc}", file=sys.stderr)
+            print(f"  nothing was saved; the preview is at {preview}", file=sys.stderr)
+            return 1
+        written = [
+            {"proposal_id": r.proposal_id, "path": str(r.path), "title": r.title}
+            for r in records
+        ]
+        _log_written(records, args.topic, "generated")
 
     result = {
         "topic": args.topic,
@@ -135,9 +200,16 @@ def _accept(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     try:
         records = accept_preview(args.preview, args.select)
+    except PartialAccept as exc:
+        _log_written(exc.written, str(args.preview), "accepted")
+        for record in exc.written:
+            print(f"{record.proposal_id}: {record.path}")
+        print(f"researchwiki proposals: {exc}", file=sys.stderr)
+        return 1
     except (ValueError, OSError) as exc:
         print(f"researchwiki proposals: {exc}", file=sys.stderr)
         return 1
+    _log_written(records, str(args.preview), "accepted")
     for record in records:
         print(f"{record.proposal_id}: {record.path}")
     return 0
@@ -206,8 +278,8 @@ def _feedback(argv: list[str]) -> int:
         return 1
     append_log_md(
         "proposal-feedback",
-        f"{args.identifier} → {feedback.decision}",
-        feedback.reason,
+        _log_line(f"{args.identifier} → {feedback.decision}"),
+        _log_line(feedback.reason),
     )
     print(f"recorded {feedback.feedback_id}: {args.identifier} → {feedback.decision}")
     return 0

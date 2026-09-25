@@ -238,8 +238,12 @@ def score_reviews(reviews: list[dict], expected: dict, case_ids: set[str]) -> di
             raise ValueError("operational_success must be boolean")
         counters["operational_success"] += ok
         proposals = review["proposals"]
-        if not isinstance(proposals, list) or (ok and len(proposals) > 3):
-            raise ValueError("a successful run may emit at most three proposals")
+        # The cap binds failed runs too. SCORING.md keeps a failed run's
+        # reviewed output in the precision and critical-failure denominators
+        # on purpose (malformed output is still emitted output), so an
+        # uncapped failure could inflate those denominators without limit.
+        if not isinstance(proposals, list) or len(proposals) > 3:
+            raise ValueError("a run may emit at most three proposals")
         counters["emitted"] += len(proposals)
         useful = 0
         for proposal in proposals:

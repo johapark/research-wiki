@@ -445,6 +445,28 @@ def test_find_stale_by_audit_count_threshold(tmp_wiki):
     assert out[0][1] == 10
 
 
+def test_stale_by_audit_count_ignores_proposal_and_idea_pages(tmp_wiki):
+    """The paper count excluded known page-type directories rather than
+    counting paper pages, so ideas always inflated it and saving proposals
+    could mark the audit page stale with no new papers."""
+    audit_page = _mkpage(tmp_wiki, "synthesis/suggested-additions", "")
+    pages = [audit_page]
+    fm = {audit_page: {"wiki_papers_at_audit": "10"}}
+    for i in range(10):
+        p = _mkpage(tmp_wiki, f"cgt/paper-{i:02d}", "")
+        pages.append(p)
+        fm[p] = {"type": "paper"}
+    for i in range(6):
+        p = _mkpage(tmp_wiki, f"proposals/prop-{i}", "")
+        pages.append(p)
+        fm[p] = {"type": "proposal"}
+    for i in range(6):
+        p = _mkpage(tmp_wiki, f"ideas/idea-{i}", "")
+        pages.append(p)
+        fm[p] = {"type": "idea"}
+    assert find_stale_by_audit_count(pages, fm) == []
+
+
 def test_find_stale_by_audit_count_below_threshold(tmp_wiki):
     audit_page = _mkpage(tmp_wiki, "synthesis/suggested-additions", "")
     pages = [audit_page]

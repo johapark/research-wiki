@@ -29,6 +29,13 @@ _SECTIONS = (
     ("proposals", "recent proposals"),
 )
 
+# A dashboard scaffolded before proposals replaced concept hubs ends in a
+# concept-hub table instead. That wiki still has hubs, and `views.md` is
+# hand-editable, so lint must not demand a rewrite it can only get from
+# `init --refresh-dashboard`: the legacy table fills the fourth slot and is
+# checked against its own rules.
+_LEGACY_CONCEPT_PREFIX = "recent concept hubs"
+
 
 def _normalize(text: str) -> str:
     return " ".join(text.lower().split())
@@ -42,6 +49,8 @@ def _dashboard_sections(text: str) -> tuple[dict[str, str], list[str]]:
     for index, match in enumerate(headings):
         heading = _normalize(match.group(1))
         key = next((key for key, prefix in _SECTIONS if heading.startswith(prefix)), None)
+        if key is None and heading.startswith(_LEGACY_CONCEPT_PREFIX):
+            key = "concepts"
         if key is None or key in found:
             continue
         end = headings[index + 1].start() if index + 1 < len(headings) else len(text)
@@ -69,17 +78,22 @@ def find_dashboard_contract_violations(views_path: Path | None = None) -> list[d
     violations: list[dict] = []
     sections, order = _dashboard_sections(text)
 
+    legacy = "concepts" in sections and "proposals" not in sections
     for key, heading in _SECTIONS:
-        if key not in sections:
+        if key not in sections and not (legacy and key == "proposals"):
             violations.append(_violation(
                 path, "dashboard_section_missing", f"missing an H2 beginning `## {heading.title()}`",
             ))
 
     expected_order = [key for key, _heading in _SECTIONS]
-    if len(order) == len(expected_order) and order != expected_order:
+    if legacy:
+        expected_order[-1] = "concepts"
+    checked = [key for key in order if key in expected_order]
+    if len(checked) == len(expected_order) and checked != expected_order:
         violations.append(_violation(
             path, "dashboard_section_order",
-            "expected papers → ideas → synthesis → proposals",
+            "expected papers → ideas → synthesis → "
+            + ("concept hubs" if legacy else "proposals"),
         ))
 
     if _DATAVIEWJS_RE.search(text):
@@ -148,5 +162,19 @@ def find_dashboard_contract_violations(views_path: Path | None = None) -> list[d
             path, "dashboard_proposal_query",
             "proposals require created_at, descending sort, and LIMIT 15",
         ))
+
+    concept = queries.get("concepts", "")
+    if concept and legacy:
+        if 'length(referenced_papers) as "members"' not in concept:
+            violations.append(_violation(
+                path, "dashboard_concept_members",
+                "concept Members must count the referenced_papers spoke registry",
+            ))
+        if ('where type = "concept" and generated_at' not in concept
+                or "sort generated_at desc" not in concept or "limit 10" not in concept):
+            violations.append(_violation(
+                path, "dashboard_concept_query",
+                "concept hubs require generated_at, descending sort, and LIMIT 10",
+            ))
 
     return violations

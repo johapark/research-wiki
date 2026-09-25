@@ -237,37 +237,26 @@ def _should_retry(record: dict) -> bool:
 _EVOLVE_ACTIONABLE_RE = re.compile(
     r"\[agent\] evolve\s+→\s+(\d+)\s+proposal.*?actionable=(\d+)"
 )
-# `[concepts] concept-attach: skipped <paper>→<hub>, term only in body prose …`
-_CONCEPT_NEARMISS_RE = re.compile(
-    r"\[concepts\] concept-attach:\s+skipped\s+(\S+)→(\S+),\s+term only in body prose"
-)
-# `[concepts] concept-attach <paper>: joined <hub>[, <hub>…]`
-_CONCEPT_JOINED_RE = re.compile(
-    r"\[concepts\] concept-attach\s+(\S+):\s+joined\s+(.+?)$", re.MULTILINE
-)
 
 
 def _summarize_worker_log(log_path: Path) -> dict:
-    """Parse one worker log for the actions a downstream reviewer needs to
-    know about: evolve proposals waiting for review, concept-hub near-misses,
-    and hub attachments that already fired.
+    """Parse one worker log for actions a downstream reviewer needs to know
+    about: evolve proposals waiting for review.
 
-    Returns `{evolve_actionable: int, concept_joined: [hub, …], concept_near_missed: [hub, …]}`.
-    Silent on any I/O error — this runs post-batch as an informational
-    summary, not a gate.
+    Concept-hub attachment used to be summarized here too, but ingest no
+    longer attaches papers to hubs (`researchwiki concepts attach` does it on
+    request), so no worker emits those lines.
+
+    Returns `{evolve_actionable: int}`. Silent on any I/O error — this runs
+    post-batch as an informational summary, not a gate.
     """
-    out = {"evolve_actionable": 0, "concept_joined": [], "concept_near_missed": []}
+    out = {"evolve_actionable": 0}
     try:
         text = log_path.read_text(encoding="utf-8")
     except OSError:
         return out
     for m in _EVOLVE_ACTIONABLE_RE.finditer(text):
         out["evolve_actionable"] += int(m.group(2))
-    for m in _CONCEPT_NEARMISS_RE.finditer(text):
-        out["concept_near_missed"].append(m.group(2))
-    for m in _CONCEPT_JOINED_RE.finditer(text):
-        for hub in [h.strip() for h in m.group(2).split(",") if h.strip()]:
-            out["concept_joined"].append(hub)
     return out
 
 
@@ -275,13 +264,9 @@ def _print_batch_epilogue(batch_dir: Path, state: dict) -> None:
     """After the pool drains, aggregate per-worker log summaries and surface
     anything the reviewer might otherwise miss inside `.ingest/batch-*/worker-*.log`.
 
-    Two motivating misses this catches:
-      - Evolve emits `[agent] evolve → N proposal(s) … actionable=N` inside
-        each worker log; without this epilogue the batch driver only prints
-        `[N/M] ok: …` and the proposal counts stay hidden.
-      - Concept-attach's near-miss + join lines also live inside worker logs.
-        Attach-hook signals (e.g. FH-shaped abbreviation misses) belong in
-        the batch summary so they surface at the same time as ingest results.
+    The motivating miss: evolve emits `[agent] evolve → N proposal(s) …
+    actionable=N` inside each worker log; without this epilogue the batch
+    driver only prints `[N/M] ok: …` and the proposal counts stay hidden.
 
     Silent when nothing to report. Non-fatal (no exceptions escape).
     """
@@ -289,46 +274,28 @@ def _print_batch_epilogue(batch_dir: Path, state: dict) -> None:
         completed = list((state.get("completed") or {}).values())
         if not completed:
             return
-        totals = {"evolve_actionable": 0}
+        total = 0
         per_paper_evolve: list[tuple[str, int]] = []
-        joined: list[tuple[str, str]] = []
-        near_missed: list[tuple[str, str]] = []
         for rec in completed:
             pdf = rec.get("input")
             if not pdf:
                 continue
-            stem = Path(pdf).stem
             summary = _summarize_worker_log(_worker_log_path(batch_dir, pdf))
             if summary["evolve_actionable"]:
-                per_paper_evolve.append((stem, summary["evolve_actionable"]))
-                totals["evolve_actionable"] += summary["evolve_actionable"]
-            joined.extend((stem, h) for h in summary["concept_joined"])
-            near_missed.extend((stem, h) for h in summary["concept_near_missed"])
-
-        if not (per_paper_evolve or joined or near_missed):
+                per_paper_evolve.append((Path(pdf).stem, summary["evolve_actionable"]))
+                total += summary["evolve_actionable"]
+        if not per_paper_evolve:
             return
 
         print()
         print("ingest-batch: post-run summary")
-        if per_paper_evolve:
-            print(
-                f"  evolve: {totals['evolve_actionable']} actionable "
-                f"proposal(s) across {len(per_paper_evolve)} paper(s) — "
-                f"review under .ingest/*-evolution-proposals/"
-            )
-            for stem, n in per_paper_evolve:
-                print(f"    · {stem}: {n} actionable")
-        if joined:
-            print(f"  concept-attach: {len(joined)} hub attachment(s)")
-            for stem, hub in joined:
-                print(f"    · {stem} → {hub}")
-        if near_missed:
-            print(
-                f"  concept-attach near-miss: {len(near_missed)} "
-                "(body prose only; run `researchwiki concepts` to review)"
-            )
-            for stem, hub in near_missed:
-                print(f"    · {stem} → {hub}")
+        print(
+            f"  evolve: {total} actionable "
+            f"proposal(s) across {len(per_paper_evolve)} paper(s) — "
+            f"review under .ingest/*-evolution-proposals/"
+        )
+        for stem, n in per_paper_evolve:
+            print(f"    · {stem}: {n} actionable")
     except Exception:
         # Epilogue is best-effort; never let a formatting bug affect the
         # ingest exit code.

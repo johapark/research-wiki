@@ -462,7 +462,7 @@ def test_agent_ingest_no_args_returns_1(wiki, capsys):
     assert "need PDF" in capsys.readouterr().err
 
 
-# ---------- post-run epilogue (evolve + concept-attach visibility) ----------
+# ---------- post-run epilogue (evolve visibility) ----------
 
 
 def _seed_batch_dir(
@@ -511,38 +511,25 @@ def test_epilogue_aggregates_evolve_proposals_across_workers(wiki, capsys):
     assert "nitu:" not in out
 
 
-def test_epilogue_surfaces_concept_attach_near_miss(wiki, capsys):
-    """The FH-shaped miss: a concept-hub whose vocabulary the ingested paper
-    only uses in body prose logs a near-miss inside the worker log. The
-    epilogue surfaces every one so reviewers can decide to attach manually."""
+def test_epilogue_ignores_legacy_concept_attach_lines(wiki, capsys):
+    """Ingest no longer attaches papers to concept hubs, so a stray
+    concept-attach line (an old worker log reused by `--resume`) is not a
+    reportable event and the epilogue stays silent."""
     log = (
         "[concepts] concept-attach: skipped ahmad-2026-fh→familial-hypercholesterolemia, "
         "term only in body prose (not in kc/results/methodology)\n"
+        "[concepts] concept-attach paper-xyz: joined hub-one, hub-two\n"
     )
     batch_dir, state = _seed_batch_dir(wiki, {"ahmad": log})
 
     _ingest_batch._print_batch_epilogue(batch_dir, state)
 
-    out = capsys.readouterr().out
-    assert "concept-attach near-miss: 1" in out
-    assert "ahmad → familial-hypercholesterolemia" in out
-
-
-def test_epilogue_reports_concept_attach_joined(wiki, capsys):
-    log = "[concepts] concept-attach paper-xyz: joined hub-one, hub-two\n"
-    batch_dir, state = _seed_batch_dir(wiki, {"paper-xyz": log})
-
-    _ingest_batch._print_batch_epilogue(batch_dir, state)
-
-    out = capsys.readouterr().out
-    assert "concept-attach: 2 hub attachment(s)" in out
-    assert "paper-xyz → hub-one" in out
-    assert "paper-xyz → hub-two" in out
+    assert capsys.readouterr().out == ""
 
 
 def test_epilogue_silent_when_nothing_to_report(wiki, capsys):
-    """A batch that produced no actionable evolve proposals and no
-    concept-attach signal shouldn't add noise — silence is a feature."""
+    """A batch that produced no actionable evolve proposals shouldn't add
+    noise — silence is a feature."""
     log = "[agent] evolve   → no actionable proposals (knn=8 above_thr=4 judged=4 actionable=0)\n"
     batch_dir, state = _seed_batch_dir(wiki, {"paper-abc": log})
 

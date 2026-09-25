@@ -75,6 +75,14 @@ def test_operational_failure_never_counts_as_successful_abstention_or_yield():
     assert result["proposal_scores"][0]["total"] == 10  # raw quality remains diagnostic
 
 
+def test_a_failed_run_is_capped_at_three_proposals_too():
+    """The cap bound successful runs only, so a failed run could carry any number
+    of reviewed proposals into the precision and critical-failure denominators."""
+    with pytest.raises(ValueError, match="at most three"):
+        score_reviews([block("P", [proposal("reject")] * 4, ok=False)],
+                      expectations(P="opportunity"), {"P"})
+
+
 def test_extra_weak_proposals_lower_precision_without_increasing_yield():
     result = score_reviews([block(proposals=[proposal(), proposal("reject"), proposal("defer")])],
                            expectations(P="opportunity"), {"P"})

@@ -235,9 +235,17 @@ def _upsert_proposal(conn: sqlite3.Connection, page: Page) -> None:
     # edits and removals reconcile exactly on rebuild.
     conn.execute("DELETE FROM proposal_feedback WHERE proposal_id = ?",
                  (record.proposal_id,))
+    # `feedback_id` is the table's primary key, but Markdown can legitimately
+    # carry one twice: a sync conflict duplicates an entry, or a block is
+    # copied into a sibling proposal. A plain INSERT then raised
+    # IntegrityError, which `rebuild` treats as a bug and answers by rolling
+    # back the whole corpus. Keep the last occurrence on the page, and let a
+    # later page's copy replace an earlier page's; `lint` reports both shapes
+    # (`proposal_duplicate_feedback_id`) so the Markdown gets fixed.
+    unique = {item.feedback_id: item for item in record.feedback}
     conn.executemany(
         """
-        INSERT INTO proposal_feedback
+        INSERT OR REPLACE INTO proposal_feedback
             (feedback_id, proposal_id, decision, actor, reason, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
@@ -246,7 +254,7 @@ def _upsert_proposal(conn: sqlite3.Connection, page: Page) -> None:
                 item.feedback_id, record.proposal_id, item.decision,
                 item.actor, item.reason, item.created_at,
             )
-            for item in record.feedback
+            for item in unique.values()
         ],
     )
 

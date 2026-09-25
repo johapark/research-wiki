@@ -183,10 +183,11 @@ def _parse_json(text: str) -> dict[str, Any]:
     return value
 
 
-def _page_categories() -> dict[str, str]:
+def paper_categories(pages: list | None = None) -> dict[str, str]:
+    """`{stem: category}` for every paper page (the directory is canonical)."""
     return {
         page.stem: page.category
-        for page in read_pages()
+        for page in (pages if pages is not None else read_pages())
         if page.page_type == "paper"
     }
 
@@ -227,6 +228,11 @@ def _select_diverse(
         if eligible_category and category != eligible_category:
             continue
         if excluded_category and category == excluded_category:
+            continue
+        # A claim without a slug has no durable `[[stem#slug]]` citation, and
+        # receipt validation requires one. Admitting it here spent the paid
+        # generation call and then failed the save, discarding the result.
+        if not str(hit.get("claim_slug") or "").strip():
             continue
         ident = (stem, str(hit.get("claim_slug") or ""), str(hit.get("text") or ""))
         if ident in seen or counts[stem] >= per_paper:
@@ -270,9 +276,11 @@ def _evidence_prompt(items: list[dict[str, Any]]) -> str:
     return "\n\n".join(blocks)
 
 
-def _relevant_history(topic: str, limit: int = 5) -> list[dict[str, str]]:
+def _relevant_history(
+    topic: str, limit: int = 5, pages: list | None = None,
+) -> list[dict[str, str]]:
     scored = []
-    for record in load_proposals():
+    for record in load_proposals(pages):
         overlap = _context_score(topic, f"{record.title} {record.question} {record.topic_seed}",
                                  record.thesis)
         if overlap:
@@ -288,9 +296,9 @@ def _relevant_history(topic: str, limit: int = 5) -> list[dict[str, str]]:
     return [item for _, item in sorted(scored, key=lambda x: -x[0])[:limit]]
 
 
-def _existing_pages(topic: str, limit: int = 3) -> list[dict]:
+def _existing_pages(topic: str, limit: int = 3, pages: list | None = None) -> list[dict]:
     scored = []
-    for page in read_pages():
+    for page in pages if pages is not None else read_pages():
         if page.page_type not in {"synthesis", "idea"}:
             continue
         summary = "\n".join(extract_section(page.body, heading) or "" for heading in
@@ -314,7 +322,10 @@ def build_evidence_packet(
     """Prepare evidence locally; cross-category planning is a separate step."""
     if not topic.strip():
         raise ValueError("topic must not be empty")
-    categories = _page_categories()
+    # One wiki walk serves categories, history, and existing-page context;
+    # each helper used to re-parse every page.
+    pages = read_pages()
+    categories = paper_categories(pages)
     stems = list(dict.fromkeys(raw.rsplit("/", 1)[-1] for raw in papers or []))
     if len(stems) > (4 if cross_category else MAX_PAPERS):
         raise ValueError("too many explicit papers: limit is 4 for cross-category, otherwise 8")
@@ -340,8 +351,8 @@ def build_evidence_packet(
             "cross_category": False,
             "search_plan": None,
             "evidence": _assign_ids(evidence),
-            "prior_proposals": _relevant_history(topic),
-            "existing_pages": _existing_pages(topic),
+            "prior_proposals": _relevant_history(topic, pages=pages),
+            "existing_pages": _existing_pages(topic, pages=pages),
         }
 
     if not target_category:
@@ -355,25 +366,15 @@ def build_evidence_packet(
 
     return {"topic": topic, "target_category": target_category,
             "cross_category": True, "search_plan": None,
-            "evidence": _assign_ids(target), "prior_proposals": _relevant_history(topic),
-            "existing_pages": _existing_pages(topic), "planning_pending": True}
+            "evidence": _assign_ids(target),
+            "prior_proposals": _relevant_history(topic, pages=pages),
+            "existing_pages": _existing_pages(topic, pages=pages), "planning_pending": True}
 
 
-def expand_cross_category(packet: dict[str, Any]) -> dict[str, Any]:
-    """Make the explicit planner call, then retrieve source-category claims."""
-    topic, target_category = packet["topic"], packet["target_category"]
-    target = packet["evidence"]
-    categories = _page_categories()
-
-    from .agents import llm
-    plan_resp = llm.call(
-        phase="proposal_search_plan",
-        system=_with_contract(_SEARCH_PLAN_SYSTEM, _SEARCH_PLAN_SCHEMA),
-        prompt=(f"TARGET CATEGORY: {target_category}\nTOPIC: {topic}\n\n"
-                f"TARGET EVIDENCE:\n{_evidence_prompt(_assign_ids(target))}"),
-        schema=_SEARCH_PLAN_SCHEMA,
-    )
-    plan = _parse_json(plan_resp.text)
+def validate_search_plan(plan: Any) -> dict[str, Any]:
+    """Structural check shared by the planner call and chat-authored plans."""
+    if not isinstance(plan, dict):
+        raise ValueError("cross-category search plan must be a JSON object")
     if not isinstance(plan.get("target_problem"), str) or not plan["target_problem"].strip():
         raise ValueError("cross-category planner must state target_problem")
     capabilities = plan.get("required_capabilities")
@@ -384,8 +385,26 @@ def expand_cross_category(packet: dict[str, Any]) -> dict[str, Any]:
     if (not isinstance(queries, list) or not 1 <= len(queries) <= 3
             or any(not isinstance(q, str) or not q.strip() for q in queries)):
         raise ValueError("cross-category planner returned no usable queries")
+    return plan
+
+
+def apply_search_plan(
+    packet: dict[str, Any], plan: dict[str, Any], usage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Retrieve source-category claims for a validated plan. Makes no model call.
+
+    Split from the planner call so a chat agent can write the plan itself
+    (`generate --search-plan`) and still get a packet with source evidence.
+    Without this, the documented chat path could only produce a target-only
+    packet, which no cross-category proposal can pass.
+    """
+    validate_search_plan(plan)
+    topic, target_category = packet["topic"], packet["target_category"]
+    target = packet["evidence"]
+    pages = read_pages()
+    categories = paper_categories(pages)
     source_hits: list[dict] = []
-    for query in queries:
+    for query in plan["queries"]:
         source_hits.extend(claim_query(query, k=60, mode="hybrid", include_context=True))
     target_papers = {item["paper_stem"] for item in target}
     source = _select_diverse(
@@ -403,13 +422,30 @@ def expand_cross_category(packet: dict[str, Any]) -> dict[str, Any]:
         "search_plan": plan,
         "planning_pending": False,
         "evidence": evidence,
-        "prior_proposals": _relevant_history(topic),
-        "usage": {
-            "search_plan_model": plan_resp.model,
-            "search_plan_input_tokens": plan_resp.input_tokens,
-            "search_plan_output_tokens": plan_resp.output_tokens,
-        },
+        "prior_proposals": _relevant_history(topic, pages=pages),
+        "usage": dict(usage or {}),
     }
+
+
+def expand_cross_category(packet: dict[str, Any]) -> dict[str, Any]:
+    """Make the explicit planner call, then retrieve source-category claims."""
+    topic, target_category = packet["topic"], packet["target_category"]
+    target = packet["evidence"]
+
+    from .agents import llm
+    plan_resp = llm.call(
+        phase="proposal_search_plan",
+        system=_with_contract(_SEARCH_PLAN_SYSTEM, _SEARCH_PLAN_SCHEMA),
+        prompt=(f"TARGET CATEGORY: {target_category}\nTOPIC: {topic}\n\n"
+                f"TARGET EVIDENCE:\n{_evidence_prompt(_assign_ids(target))}"),
+        schema=_SEARCH_PLAN_SCHEMA,
+    )
+    plan = validate_search_plan(_parse_json(plan_resp.text))
+    return apply_search_plan(packet, plan, usage={
+        "search_plan_model": plan_resp.model,
+        "search_plan_input_tokens": plan_resp.input_tokens,
+        "search_plan_output_tokens": plan_resp.output_tokens,
+    })
 
 
 def proposal_request(packet: dict[str, Any]) -> dict[str, Any]:

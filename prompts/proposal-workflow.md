@@ -62,11 +62,25 @@ the quality of a mapping or experimental control still needs editorial review.
 
 Use the preparation JSON as `packet` in a receipt with `version: 1`, `proposals`
 (the same structured fields used by generation), and `usage: {model: "<exact model>"}`.
-Keep evidence IDs and citation mappings unchanged; cross-category ideas must cite
-both target and source-category evidence. Review the complete receipt, then use
+The model must be an exact id (`gpt-5.6-terra`, not `gpt-5.6` or `TODO`). Keep
+evidence IDs, categories, and citation mappings unchanged: acceptance checks each
+evidence stem's category against the wiki. Review the complete receipt, then use
 the same `accept <file> --select ...` command. Validation checks structure and
 evidence references, not scientific fidelity; proposals remain hypotheses, not
 citable evidence. Do not regenerate a reviewed receipt to accept it.
+
+For a cross-category receipt, a target-only preparation cannot be accepted: no
+transfer can cite source evidence it does not contain. Write the search plan
+yourself and let the CLI run the source search locally, with no planner call:
+
+```bash
+researchwiki proposals generate "<target problem>" --target-category <category> \
+  --cross-category --search-plan plan.json --prepare-only
+```
+
+`plan.json` is `{"target_problem": "…", "required_capabilities": ["…"],
+"queries": ["…"]}` (one to three domain-independent queries). The resulting
+packet carries both target and source evidence; build the receipt from it.
 
 ## Cross-category application
 
@@ -103,7 +117,10 @@ new proposal explicitly revises one of those supplied prior records.
 
 `## Feedback` is the final section: everything after it belongs to the ledger.
 Reasons may contain Markdown headings; event boundaries use the reserved
-`### fb-<id> — <decision>` format. Transfer proposals must cite both target and
+`### fb-<id> — <decision>` format. A reason line shaped like that heading is
+written with a leading backslash, so quoting an old review cannot create a second
+decision. `log.md` records each decision on one line; the full reason stays in
+the proposal page. Transfer proposals must cite both target and
 source-category evidence, including those returned by ordinary generation or
 accepted from a chat-authored receipt.
 
@@ -126,6 +143,9 @@ plus `check-coverage`. Do not treat a proposal itself as citable evidence.
 
 Existing `wiki/concepts/` pages remain readable and the manual `concepts`
 commands remain available. New wikis do not scaffold concept hubs, `status`
-does not promote candidates, and ingest does not mutate them automatically.
+does not promote candidates, and ingest does not mutate them automatically;
+run `researchwiki concepts attach <stem> ...` after an ingest to join new papers
+to existing hubs. A dashboard that still ends in a concept-hub table passes the
+dashboard lint as it is.
 Use proposals for new cross-paper discovery; maintain a legacy hub explicitly
 only when a single-term spoke registry is still useful.

@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .fsatomic import update_locked, write_text_atomic
+from .fsatomic import exclusive_lock, update_locked, write_text_atomic
 from .paths import wiki_dir
 from .wiki import Page, commit_page, extract_section, read_page, read_pages
 
@@ -40,11 +40,78 @@ _FEEDBACK_RE = re.compile(
     r"(.*?)(?=^###\s+fb-[a-f0-9]{12}\s+—|\Z)",
     re.MULTILINE | re.DOTALL,
 )
-_STATUS_RE = re.compile(r"^status:\s*.*$", re.MULTILINE)
+# A reason line that could open a ledger entry. Written with a leading
+# backslash, which renders as the literal heading text in Markdown and is not
+# an entry boundary to `_FEEDBACK_RE`; `parse_feedback` strips it back off.
+_ENTRY_LIKE_LINE = re.compile(r"^(\\*)(###[ \t]+fb-)", re.MULTILINE)
+_TOP_LEVEL_KEY = re.compile(r"^([A-Za-z_][\w-]*)[ \t]*:")
 
 
 def _now() -> str:
     return datetime.now().astimezone().replace(microsecond=0).isoformat()
+
+
+def _timestamp_key(value: str) -> float:
+    """Sortable instant for an ISO timestamp; unparseable values sort first.
+
+    Records sync between machines in different time zones, so the offset must
+    be honoured: `09:00+09:00` precedes `20:00-07:00` the previous day, which a
+    string comparison gets backwards.
+    """
+    try:
+        moment = datetime.fromisoformat(str(value).strip())
+    except ValueError:
+        return float("-inf")
+    if moment.tzinfo is None:
+        moment = moment.astimezone()
+    return moment.timestamp()
+
+
+def _escape_reason(reason: str) -> str:
+    return _ENTRY_LIKE_LINE.sub(lambda m: "\\" + m.group(1) + m.group(2), reason)
+
+
+def _unescape_reason(reason: str) -> str:
+    return re.sub(r"^\\(\\*###[ \t]+fb-)", r"\1", reason, flags=re.MULTILINE)
+
+
+def _set_frontmatter_fields(text: str, values: dict[str, str]) -> str:
+    """Set top-level YAML keys inside the leading frontmatter only.
+
+    Line-based rather than a regex over the whole file: a body line such as
+    `status: …` is never touched, an emptied `key:` never absorbs the next
+    line, and values are inserted verbatim (a regex replacement template would
+    reinterpret the backslashes JSON escaping produces). A missing key is
+    added before the closing fence. Each value must already be a YAML scalar.
+    """
+    if not text.startswith("---\n"):
+        raise ValueError("proposal page has no YAML frontmatter")
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        raise ValueError("proposal page has unterminated YAML frontmatter")
+    lines = text[4:end].split("\n")
+    remaining = dict(values)
+    out: list[str] = []
+    skipping = False
+    for line in lines:
+        match = _TOP_LEVEL_KEY.match(line)
+        if match:
+            key = match.group(1)
+            skipping = False
+            if key in values:
+                if key in remaining:
+                    out.append(f"{key}: {remaining.pop(key)}")
+                # A continuation of a replaced multi-line value is dropped
+                # with it; a duplicate key is dropped so YAML reads one value.
+                skipping = True
+                continue
+        elif skipping and (not line.strip() or line[:1] in " \t-"):
+            continue
+        else:
+            skipping = False
+        out.append(line)
+    out.extend(f"{key}: {value}" for key, value in remaining.items())
+    return "---\n" + "\n".join(out) + text[end:]
 
 
 def _yaml_string(value: str) -> str:
@@ -115,7 +182,7 @@ def parse_feedback(body: str) -> list[Feedback]:
             decision=match.group(2).strip(),
             created_at=match.group(3).strip(),
             actor=match.group(4).strip(),
-            reason=match.group(5).strip(),
+            reason=_unescape_reason(match.group(5).strip()),
         ))
     return out
 
@@ -148,19 +215,27 @@ def parse_proposal(page: Page) -> ProposalRecord | None:
     )
 
 
-def load_proposals() -> list[ProposalRecord]:
+def load_proposals(pages: list[Page] | None = None) -> list[ProposalRecord]:
+    """Parsed proposal records, most recently updated first.
+
+    Pass `pages` when the caller has already walked the wiki, so one command
+    does not parse every page several times over.
+    """
     records = []
-    for page in read_pages():
+    for page in pages if pages is not None else read_pages():
         record = parse_proposal(page)
         if record is not None:
             records.append(record)
-    return sorted(records, key=lambda r: (r.updated_at or r.created_at, r.proposal_id),
-                  reverse=True)
+    return sorted(
+        records,
+        key=lambda r: (_timestamp_key(r.updated_at or r.created_at), r.proposal_id),
+        reverse=True,
+    )
 
 
 def find_proposal(identifier: str) -> ProposalRecord | None:
     wanted = identifier.strip()
-    for record in load_proposals():
+    for record in _proposals_on_disk():
         if wanted in {record.proposal_id, record.stem}:
             return record
     return None
@@ -296,6 +371,16 @@ def render_proposal(
     return "\n".join(fm) + body
 
 
+def _proposals_on_disk() -> list[ProposalRecord]:
+    """Proposal records from `wiki/proposals/` only — not a whole-wiki walk."""
+    folder = wiki_dir() / "proposals"
+    if not folder.is_dir():
+        return []
+    pages = [page for page in (read_page(md) for md in sorted(folder.glob("*.md")))
+             if page is not None]
+    return load_proposals(pages)
+
+
 def create_proposal(
     proposal: dict[str, Any],
     *,
@@ -305,38 +390,58 @@ def create_proposal(
     author_model: str,
     parent_proposal: str = "",
     acceptance_id: str = "",
+    existing: dict[str, ProposalRecord] | None = None,
 ) -> ProposalRecord:
+    """Write one proposal page, or return the one an earlier accept wrote.
+
+    Runs under a lock on the proposals directory, so two concurrent accepts of
+    one receipt cannot both miss the existing record and write it twice, and a
+    page that already exists at the target path is never overwritten: that
+    would discard feedback appended since. `existing` lets a caller accepting
+    several entries scan the directory once rather than per entry.
+    """
     validate_proposal(proposal, {str(i.get("id")) for i in evidence_items})
     short_id = acceptance_id or uuid.uuid4().hex[:12]
     if not re.fullmatch(r"[0-9a-f]{12}", short_id):
         raise ValueError("invalid acceptance id")
     proposal_id = f"prop-{short_id}"
-    if acceptance_id:
-        for existing in load_proposals():
-            if existing.proposal_id == proposal_id:
-                commit_page(existing.path)
-                return existing
-    stem = f"{_slugify(str(proposal['title']))}--{short_id[:8]}"
-    out = wiki_dir() / "proposals" / f"{stem}.md"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    created_at = _now()
-    text = render_proposal(
-        proposal_id=proposal_id,
-        stem=stem,
-        proposal=proposal,
-        evidence_items=evidence_items,
-        topic_seed=topic_seed,
-        target_category=target_category,
-        author_model=author_model,
-        created_at=created_at,
-        parent_proposal=parent_proposal,
-    )
-    write_text_atomic(out, text)
+    folder = wiki_dir() / "proposals"
+    folder.mkdir(parents=True, exist_ok=True)
+    with exclusive_lock(folder / ".proposals"):
+        known = existing if existing is not None else {
+            record.proposal_id: record for record in _proposals_on_disk()
+        }
+        if proposal_id in known:
+            commit_page(known[proposal_id].path)
+            return known[proposal_id]
+        stem = f"{_slugify(str(proposal['title']))}--{short_id[:8]}"
+        out = folder / f"{stem}.md"
+        if out.exists() or out.is_symlink():
+            # Same title slug and id prefix as an unrelated record (or a record
+            # the caller's snapshot predates). Never clobber a ledger page.
+            stem = f"{_slugify(str(proposal['title']))}--{short_id}"
+            out = folder / f"{stem}.md"
+            if out.exists() or out.is_symlink():
+                raise ValueError(f"refusing to overwrite existing proposal page: {out}")
+        text = render_proposal(
+            proposal_id=proposal_id,
+            stem=stem,
+            proposal=proposal,
+            evidence_items=evidence_items,
+            topic_seed=topic_seed,
+            target_category=target_category,
+            author_model=author_model,
+            created_at=_now(),
+            parent_proposal=parent_proposal,
+        )
+        write_text_atomic(out, text)
     commit_page(out)
     page = read_page(out)
     record = parse_proposal(page) if page else None
     if record is None:  # pragma: no cover - renderer and parser share contract
         raise ValueError(f"could not parse newly written proposal: {out}")
+    if existing is not None:
+        existing[record.proposal_id] = record
     return record
 
 
@@ -360,32 +465,28 @@ def append_feedback(
         feedback_id=f"fb-{uuid.uuid4().hex[:12]}",
         decision=decision,
         created_at=_now(),
-        actor=actor.strip() or "user",
+        actor=" ".join(actor.split()) or "user",
         reason=reason.strip(),
     )
 
+    fields = {
+        "status": decision,
+        "updated_at": _yaml_string(feedback.created_at),
+    }
+    if resulting_page.strip():
+        fields["resulting_page"] = _yaml_string(resulting_page.strip())
+
     def _mutate(text: str) -> str:
-        updated = _STATUS_RE.sub(f"status: {decision}", text, count=1)
-        updated = re.sub(
-            r'^updated_at:\s*.*$',
-            f"updated_at: {_yaml_string(feedback.created_at)}",
-            updated,
-            count=1,
-            flags=re.MULTILINE,
-        )
-        if resulting_page.strip():
-            updated = re.sub(
-                r'^resulting_page:\s*.*$',
-                f"resulting_page: {_yaml_string(resulting_page.strip())}",
-                updated,
-                count=1,
-                flags=re.MULTILINE,
-            )
+        updated = _set_frontmatter_fields(text, fields)
+        # The actor sits on a single `- Actor:` line; a newline would break the
+        # entry, so it is flattened. The reason may span lines and headings,
+        # but a line shaped like an entry heading is escaped so it cannot
+        # forge a second decision.
         entry = (
             f"\n### {feedback.feedback_id} — {feedback.decision}\n"
             f"- Created: {feedback.created_at}\n"
-            f"- Actor: {feedback.actor}\n\n"
-            f"{feedback.reason}\n"
+            f"- Actor: {' '.join(feedback.actor.split())}\n\n"
+            f"{_escape_reason(feedback.reason)}\n"
         )
         return updated.rstrip() + "\n" + entry
 

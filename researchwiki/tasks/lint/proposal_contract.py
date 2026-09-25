@@ -119,15 +119,27 @@ def find_proposal_contract_violations(
 ) -> list[dict]:
     out: list[dict] = []
     seen_ids: dict[str, Path] = {}
+    seen_feedback: dict[str, Path] = {}
     for path in pages:
         fm = pages_fm.get(path, {}) or {}
         if path.parent.name != "proposals" or _value(fm, "type") != "proposal":
             continue
-        out.extend(check_page(path, pages_body.get(path, ""), fm))
+        body = pages_body.get(path, "")
+        out.extend(check_page(path, body, fm))
         proposal_id = _value(fm, "proposal_id")
         if proposal_id and proposal_id in seen_ids:
             out.append(_violation(path, "proposal_duplicate_id",
                                   f"also used by `{seen_ids[proposal_id].name}`"))
         elif proposal_id:
             seen_ids[proposal_id] = path
+        # Feedback ids are global in `state.db`, so a block copied into a
+        # sibling proposal collides on rebuild; the later page's row wins.
+        for feedback_id in dict.fromkeys(item.feedback_id for item in parse_feedback(body)):
+            if feedback_id in seen_feedback:
+                out.append(_violation(
+                    path, "proposal_duplicate_feedback_id",
+                    f"{feedback_id} also appears in `{seen_feedback[feedback_id].name}`",
+                ))
+            else:
+                seen_feedback[feedback_id] = path
     return out

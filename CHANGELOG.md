@@ -97,6 +97,43 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Proposal feedback now edits only the page's YAML frontmatter, line by line.
+  A `--resulting-page` value containing backslashes no longer writes invalid
+  YAML that removed the proposal from `list`, `status`, generation history, and
+  the database; an emptied `resulting_page:` or `updated_at:` no longer swallows
+  the following `author_model:` line; and a page missing `status:` gets one
+  instead of having a body line rewritten.
+- A feedback reason that quotes a `### fb-… — <decision>` entry heading is
+  escaped, so it can no longer create a second, forged decision in the ledger.
+  `log.md` records each decision on one line, so a reason containing `## `
+  headings no longer adds spurious log entries.
+- `db rebuild` no longer aborts the whole corpus with exit 3 when a feedback id
+  appears twice (a sync conflict or a copied block); `lint` now also reports a
+  feedback id shared across proposal pages.
+- Accepting a proposal runs under a lock, scans `wiki/proposals/` once, and never
+  overwrites an existing page, so concurrent accepts or a title collision cannot
+  discard a record's feedback. A failure after some entries were saved exits 1,
+  names the saved pages, and logs them.
+- Proposal receipts must record an exact author model, and acceptance checks
+  each evidence item's category against the wiki. `proposals generate` preflights
+  the provider and author model before retrieval, and claims without a slug are
+  kept out of the packet instead of failing the save after a paid call.
+- Chat-authored cross-category proposals are usable: `proposals generate
+  --search-plan PLAN.json` runs the source-category search locally with no
+  planner call, and an unplanned cross-category packet is rejected at acceptance
+  with that instruction.
+- `researchwiki remove` reports citations on proposal pages instead of deleting
+  their evidence bullets, `stale_by_audit_count` counts only paper pages, and OKF
+  export maps proposal pages (type, lifecycle status, `generated.at`, and the
+  unverified-page count).
+- Wikis that still have concept hubs keep working: the dashboard lint accepts a
+  concept-hub table in place of the proposal table, and `researchwiki concepts
+  attach <stem> ...` joins new papers to existing hubs now that ingest does not.
+- Proposal lists sort by instant rather than timestamp string, so records synced
+  across time zones order correctly, and one `generate` walks the wiki once.
+- The proposal benchmark caps failed runs at three proposals as well, so a
+  failure cannot inflate the precision and critical-failure denominators.
+
 - Exact bare-version model ids (`gpt-5`, `gpt-5.5`, `gpt-4.1` — any id
   `config/pricing.yaml` lists) and Ollama tags (`qwen3:32b`) are no longer
   rejected as family aliases. Promotion, `lint`, `migrate provenance`, and the

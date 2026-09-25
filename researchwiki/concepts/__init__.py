@@ -10,11 +10,12 @@ four concerns:
                  (`researchwiki candidates concepts` reads this)
   term_claims  — term ↔ claim helpers shared by scaffold + attach
   scaffold     — the `researchwiki concepts <term>` scaffolder +
-                 `attach_after_ingest` post-ingest hook
+                 `attach_after_ingest` (run by `concepts attach`; ingest no
+                 longer calls it)
   refresh      — `refresh_concept` and `upgrade_spokes`
 
 The CLI (`researchwiki concepts <term>` / `--upgrade-spokes` /
-`refresh <slug>`) still lives at `researchwiki.tasks.concepts` and is
+`refresh <slug>` / `attach <stem>`) still lives at `researchwiki.tasks.concepts` and is
 just a thin argparse wrapper over these entry points.
 """
 

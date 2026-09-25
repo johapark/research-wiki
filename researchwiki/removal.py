@@ -69,8 +69,11 @@ def _link_re(stem: str) -> re.Pattern[str]:
     )
 
 
-# Page types whose prose this command must never rewrite.
-AUTHORED_TYPES = {"synthesis", "idea", "concept"}
+# Page types whose prose this command must never rewrite. A proposal's
+# `## Evidence and reasoning` bullets are authored insight text that happens
+# to be bullet-shaped, and its Markdown is the canonical decision ledger, so
+# it is reported for review like a synthesis page rather than stripped.
+AUTHORED_TYPES = {"synthesis", "idea", "concept", "proposal"}
 
 
 @dataclass

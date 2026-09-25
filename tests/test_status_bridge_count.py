@@ -75,48 +75,10 @@ def test_interrupt_still_propagates(monkeypatch):
 
 
 # ---------- what status actually prints ----------
-
-def _status_concept_line(monkeypatch, capsys, result):
-    """Drive just the concept-hub block of `status` and return its output.
-
-    `status.main` touches the DB, the index and the filesystem, so rather than
-    stand a whole wiki up we exercise the same three-branch render the module
-    performs, against the module's own threshold constant.
-    """
-    monkeypatch.setattr(concepts, "n_bridge_candidates", lambda: result)
-    n_bridges = concepts.n_bridge_candidates()
-    if n_bridges is None:
-        print("Concept-hub candidates: scan failed — count unknown "
-              "(`researchwiki candidates concepts --bridges` for the error)")
-    elif n_bridges >= concepts.TRIAGE_THRESHOLD:
-        print(f"Concept-hub candidates: {n_bridges} bridge term(s) — likely "
-              "dominated by extraction noise.")
-    elif n_bridges > 0:
-        print(f"Concept-hub candidates: {n_bridges} bridge term(s) with no hub yet")
-    return capsys.readouterr().out
-
-
-def test_status_announces_a_failed_scan(monkeypatch, capsys):
-    out = _status_concept_line(monkeypatch, capsys, None)
-    assert "scan failed" in out
-    assert "count unknown" in out
-
-
-def test_status_stays_silent_on_a_real_zero(monkeypatch, capsys):
-    # Silence is correct here — nothing to scaffold. It's only wrong when it
-    # means "we don't know".
-    assert _status_concept_line(monkeypatch, capsys, 0) == ""
-
-
-def test_status_fires_the_trigger_on_a_small_count(monkeypatch, capsys):
-    out = _status_concept_line(monkeypatch, capsys, 3)
-    assert "3 bridge term(s)" in out
-    assert "no hub yet" in out
-
-
-def test_status_suggests_triage_above_threshold(monkeypatch, capsys):
-    out = _status_concept_line(monkeypatch, capsys, concepts.TRIAGE_THRESHOLD + 5)
-    assert "extraction noise" in out
+#
+# `status` no longer prints a concept-hub line: proposals replaced hubs as the
+# discovery path, so its nudge is the proposal queue. `n_bridge_candidates`
+# stays callable for `candidates concepts`, and is pinned above.
 
 
 def test_status_module_uses_the_synced_proposal_queue():

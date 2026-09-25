@@ -433,3 +433,22 @@ def test_keep_pdf_lands_the_stem_in_lint_orphan_pdfs(wiki):
 
     assert (wiki / "papers" / f"{STEM}.pdf").exists()
     assert find_orphan_pdfs() == [STEM]
+
+
+def test_apply_never_edits_a_proposal_page(wiki):
+    """A proposal's evidence bullets are authored insight text in the canonical
+    decision ledger. Stripping them as back-links deleted that text and left the
+    proposal with no evidence."""
+    page = wiki / "wiki" / "proposals" / "a-proposal--12345678.md"
+    page.parent.mkdir()
+    page.write_text(
+        "---\ntype: proposal\nproposal_id: \"prop-123456789012\"\n---\n\n"
+        "## Evidence and reasoning\n\n"
+        f"- Both build graphs from assemblies [[{STEM}#kc-aaaaaaaa]] "
+        "[[ai/other-2023-thing#kc-bbbbbbbb]]\n",
+        encoding="utf-8")
+    before = page.read_text(encoding="utf-8")
+    plan = removal.scan(STEM)
+    assert any(ref.path == page and ref.page_type == "proposal" for ref in plan.prose_refs)
+    removal.apply(plan)
+    assert page.read_text(encoding="utf-8") == before

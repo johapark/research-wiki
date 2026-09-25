@@ -310,9 +310,10 @@ def missing_provider_credentials() -> list[str]:
     return problems
 
 
-#: Phases whose output can become the committed page body, so their model is
-#: the one `promote` records as `author_model:`.
-AUTHORING_PHASES = ("author", "evolve", "debug")
+#: Phases whose output is written to a page as authored prose, so their model
+#: is what the page records as `author_model:` — ingest's author/evolve/debug,
+#: and the proposal author.
+AUTHORING_PHASES = ("author", "evolve", "debug", "proposal_generation")
 
 
 def unattributable_author_models() -> list[str]:

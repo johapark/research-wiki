@@ -5,6 +5,7 @@ The detection, scaffolding, and refresh logic all live in
 `scaffold.py`, `refresh.py`). This file is the thin argparse layer that:
 
   - dispatches `concepts refresh <slug>` to `refresh_concept`
+  - dispatches `concepts attach <stem> ...` to `attach_after_ingest`
   - dispatches `concepts --upgrade-spokes` to `upgrade_spokes`
   - dispatches `concepts <term>` (with `--thesis`, `--aliases`, …) to `run`
 
@@ -17,6 +18,7 @@ Usage:
   researchwiki concepts "RAG" --dry-run             # show members + span
   researchwiki concepts "RAG" --json                # scaffold decisions JSON
   researchwiki concepts refresh <slug>              # draft Cross-domain connections from edges
+  researchwiki concepts attach <stem> [<stem> ...]  # join papers to existing hubs
   researchwiki concepts --upgrade-spokes            # backfill [[stem#slug]] on existing hubs
 
 Exit codes: 0 = success (stub written or dry-run);
@@ -30,7 +32,7 @@ import argparse
 import json
 import sys
 
-from ..concepts import refresh_concept, run, upgrade_spokes
+from ..concepts import attach_after_ingest, refresh_concept, run, upgrade_spokes
 
 
 def _run_refresh(argv: list[str]) -> int:
@@ -104,11 +106,52 @@ def _resolve_thesis(term: str, from_arg: str | None) -> str | None:
     return answer.strip() or None
 
 
+def _run_attach(argv: list[str]) -> int:
+    """`concepts attach <stem> ...` — join papers to existing hubs by hand.
+
+    Ingest no longer attaches new papers to concept hubs (proposals replaced
+    hubs as the discovery path), so a wiki that keeps hubs runs this after an
+    ingest instead. Same membership rule the ingest hook used: a contribution
+    claim must mention the hub's term or an alias.
+    """
+    from ..paths import wiki_dir
+
+    parser = argparse.ArgumentParser(
+        prog="researchwiki concepts attach",
+        description="Attach paper pages to every existing concept hub they instantiate.",
+    )
+    parser.add_argument("stems", nargs="+", help="Paper stems (or category/stem keys).")
+    args = parser.parse_args(argv)
+    pages = {md.stem: md for md in wiki_dir().rglob("*.md")}
+    missing = [raw for raw in args.stems if raw.rsplit("/", 1)[-1] not in pages]
+    if missing:
+        print(f"researchwiki concepts attach: unknown page(s): {', '.join(missing)}",
+              file=sys.stderr)
+        return 1
+    joined = 0
+    for raw in args.stems:
+        stem = raw.rsplit("/", 1)[-1]
+        result = attach_after_ingest(stem, pages[stem])
+        if result is None:
+            print(f"{stem}: skipped (not a paper page, no hubs, or attach failed; "
+                  "see the log above)")
+            continue
+        joined += len(result["attached"])
+        if not result["attached"]:
+            print(f"{stem}: joined no hub"
+                  + (f" (term only in body prose: {', '.join(result['near_missed'])})"
+                     if result["near_missed"] else ""))
+    print(f"concepts attach: {joined} spoke(s) added across {len(args.stems)} paper(s)")
+    return 0
+
+
 def main(argv: list[str]) -> int:
-    # Subcommand: `concepts refresh <slug>` peels off first — it's a distinct
-    # mode over an existing hub rather than a term-scaffold operation.
+    # Subcommands peel off first — each is a distinct mode over existing hubs
+    # rather than a term-scaffold operation.
     if argv and argv[0] == "refresh":
         return _run_refresh(argv[1:])
+    if argv and argv[0] == "attach":
+        return _run_attach(argv[1:])
 
     parser = argparse.ArgumentParser(
         prog="researchwiki concepts",
