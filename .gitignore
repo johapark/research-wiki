@@ -51,6 +51,10 @@ share/
 # suppress `candidates pairs` reminders for the decay window).
 .claim-discovery-stamp
 
+# Companion stamp for the proposal-opportunity nudge (status uses it to
+# suppress `proposals opportunities` reminders for the decay window).
+.proposal-opportunity-stamp
+
 # Per-user "these two papers aren't related" denylist for the claim-pair
 # discovery queue. Written by `candidates pairs --decline`; read by
 # `discover_pairs` so a reviewed-and-rejected pair stops re-proposing.

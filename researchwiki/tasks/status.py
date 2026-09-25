@@ -822,6 +822,16 @@ def _render_backlogs_and_telemetry() -> None:
               "(`researchwiki proposals list --status proposed`)")
         print()
 
+    # Opportunities the corpus already contains. Without this line proposals are
+    # invisible to anyone who does not already know the command exists: the
+    # queue above only counts proposals someone has made. Local scans only, and
+    # decay-stamped like the other nudges so it does not repeat every run.
+    from ..proposal_opportunities import opportunity_warning
+    opp_msg = opportunity_warning()
+    if opp_msg:
+        print(opp_msg)
+        print()
+
 
 def _render_status(ctx: dict) -> int:
     """Render a collected status snapshot without walking the wiki again."""
