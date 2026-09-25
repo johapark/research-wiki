@@ -35,6 +35,17 @@ the reasoning behind any line below.
   so neither gets slower. CLAUDE.md asks chat agents to offer, never run, a
   proposal after a cross-paper answer that surfaces one.
 
+### Changed
+
+- `researchwiki status` runs about 4x faster (2.6 s → 0.7 s on a 540-page
+  wiki) with identical output. It no longer walks the wiki twice to count
+  pending proposals. The claim-overlap backlog is computed in one query
+  instead of one per paper (1.3 s → 0.02 s), and the backlog nudge checks
+  its quiet-period stamp before scanning, as the other nudges do. Page
+  frontmatter is parsed with PyYAML's libyaml C loader when available
+  (about 9x faster, same results), which speeds up every command that reads
+  the wiki; `lint` drops from 3.2 s to 1.6 s.
+
 ## [0.5.0] - 2026-09-25
 
 > **Breaking:** an automatic ingest that fails promotion gates now exits 1 after

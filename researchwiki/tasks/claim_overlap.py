@@ -556,23 +556,27 @@ def find_backlog(conn=None) -> list[str]:
     """
     from ..db.connection import get_connection
     c = conn or get_connection()
-    stems = [
-        r[0] for r in c.execute(
-            "SELECT DISTINCT p.stem FROM papers p "
-            "  JOIN claims cl ON cl.paper_stem = p.stem AND cl.is_cross_ref = 0 "
-            " WHERE p.page_type = 'paper' ORDER BY p.stem"
-        )
-    ]
     recorded = {
         r[0]: r[1] for r in c.execute(
             "SELECT paper_stem, claims_fingerprint FROM claim_overlap_runs"
         )
     }
+    # One pass over every paper's claims, grouped in Python. This used to issue
+    # one query per paper (~480 on a 500-paper corpus), which made the check
+    # over a second of `status` on its own. The rows and filter are exactly
+    # `_claims_for_stem`'s, so fingerprints match those `record_run` stored.
+    claims_by_stem: dict[str, list[dict]] = {}
+    for stem, section, text in c.execute(
+        "SELECT cl.paper_stem, cl.section, cl.text FROM claims cl "
+        "  JOIN papers p ON p.stem = cl.paper_stem "
+        " WHERE p.page_type = 'paper' AND cl.is_cross_ref = 0"
+    ):
+        claims_by_stem.setdefault(stem, []).append({"section": section, "text": text})
     pending = []
-    for s in stems:
-        want = recorded.get(s)
-        if want is None or want != claims_fingerprint(_claims_for_stem(c, s)):
-            pending.append(s)
+    for stem in sorted(claims_by_stem):
+        want = recorded.get(stem)
+        if want is None or want != claims_fingerprint(claims_by_stem[stem]):
+            pending.append(stem)
     return pending
 
 
@@ -619,14 +623,17 @@ def backlog_warning(*, touch: bool = True) -> str | None:
     `touch=False` peeks without affecting decay state (tests, or a caller that
     wants to compute the string and defer the "shown" semantics).
     """
+    # Decay check first: it is one stat(), and the backlog scan reads every
+    # claim in the corpus. Checked after the scan, `status` paid for that scan
+    # on every run of the quiet window only to discard the answer.
+    age = backlog_stamp_age_days()
+    if age is not None and age < BACKLOG_DECAY_DAYS:
+        return None
     try:
         n = len(find_backlog())
     except Exception:
         return None      # no DB / cold install — nothing to say
     if n < BACKLOG_THRESHOLD:
-        return None
-    age = backlog_stamp_age_days()
-    if age is not None and age < BACKLOG_DECAY_DAYS:
         return None
     if touch:
         write_backlog_stamp()
