@@ -491,6 +491,7 @@ def main(argv: list[str]) -> int:
         "orphan_pdfs": orphan_pdfs,
         "failed": failed,
         "recent": recent,
+        "wiki_pages": wiki_pages,
     })
 
 
@@ -751,7 +752,7 @@ def _render_model_and_index_health(ctx: dict) -> None:
     print()
 
 
-def _render_backlogs_and_telemetry() -> None:
+def _render_backlogs_and_telemetry(wiki_pages: list | None = None) -> None:
     """Render optional proposals, supplements, costs, and concept candidates."""
 
     # --- pending evolution proposals
@@ -816,10 +817,22 @@ def _render_backlogs_and_telemetry() -> None:
     # Proposals are the review queue that replaces recurring concept-hub
     # nudges. Their Markdown is synced and canonical; this read remains cheap.
     from ..proposals import load_proposals
-    proposed = [p for p in load_proposals() if p.status == "proposed"]
+    # The pages `main` already parsed: a second `read_pages()` here re-read and
+    # re-parsed every page's YAML, which was a third of the command's runtime.
+    proposed = [p for p in load_proposals(wiki_pages) if p.status == "proposed"]
     if proposed:
         print(f"Proposal queue: {len(proposed)} awaiting feedback "
               "(`researchwiki proposals list --status proposed`)")
+        print()
+
+    # Opportunities the corpus already contains. Without this line proposals are
+    # invisible to anyone who does not already know the command exists: the
+    # queue above only counts proposals someone has made. Local scans only, and
+    # decay-stamped like the other nudges so it does not repeat every run.
+    from ..proposal_opportunities import opportunity_warning
+    opp_msg = opportunity_warning()
+    if opp_msg:
+        print(opp_msg)
         print()
 
 
@@ -827,7 +840,7 @@ def _render_status(ctx: dict) -> int:
     """Render a collected status snapshot without walking the wiki again."""
     _render_overview(ctx)
     _render_model_and_index_health(ctx)
-    _render_backlogs_and_telemetry()
+    _render_backlogs_and_telemetry(ctx["wiki_pages"])
     print("For the full citation-scout report run: researchwiki scout")
     return 0
 

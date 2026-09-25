@@ -4,6 +4,28 @@ Read this file when the user asks the wiki to suggest, remember, review, or act
 on possible synthesis or idea pages. Proposal Markdown is a decision ledger,
 not a finished evidence page.
 
+## Find opportunities first
+
+You don't need a question in hand. The corpus already records proposal-shaped
+signals, and one local command ranks them (no model calls, no writes):
+
+```bash
+researchwiki proposals opportunities            # ranked list with ready commands
+researchwiki proposals opportunities --json     # for agents
+```
+
+Ranked strongest first: a judged contradiction between two papers, a chain of
+judged build-on/refine relations (one entry per connected set of papers), a
+cluster of 3–40 papers no synthesis page covers, and a cross-category claim pair
+sharing a named method (`needleman-wunsch`, `atac-seq`). A topic an existing
+proposal already cites is dropped, so accepting or rejecting one stops it
+resurfacing. `status` prints a one-line summary of the judged-edge signals
+(quiet for 14 days after it shows), and ingest prints a hint when the new paper
+joins one. Clusters and bridges take seconds to scan, so only this command
+lists them.
+Opportunities only get richer as `researchwiki claim-overlap --backlog` judges
+more claim pairs.
+
 ## Generate a bounded proposal set
 
 Start with a question, limitation, or target problem:

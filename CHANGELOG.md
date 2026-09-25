@@ -20,6 +20,32 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- Proposal opportunities are now surfaced to users who have never run
+  `proposals generate`. `researchwiki proposals opportunities [--json]` ranks
+  proposal-shaped signals the corpus already contains, each with a ready
+  preview command: judged claim-graph contradictions first, then build-on and
+  refine chains (one entry per connected set of papers), paper clusters of 3–40
+  with no synthesis page, and cross-category claim pairs sharing a named method.
+  It makes no model calls and writes nothing. Topics an existing proposal
+  already cites are dropped. `status` prints a one-line summary of the judged
+  claim-relation signals (quiet for 14 days once shown) and `agent ingest`
+  prints a hint when the new paper joins one; both read only the edge cache,
+  so neither gets slower. CLAUDE.md asks chat agents to offer, never run, a
+  proposal after a cross-paper answer that surfaces one.
+
+### Changed
+
+- `researchwiki status` runs about 4x faster (2.6 s → 0.7 s on a 540-page
+  wiki) with identical output. It no longer walks the wiki twice to count
+  pending proposals. The claim-overlap backlog is computed in one query
+  instead of one per paper (1.3 s → 0.02 s), and the backlog nudge checks
+  its quiet-period stamp before scanning, as the other nudges do. Page
+  frontmatter is parsed with PyYAML's libyaml C loader when available
+  (about 9x faster, same results), which speeds up every command that reads
+  the wiki; `lint` drops from 3.2 s to 1.6 s.
+
 ## [0.5.0] - 2026-09-25
 
 > **Breaking:** an automatic ingest that fails promotion gates now exits 1 after

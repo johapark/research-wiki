@@ -19,6 +19,18 @@ import yaml
 from .paths import papers_dir, wiki_dir
 from .categories import PAGE_TYPE_DIRS
 
+# libyaml's C loader parses the same YAML ~9x faster than PyYAML's pure-Python
+# one, and every command that walks the wiki parses every page's frontmatter.
+# It builds the same SafeLoader constructors and resolvers, so results are
+# identical (checked across a 544-page corpus); PyYAML wheels bundle libyaml,
+# and a build without it falls back to the pure-Python loader.
+_SafeLoader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+def load_frontmatter_yaml(text: str) -> Any:
+    """`yaml.safe_load`, via the C loader when available."""
+    return yaml.load(text, Loader=_SafeLoader)
+
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
@@ -102,7 +114,7 @@ def read_page(md: Path) -> Page | None:
     if end < 0:
         return None
     try:
-        fm = yaml.safe_load(text[4:end])
+        fm = load_frontmatter_yaml(text[4:end])
     except yaml.YAMLError:
         fm = None
     if not isinstance(fm, dict):

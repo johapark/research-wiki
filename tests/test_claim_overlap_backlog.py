@@ -437,3 +437,31 @@ def test_backlog_reports_no_halt_on_a_clean_drain(monkeypatch, capsys):
     raw = capsys.readouterr().out
     payload = _json.loads(raw[raw.index("{"):])
     assert payload["stopped_early"] is None
+
+
+def test_backlog_is_one_pass_not_one_query_per_paper(conn):
+    """A query per paper made `status` spend over a second here on a
+    500-paper corpus; the grouped pass must give the same answer."""
+    for i in range(30):
+        _paper(conn, f"p{i:02d}-2024-x", claims=(f"claim {i}", f"other {i}"))
+    covered = "p00-2024-x"
+    co.record_run(conn, covered,
+                  fingerprint=co.claims_fingerprint(co._claims_for_stem(conn, covered)),
+                  n_claims=2, n_candidates=0, n_judged=0, n_confirmed=0,
+                  sim_threshold=0.83)
+    statements: list[str] = []
+    conn.set_trace_callback(statements.append)
+    pending = co.find_backlog(conn)
+    conn.set_trace_callback(None)
+    assert covered not in pending and len(pending) == 29
+    selects = [s for s in statements if s.lstrip().upper().startswith("SELECT")]
+    assert len(selects) <= 2, selects
+
+
+def test_nudge_checks_the_stamp_before_scanning(monkeypatch, stamp):
+    """The backlog scan reads every claim; during the quiet window `status`
+    must not pay for it just to discard the answer."""
+    stamp.write_text(str(int(time.time())))
+    monkeypatch.setattr(co, "find_backlog",
+                        lambda conn=None: pytest.fail("scanned during the quiet window"))
+    assert co.backlog_warning() is None

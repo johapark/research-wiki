@@ -4,6 +4,7 @@ Usage:
   researchwiki proposals generate "question or topic" [--papers STEM ...]
       [--target-category CAT --cross-category [--search-plan PLAN.json]]
       [--prepare-only] [--write] [--json]
+  researchwiki proposals opportunities [--limit N] [--json]
   researchwiki proposals accept PREVIEW.json --select 1 [2 3]
   researchwiki proposals list [--status STATUS] [--json]
   researchwiki proposals feedback ID --decision STATUS --reason TEXT [--actor NAME]
@@ -192,6 +193,44 @@ def _generate(argv: list[str]) -> int:
     return 0
 
 
+def _opportunities(argv: list[str]) -> int:
+    """List ranked proposal opportunities already present in the corpus.
+
+    Local only: no model call and no write. Each entry carries the exact
+    `proposals generate` command that would explore it, as a preview.
+    """
+    from ..proposal_opportunities import find_opportunities
+
+    parser = argparse.ArgumentParser(
+        prog="researchwiki proposals opportunities",
+        description="Rank proposal opportunities found in the corpus (no model calls).",
+    )
+    parser.add_argument("--limit", type=int, default=10,
+                        help="Most opportunities to list (default 10).")
+    parser.add_argument("--json", action="store_true", dest="as_json")
+    args = parser.parse_args(argv)
+    if args.limit < 1:
+        parser.error("--limit must be at least 1")
+    opps = find_opportunities(limit=args.limit)
+    if args.as_json:
+        print(json.dumps([opp.as_json() for opp in opps], ensure_ascii=False, indent=2))
+        return 0
+    if not opps:
+        print("No proposal opportunities found. They come from judged claim-graph "
+              "edges (`researchwiki claim-overlap --backlog`), paper clusters no "
+              "synthesis page covers, and cross-category claim pairs.")
+        return 0
+    print("Proposal opportunities (found locally, no model calls):")
+    print()
+    for i, opp in enumerate(opps, 1):
+        print(f"{i}. [{opp.kind}] {opp.why}")
+        print(f"   {opp.command()}")
+        print()
+    print("Each command previews up to three proposals (one model call) and saves "
+          "nothing to the wiki until you run `proposals accept`.")
+    return 0
+
+
 def _accept(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="researchwiki proposals accept")
     parser.add_argument("preview", type=Path, help="Reviewed preview JSON, including chat-authored receipts.")
@@ -294,6 +333,8 @@ def main(argv: list[str]) -> int:
         return _generate(rest)
     if action == "accept":
         return _accept(rest)
+    if action == "opportunities":
+        return _opportunities(rest)
     if action == "list":
         return _list(rest)
     if action == "feedback":

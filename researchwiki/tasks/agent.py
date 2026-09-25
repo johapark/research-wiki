@@ -521,9 +521,30 @@ def _cmd_ingest(args) -> int:
     if msg:
         print()
         print(msg)
+    if ctx.outcome == "promoted" and ctx.paper_stem and not args.stub:
+        _print_proposal_hint(ctx.paper_stem)
     if ctx.outcome == "sandboxed" and ctx.promote_mode == "auto":
         return 1
     return 0
+
+
+def _print_proposal_hint(stem: str) -> None:
+    """One line naming a proposal the new paper just made possible.
+
+    Local and advisory: it reuses `proposal_opportunities` (no model call),
+    skips the slow cross-category pair scan, and never affects the exit code.
+    Silent when the paper joins no opportunity, which is the common case.
+    """
+    try:
+        from ..proposal_opportunities import opportunities_for_paper
+        opps = opportunities_for_paper(stem, limit=1)
+    except Exception:
+        return
+    if not opps:
+        return
+    print()
+    print(f"Proposal opportunity: {opps[0].why}")
+    print(f"  → {opps[0].command()}")
 
 
 def _cmd_trace(args) -> int:
