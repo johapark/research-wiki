@@ -20,7 +20,14 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
-> **Breaking:** `agent ingest` no longer adds new papers to existing concept
+## [0.5.0] - 2026-09-25
+
+> **Breaking:** an automatic ingest that fails promotion gates now exits 1 after
+> writing its review draft. Previously that sandbox outcome exited 0 and could be
+> mistaken for a successfully published paper. Explicit `--force-sandbox` runs
+> remain successful exit-0 review operations.
+>
+> **Also breaking:** `agent ingest` no longer adds new papers to existing concept
 > hubs, and `status` no longer prints the concept-hub candidate line; proposal
 > records replace both. Existing hubs are otherwise untouched.
 >
@@ -92,6 +99,14 @@ the reasoning behind any line below.
   justify promoting hybrid. The retrieval suite now includes ten corpus-native
   fixtures alongside its four portable fixtures.
 
+- Ingest now reports distinct terminal outcomes for a promoted paper, an exact
+  duplicate already present in the library, and a review-only sandbox draft.
+  Byte-identical inbox duplicates stop after reconciliation, leave the input in
+  place, and avoid authoring, grading, and post-hook model calls.
+- `agent ingest` / `add` gain `--memory-evolve` and
+  `--contradiction-alert`, making those model-backed enrichment passes explicit
+  opt-ins alongside the existing `--claim-overlap` switch.
+
 ### Changed
 
 - Proposals replace concept hubs as the default page-discovery surface. Fresh
@@ -105,6 +120,49 @@ the reasoning behind any line below.
   supporting claim are shown per hit for human cite-or-exclude review.
 - Classifier evaluation is local BM25-kNN by default; paid LLM evaluation is now
   an explicit `--mode llm` choice that makes one call per held-out paper.
+
+- Target-claim extraction is now part of the automatic-promotion contract:
+  unavailable or empty extraction and any missed critical target claim block
+  promotion. One critical miss is enough to trigger revision, while ordinary
+  structural gaps retain the two-gap threshold. Long healthy PDFs use a
+  document-stratified sample, and target extraction supplies 5–10 source-derived
+  keywords so the normal path avoids a separate keyword call.
+- Required claim-grade persistence runs immediately after promotion. Optional
+  model-backed maintenance runs only for promoted pages, under the ingest budget,
+  and cannot turn an already-landed paper into a failed ingest.
+- Ingest receipts now distinguish review-required sandbox output from published
+  pages and state that supplementary files are attached but not analyzed during
+  authoring.
+
+- Multi-PDF `agent ingest` / `add`, `import apply` and `researchwiki ingest -w N`
+  runs now default to one worker when a phase that command can reach uses
+  `chat-relay`; API-backed providers and `--stub` retain the four-worker default,
+  and explicit `-w N` still opts into parallel relay requests. The batch parent
+  mirrors `.llm-relay/pending/` handoffs — with both file paths, the deadline and
+  the retry marker, matching the in-process notice, which it now shares a
+  formatter with — so the safe sequential fallback no longer hides for ten
+  minutes in worker logs. Requests abandoned by an exited run are labelled
+  `STALE` rather than listed as live, because answering one writes a response
+  nothing consumes that then becomes a silent cache hit.
+  Chat-agent instructions now prescribe a bounded rolling pool with one
+  foreground single-PDF ingest per native subagent, keeping paper context and
+  paper-specific post-ingest work isolated.
+- Worker-count policy moved from `tasks.agent` into the batch driver
+  (`tasks._ingest_batch.resolve_batch_workers`), keyed off the plan's own
+  subcommand. Every entry point that can start or resume a batch now gets the
+  same answer, so `researchwiki ingest` and `agent ingest` no longer disagree
+  about a batch dir they can both resume.
+- Batch plans now distinguish provider-selected worker defaults from an explicit
+  `-w N`. On `--resume`, the active provider is resolved again: switching an
+  implicit API batch to chat-relay safely enables one worker plus prompt
+  mirroring, while an explicit worker count remains unchanged. In a plan written
+  before that field existed, only a stored `4` is treated as implicit — a stored
+  `1`, `2` or `8` was typed by hand and is honoured.
+- `errors.py` now documents the three call-site rules that decide what happens to
+  an `EnvironmentFailure`: phase wrappers propagate it, work the command's
+  success does not depend on records a skip, and loops over independent items
+  stop and report what they accumulated. `tests/test_environment_failure.py`
+  pins all three.
 
 ### Fixed
 
@@ -188,70 +246,6 @@ the reasoning behind any line below.
   negative anchors are reported separately without blocking positive scoring.
 - Retrieval benchmark keyword rankings now call the production claim retriever,
   preventing its former LIKE-based approximation from drifting from FTS results.
-
-## [0.5.0] - 2026-09-13
-
-> **Breaking:** an automatic ingest that fails promotion gates now exits 1 after
-> writing its review draft. Previously that sandbox outcome exited 0 and could be
-> mistaken for a successfully published paper. Explicit `--force-sandbox` runs
-> remain successful exit-0 review operations.
-
-### Added
-
-- Ingest now reports distinct terminal outcomes for a promoted paper, an exact
-  duplicate already present in the library, and a review-only sandbox draft.
-  Byte-identical inbox duplicates stop after reconciliation, leave the input in
-  place, and avoid authoring, grading, and post-hook model calls.
-- `agent ingest` / `add` gain `--memory-evolve` and
-  `--contradiction-alert`, making those model-backed enrichment passes explicit
-  opt-ins alongside the existing `--claim-overlap` switch.
-
-### Changed
-
-- Target-claim extraction is now part of the automatic-promotion contract:
-  unavailable or empty extraction and any missed critical target claim block
-  promotion. One critical miss is enough to trigger revision, while ordinary
-  structural gaps retain the two-gap threshold. Long healthy PDFs use a
-  document-stratified sample, and target extraction supplies 5–10 source-derived
-  keywords so the normal path avoids a separate keyword call.
-- Required claim-grade persistence runs immediately after promotion. Optional
-  model-backed maintenance runs only for promoted pages, under the ingest budget,
-  and cannot turn an already-landed paper into a failed ingest.
-- Ingest receipts now distinguish review-required sandbox output from published
-  pages and state that supplementary files are attached but not analyzed during
-  authoring.
-
-- Multi-PDF `agent ingest` / `add`, `import apply` and `researchwiki ingest -w N`
-  runs now default to one worker when a phase that command can reach uses
-  `chat-relay`; API-backed providers and `--stub` retain the four-worker default,
-  and explicit `-w N` still opts into parallel relay requests. The batch parent
-  mirrors `.llm-relay/pending/` handoffs — with both file paths, the deadline and
-  the retry marker, matching the in-process notice, which it now shares a
-  formatter with — so the safe sequential fallback no longer hides for ten
-  minutes in worker logs. Requests abandoned by an exited run are labelled
-  `STALE` rather than listed as live, because answering one writes a response
-  nothing consumes that then becomes a silent cache hit.
-  Chat-agent instructions now prescribe a bounded rolling pool with one
-  foreground single-PDF ingest per native subagent, keeping paper context and
-  paper-specific post-ingest work isolated.
-- Worker-count policy moved from `tasks.agent` into the batch driver
-  (`tasks._ingest_batch.resolve_batch_workers`), keyed off the plan's own
-  subcommand. Every entry point that can start or resume a batch now gets the
-  same answer, so `researchwiki ingest` and `agent ingest` no longer disagree
-  about a batch dir they can both resume.
-- Batch plans now distinguish provider-selected worker defaults from an explicit
-  `-w N`. On `--resume`, the active provider is resolved again: switching an
-  implicit API batch to chat-relay safely enables one worker plus prompt
-  mirroring, while an explicit worker count remains unchanged. In a plan written
-  before that field existed, only a stored `4` is treated as implicit — a stored
-  `1`, `2` or `8` was typed by hand and is honoured.
-- `errors.py` now documents the three call-site rules that decide what happens to
-  an `EnvironmentFailure`: phase wrappers propagate it, work the command's
-  success does not depend on records a skip, and loops over independent items
-  stop and report what they accumulated. `tests/test_environment_failure.py`
-  pins all three.
-
-### Fixed
 
 - An arXiv/preprint-only DOI no longer inherits a formal journal or conference
   venue from a merged Semantic Scholar record. Reconciliation now defers to
