@@ -10,18 +10,19 @@ four concerns:
                  (`researchwiki candidates concepts` reads this)
   term_claims  — term ↔ claim helpers shared by scaffold + attach
   scaffold     — the `researchwiki concepts <term>` scaffolder +
-                 `attach_after_ingest` (run by `concepts attach`; ingest no
-                 longer calls it)
+                 `attach_after_ingest` (ingest no longer calls it)
   refresh      — `refresh_concept` and `upgrade_spokes`
 
 The CLI (`researchwiki concepts <term>` / `--upgrade-spokes` /
-`refresh <slug>` / `attach <stem>`) still lives at `researchwiki.tasks.concepts` and is
+`refresh <slug>`) still lives at `researchwiki.tasks.concepts` and is
 just a thin argparse wrapper over these entry points.
 """
 
 from .candidates import collect_candidates, n_bridge_candidates
 from .declines import add_decline, add_declines, load_declines, remove_decline
 from .refresh import refresh_concept, upgrade_spokes
+import sys
+
 from .scaffold import attach_after_ingest, find_members, run
 from .triage import TRIAGE_THRESHOLD, apply_triage, triage_candidates
 
@@ -35,9 +36,30 @@ __all__ = [
     "refresh_concept",
     "upgrade_spokes",
     "attach_after_ingest",
+    "DEPRECATION_NOTICE",
+    "warn_deprecated",
     "find_members",
     "run",
     "triage_candidates",
     "apply_triage",
     "TRIAGE_THRESHOLD",
 ]
+
+
+#: Printed by every concept-hub command. Kept in one place so both commands say
+#: the same thing and the compatibility tests can match it. The dates mirror the
+#: `concept-hubs` row in `researchwiki/data/deprecations.yaml`.
+DEPRECATION_NOTICE = (
+    "note: concept hubs are deprecated and will be removed no earlier than 0.7.0 "
+    "and 2026-12-24; use `researchwiki proposals generate` for cross-paper "
+    "discovery (see prompts/proposal-workflow.md)."
+)
+
+
+def warn_deprecated() -> None:
+    """Announce the deprecation on stderr, never stdout.
+
+    COMPATIBILITY.md requires the notice to stay off stdout so `--json` output
+    remains parseable for the whole window.
+    """
+    print(DEPRECATION_NOTICE, file=sys.stderr)

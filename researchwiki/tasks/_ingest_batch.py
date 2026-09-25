@@ -244,8 +244,7 @@ def _summarize_worker_log(log_path: Path) -> dict:
     about: evolve proposals waiting for review.
 
     Concept-hub attachment used to be summarized here too, but ingest no
-    longer attaches papers to hubs (`researchwiki concepts attach` does it on
-    request), so no worker emits those lines.
+    longer attaches papers to hubs, so no worker emits those lines.
 
     Returns `{evolve_actionable: int}`. Silent on any I/O error — this runs
     post-batch as an informational summary, not a gate.

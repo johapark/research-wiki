@@ -9,8 +9,8 @@ Two public entry points:
   - `attach_after_ingest(stem)`  — for every existing hub whose term
                                     appears in the paper's contribution
                                     claims, add a spoke bullet and reciprocal
-                                    back-link. Run by `concepts attach`;
-                                    ingest no longer calls it.
+                                    back-link. Ingest no longer calls it;
+                                    concept hubs are deprecated.
 
 Both share the term↔claim substrate in `term_claims`.
 """
@@ -388,9 +388,8 @@ def _attach_to_concept(
     linked). Returns True iff written.
     """
     def _splice(text: str) -> str:
-        # Two attaches to the same hub (concurrent `concepts attach` runs, or
-        # a scaffold alongside one) race on this page — the file lock in
-        # update_locked serializes them. Returning `text` unchanged signals a
+        # Two writers to the same hub (a scaffold alongside an attach) race on
+        # this page — the file lock in update_locked serializes them. Returning `text` unchanged signals a
         # no-op (already linked, or structurally not a concept page).
         if f"[[{paper_key}]]" in text or f"[[{paper_key}#" in text:
             return text

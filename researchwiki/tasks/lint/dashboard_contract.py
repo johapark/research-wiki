@@ -29,11 +29,12 @@ _SECTIONS = (
     ("proposals", "recent proposals"),
 )
 
-# A dashboard scaffolded before proposals replaced concept hubs ends in a
-# concept-hub table instead. That wiki still has hubs, and `views.md` is
-# hand-editable, so lint must not demand a rewrite it can only get from
-# `init --refresh-dashboard`: the legacy table fills the fourth slot and is
-# checked against its own rules.
+# A dashboard scaffolded by 0.4.x ends in a concept-hub table instead. That
+# layout is a published contract, and `views.md` is hand-editable, so lint must
+# not demand a rewrite it can only get from `init --refresh-dashboard`: the
+# legacy table fills the fourth slot and is checked against its own rules.
+# Deprecated with concept hubs (`concept-hubs` in data/deprecations.yaml);
+# delete this branch when that entry is removed.
 _LEGACY_CONCEPT_PREFIX = "recent concept hubs"
 
 

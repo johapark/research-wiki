@@ -139,13 +139,19 @@ feedback in Markdown and rebuild. Once a proposal is chosen, draft the actual
 synthesis or idea page using its own author prompt and run both grounding gates
 plus `check-coverage`. Do not treat a proposal itself as citable evidence.
 
-## Legacy concept hubs
+## Deprecated concept hubs
 
-Existing `wiki/concepts/` pages remain readable and the manual `concepts`
-commands remain available. New wikis do not scaffold concept hubs, `status`
-does not promote candidates, and ingest does not mutate them automatically;
-run `researchwiki concepts attach <stem> ...` after an ingest to join new papers
-to existing hubs. A dashboard that still ends in a concept-hub table passes the
-dashboard lint as it is.
-Use proposals for new cross-paper discovery; maintain a legacy hub explicitly
-only when a single-term spoke registry is still useful.
+Concept hubs are deprecated and will be removed no earlier than 0.7.0 and
+2026-12-24 (`concept-hubs` in `researchwiki/data/deprecations.yaml`). Until then,
+existing `wiki/concepts/` pages stay readable, the `concepts` and `candidates
+concepts` commands still work and print a notice on stderr, and a dashboard that
+ends in a concept-hub table passes the dashboard lint as it is. New wikis do not
+scaffold hubs, `status` does not promote candidates, and ingest no longer adds
+papers to existing hubs.
+
+To retire hubs early, back up `wiki/`, run `researchwiki remove <slug>` (dry run
+first) for each page under `wiki/concepts/`, then `researchwiki init
+--refresh-dashboard`, `researchwiki db rebuild`, and `researchwiki reindex`.
+Removal strips the generated `[[concepts/…]]` back-link bullets and reports any
+authored citation instead of editing it. Use proposals for new cross-paper
+discovery.

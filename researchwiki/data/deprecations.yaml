@@ -26,6 +26,26 @@ deprecations:
     compatibility: delegating-alias
     status: active
 
+  # Concept hubs are superseded by proposal records. One feature, several
+  # published surfaces: every one stays working through the whole window, and
+  # all are removed together. The `concept_triage` routing phase is NOT listed:
+  # phase names are append-only and outlive the feature.
+  - id: concept-hubs
+    surface: cli-command
+    deprecated: researchwiki concepts
+    replacement: researchwiki proposals generate
+    announced_in: 0.5.0
+    announced_on: 2026-09-25
+    removal_not_before_version: 0.7.0
+    removal_not_before_date: 2026-12-24
+    compatibility: deprecated-in-place
+    status: active
+    also_covers:
+      - "researchwiki candidates concepts (and its flags)"
+      - "lint --json key: concept_contract_violations"
+      - "page type: concept (wiki/concepts/*.md)"
+      - "wiki/views.md: legacy `Recent concept hubs` table"
+
 # Historical database values are append-only, not deprecated. Every shipped role
 # stays here and in VALID_ROLES permanently; new roles are appended to both.
 persisted_phase_roles:

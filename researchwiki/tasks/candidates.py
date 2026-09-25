@@ -233,6 +233,8 @@ def main(argv: list[str]) -> int:
 
     target, rest = argv[0], argv[1:]
     if target == "concepts":
+        from ..concepts import warn_deprecated
+        warn_deprecated()
         return _run_concepts(rest)
     if target == "synthesis":
         return _run_synthesis(rest)

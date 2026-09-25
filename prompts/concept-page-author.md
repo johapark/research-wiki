@@ -1,5 +1,10 @@
 # Concept-page authoring — procedure
 
+> **Deprecated.** Concept hubs are removed no earlier than 0.7.0 and 2026-12-24.
+> Do not create new hubs; use `researchwiki proposals generate` for cross-paper
+> discovery ([`proposal-workflow.md`](./proposal-workflow.md)). This procedure
+> remains only for maintaining a hub that already exists.
+
 Trigger: when writing a new concept hub note (`wiki/concepts/<slug>.md`) or refreshing an existing one after new papers join the concept. A concept page is a **mini-synthesis around a single recurring term** — a hub that ties together every wiki paper that instantiates the concept, so the graph gains a bridge node the citation graph and semantic-KNN both miss. Use alongside CLAUDE.md §Page Types.
 
 A concept page earns its existence when a term recurs across **≥3 papers** (surfaced by `researchwiki candidates concepts`) — and is most valuable when those papers **span categories** (`concept_span ≥ 2`), because then the hub is the only thing linking otherwise-siloed domains. A term confined to one category is a weaker candidate; prefer a synthesis page there.
@@ -67,7 +72,7 @@ tags: [concept, rag]
 - `concept_span:` is provenance from the extractor — how many categories the term bridges. Bridges (span ≥ 2) are the reason the page exists; record it.
 - `concept_thesis:` is **required** — the scaffolder refuses without one. See *The thesis test* below.
 - `author_model:` is **required** — replace the scaffold's `TODO` with the exact model id that authored the current page (for example `gpt-5.6-luna`). Do not use a provider name or generic label.
-- `topic_seed_aliases:` is optional and emitted only when non-empty. `find_members` (on refresh) and `researchwiki concepts attach` expand their term search across every alias, so a concept the corpus names three ways still collects all its spokes. **Aliases are substring matches and widen membership fast** — five plausible ones took the parameter-efficient-fine-tuning hub from 5 members to 17 across 4 categories, admitting a Bayesian-optimization paper on `low-rank`. The scaffolder prints a `members by matching term` breakdown whenever you pass `--aliases`: read it, and keep the aliases that earn their members. Hubs should stay sparse.
+- `topic_seed_aliases:` is optional and emitted only when non-empty. `find_members` (on refresh) expands their term search across every alias, so a concept the corpus names three ways still collects all its spokes. **Aliases are substring matches and widen membership fast** — five plausible ones took the parameter-efficient-fine-tuning hub from 5 members to 17 across 4 categories, admitting a Bayesian-optimization paper on `low-rank`. The scaffolder prints a `members by matching term` breakdown whenever you pass `--aliases`: read it, and keep the aliases that earn their members. Hubs should stay sparse.
 - **Inspect before you commit to a thesis.** `researchwiki concepts "<term>" --dry-run` needs no `--thesis` — you cannot judge concept-vs-glossary before seeing the member list. The gate still applies to the write.
 - **A spoke with no matching claim is cited bare.** When a member joined on keywords and no claim mentions the term or any alias, the spoke is `[[stem]]` rather than `[[stem#slug]]`. That is honest, not missing: pick the right claim by hand, or leave it for `concepts --upgrade-spokes` once one lands.
 
@@ -129,6 +134,6 @@ researchwiki check-coverage  wiki/concepts/<slug>.md   # advisory — wiki paper
 
 ## When the wiki ingests something that affects the page
 
-- A new paper uses the concept → add it as a spoke (+ reciprocal link), update `referenced_papers:`, bump `concept_span:` if it's a new category, refresh `generated_at:`. Ingest no longer does this; run `researchwiki concepts attach <stem>` after the ingest, then verify and re-run the gates.
+- A new paper uses the concept → add it as a spoke (+ reciprocal link), update `referenced_papers:`, bump `concept_span:` if it's a new category, refresh `generated_at:`. Ingest no longer does this, so add the spoke by hand, then verify and re-run the gates.
 - The concept fragments into distinct sub-meanings across new papers → consider splitting into narrower concept pages, or promoting to a synthesis page if the cross-paper story has grown past enumeration into argument.
 - Staleness: concept pages are tracked by `lint` like synthesis/idea pages (via `generated_at` vs. member mtimes). A `stale_by_content` flag means a member paper changed after the last refresh — re-verify the spoke.

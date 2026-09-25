@@ -20,6 +20,17 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+> **Breaking:** `agent ingest` no longer adds new papers to existing concept
+> hubs, and `status` no longer prints the concept-hub candidate line; proposal
+> records replace both. Existing hubs are otherwise untouched.
+>
+> **Deprecated:** concept hubs as a whole — the `concepts` and `candidates
+> concepts` commands, the `lint --json` key `concept_contract_violations`, the
+> `concept` page type, and the dashboard's concept-hub table. Each keeps working
+> and warns on stderr until removal, no earlier than 0.7.0 and 2026-12-24
+> (`concept-hubs` in `researchwiki/data/deprecations.yaml`). To retire hubs now,
+> see `prompts/proposal-workflow.md` § Deprecated concept hubs.
+
 ### Added
 
 - First-run setup now validates that it is running from the clone before any
@@ -86,7 +97,7 @@ the reasoning behind any line below.
 - Proposals replace concept hubs as the default page-discovery surface. Fresh
   scaffolds create `wiki/proposals/`; `status` reports its review queue, and
   ingest no longer mutates concept hubs automatically. Existing concept pages
-  and manual commands remain available as a legacy workflow.
+  and manual commands remain available until the deprecation window closes.
 - Coverage checks fuse BM25 page, semantic page, and semantic contribution-claim
   evidence with reciprocal-rank fusion. BM25 candidates remain eligible; new
   semantic-only candidates require corroboration from both vector signals and a
@@ -126,9 +137,8 @@ the reasoning behind any line below.
   their evidence bullets, `stale_by_audit_count` counts only paper pages, and OKF
   export maps proposal pages (type, lifecycle status, `generated.at`, and the
   unverified-page count).
-- Wikis that still have concept hubs keep working: the dashboard lint accepts a
-  concept-hub table in place of the proposal table, and `researchwiki concepts
-  attach <stem> ...` joins new papers to existing hubs now that ingest does not.
+- Wikis that still have concept hubs keep a passing dashboard: the dashboard
+  lint accepts a concept-hub table in place of the proposal table.
 - Proposal lists sort by instant rather than timestamp string, so records synced
   across time zones order correctly, and one `generate` walks the wiki once.
 - The proposal benchmark caps failed runs at three proposals as well, so a
