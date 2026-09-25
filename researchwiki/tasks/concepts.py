@@ -30,7 +30,7 @@ import argparse
 import json
 import sys
 
-from ..concepts import refresh_concept, run, upgrade_spokes
+from ..concepts import refresh_concept, run, upgrade_spokes, warn_deprecated
 
 
 def _run_refresh(argv: list[str]) -> int:
@@ -105,6 +105,8 @@ def _resolve_thesis(term: str, from_arg: str | None) -> str | None:
 
 
 def main(argv: list[str]) -> int:
+    # Before any parsing, so `--help` and a bad flag announce it too.
+    warn_deprecated()
     # Subcommand: `concepts refresh <slug>` peels off first — it's a distinct
     # mode over an existing hub rather than a term-scaffold operation.
     if argv and argv[0] == "refresh":

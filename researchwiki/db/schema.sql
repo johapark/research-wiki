@@ -94,6 +94,47 @@ CREATE INDEX IF NOT EXISTS idx_claims_xref      ON claims(is_cross_ref);
 -- keeping it out of schema.sql means executescript() doesn't fail on
 -- existing DBs where the column hasn't been added yet.
 
+-- proposals: a deterministic index over wiki/proposals/*.md. The Markdown
+-- page remains canonical; these rows exist only for fast filtering and for
+-- feeding relevant prior decisions into later proposal runs.
+CREATE TABLE IF NOT EXISTS proposals (
+    proposal_id          TEXT PRIMARY KEY,
+    page_stem            TEXT NOT NULL UNIQUE
+                         REFERENCES papers(stem) ON DELETE CASCADE,
+    proposed_page_type   TEXT NOT NULL,
+    direction            TEXT NOT NULL,
+    status               TEXT NOT NULL,
+    question             TEXT NOT NULL,
+    thesis               TEXT NOT NULL,
+    topic_seed           TEXT,
+    target_category      TEXT,
+    source_fingerprint   TEXT,
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT NOT NULL,
+    author_model         TEXT,
+    parent_proposal      TEXT,
+    resulting_page       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_proposals_status    ON proposals(status);
+CREATE INDEX IF NOT EXISTS idx_proposals_direction ON proposals(direction);
+CREATE INDEX IF NOT EXISTS idx_proposals_category  ON proposals(target_category);
+
+-- Every row is parsed from a readable entry in the proposal page's
+-- ``## Feedback`` section. Editing or removing that Markdown entry is reflected
+-- on the next rebuild; the database never owns a user decision.
+CREATE TABLE IF NOT EXISTS proposal_feedback (
+    feedback_id TEXT PRIMARY KEY,
+    proposal_id TEXT NOT NULL REFERENCES proposals(proposal_id) ON DELETE CASCADE,
+    decision    TEXT NOT NULL,
+    actor       TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_proposal_feedback_proposal
+    ON proposal_feedback(proposal_id);
+
 -- ingest_iterations: append-only event log of every step the ingest agent
 -- takes. The framework writes a row after each phase / each LLM call;
 -- the LLM never inserts here directly. See researchwiki/agents/runner.py

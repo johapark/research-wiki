@@ -4,7 +4,7 @@
 
 `refexport` emits a *bibliography*: a list of documents somebody else published,
 so it carries only `paper`/`commentary`/`whitepaper`/`guidance`/`book` and there is
-deliberately no flag to include synthesis, idea or concept pages — a BibTeX entry
+deliberately no flag to include synthesis, idea, proposal or concept pages — a BibTeX entry
 for one would assert a publication that does not exist.
 
 OKF has the opposite scope. Its unit is a **concept**: "anything you want to
@@ -60,6 +60,7 @@ TYPE_MAP: dict[str, str] = {
     "synthesis": "Synthesis",
     "idea": "Idea",
     "concept": "Concept",
+    "proposal": "Proposal",
     "guidance": "Guidance",
     "protocol": "Protocol",
     "whitepaper": "Whitepaper",
@@ -80,12 +81,29 @@ STATUS_MAP: dict[str, str] = {
     "abandoned": "deprecated",
 }
 
+#: proposal-record `status:` → OKF lifecycle. A proposal is a draft until it has
+#: produced its page (`published`) or been set aside (`rejected`). Kept separate
+#: from `STATUS_MAP` because the two vocabularies share no values today but
+#: mean different things if they ever did.
+PROPOSAL_STATUS_MAP: dict[str, str] = {
+    "proposed": "draft",
+    "shortlisted": "draft",
+    "deferred": "draft",
+    "drafted": "draft",
+    "published": "stable",
+    "rejected": "deprecated",
+}
+
+#: Authored cross-paper page types. Their gates (`check-grounding`, `grade
+#: synthesis`) persist no record, so an export can never claim them verified.
+_UNGATED_TYPES = frozenset({"synthesis", "idea", "concept", "proposal"})
+
 #: Frontmatter keys that map onto an OKF field or are deliberately dropped. Any
 #: key NOT listed is carried through untouched under an `x_researchwiki_` prefix,
 #: so an export never silently loses curation.
 _MAPPED_KEYS = frozenset({
     "type", "title", "hook", "doi", "tags", "keywords",
-    "author_model", "ingested_at", "generated_at", "status",
+    "author_model", "ingested_at", "generated_at", "created_at", "status",
     "source_url",   # → `resource`, when the page has no DOI
     # Dropped: local-vault plumbing with no meaning outside this repo.
     "pdf_path", "category", "referenced_papers",
@@ -323,7 +341,7 @@ def _okf_frontmatter(
         report.description_missing.append(page.key)
 
     # `resource` is a URI for the underlying asset, absent for abstract concepts
-    # (§4.1) — which is the honest state for synthesis/idea/concept pages.
+    # (§4.1) — honest for synthesis/idea/proposal/concept pages.
     doi = page.str_field("doi").strip().strip('"').strip("'")
     if doi and doi.lower() not in ("todo", "none"):
         fm["resource"] = f"https://doi.org/{doi}"
@@ -338,7 +356,9 @@ def _okf_frontmatter(
         fm["tags"] = tags
 
     actor = _actor_for(page)
-    at = page.str_field("ingested_at").strip() or page.str_field("generated_at").strip()
+    # Proposal records stamp `created_at`, not `generated_at`/`ingested_at`.
+    at = (page.str_field("ingested_at").strip() or page.str_field("generated_at").strip()
+          or page.str_field("created_at").strip())
     if actor:
         gen: dict = {"by": actor}
         if at:
@@ -354,11 +374,12 @@ def _okf_frontmatter(
         fm["verified"] = {"by": "process:researchwiki-grade-paper",
                           "at": _iso(ts)}
         report.verified_emitted += 1
-    elif rw_type in ("synthesis", "idea", "concept"):
+    elif rw_type in _UNGATED_TYPES:
         report.verified_absent_no_gate_record.append(page.key)
 
     if (native_status := page.str_field("status").strip()):
-        if (mapped := STATUS_MAP.get(native_status)):
+        status_map = PROPOSAL_STATUS_MAP if rw_type == "proposal" else STATUS_MAP
+        if (mapped := status_map.get(native_status)):
             fm["status"] = mapped
         fm["x_researchwiki_status"] = native_status
 

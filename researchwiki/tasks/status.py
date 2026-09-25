@@ -44,7 +44,7 @@ WIKILINK_RE = re.compile(r"\[\[([^\]\|#]+?)(?:#[^\]\|]*)?(?:\|[^\]]+)?\]\]")
 
 
 #: Directories that hold page types rather than content categories.
-PAGE_TYPE_DIRS_ = ("synthesis", "references", "ideas", "concepts")
+PAGE_TYPE_DIRS_ = ("synthesis", "references", "ideas", "proposals", "concepts")
 
 #: Types that behave like papers for counting and for the cross-link graph.
 #: `commentary` belongs here: it lives in a content category, carries
@@ -521,6 +521,7 @@ def _render_overview(ctx: dict) -> None:
         "synthesis": "synthesis",
         "references": "reference",
         "ideas": "idea",
+        "proposals": "proposal",
         "concepts": "concept",
     }
     total_pages = n + sum(len(s) for s in page_type_sets.values())
@@ -812,24 +813,13 @@ def _render_backlogs_and_telemetry() -> None:
                   f"{slot['out']/1000:>7,.0f}K out")
         print()
 
-    # --- concept-hub candidates (opportunity signal; not a defect)
-    # No outer try/except here: `n_bridge_candidates` already swallows its own
-    # failures and reports them as None, so wrapping it again would only hide a
-    # bug in these three prints.
-    from ..concepts import TRIAGE_THRESHOLD, n_bridge_candidates
-    n_bridges = n_bridge_candidates()
-    if n_bridges is None:
-        print("Concept-hub candidates: scan failed — count unknown "
-              "(`researchwiki candidates concepts --bridges` for the error)")
-        print()
-    elif n_bridges >= TRIAGE_THRESHOLD:
-        print(f"Concept-hub candidates: {n_bridges} bridge term(s) — likely dominated by "
-              "extraction noise. Batch-triage with "
-              "`researchwiki candidates concepts --triage` (--dry-run to preview).")
-        print()
-    elif n_bridges > 0:
-        print(f"Concept-hub candidates: {n_bridges} bridge term(s) with no hub yet "
-              "(`researchwiki candidates concepts --bridges`)")
+    # Proposals are the review queue that replaces recurring concept-hub
+    # nudges. Their Markdown is synced and canonical; this read remains cheap.
+    from ..proposals import load_proposals
+    proposed = [p for p in load_proposals() if p.status == "proposed"]
+    if proposed:
+        print(f"Proposal queue: {len(proposed)} awaiting feedback "
+              "(`researchwiki proposals list --status proposed`)")
         print()
 
 

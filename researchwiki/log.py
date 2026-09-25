@@ -24,7 +24,8 @@ def append_log_md(kind: str, headline: str, details: str = "") -> None:
         ## [YYYY-MM-DD] {kind} | {headline}
         {details}
 
-    `kind` is one of `ingest`, `query`, `lint`, `synthesize`. Creates the file
+    `kind` includes `ingest`, `query`, `lint`, `synthesize`, and proposal
+    lifecycle events. Creates the file
     on first use. `wiki/log.md` is gitignored by default (per-user history)
     and lives inside wiki/ so an Obsidian vault on wiki/ can browse it.
     """

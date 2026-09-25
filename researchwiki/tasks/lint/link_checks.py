@@ -155,17 +155,17 @@ def find_missing_backlinks(out_links: dict[str, set[str]]) -> list[tuple[str, st
       - root meta pages (`index`, `log`, `views`, …): a slashless key is a
         catalogue / log, not a content node. The index links *every* paper;
         papers must not carry a `- [[index]]` backlink.
-      - `synthesis/`, `ideas/`: page-type pages that *reference* many papers
-        as grounding (synthesis cites; an idea leans on 20+ papers). Forcing
-        a backlink bullet onto every referenced paper is the noise this guard
-        prevents.
+      - `synthesis/`, `ideas/`, `proposals/`: page-type pages that reference
+        papers as grounding or candidate evidence. Forcing a backlink bullet
+        onto every referenced paper is noise; proposals in particular are a
+        decision ledger and may never become published pages.
       - `references/`: document-shaped, different linking semantics.
 
     `concepts/` is intentionally NOT excluded: a hub↔member edge is meant to
     be reciprocal (the `concepts` task adds the member→hub back-link), so a
     one-way concept edge is a real gap worth surfacing.
     """
-    EXCLUDED_PREFIXES = ("synthesis/", "references/", "ideas/")
+    EXCLUDED_PREFIXES = ("synthesis/", "references/", "ideas/", "proposals/")
 
     def _excluded(key: str) -> bool:
         return "/" not in key or key.startswith(EXCLUDED_PREFIXES)

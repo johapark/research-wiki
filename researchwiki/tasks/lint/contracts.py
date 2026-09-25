@@ -11,6 +11,7 @@ LINT_JSON_KEYS = frozenset({
     "supplementary_missing_on_disk", "supplementary_orphaned_files",
     "dangling_claim_anchors", "orphan_prompts", "broken_prompt_pointers",
     "concept_contract_violations", "idea_contract_violations",
+    "proposal_contract_violations",
     "dashboard_contract_violations", "ungraded_papers", "venue_suspect",
     "none_placeholders", "thin_index_text", "zero_claim_papers",
     "stems_missing_claim_overlap", "duplicate_claim_sets", "db_drift",

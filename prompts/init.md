@@ -52,9 +52,9 @@ existing dashboard is preserved. The dashboard is static and renders in
 Obsidian when the Dataview plugin is enabled.
 
 The dashboard contract is automatic: Keep this dashboard JavaScript-free. It
-uses stamped dates, including `WHERE type = "concept" AND generated_at`.
-There is **No synthesis member-count column**; concept membership comes from
-its canonical spoke registry, `referenced_papers`.
+uses stamped dates. Its fourth table is `WHERE type = "proposal" AND created_at`
+and shows intended page type, direction, and status. There is **no synthesis
+member-count column** because synthesis sources live in body citations.
 
 `researchwiki doctor` is local and free. It checks Python, dependencies,
 content paths and symlinks, model routing and credentials, state DB access,

@@ -229,10 +229,13 @@ def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
         "wiki/other",
         "wiki/synthesis",
         "wiki/ideas",
-        "wiki/concepts",
+        "wiki/proposals",
         "wiki/references",
     ):
         assert (root / rel).exists(), rel
+    # Proposals replace concept hubs in the scaffold; `concepts/` stays a
+    # recognized legacy directory but a new wiki must not get one.
+    assert not (root / "wiki" / "concepts").exists()
     doctor = run_cli(root, env, "doctor")
     assert "READY TO INGEST" in doctor.stdout
     assert "Provider connectivity was not tested" in doctor.stdout

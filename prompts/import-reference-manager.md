@@ -147,7 +147,7 @@ measures that. This step is the difference between a pile of pages and a wiki:
 ```bash
 researchwiki claim-overlap --backlog --dry-run   # reciprocal links, LLM-judged
 researchwiki scout --json                        # citation-graph gaps (needs S2)
-researchwiki candidates concepts --bridges       # cross-category hub notes
+researchwiki proposals generate "<question>"     # preview cross-paper page ideas
 researchwiki candidates synthesis                # dense clusters
 ```
 

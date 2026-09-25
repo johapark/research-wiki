@@ -499,11 +499,6 @@ def _cmd_ingest(args) -> int:
                     ctx.paper_stem, ctx.committed_path
                 ),
             )
-        # Attach the new paper to any existing concept hub whose term it
-        # mentions (spoke + reciprocal link). No-ops until concept pages exist.
-        from .. import concepts
-
-        concepts.attach_after_ingest(ctx.paper_stem, ctx.committed_path)
         if args.contradiction_alert:
             # Any claim in the new paper that disagrees with a graded existing
             # claim surfaces as `⚠ contradicts [[stem#slug]]`. This analysis is

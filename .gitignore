@@ -154,3 +154,4 @@ internal/
 # Local state DB — repo-root fallback path (some tools open it here
 # before resolving the canonical ~/.local/share/researchwiki/state.db).
 .state.db
+.proposal-cache/

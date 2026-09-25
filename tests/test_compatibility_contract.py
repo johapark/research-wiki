@@ -180,3 +180,66 @@ def test_alias_discovery_covers_every_known_alias():
     """Guard the guard: an empty or shrunken alias set makes the two checks above
     pass without testing anything."""
     assert set(_alias_modules()) == set(_ALIAS_WORKERS)
+
+
+# ---------- deprecated-in-place surfaces ----------
+#
+# Concept hubs have no replacement *command* to delegate to, so they are
+# deprecated in place: every published surface keeps working and warns. These
+# pin that it does, for the whole window.
+
+
+def _concept_row() -> dict:
+    return next(r for r in _ledger()["deprecations"] if r["id"] == "concept-hubs")
+
+
+def test_concept_hub_notice_matches_the_ledger():
+    from researchwiki.concepts import DEPRECATION_NOTICE
+
+    row = _concept_row()
+    assert row["status"] == "active"
+    assert row["compatibility"] == "deprecated-in-place"
+    assert f"no earlier than {row['removal_not_before_version']}" in DEPRECATION_NOTICE
+    assert str(row["removal_not_before_date"]) in DEPRECATION_NOTICE
+
+
+@pytest.mark.parametrize("argv", [
+    ["concepts", "--__definitely_not_a_flag__"],
+    ["candidates", "concepts", "--__definitely_not_a_flag__"],
+])
+def test_concept_commands_warn_on_stderr_even_when_argv_fails(argv):
+    """Warned before parsing, so `--help` and a typo still announce it."""
+    module = importlib.import_module(
+        "researchwiki.tasks.concepts" if argv[0] == "concepts"
+        else "researchwiki.tasks.candidates")
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with contextlib.suppress(SystemExit):
+            module.main(argv[1:])
+    assert "concept hubs are deprecated" in err.getvalue()
+    assert "deprecated" not in out.getvalue()
+
+
+def test_candidates_concepts_json_stdout_stays_parseable(monkeypatch):
+    import json as _json
+
+    from researchwiki.tasks import candidates
+
+    import researchwiki.concepts as concepts_pkg
+    # `_run_concepts` imports it from the package inside the function.
+    monkeypatch.setattr(concepts_pkg, "collect_candidates", lambda **kw: [])
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = candidates.main(["concepts", "--json"])
+    assert rc == 0
+    _json.loads(out.getvalue())
+    assert "deprecated" in err.getvalue()
+
+
+def test_deprecated_concept_surfaces_are_still_published():
+    """Removal is not allowed before both gates, so each surface must exist."""
+    commands = cli._discover_tasks()
+    assert "concepts" in commands and "candidates" in commands
+    assert "concept_contract_violations" in LINT_JSON_KEYS
+    from researchwiki.provenance import AUTHORED_PAGE_TYPES
+    assert "concept" in AUTHORED_PAGE_TYPES

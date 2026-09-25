@@ -177,15 +177,20 @@ def test_find_missing_backlinks_excludes_synthesis(tmp_wiki):
     assert find_missing_backlinks(out_links) == []
 
 
-def test_find_missing_backlinks_excludes_index_and_ideas(tmp_wiki):
-    """The index catalogue and idea-page grounding links are asymmetric by
-    design — a paper must not be forced to back-link them."""
+def test_find_missing_backlinks_excludes_index_ideas_and_proposals(tmp_wiki):
+    """Catalog, idea, and proposal evidence links are asymmetric by design."""
     idx = _mkpage(tmp_wiki, "index", "[[cgt/a]]")
     idea = _mkpage(tmp_wiki, "ideas/plan", "[[cgt/a]]")
+    proposal = _mkpage(tmp_wiki, "proposals/candidate", "[[cgt/a#kc-deadbeef]]")
     a = _mkpage(tmp_wiki, "cgt/a", "")
-    pages = [idx, idea, a]
-    pages_prose = {idx: "[[cgt/a]]", idea: "[[cgt/a]]", a: ""}
-    known = {page_key(idx), page_key(idea), page_key(a)}
+    pages = [idx, idea, proposal, a]
+    pages_prose = {
+        idx: "[[cgt/a]]",
+        idea: "[[cgt/a]]",
+        proposal: "[[cgt/a#kc-deadbeef]]",
+        a: "",
+    }
+    known = {page_key(idx), page_key(idea), page_key(proposal), page_key(a)}
     out_links, _, _ = build_link_graph(pages, pages_prose, known)
     assert find_missing_backlinks(out_links) == []
 
@@ -438,6 +443,28 @@ def test_find_stale_by_audit_count_threshold(tmp_wiki):
     assert len(out) == 1
     assert out[0][0] == audit_page
     assert out[0][1] == 10
+
+
+def test_stale_by_audit_count_ignores_proposal_and_idea_pages(tmp_wiki):
+    """The paper count excluded known page-type directories rather than
+    counting paper pages, so ideas always inflated it and saving proposals
+    could mark the audit page stale with no new papers."""
+    audit_page = _mkpage(tmp_wiki, "synthesis/suggested-additions", "")
+    pages = [audit_page]
+    fm = {audit_page: {"wiki_papers_at_audit": "10"}}
+    for i in range(10):
+        p = _mkpage(tmp_wiki, f"cgt/paper-{i:02d}", "")
+        pages.append(p)
+        fm[p] = {"type": "paper"}
+    for i in range(6):
+        p = _mkpage(tmp_wiki, f"proposals/prop-{i}", "")
+        pages.append(p)
+        fm[p] = {"type": "proposal"}
+    for i in range(6):
+        p = _mkpage(tmp_wiki, f"ideas/idea-{i}", "")
+        pages.append(p)
+        fm[p] = {"type": "idea"}
+    assert find_stale_by_audit_count(pages, fm) == []
 
 
 def test_find_stale_by_audit_count_below_threshold(tmp_wiki):

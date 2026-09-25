@@ -235,7 +235,15 @@ def find_stale_by_audit_count(
     Threshold: max(5 papers, 20% of cached) delta. Signals "time to re-run
     `researchwiki scout` and re-merge the suggested-additions output."
     """
-    paper_count = sum(1 for md in pages if md.parent.name not in ("synthesis", "references", "concepts"))
+    # Count paper pages by type, not by excluding known page-type directories:
+    # that list went stale each time one was added, and it already counted
+    # every idea. Proposal pages then moved the count too, so saving five
+    # proposals could mark `suggested-additions.md` stale with no new papers.
+    paper_count = sum(
+        1 for md in pages
+        if "/" in page_key(md)
+        and (pages_fm.get(md) or {}).get("type", "paper") == "paper"
+    )
     out: list[tuple[Path, int, int]] = []
     for md in pages:
         cached_raw = str(pages_fm[md].get("wiki_papers_at_audit", "")).strip()

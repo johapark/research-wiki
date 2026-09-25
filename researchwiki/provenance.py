@@ -19,6 +19,7 @@ AUTHORED_PAGE_TYPES = frozenset(
         "synthesis",
         "concept",
         "idea",
+        "proposal",
         *REFERENCE_PAGE_TYPES,
     }
 )

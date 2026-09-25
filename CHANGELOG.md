@@ -20,6 +20,17 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+> **Breaking:** `agent ingest` no longer adds new papers to existing concept
+> hubs, and `status` no longer prints the concept-hub candidate line; proposal
+> records replace both. Existing hubs are otherwise untouched.
+>
+> **Deprecated:** concept hubs as a whole — the `concepts` and `candidates
+> concepts` commands, the `lint --json` key `concept_contract_violations`, the
+> `concept` page type, and the dashboard's concept-hub table. Each keeps working
+> and warns on stderr until removal, no earlier than 0.7.0 and 2026-12-24
+> (`concept-hubs` in `researchwiki/data/deprecations.yaml`). To retire hubs now,
+> see `prompts/proposal-workflow.md` § Deprecated concept hubs.
+
 ### Added
 
 - First-run setup now validates that it is running from the clone before any
@@ -28,6 +39,48 @@ the reasoning behind any line below.
 - Category bootstrap previews now save the exact validated proposal under
   `.ingest/`; `--apply` reuses that receipt without another model call and
   refuses stale proposals after the inbox changes.
+- An offline proposal/ideation benchmark defines twelve personal-corpus cases
+  with source-disjoint development/held-out splits, synthetic feedback, explicit
+  abstention cases, and a five-axis reviewer rubric. Agent calibration of saved
+  outputs tightened prompt-delta, simpler-baseline, and executable-test checks;
+  it is explicitly not human validation. Scored blocks preserve reviewer identity
+  and kind so agent assessments cannot be mislabeled as human judgments.
+  `python -m researchwiki.benchmark.proposals` prepares hash-verified evidence
+  packs and scores attributed reviews; operational failures cannot count as correct
+  abstention or useful outputs. Preparation and scoring make no model calls or wiki writes.
+- A development-only proposal comparison runner freezes a simple prompt baseline
+  and the production policy against identical packets and model settings. Live
+  execution requires the reviewed plan ID and refuses changed prompts/routing.
+  Raw responses survive validation failures, interrupted runs cannot silently
+  replay, and identity-hidden review templates keep reviewer judgments separate
+  from model/usage metadata. No automatic judge or held-out execution.
+- A Markdown-first proposal workflow can now generate at most three bounded,
+  claim-grounded synthesis or idea candidates across tension, shared-mechanism,
+  complementary-limitation, boundary-condition, and cross-category-application
+  directions. `proposals feedback` appends durable user decisions; disposable
+  `proposals` and `proposal_feedback` database tables rebuild from those pages.
+- Proposal previews now retain full evidence and author provenance in portable
+  JSON receipts; `proposals accept <file> --select ...` saves exact reviewed
+  entries without regeneration or duplicate acceptance, including chat-authored
+  receipts. Generation receives bounded existing-page context, rejects unknown
+  or evidence-free explicit papers, and separates cross-category planning from
+  the model-call-free `--prepare-only` step.
+- Proposal evidence from explicitly selected papers now follows query relevance
+  before per-paper caps, preventing early contribution claims from crowding out
+  retrieved methods or limitations. Existing-page and proposal-history context
+  share stopword filtering and metadata-anchored multi-term matching, allowing
+  empty context instead of filling it with incidental word matches. No added
+  model calls or larger evidence budgets.
+- Proposal and cross-category planner prompts now carry their exact JSON
+  contracts across providers, including the empty-proposal envelope. Planner
+  validation requires the target problem and capabilities, not only queries.
+  Transfer mode explicitly requires a source method and source/target evidence;
+  feedback-driven revisions must identify their parent. JSON parsing rejects
+  incorrectly wrapped arrays instead of extracting an object from inside them.
+- Proposal pages have a lint contract and appear in the default Obsidian
+  dashboard. Cross-category generation begins with the target problem, plans
+  capability queries, and searches outside the target category before drafting
+  an explicit transfer mapping, mechanism, assumptions, baseline, and first experiment.
 - Page search has an explicit, bounded `--llm-rerank` mode: one low-reasoning
   classifier call reorders at most 12 locally retrieved candidates using bounded
   summaries and claims, reports model and token usage in JSON, rejects invented
@@ -41,6 +94,10 @@ the reasoning behind any line below.
 
 ### Changed
 
+- Proposals replace concept hubs as the default page-discovery surface. Fresh
+  scaffolds create `wiki/proposals/`; `status` reports its review queue, and
+  ingest no longer mutates concept hubs automatically. Existing concept pages
+  and manual commands remain available until the deprecation window closes.
 - Coverage checks fuse BM25 page, semantic page, and semantic contribution-claim
   evidence with reciprocal-rank fusion. BM25 candidates remain eligible; new
   semantic-only candidates require corroboration from both vector signals and a
@@ -50,6 +107,42 @@ the reasoning behind any line below.
   an explicit `--mode llm` choice that makes one call per held-out paper.
 
 ### Fixed
+
+- Proposal feedback now edits only the page's YAML frontmatter, line by line.
+  A `--resulting-page` value containing backslashes no longer writes invalid
+  YAML that removed the proposal from `list`, `status`, generation history, and
+  the database; an emptied `resulting_page:` or `updated_at:` no longer swallows
+  the following `author_model:` line; and a page missing `status:` gets one
+  instead of having a body line rewritten.
+- A feedback reason that quotes a `### fb-… — <decision>` entry heading is
+  escaped, so it can no longer create a second, forged decision in the ledger.
+  `log.md` records each decision on one line, so a reason containing `## `
+  headings no longer adds spurious log entries.
+- `db rebuild` no longer aborts the whole corpus with exit 3 when a feedback id
+  appears twice (a sync conflict or a copied block); `lint` now also reports a
+  feedback id shared across proposal pages.
+- Accepting a proposal runs under a lock, scans `wiki/proposals/` once, and never
+  overwrites an existing page, so concurrent accepts or a title collision cannot
+  discard a record's feedback. A failure after some entries were saved exits 1,
+  names the saved pages, and logs them.
+- Proposal receipts must record an exact author model, and acceptance checks
+  each evidence item's category against the wiki. `proposals generate` preflights
+  the provider and author model before retrieval, and claims without a slug are
+  kept out of the packet instead of failing the save after a paid call.
+- Chat-authored cross-category proposals are usable: `proposals generate
+  --search-plan PLAN.json` runs the source-category search locally with no
+  planner call, and an unplanned cross-category packet is rejected at acceptance
+  with that instruction.
+- `researchwiki remove` reports citations on proposal pages instead of deleting
+  their evidence bullets, `stale_by_audit_count` counts only paper pages, and OKF
+  export maps proposal pages (type, lifecycle status, `generated.at`, and the
+  unverified-page count).
+- Wikis that still have concept hubs keep a passing dashboard: the dashboard
+  lint accepts a concept-hub table in place of the proposal table.
+- Proposal lists sort by instant rather than timestamp string, so records synced
+  across time zones order correctly, and one `generate` walks the wiki once.
+- The proposal benchmark caps failed runs at three proposals as well, so a
+  failure cannot inflate the precision and critical-failure denominators.
 
 - Exact bare-version model ids (`gpt-5`, `gpt-5.5`, `gpt-4.1` — any id
   `config/pricing.yaml` lists) and Ollama tags (`qwen3:32b`) are no longer
@@ -80,6 +173,11 @@ the reasoning behind any line below.
 - Scaffold permission failures now remain actionable environment errors instead
   of escaping as internal bugs, and `doctor` reports a content tree that is not
   accompanied by the checkout's required configs and prompts.
+- Proposal feedback preserves Markdown headings and subsequent decisions when
+  parsing the append-only ledger, so database rebuilds and generation history
+  retain the complete reasons. Cross-category applications require cited evidence
+  from both target and source categories in ordinary generation and receipt
+  acceptance as well as explicit transfer mode.
 - Classifier evaluation preserves the requested mode across every held-out
   paper and its report. Per-paper outcomes no longer overwrite the mode and
   silently switch default/local kNN evaluation to the model-backed classifier;

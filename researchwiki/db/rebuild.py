@@ -188,6 +188,77 @@ def _upsert_paper(
     )
 
 
+def _upsert_proposal(conn: sqlite3.Connection, page: Page) -> None:
+    """Rebuild one proposal and its feedback events from canonical Markdown."""
+    from ..proposals import parse_proposal
+
+    record = parse_proposal(page)
+    if record is None:
+        conn.execute("DELETE FROM proposals WHERE page_stem = ?", (page.stem,))
+        return
+    conn.execute(
+        "DELETE FROM proposals WHERE page_stem = ? AND proposal_id != ?",
+        (record.stem, record.proposal_id),
+    )
+    conn.execute(
+        """
+        INSERT INTO proposals (
+            proposal_id, page_stem, proposed_page_type, direction, status,
+            question, thesis, topic_seed, target_category, source_fingerprint,
+            created_at, updated_at, author_model, parent_proposal, resulting_page
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(proposal_id) DO UPDATE SET
+            page_stem=excluded.page_stem,
+            proposed_page_type=excluded.proposed_page_type,
+            direction=excluded.direction,
+            status=excluded.status,
+            question=excluded.question,
+            thesis=excluded.thesis,
+            topic_seed=excluded.topic_seed,
+            target_category=excluded.target_category,
+            source_fingerprint=excluded.source_fingerprint,
+            created_at=excluded.created_at,
+            updated_at=excluded.updated_at,
+            author_model=excluded.author_model,
+            parent_proposal=excluded.parent_proposal,
+            resulting_page=excluded.resulting_page
+        """,
+        (
+            record.proposal_id, record.stem, record.proposed_page_type,
+            record.direction, record.status, record.question, record.thesis,
+            record.topic_seed, record.target_category, record.source_fingerprint,
+            record.created_at, record.updated_at, record.author_model,
+            record.parent_proposal or None, record.resulting_page or None,
+        ),
+    )
+    # The page is the complete event ledger. Replace its derived rows so manual
+    # edits and removals reconcile exactly on rebuild.
+    conn.execute("DELETE FROM proposal_feedback WHERE proposal_id = ?",
+                 (record.proposal_id,))
+    # `feedback_id` is the table's primary key, but Markdown can legitimately
+    # carry one twice: a sync conflict duplicates an entry, or a block is
+    # copied into a sibling proposal. A plain INSERT then raised
+    # IntegrityError, which `rebuild` treats as a bug and answers by rolling
+    # back the whole corpus. Keep the last occurrence on the page, and let a
+    # later page's copy replace an earlier page's; `lint` reports both shapes
+    # (`proposal_duplicate_feedback_id`) so the Markdown gets fixed.
+    unique = {item.feedback_id: item for item in record.feedback}
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO proposal_feedback
+            (feedback_id, proposal_id, decision, actor, reason, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                item.feedback_id, record.proposal_id, item.decision,
+                item.actor, item.reason, item.created_at,
+            )
+            for item in unique.values()
+        ],
+    )
+
+
 def _resolve_slug(
     conn: sqlite3.Connection, page_stem: str, section: str, position: int, text: str,
     already_assigned: set[str],
@@ -335,6 +406,10 @@ def _upsert_one(conn: sqlite3.Connection, md: Path, now_ts: int) -> tuple[Page |
         # `papers` row for joins and queries.
         conn.execute("DELETE FROM claims WHERE paper_stem = ?", (page.stem,))
         n_claims = 0
+    if page_type == "proposal":
+        _upsert_proposal(conn, page)
+    else:
+        conn.execute("DELETE FROM proposals WHERE page_stem = ?", (page.stem,))
     return page, n_claims
 
 

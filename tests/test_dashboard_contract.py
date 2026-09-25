@@ -59,10 +59,10 @@ def test_custom_prose_and_extra_columns_are_allowed(tmp_path):
         ),
         (
             lambda text: text.replace(
-                'length(referenced_papers) AS "Members"',
-                'file.size AS "Members"',
+                'WHERE type = "proposal" AND created_at',
+                'WHERE type = "proposal"',
             ),
-            "dashboard_concept_members",
+            "dashboard_proposal_query",
         ),
         (
             lambda text: text.replace(
@@ -91,12 +91,12 @@ def test_contract_drift_is_reported(tmp_path, mutate, expected_kind):
 def test_table_order_drift_is_reported(tmp_path):
     prefix, after_idea = VIEWS_MD_TEMPLATE.split("## Recent ideas", 1)
     idea, after_synthesis = after_idea.split("## Recent synthesis pages", 1)
-    synthesis, concept = after_synthesis.split("## Recent concept hubs", 1)
+    synthesis, proposals = after_synthesis.split("## Recent proposals", 1)
     reordered = (
         prefix
         + "## Recent synthesis pages" + synthesis
         + "## Recent ideas" + idea
-        + "## Recent concept hubs" + concept
+        + "## Recent proposals" + proposals
     )
 
     assert "dashboard_section_order" in _kinds(_check(tmp_path, reordered))
@@ -106,3 +106,44 @@ def test_missing_dashboard_is_reported(tmp_path):
     violations = find_dashboard_contract_violations(tmp_path / "views.md")
 
     assert _kinds(violations) == {"dashboard_missing"}
+
+
+#: The fourth section a dashboard scaffolded before proposals carried.
+_LEGACY_CONCEPT_SECTION = """## Recent concept hubs (top 10)
+
+```dataview
+TABLE WITHOUT ID
+  file.link AS "Concept",
+  length(referenced_papers) AS "Members",
+  concept_span AS "Categories",
+  concept_thesis AS "Thesis",
+  dateformat(generated_at, "yyyy-MM-dd") AS "Filed"
+FROM ""
+WHERE type = "concept" AND generated_at
+SORT generated_at DESC
+LIMIT 10
+```
+"""
+
+
+def _legacy_dashboard() -> str:
+    head = VIEWS_MD_TEMPLATE[: VIEWS_MD_TEMPLATE.index("## Recent proposals")]
+    return head + _LEGACY_CONCEPT_SECTION
+
+
+def test_a_legacy_concept_hub_dashboard_still_passes(tmp_path):
+    """A wiki scaffolded before proposals ends its dashboard with a concept-hub
+    table. That is a valid layout for a wiki that still has hubs, not a defect
+    that only `init --refresh-dashboard` could clear."""
+    assert _check(tmp_path, _legacy_dashboard()) == []
+
+
+def test_a_legacy_concept_table_is_still_checked(tmp_path):
+    broken = _legacy_dashboard().replace(
+        'length(referenced_papers) AS "Members"', 'concept_span AS "Members"')
+    assert "dashboard_concept_members" in _kinds(_check(tmp_path, broken))
+
+
+def test_a_proposal_table_is_required_once_concepts_are_gone(tmp_path):
+    head = VIEWS_MD_TEMPLATE[: VIEWS_MD_TEMPLATE.index("## Recent proposals")]
+    assert "dashboard_section_missing" in _kinds(_check(tmp_path, head))

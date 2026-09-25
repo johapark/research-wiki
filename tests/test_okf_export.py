@@ -401,3 +401,24 @@ def test_wiki_root_bookkeeping_is_skipped_quietly(wiki):
     does."""
     _, report = okfexport.collect_bundle()
     assert not any(s["page"].startswith("wiki/") for s in report.skipped)
+
+
+def test_proposal_pages_map_to_okf_lifecycle_and_are_never_verified(wiki):
+    """Proposal records had no type or status mapping, fell outside the
+    unverified-page count the CLI reports, and — stamping `created_at` rather
+    than `generated_at` — lost `generated.at`."""
+    _page(wiki, "proposals/transfer--12345678",
+          "## Question\nCan it transfer?\n\n## Evidence and reasoning\n"
+          "- Shared mechanism [[cgt/smith-2024-a-paper-about-things#kc-9f3a2b1c]]\n",
+          type="proposal", title="Transfer", proposal_id="prop-123456789012",
+          status="rejected", author_model="gpt-5.6-terra",
+          created_at="2026-09-24T10:00:00-04:00", tags=["proposal"])
+    files, report = okfexport.collect_bundle()
+    fm = yaml.safe_load(files["proposals/transfer--12345678.md"].split("---\n")[1])
+    assert fm["type"] == "Proposal"
+    assert fm["status"] == "deprecated"
+    assert fm["x_researchwiki_status"] == "rejected"
+    assert fm["generated"]["at"] == "2026-09-24T10:00:00-04:00"
+    assert "gpt-5.6-terra" in fm["generated"]["by"]
+    assert "verified" not in fm
+    assert "proposals/transfer--12345678" in report.verified_absent_no_gate_record

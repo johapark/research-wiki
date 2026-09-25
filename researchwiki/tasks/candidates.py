@@ -1,12 +1,12 @@
 """Surface opportunity signals — un-scaffolded concept hubs, un-covered synthesis
 clusters, and unreviewed claim pairs.
 
-✅ Use when: `status` prints a nonzero `Concept-hub candidates: N bridge term(s)`
-   line (concepts target), OR you want to ask "what synthesis pages are we
+✅ Use when: maintaining legacy concept hubs, asking "what synthesis pages are
    missing?" after a batch of ingests (synthesis target), OR `status` prints a
    nonzero `Claim-pair discovery: N unreviewed cross-category pair(s)` line
    (pairs target).
-❌ Don't use: as a substitute for human curation. All three are advisory.
+❌ Don't use: as the default creative page-proposal path (`proposals generate`)
+   or as a substitute for human curation. All three are advisory.
 
 Three targets:
 
@@ -23,8 +23,8 @@ Three targets:
 **concepts** — recurring vocabulary terms mentioned by ≥3 wiki papers with no
 `wiki/concepts/{slug}.md` yet. Cheap (local, sub-second), no LLM. Bridge tier
 (--bridges: span ≥ 2 categories) is the highest-leverage — those are the terms
-the citation graph and semantic-KNN don't naturally connect. `status`
-auto-surfaces the bridge count, so treat that line as the trigger.
+the citation graph and semantic-KNN don't naturally connect. This is retained
+for users who explicitly maintain legacy concept hubs.
 
 Detection is stateless — it re-derives candidates from scratch every call, so
 a term that fails the concept-vs-glossary thesis test (see
@@ -233,6 +233,8 @@ def main(argv: list[str]) -> int:
 
     target, rest = argv[0], argv[1:]
     if target == "concepts":
+        from ..concepts import warn_deprecated
+        warn_deprecated()
         return _run_concepts(rest)
     if target == "synthesis":
         return _run_synthesis(rest)

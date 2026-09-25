@@ -1,0 +1,30 @@
+{
+  "pack_id": "COPY_FROM_MANIFEST",
+  "candidate": "ANONYMOUS_CANDIDATE_A",
+  "repeat": 1,
+  "split": "development",
+  "execution_mode": "fixed-packet",
+  "reviewer": "REVIEWER_ID",
+  "reviewer_kind": "human",
+  "reviewer_model": null,
+  "reviews": [
+    {
+      "case_id": "S01",
+      "operational_success": null,
+      "response_path": "PATH_TO_RETAINED_RAW_RESPONSE",
+      "proposals": [
+        {
+          "proposal_index": 1,
+          "scores": {"evidence": null, "insight": null, "contribution": null, "decision_value": null, "proportionality": null},
+          "reasons": {"evidence": "", "insight": "", "contribution": "", "decision_value": "", "proportionality": ""},
+          "critical_factual_failure": null,
+          "constraint_failure": null,
+          "decision": null,
+          "decision_reason": "",
+          "parent_proposal": null
+        }
+      ],
+      "feedback_checks": []
+    }
+  ]
+}

@@ -23,7 +23,7 @@ Live views of recent additions across the wiki. Rendered by the [Dataview](https
 
 Recent tables use the frontmatter stamps (`ingested_at` / `generated_at`); pages without the relevant stamp are omitted.
 
-Concept membership comes directly from its canonical `referenced_papers` spoke registry. Synthesis pages intentionally have no Members column because body citations, not duplicate frontmatter, are their source registry.
+Proposal decisions are stored in their Markdown pages and mirrored into the local database by `researchwiki db rebuild`. Synthesis pages intentionally have no Members column because body citations are their source registry.
 
 ## Recent papers (top 15)
 
@@ -67,19 +67,19 @@ SORT generated_at DESC
 LIMIT 10
 ```
 
-## Recent concept hubs (top 10)
+## Recent proposals (top 15)
 
 ```dataview
 TABLE WITHOUT ID
-  file.link AS "Concept",
-  length(referenced_papers) AS "Members",
-  concept_span AS "Categories",
-  concept_thesis AS "Thesis",
-  dateformat(generated_at, "yyyy-MM-dd") AS "Filed"
+  file.link AS "Proposal",
+  proposed_page_type AS "For",
+  direction AS "Direction",
+  status AS "Status",
+  dateformat(date(created_at), "yyyy-MM-dd") AS "Created"
 FROM ""
-WHERE type = "concept" AND generated_at
-SORT generated_at DESC
-LIMIT 10
+WHERE type = "proposal" AND created_at
+SORT created_at DESC
+LIMIT 15
 ```
 """
 
