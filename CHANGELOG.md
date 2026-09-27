@@ -20,6 +20,21 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Fixed
+
+- `grade synthesis` no longer misgrades claims written as Markdown list items.
+  PDF passage retrieval passed claim text straight to Tantivy's query parser,
+  which reads a leading `-` as "exclude the next term". A bullet therefore
+  either returned no passages, scoring a correctly cited claim `weak`, or, when
+  its first token was a bold or hyphenated term, matched every chunk with a
+  flat score of exactly 1.0 that cleared the retrieval floor regardless of
+  content. Operator-position `-`/`+` are now dropped before parsing; interior
+  hyphens in method names are kept. Across the 34 synthesis and idea pages of a
+  540-page corpus, `weak` verdicts fell from 61 to 36 and 21 pages changed
+  grade; some claims that passed only on the flat 1.0 score are now correctly
+  reported `weak`. `pdf-search` and paper grading use the same query path. No
+  hard verdict (`misattributed`) changed.
+
 ## [0.5.1] - 2026-09-25
 
 ### Added

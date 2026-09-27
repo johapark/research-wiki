@@ -331,8 +331,31 @@ def _read_cached_chunk_texts(idx_dir: Path) -> list[str] | None:
     return [t for _, t in pairs]
 
 
+#: A `-` or `+` Tantivy would read as an operator: one that starts a term,
+#: after start-of-text or whitespace. Interior hyphens (`multi-allelic`,
+#: `vg-giraffe`) and minus signs inside numbers are left alone.
+_BOOLEAN_PREFIX_RE = re.compile(r"(^|\s)[-+]+(?=\S)")
+#: A lone `-`/`+` token, such as a Markdown bullet marker or a spaced dash.
+_LONE_OPERATOR_RE = re.compile(r"(^|\s)[-+]+(?=\s|$)")
+
+
+def _neutralize_operators(query: str) -> str:
+    """Drop `-`/`+` that Tantivy's query parser would treat as operators.
+
+    Callers pass claim prose, not search syntax. Markdown list items start
+    with `- `, and `parse_query_lenient` reads that as MUST_NOT on the next
+    term (`- The panel…` excludes every chunk containing "the"), which
+    silently returns no hits. The synthesis grader then scored a correctly
+    cited bullet as `weak`: 24 of 492 bullet claims on this corpus's
+    synthesis and idea pages lost all retrieval this way.
+    """
+    query = _LONE_OPERATOR_RE.sub(r"\1", query)
+    return _BOOLEAN_PREFIX_RE.sub(r"\1", query)
+
+
 def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT) -> list[RetrievedChunk]:
     """Run a BM25 query against the paper's chunk index. Returns top-k chunks."""
+    query = _neutralize_operators(query)
     idx_dir = _index_path_for(stem)
     # `build_pdf_index` also rebuilds a stale-format index, so calling it
     # whenever the version doesn't match is what backfills provenance onto
