@@ -20,6 +20,30 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- `researchwiki scout recent` finds newly published papers near a category, a
+  synthesis or idea page, or a set of papers. `scout citations` and `neighbors`
+  both walk citation edges, and a paper published last month has none yet, so
+  neither could see it. Recent mode sends up to 100 wiki papers as seeds to
+  Semantic Scholar's multi-seed recommendations endpoint, which weights recent
+  work heavily (a 35-seed single-cell query returned nothing older than two
+  months), drops papers the wiki already holds by DOI or title, and ranks the
+  rest locally with the page index's embedder. Papers on the topic of a page
+  that states update triggers (a synthesis or idea page's "What would update
+  this page" items, or an open proposal's decisive uncertainty) are listed
+  first, each with the trigger it sits closest to. A match must stand out
+  against the corpus on that trigger's wording, land near papers the page
+  cites, and sit within cosine 0.85 of the page's three nearest cited papers;
+  each trigger keeps its two best. On 614 blind-labelled pairs from eight
+  pools, the last gate raised the on-topic share of matches from 0.67 to 0.90
+  on the four tuning pools and from 0.70 to 0.88 on four held out. The
+  trigger wording itself barely separates papers that answer a trigger from
+  on-topic ones that don't, so a match is labelled "on-topic", not "update".
+  No model is called. Abstracts are used only to rank and never appear in
+  output or the snapshot. `--decline` removes a paper for good and sends it
+  to S2 as a negative seed.
+
 ### Fixed
 
 - `grade synthesis` no longer misgrades claims written as Markdown list items.

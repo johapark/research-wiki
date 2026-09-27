@@ -31,6 +31,12 @@ S2_RECS = "https://api.semanticscholar.org/recommendations/v1"
 DETAIL_FIELDS = "title,authors.name,year,externalIds,venue,abstract,tldr,referenceCount,citationCount"
 REFCITE_FIELDS = "title,year,externalIds,venue,citationCount"
 REC_FIELDS = "title,year,externalIds,venue,citationCount"
+#: `scout recent` also needs the publication date (recency window) and the
+#: abstract (scored locally against the wiki, never persisted or prompted).
+RECENT_FIELDS = "title,year,publicationDate,externalIds,venue,citationCount,abstract"
+#: The multi-seed endpoint rejects more than this many positive + negative ids
+#: with HTTP 400 "Maximum 100 papers in input lists" (probed 2026-09-27).
+MAX_RECOMMENDATION_SEEDS = 100
 
 # Negative-cache shape — written to the same cache path on a permanent
 # failure so re-runs don't re-fetch and re-suffer the retry-backoff cost
@@ -247,7 +253,10 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
                 backoff = 2 ** attempt
                 log(f"  retry {attempt} after {backoff}s", tag=self._log_tag)
                 time.sleep(backoff)
-            n_ids = len(payload.get("ids", []))
+            n_ids = len(payload.get("ids", [])) or (
+                len(payload.get("positivePaperIds", []))
+                + len(payload.get("negativePaperIds", []))
+            )
             log(f"  fetch POST {url} ({n_ids} ids)", tag=self._log_tag)
             try:
                 proc = subprocess.run(
@@ -359,6 +368,50 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
         items = data.get("recommendedPapers") or data.get("data") or []
         return [self._to_article(item) for item in items if item]
 
+    def get_recommendations_for_seeds(
+        self,
+        positive_dois: list[str],
+        negative_dois: list[str] = (),
+        *,
+        limit: int = 100,
+    ) -> list[ScholarlyArticle]:
+        """Multi-seed recommendations: papers like `positive_dois`, unlike `negative_dois`.
+
+        Unlike the single-paper endpoint, this one weights recent papers
+        heavily — a 35-seed single-cell query at `limit=100` returned nothing
+        older than two months — which is what makes it a new-paper feed rather
+        than a related-work list. Unknown seed DOIs are ignored server-side; an
+        input with no known positive seed returns HTTP 400, surfaced here as
+        `StructuredProviderUnavailable` like any other non-200.
+
+        The request is cached by its sorted seed sets, so a re-run the same day
+        is free; pass `force_refresh_days` on the provider to re-poll.
+        """
+        pos = sorted({d.lower() for d in positive_dois if d})
+        neg = sorted({d.lower() for d in negative_dois if d} - set(pos))
+        if not pos:
+            return []
+        if len(pos) + len(neg) > MAX_RECOMMENDATION_SEEDS:
+            raise ValueError(
+                f"S2 accepts at most {MAX_RECOMMENDATION_SEEDS} seed papers; "
+                f"got {len(pos)} positive + {len(neg)} negative"
+            )
+        url = f"{S2_RECS}/papers/?fields={RECENT_FIELDS}&limit={int(limit)}"
+        key = hashlib.md5(
+            ("v1|" + "|".join(pos) + "||" + "|".join(neg) + f"||{int(limit)}").encode()
+        ).hexdigest()
+        cache_path = s2_cache_dir() / f"s2_recs_multi_v1__{key}.json"
+        data = self._post_fetch(
+            url,
+            {"positivePaperIds": [f"DOI:{d}" for d in pos],
+             "negativePaperIds": [f"DOI:{d}" for d in neg]},
+            cache_path,
+        )
+        if not data or not isinstance(data, dict):
+            return []
+        items = data.get("recommendedPapers") or []
+        return [self._to_article(item) for item in items if item]
+
     def get_batch_metadata(self, dois: list[str]) -> dict[str, ScholarlyArticle]:
         """Batch-fetch metadata for multiple papers in chunks of 500.
 
@@ -419,6 +472,7 @@ class SemanticScholarProvider(ScholarlyDatabaseProvider):
             title=d.get("title") or "",
             authors=authors,
             year=d.get("year"),
+            publication_date=d.get("publicationDate") or None,
             venue=d.get("venue") or "",
             doi=(ext.get("DOI") or "").lower() or None,
             abstract=d.get("abstract") or "",
