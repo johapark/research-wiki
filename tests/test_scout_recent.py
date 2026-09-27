@@ -270,19 +270,57 @@ def test_snapshot_never_carries_the_abstract(wiki, monkeypatch):
     assert snap["candidates"][0]["has_abstract"] is True
 
 
+NO_DOI = "10.1234/declined"
+S2_ID = "a9fee85887435d8d9b7571969eb9a2f6d4aaebba"
+
+
 def test_declines_are_filtered_and_sent_as_negative_seeds(wiki, monkeypatch):
     _paper(wiki, "single-cell", "a-2026-x", 2026, "10.1/a")
     monkeypatch.setattr(R, "score_candidates", lambda c, t: True)
-    assert R.add_decline("https://doi.org/10.1/NO", "off-topic") == "10.1/no"
-    assert R.add_decline("https://www.semanticscholar.org/paper/Abc", "no doi") == "s2:Abc"
-    provider = _Provider([_article(doi="10.1/no"), _article(pid="Abc"),
+    assert R.add_decline("https://doi.org/10.1234/DECLINED", "off-topic") == NO_DOI
+    assert R.add_decline(f"https://www.semanticscholar.org/paper/{S2_ID}", "no doi") == f"s2:{S2_ID}"
+    provider = _Provider([_article(doi=NO_DOI), _article(pid=S2_ID),
                           _article(doi="10.1/yes")])
     snap = R.run(categories=["single-cell"], today=TODAY, provider=provider)
-    assert provider.calls == [(["10.1/a"], ["10.1/no"], R.POOL)]
+    assert provider.calls == [(["10.1/a"], [NO_DOI], R.POOL)]
     assert [c["key"] for c in snap["candidates"]] == ["10.1/yes"]
     assert snap["counts"]["declined"] == 2
-    assert R.remove_decline("10.1/no") is True
-    assert R.remove_decline("10.1/no") is False
+    assert R.remove_decline(NO_DOI) is True
+    assert R.remove_decline(NO_DOI) is False
+
+
+@pytest.mark.parametrize("raw", [
+    f"https://www.semanticscholar.org/paper/{S2_ID}",           # as the report prints it
+    f"https://www.semanticscholar.org/paper/{S2_ID}/",
+    f"https://www.semanticscholar.org/paper/PopPert-Population-level-Joint-Smith/{S2_ID}",
+    f"http://semanticscholar.org/paper/{S2_ID.upper()}?utm_source=x#abstract",
+    f"s2:{S2_ID}",
+    f"S2:{S2_ID.upper()}",
+])
+def test_every_s2_paper_spelling_is_one_key(raw):
+    """A URL copied from the browser carries a title slug before the id; it
+    must decline the same paper the printed URL does."""
+    assert R.normalize_key(raw) == f"s2:{S2_ID}"
+
+
+@pytest.mark.parametrize("raw", [
+    "10.1234/declined", "doi:10.1234/DECLINED", "https://doi.org/10.1234/declined",
+    "http://doi.org/10.1234/declined", " 10.1234/Declined ",
+])
+def test_every_doi_spelling_is_one_key(raw):
+    assert R.normalize_key(raw) == NO_DOI
+
+
+@pytest.mark.parametrize("raw", [
+    "", "s2:", "not a doi", "10.1234/", "10.1/x",
+    "https://api.semanticscholar.org/graph/v1/paper/abc",
+    "https://example.org/paper/abc",
+])
+def test_an_unrecognised_decline_is_refused(raw):
+    """Stored as-is it would match no candidate and be sent to S2 as a
+    negative "DOI": a decline that reports success and does nothing."""
+    with pytest.raises(R.DeclineKeyError):
+        R.normalize_key(raw)
 
 
 def test_first_seen_survives_a_rerun(wiki, monkeypatch):
@@ -343,10 +381,26 @@ def test_scout_dispatches_recent_mode(monkeypatch):
 def test_cli_requires_a_seed_and_a_decline_reason(wiki, capsys):
     assert R.main([]) == 1
     assert "--category" in capsys.readouterr().err
-    assert R.main(["--decline", "10.1/x"]) == 1
-    assert R.main(["--decline", "10.1/x", "--reason", "off-topic"]) == 0
-    assert R.main(["--undecline", "10.1/x"]) == 0
-    assert R.main(["--undecline", "10.1/x"]) == 1
+    assert R.main(["--decline", NO_DOI]) == 1
+    assert R.main(["--decline", NO_DOI, "--reason", "off-topic"]) == 0
+    assert R.main(["--undecline", NO_DOI]) == 0
+    assert R.main(["--undecline", NO_DOI]) == 1
+
+
+def test_cli_declines_a_browser_url_and_undeclines_the_printed_one(wiki, capsys):
+    slugged = f"https://www.semanticscholar.org/paper/PopPert-Smith/{S2_ID}"
+    assert R.main(["--decline", slugged, "--reason", "off-topic"]) == 0
+    assert f"declined s2:{S2_ID}" in capsys.readouterr().out
+    assert set(R.load_declines()) == {f"s2:{S2_ID}"}
+    assert R.main(["--undecline", f"https://www.semanticscholar.org/paper/{S2_ID}"]) == 0
+    assert R.load_declines() == {}
+
+
+def test_cli_refuses_a_decline_that_names_no_paper(wiki, capsys):
+    assert R.main(["--decline", "https://example.org/paper/x", "--reason", "r"]) == 1
+    assert "not a DOI" in capsys.readouterr().err
+    assert R.main(["--undecline", "not a doi"]) == 1
+    assert not (wiki / R.DECLINES_FILENAME).exists()
 
 
 def test_cli_renders_page_matches_first(wiki, monkeypatch, capsys):
@@ -374,16 +428,39 @@ def test_cli_renders_page_matches_first(wiki, monkeypatch, capsys):
     assert "NEW 2026-09-01" in out
     assert "semanticscholar.org/paper/p" in out and "2026 (undated)" in out
 
-    # A displayed S2 URL is also a valid decline argument for a DOI-less paper.
-    assert R.normalize_key("https://www.semanticscholar.org/paper/p") == "s2:p"
 
-    snapshot["page_matches"].append({**snapshot["page_matches"][0],
-                                     "title": "Second page match"})
-    limited = R.render(snapshot, 1)
-    assert "Update me" in limited
-    assert "Second page match" not in limited
-    assert "Other" not in limited
-    assert "Near a page's open questions (1 of 2)" in limited
+def _snapshot(n_matches: int, n_rest: int) -> dict:
+    row = {"doi": None, "paper_id": "p", "publication_date": "2026-09-01", "year": 2026,
+           "venue": "", "fit": 0.8, "first_seen": "2026-09-20", "nearest": []}
+    trig = [{"page": "synthesis/s", "z": 3.0, "text": "A head-to-head benchmark."}]
+    return {
+        "generated_at": "2026-09-27T09:00:00", "since": "2026-07-29",
+        "seeds": {"label": "x", "used": 1, "available": 1, "negatives": 0},
+        "counts": {"returned": n_matches + n_rest, "in_wiki": 0, "declined": 0,
+                   "outside_window": 0},
+        "page_matches": [{**row, "key": f"m{i}", "title": f"Match {i}", "triggers": trig}
+                         for i in range(n_matches)],
+        "candidates": [{**row, "key": f"r{i}", "title": f"Rest {i}", "triggers": []}
+                       for i in range(n_rest)],
+    }
+
+
+def test_limit_caps_rows_across_both_sections():
+    out = R.render(_snapshot(3, 3), 2)
+    assert "Match 0" in out and "Match 1" in out and "Match 2" not in out
+    assert "Rest 0" not in out
+    assert "Near a page's open questions (2 of 3)" in out
+    assert "Closest to the corpus (0 of 3)" in out
+
+
+def test_limit_fills_from_the_second_section_after_the_first():
+    out = R.render(_snapshot(1, 3), 3)
+    assert "Match 0" in out and "Rest 0" in out and "Rest 1" in out and "Rest 2" not in out
+
+
+def test_empty_first_section_says_so_but_a_capped_one_does_not():
+    assert "(none above the trigger threshold)" in R.render(_snapshot(0, 2), 5)
+    assert "(none above the trigger threshold)" not in R.render(_snapshot(2, 0), 0)
 
 
 def test_seed_error_exits_1(wiki, capsys):

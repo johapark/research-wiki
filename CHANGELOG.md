@@ -41,8 +41,10 @@ the reasoning behind any line below.
   trigger wording itself barely separates papers that answer a trigger from
   on-topic ones that don't, so a match is labelled "on-topic", not "update".
   No model is called. Abstracts are used only to rank and never appear in
-  output or the snapshot. `--decline` removes a paper for good and sends it
-  to S2 as a negative seed.
+  output or the snapshot. `--decline` removes a paper for good and, for a
+  DOI, sends it to S2 as a negative seed. It takes a DOI in any common
+  spelling or a Semantic Scholar paper URL, including one copied from the
+  browser with its title slug, and refuses anything else.
 
 ### Fixed
 

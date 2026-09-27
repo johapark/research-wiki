@@ -551,22 +551,47 @@ def _declines_path() -> Path:
     return wiki_root() / DECLINES_FILENAME
 
 
+#: A Semantic Scholar paper page. The report prints `/paper/<id>`; the site's
+#: own links, and so a URL copied from the address bar, put a title slug first:
+#: `/paper/<Title-Words-Author>/<id>`. The id is always the last segment.
+_S2_PAPER_URL_RE = re.compile(
+    r"https?://(?:www\.)?semanticscholar\.org/paper/(?:[^/?#]+/)?([^/?#]+)/?(?:[?#].*)?",
+    flags=re.IGNORECASE,
+)
+_DOI_RE = re.compile(r"10\.\d{4,9}/\S+")
+
+
+class DeclineKeyError(ValueError):
+    """A decline argument that names no paper — exit 1."""
+
+
 def normalize_key(value: str) -> str:
-    """Normalize DOI spellings and the S2 URL shown for DOI-less papers."""
+    """One key per paper: a lowercase DOI, or `s2:<id>` for a paper without one.
+
+    Accepts DOI spellings (`10.1/X`, `doi:10.1/X`, `https://doi.org/10.1/X`),
+    Semantic Scholar paper URLs with or without the title slug, and `s2:<id>`.
+    S2 ids are lowercase hex, which is how candidates are keyed, so the id is
+    lowercased too. Raises `DeclineKeyError` for anything else: stored as-is,
+    such a key would match no candidate and be sent to S2 as a bogus negative
+    DOI, a decline that reports success and does nothing.
+    """
     v = value.strip()
     low = v.lower()
     for prefix in ("https://doi.org/", "http://doi.org/", "doi.org/", "doi:"):
         if low.startswith(prefix):
-            return low[len(prefix):]
-    s2_url = re.fullmatch(
-        r"https?://(?:www\.)?semanticscholar\.org/paper/([^/?#]+)/?(?:[?#].*)?",
-        v, flags=re.IGNORECASE,
+            low = low[len(prefix):]
+            break
+    else:
+        s2_url = _S2_PAPER_URL_RE.fullmatch(v)
+        if s2_url:
+            return "s2:" + s2_url.group(1).lower()
+        if low.startswith("s2:") and len(low) > 3:
+            return low
+    if _DOI_RE.fullmatch(low):
+        return low
+    raise DeclineKeyError(
+        f"{value!r} is not a DOI, a Semantic Scholar paper URL, or s2:<paper-id>"
     )
-    if s2_url:
-        return "s2:" + s2_url.group(1)
-    if low.startswith("s2:"):
-        return "s2:" + v[3:]
-    return low
 
 
 def load_declines() -> dict[str, dict]:
@@ -764,21 +789,28 @@ def main(argv: list[str], *, prog: str = "researchwiki scout recent") -> int:
     manage.add_argument("--decline", metavar="DOI_OR_S2_URL",
                         help="Never show this paper again; DOI declines also steer S2 away from it.")
     manage.add_argument("--reason", help="Why (required with --decline).")
-    manage.add_argument("--undecline", metavar="DOI")
+    manage.add_argument("--undecline", metavar="DOI_OR_S2_URL",
+                        help="Remove a decline; same forms as --decline.")
     manage.add_argument("--list-declined", action="store_true")
     args = ap.parse_args(argv)
 
+    if args.decline or args.undecline:
+        try:
+            key = normalize_key(args.decline or args.undecline)
+        except DeclineKeyError as exc:
+            print(f"{prog}: {exc}", file=sys.stderr)
+            return 1
     if args.decline:
         if not (args.reason or "").strip():
             print(f"{prog}: --decline needs --reason", file=sys.stderr)
             return 1
-        print(f"declined {add_decline(args.decline, args.reason.strip())}")
+        print(f"declined {add_decline(key, args.reason.strip())}")
         return 0
     if args.undecline:
-        if remove_decline(args.undecline):
-            print(f"undeclined {normalize_key(args.undecline)}")
+        if remove_decline(key):
+            print(f"undeclined {key}")
             return 0
-        print(f"{prog}: {normalize_key(args.undecline)} was not declined", file=sys.stderr)
+        print(f"{prog}: {key} was not declined", file=sys.stderr)
         return 1
     if args.list_declined:
         declines = load_declines()
