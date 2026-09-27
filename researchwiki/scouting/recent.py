@@ -552,13 +552,18 @@ def _declines_path() -> Path:
 
 
 def normalize_key(value: str) -> str:
-    """`https://doi.org/10.1/X`, `doi:10.1/X` and `10.1/x` are one key; S2
-    paper ids are written `s2:<id>`."""
+    """Normalize DOI spellings and the S2 URL shown for DOI-less papers."""
     v = value.strip()
     low = v.lower()
     for prefix in ("https://doi.org/", "http://doi.org/", "doi.org/", "doi:"):
         if low.startswith(prefix):
             return low[len(prefix):]
+    s2_url = re.fullmatch(
+        r"https?://(?:www\.)?semanticscholar\.org/paper/([^/?#]+)/?(?:[?#].*)?",
+        v, flags=re.IGNORECASE,
+    )
+    if s2_url:
+        return "s2:" + s2_url.group(1)
     if low.startswith("s2:"):
         return "s2:" + v[3:]
     return low
@@ -711,11 +716,12 @@ def render(snapshot: dict, limit: int) -> str:
         f"{n['outside_window']} outside the window._"
     )
     out.append("")
-    updates = snapshot["page_matches"]
+    all_updates = snapshot["page_matches"]
+    updates = all_updates[:max(0, limit)]
     rest = snapshot["candidates"][:max(0, limit - len(updates))]
-    out.append(f"## Near a page's open questions ({len(updates)})")
+    out.append(f"## Near a page's open questions ({len(updates)} of {len(all_updates)})")
     out.extend(line for c in updates for line in _row(c, today))
-    if not updates:
+    if not all_updates:
         out.append("_(none above the trigger threshold)_")
     out.append("")
     out.append(f"## Closest to the corpus ({len(rest)} of {len(snapshot['candidates'])})")
@@ -723,7 +729,7 @@ def render(snapshot: dict, limit: int) -> str:
     out.append("")
     out.append("_Leads only: nothing here is evidence until its PDF is in `inbox/` and "
                "ingested. Reject one for good with "
-               "`researchwiki scout recent --decline <doi> --reason \"…\"`._")
+               "`researchwiki scout recent --decline <DOI-or-S2-URL> --reason \"…\"`._")
     return "\n".join(out)
 
 
@@ -755,8 +761,8 @@ def main(argv: list[str], *, prog: str = "researchwiki scout recent") -> int:
     ap.add_argument("--json", dest="as_json", action="store_true",
                     help="Emit the snapshot as JSON.")
     manage = ap.add_argument_group("declines")
-    manage.add_argument("--decline", metavar="DOI",
-                        help="Never show this paper again; also steers S2 away from it.")
+    manage.add_argument("--decline", metavar="DOI_OR_S2_URL",
+                        help="Never show this paper again; DOI declines also steer S2 away from it.")
     manage.add_argument("--reason", help="Why (required with --decline).")
     manage.add_argument("--undecline", metavar="DOI")
     manage.add_argument("--list-declined", action="store_true")

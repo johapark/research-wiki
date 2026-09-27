@@ -274,7 +274,7 @@ def test_declines_are_filtered_and_sent_as_negative_seeds(wiki, monkeypatch):
     _paper(wiki, "single-cell", "a-2026-x", 2026, "10.1/a")
     monkeypatch.setattr(R, "score_candidates", lambda c, t: True)
     assert R.add_decline("https://doi.org/10.1/NO", "off-topic") == "10.1/no"
-    R.add_decline("s2:Abc", "no doi")
+    assert R.add_decline("https://www.semanticscholar.org/paper/Abc", "no doi") == "s2:Abc"
     provider = _Provider([_article(doi="10.1/no"), _article(pid="Abc"),
                           _article(doi="10.1/yes")])
     snap = R.run(categories=["single-cell"], today=TODAY, provider=provider)
@@ -373,6 +373,17 @@ def test_cli_renders_page_matches_first(wiki, monkeypatch, capsys):
     assert "on-topic for [[synthesis/s]]; closest trigger (z 3.1)" in out
     assert "NEW 2026-09-01" in out
     assert "semanticscholar.org/paper/p" in out and "2026 (undated)" in out
+
+    # A displayed S2 URL is also a valid decline argument for a DOI-less paper.
+    assert R.normalize_key("https://www.semanticscholar.org/paper/p") == "s2:p"
+
+    snapshot["page_matches"].append({**snapshot["page_matches"][0],
+                                     "title": "Second page match"})
+    limited = R.render(snapshot, 1)
+    assert "Update me" in limited
+    assert "Second page match" not in limited
+    assert "Other" not in limited
+    assert "Near a page's open questions (1 of 2)" in limited
 
 
 def test_seed_error_exits_1(wiki, capsys):
