@@ -329,6 +329,29 @@ def test_saved_browser_url_decline_is_loaded_and_can_be_removed(wiki, monkeypatc
     assert old_url not in json.loads(path.read_text())
 
 
+def test_an_unreadable_legacy_decline_can_be_listed_and_removed(wiki, capsys):
+    """A key no current spelling produces stays under its raw key. It must be
+    removable by pasting it exactly as `--list-declined` shows it."""
+    legacy = "https://example.org/paper/invalid"
+    entry = {"reason": "off-topic", "declined_at": "2026-09-27T10:00:00"}
+    path = wiki / R.DECLINES_FILENAME
+    path.write_text(json.dumps({legacy: entry, NO_DOI: entry}))
+
+    assert R.main(["--list-declined"]) == 0
+    assert legacy in capsys.readouterr().out
+    assert R.main(["--undecline", legacy]) == 0
+    assert f"undeclined {legacy}" in capsys.readouterr().out
+    assert json.loads(path.read_text()) == {NO_DOI: entry}
+
+
+def test_undecline_still_refuses_a_key_that_is_neither_valid_nor_stored(wiki, capsys):
+    path = wiki / R.DECLINES_FILENAME
+    path.write_text(json.dumps({"https://example.org/paper/invalid": {"reason": "r"}}))
+    assert R.main(["--undecline", "https://example.org/paper/other"]) == 1
+    assert "not a DOI" in capsys.readouterr().err
+    assert len(json.loads(path.read_text())) == 1
+
+
 @pytest.mark.parametrize("raw", [
     f"https://www.semanticscholar.org/paper/{S2_ID}",           # as the report prints it
     f"https://www.semanticscholar.org/paper/{S2_ID}/",

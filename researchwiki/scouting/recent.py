@@ -629,9 +629,27 @@ def add_decline(key: str, reason: str) -> str:
     return key
 
 
+def _stored_key(value: str, declines: dict[str, dict]) -> str:
+    """The key `value` names in `declines`.
+
+    Normally the canonical key. A legacy entry that `normalize_key` cannot
+    read keeps its raw key in `load_declines`, so it is also matched verbatim
+    as `--list-declined` prints it; otherwise it could be listed but never
+    removed. Raises `DeclineKeyError` when `value` is neither.
+    """
+    try:
+        return normalize_key(value)
+    except DeclineKeyError:
+        raw = value.strip()
+        for candidate in (raw, raw.lower()):
+            if candidate in declines:
+                return candidate
+        raise
+
+
 def remove_decline(key: str) -> bool:
-    key = normalize_key(key)
     declines = load_declines()
+    key = _stored_key(key, declines)
     if key not in declines:
         return False
     del declines[key]
@@ -812,13 +830,15 @@ def main(argv: list[str], *, prog: str = "researchwiki scout recent") -> int:
                         help="Never show this paper again; DOI declines also steer S2 away from it.")
     manage.add_argument("--reason", help="Why (required with --decline).")
     manage.add_argument("--undecline", metavar="DOI_OR_S2_URL",
-                        help="Remove a decline; same forms as --decline.")
+                        help="Remove a decline; same forms as --decline, or a key "
+                             "exactly as --list-declined prints it.")
     manage.add_argument("--list-declined", action="store_true")
     args = ap.parse_args(argv)
 
     if args.decline or args.undecline:
         try:
-            key = normalize_key(args.decline or args.undecline)
+            key = (normalize_key(args.decline) if args.decline
+                   else _stored_key(args.undecline, load_declines()))
         except DeclineKeyError as exc:
             print(f"{prog}: {exc}", file=sys.stderr)
             return 1
