@@ -61,6 +61,10 @@ share/
 # Curatorial state, same bucket as `.concept-declines.json` above.
 .pair-dismissals.json
 
+# Per-user "never show this paper again" list for `scout recent`. Written by
+# `scout recent --decline`; read to filter results and as S2 negative seeds.
+.recent-declines.json
+
 # Active LLM model config — per-user, mutable. Every `config/models.*.yaml`
 # template IS tracked (openai — the explicit all-Luna fallback, chatgpt — the
 # opt-in Terra/Luna split — plus anthropic, gemini*, glm, gemma, lmstudio,

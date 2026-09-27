@@ -34,6 +34,7 @@ class ScholarlyArticle:
     external_ids: dict[str, str] = field(default_factory=dict)
     reference_count: int | None = None
     citation_count: int | None = None
+    publication_date: str | None = None  # ISO `YYYY-MM-DD` when the provider has one
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property
