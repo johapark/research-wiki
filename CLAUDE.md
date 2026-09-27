@@ -18,7 +18,7 @@ Original PDF (immutable) → wiki/{category}/*.md (the single LLM-authored page)
 
    | API | Allowed fields | Used by |
    |---|---|---|
-   | Semantic Scholar Graph | title, authors, year, venue, externalIds, references, citations, `/recommendations`, `abstract` (verbatim), `tldr` (draft/cross-check only) | `ingest`, `scout`, `neighbors` |
+   | Semantic Scholar Graph | title, authors, year, venue, `publicationDate`, externalIds, references, citations, `/recommendations`, `abstract` (verbatim), `tldr` (draft/cross-check only) | `ingest`, `scout`, `neighbors` |
    | Crossref | title, authors, year, container-title, ISSN, `reference` list, `type` | `ingest` (S2 fallback) |
    | PubMed E-utilities | PMID, `pubtype`, `pubdate`, retraction linkage | `retraction-check` |
    | bioRxiv/medRxiv | `server`, `version`, `date`, `category`, `type`, `published` DOI. `abstract` **not re-exposed** | `preprint-check` |
