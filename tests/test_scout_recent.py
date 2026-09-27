@@ -289,6 +289,46 @@ def test_declines_are_filtered_and_sent_as_negative_seeds(wiki, monkeypatch):
     assert R.remove_decline(NO_DOI) is False
 
 
+def test_s2_decline_survives_a_later_doi(wiki, monkeypatch):
+    _paper(wiki, "single-cell", "a-2026-x", 2026, "10.1/a")
+    monkeypatch.setattr(R, "score_candidates", lambda c, t: True)
+    R.add_decline(f"https://www.semanticscholar.org/paper/{S2_ID}", "off-topic")
+
+    before = _Provider([_article(pid=S2_ID.upper())])
+    first = R.run(categories=["single-cell"], today=TODAY, provider=before)
+    after = _Provider([_article(pid=S2_ID.upper(), doi="10.1234/new-doi")])
+    later = R.run(categories=["single-cell"], today=TODAY + dt.timedelta(days=3),
+                  provider=after)
+
+    assert first["counts"]["declined"] == later["counts"]["declined"] == 1
+    assert first["candidates"] == later["candidates"] == []
+    assert before.calls[0][1] == after.calls[0][1] == []
+
+
+def test_saved_browser_url_decline_is_loaded_and_can_be_removed(wiki, monkeypatch):
+    _paper(wiki, "single-cell", "a-2026-x", 2026, "10.1/a")
+    monkeypatch.setattr(R, "score_candidates", lambda c, t: True)
+    # The previous CLI saved an unrecognized browser URL lowercased as-is.
+    old_url = f"https://www.semanticscholar.org/paper/PopPert-Smith/{S2_ID}".lower()
+    entry = {"reason": "off-topic", "declined_at": "2026-09-27T10:00:00"}
+    path = wiki / R.DECLINES_FILENAME
+    path.write_text(json.dumps({old_url: entry, NO_DOI: entry,
+                                "https://example.org/paper/invalid": entry}))
+
+    loaded = R.load_declines()
+    assert loaded[f"s2:{S2_ID}"] == entry
+    assert old_url not in loaded
+    assert R.negative_dois(loaded) == [NO_DOI]
+    provider = _Provider([_article(pid=S2_ID)])
+    snapshot = R.run(categories=["single-cell"], today=TODAY, provider=provider)
+    assert snapshot["counts"]["declined"] == 1
+    assert provider.calls[0][1] == [NO_DOI]
+
+    assert R.main(["--undecline", old_url]) == 0
+    assert f"s2:{S2_ID}" not in R.load_declines()
+    assert old_url not in json.loads(path.read_text())
+
+
 @pytest.mark.parametrize("raw", [
     f"https://www.semanticscholar.org/paper/{S2_ID}",           # as the report prints it
     f"https://www.semanticscholar.org/paper/{S2_ID}/",

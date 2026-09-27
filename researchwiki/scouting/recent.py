@@ -356,7 +356,7 @@ class Candidate:
 
     @property
     def key(self) -> str:
-        return self.doi or f"s2:{self.paper_id}"
+        return self.doi or f"s2:{self.paper_id.lower()}"
 
     def to_dict(self) -> dict:
         return {
@@ -427,7 +427,10 @@ def filter_candidates(
             has_abstract=bool(a.abstract),
             score_text="\n\n".join(x for x in (a.title, a.abstract) if x),
         )
-        if cand.key in declined:
+        # S2 may add a DOI after a paper was first recommended without one.
+        # Keep its S2-id decline effective when the preferred key changes.
+        s2_key = f"s2:{paper_id.lower()}" if paper_id else None
+        if cand.key in declined or (s2_key is not None and s2_key in declined):
             counts["declined"] += 1
             continue
         published = _parse_date(a.publication_date)
@@ -595,8 +598,26 @@ def normalize_key(value: str) -> str:
 
 
 def load_declines() -> dict[str, dict]:
+    """Read declines under canonical keys, including URLs saved by old CLI builds.
+
+    Keep unrecognized legacy keys visible in `--list-declined`; they cannot
+    match a candidate, and `negative_dois` must not send them to S2.
+    """
     data = read_json(_declines_path(), {})
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    declines: dict[str, dict] = {}
+    for raw_key, entry in data.items():
+        if not isinstance(raw_key, str) or not isinstance(entry, dict):
+            continue
+        try:
+            key = normalize_key(raw_key)
+        except DeclineKeyError:
+            key = raw_key
+        prior = declines.get(key)
+        if prior is None or str(entry.get("declined_at") or "") >= str(prior.get("declined_at") or ""):
+            declines[key] = entry
+    return declines
 
 
 def add_decline(key: str, reason: str) -> str:
@@ -619,8 +640,9 @@ def remove_decline(key: str) -> bool:
 
 
 def negative_dois(declines: dict[str, dict], cap: int = MAX_NEGATIVES) -> list[str]:
-    """Most recently declined DOIs first; S2-id declines are only filtered."""
-    dois = [(v.get("declined_at", ""), k) for k, v in declines.items() if not k.startswith("s2:")]
+    """Most recently declined DOIs first; S2 and malformed legacy keys stay local."""
+    dois = [(v.get("declined_at", ""), k) for k, v in declines.items()
+            if _DOI_RE.fullmatch(k)]
     return [k for _, k in sorted(dois, reverse=True)[:cap]]
 
 
