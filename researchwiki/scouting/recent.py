@@ -801,6 +801,9 @@ def render(snapshot: dict, limit: int) -> str:
 # ---------- CLI ----------
 
 def main(argv: list[str], *, prog: str = "researchwiki scout recent") -> int:
+    if argv and argv[0] == "report":
+        from . import recent_report
+        return recent_report.main(argv[1:])
     ap = argparse.ArgumentParser(
         prog=prog,
         description="Recently published papers near a category, page, or paper set, "
