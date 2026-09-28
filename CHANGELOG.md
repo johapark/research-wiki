@@ -22,6 +22,22 @@ the reasoning behind any line below.
 
 ### Added
 
+- `researchwiki scout recent report` merges every saved `scout recent`
+  snapshot into one current view. Each run writes its own snapshot keyed by
+  its seed set, and a category run and a page run overlap heavily, so reading
+  them one at a time answers "what did this seed set return" rather than
+  "what should I look at now" — and a paper ingested or declined since a
+  snapshot was written still sits in it. The report takes the newest snapshot
+  per seed set (a re-run supersedes rather than merges with its predecessor,
+  or a paper the re-run dropped would return), re-checks every paper against
+  the wiki and the decline list, keeps one row per paper carrying every page
+  it matched, and keeps the earliest `first_seen`. `--days`/`--since`
+  re-apply a publication window so an old snapshot stops surfacing papers
+  that have aged out. Output is text, `--out PATH`, or `--json`, the
+  versioned contract an HTML dashboard can read the way `visualize` renders
+  its graph. Local files only: no network, no model, and nothing written to
+  `wiki/`, since these are unverified leads until a PDF is ingested.
+
 - `researchwiki scout recent` finds newly published papers near a category, a
   synthesis or idea page, or a set of papers. `scout citations` and `neighbors`
   both walk citation edges, and a paper published last month has none yet, so
