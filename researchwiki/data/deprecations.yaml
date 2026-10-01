@@ -57,6 +57,7 @@ persisted_phase_roles:
   - critic
   - crosslinks
   - debug
+  - duplicate
   - extract
   - grade
   - grade_persist

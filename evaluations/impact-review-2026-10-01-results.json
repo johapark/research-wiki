@@ -1,0 +1,1748 @@
+{
+  "labels_file": "evaluations/impact-review-2026-10-01-labels.json",
+  "impact_review_sha256": "c8471d5fb251902b65502db1daf55d637244dea858442d05e1cf92b42b855a7a",
+  "elapsed_seconds": 200.17,
+  "source_papers": 71,
+  "targets": 12,
+  "pairs": 89,
+  "confusion_matrix": {
+    "tp": 21,
+    "fn": 1,
+    "fp": 33,
+    "tn": 29,
+    "uncertain": 5
+  },
+  "recall": 0.9545,
+  "recall_wilson_95": [
+    0.782,
+    0.9919
+  ],
+  "precision_on_independently_nominated_pairs": 0.3889,
+  "candidate_volume_per_source": {
+    "median": 4,
+    "max": 13,
+    "mean": 4.87
+  },
+  "by_target_type": {
+    "synthesis": {
+      "pairs": 51,
+      "relevant": 8,
+      "caught": 8,
+      "recall": 1.0
+    },
+    "idea": {
+      "pairs": 17,
+      "relevant": 10,
+      "caught": 9,
+      "recall": 0.9
+    },
+    "proposal": {
+      "pairs": 21,
+      "relevant": 4,
+      "caught": 4,
+      "recall": 1.0
+    }
+  },
+  "measurements": [
+    {
+      "source": "ai/falck-2026-training-ai-scientists-to-replicate",
+      "target": "synthesis/ai-in-scientific-workflows-productivity-quality-partnership",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8359,
+      "page_score": 0.8046,
+      "passage_score": 0.8359,
+      "shared_terms": [
+        "agent",
+        "agents",
+        "coding",
+        "figure",
+        "research",
+        "scientist",
+        "scientists",
+        "space"
+      ],
+      "shared_phrases": [
+        "coding agents"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "ai/guo-2026-toward-autonomous-science-with-agentic",
+      "target": "synthesis/ai-in-scientific-workflows-productivity-quality-partnership",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8645,
+      "page_score": 0.788,
+      "passage_score": 0.8645,
+      "shared_terms": [
+        "agentic",
+        "co-scientist",
+        "science",
+        "scientific"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "ai/kirgis-2026-can-ai-agents-conduct-open-ended",
+      "target": "synthesis/ai-in-scientific-workflows-productivity-quality-partnership",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8107,
+      "page_score": 0.8107,
+      "passage_score": 0.8023,
+      "shared_terms": [
+        "agents",
+        "can",
+        "claude",
+        "codex",
+        "evidence",
+        "neurips",
+        "open-ended",
+        "research"
+      ],
+      "shared_phrases": [
+        "open-ended research"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "ai/luan-2018-multi-task-identification-of-entities-relations",
+      "target": "synthesis/ai-in-scientific-workflows-productivity-quality-partnership",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7799,
+      "page_score": 0.7514,
+      "passage_score": 0.7799,
+      "shared_terms": [
+        "construction",
+        "extraction",
+        "graph",
+        "knowledge",
+        "scientific"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "ai/miao-2026-reimagining-research-papers-as-interactive",
+      "target": "synthesis/ai-in-scientific-workflows-productivity-quality-partnership",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.832,
+      "page_score": 0.7822,
+      "passage_score": 0.832,
+      "shared_terms": [
+        "agent",
+        "agents",
+        "claude",
+        "code",
+        "context",
+        "paper2agent",
+        "papers",
+        "research"
+      ],
+      "shared_phrases": [
+        "claude code",
+        "research papers"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "ai/neves-2026-robust-out-of-distribution-prediction-of-buchwald-hartwig",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7582,
+      "page_score": 0.7468,
+      "passage_score": 0.7582,
+      "shared_terms": [
+        "diversity",
+        "generalization",
+        "out-of-distribution",
+        "score"
+      ],
+      "shared_phrases": [
+        "out-of-distribution generalization"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "cgt/clement-2019-crispresso2-provides-accurate-and-rapid",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7481,
+      "page_score": 0.6771,
+      "passage_score": 0.7481,
+      "shared_terms": [],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "cgt/cohen-2026-context-dependent-determinants-of-crispr-cas9-editing",
+      "target": "synthesis/crispr-cas9-off-target-methods-2026",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8443,
+      "page_score": 0.8443,
+      "passage_score": 0.8373,
+      "shared_terms": [
+        "assay",
+        "bias",
+        "crispr-cas9",
+        "deepcrispr",
+        "editing",
+        "framework",
+        "grna",
+        "locus"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "cgt/cohen-2026-context-dependent-determinants-of-crispr-cas9-editing",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8212,
+      "page_score": 0.8192,
+      "passage_score": 0.8212,
+      "shared_terms": [
+        "editing",
+        "grna"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "cgt/hsu-2026-mechanistic-machine-learning-for-prediction",
+      "target": "synthesis/variant-aware-crispr-off-target",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8147,
+      "page_score": 0.7877,
+      "passage_score": 0.8147,
+      "shared_terms": [
+        "design",
+        "editing",
+        "efficiency",
+        "learning",
+        "mechanistic",
+        "pegrna",
+        "prime",
+        "repair"
+      ],
+      "shared_phrases": [
+        "editing efficiency",
+        "learning prime",
+        "prime editing"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "cgt/hwang-2026-analysing-long-read-crispr-experiments-with-crisprlungo",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "uncertain",
+      "predicted": true,
+      "score": 0.8456,
+      "page_score": 0.8456,
+      "passage_score": 0.826,
+      "shared_terms": [
+        "bcl11a",
+        "crispr",
+        "structural",
+        "variants"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "cgt/jerabek-2026-highly-efficient-base-editing-at-pcsk9",
+      "target": "synthesis/variant-aware-crispr-off-target",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8119,
+      "page_score": 0.7774,
+      "passage_score": 0.8119,
+      "shared_terms": [
+        "base",
+        "editing",
+        "editor",
+        "on-target"
+      ],
+      "shared_phrases": [
+        "base editor"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "cgt/lin-2018-off-target-predictions-in-crispr-cas9-gene",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8269,
+      "page_score": 0.7914,
+      "passage_score": 0.8269,
+      "shared_terms": [
+        "cfd",
+        "editing",
+        "encoding",
+        "guide-seq",
+        "mismatch",
+        "off-target",
+        "score",
+        "scoring"
+      ],
+      "shared_phrases": [
+        "cfd score"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "cgt/luo-2024-interpretable-crisprcas9-off-target-activities-with-mismatches",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "relevant",
+      "predicted": false,
+      "score": 0.8263,
+      "page_score": 0.8263,
+      "passage_score": 0.818,
+      "shared_terms": [
+        "crispr",
+        "encoding",
+        "indel",
+        "mismatch",
+        "mismatches",
+        "off-target",
+        "protospacer",
+        "sequence"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "cgt/ozden-2024-learning-to-quantify-uncertainty-in-off-target",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7802,
+      "page_score": 0.7524,
+      "passage_score": 0.7802,
+      "shared_terms": [
+        "activity",
+        "negative",
+        "score",
+        "uncertainty",
+        "zero"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "cgt/sherkatghanad-2023-using-traditional-machine-learning-and-deep",
+      "target": "synthesis/crispr-cas9-off-target-methods-2026",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8663,
+      "page_score": 0.8663,
+      "passage_score": 0.842,
+      "shared_terms": [
+        "activity",
+        "cas9",
+        "cleavage",
+        "crispr",
+        "deep",
+        "design",
+        "editing",
+        "genome"
+      ],
+      "shared_phrases": [
+        "crispr cas9",
+        "deep learning",
+        "on- off-target"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "cgt/silverstein-2025-custom-crispr-cas9-pam-variants-via",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.817,
+      "page_score": 0.8141,
+      "passage_score": 0.817,
+      "shared_terms": [
+        "crispr",
+        "editing",
+        "engineering",
+        "machine",
+        "off-target",
+        "pam",
+        "spcas9",
+        "specificity"
+      ],
+      "shared_phrases": [
+        "variants via"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "cgt/xue-2015-crispr-cas9-for-medical-genetic-screens",
+      "target": "synthesis/crispr-cas9-off-target-methods-2026",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8313,
+      "page_score": 0.8296,
+      "passage_score": 0.8313,
+      "shared_terms": [
+        "crispr",
+        "crispr-cas9",
+        "editing",
+        "genetic",
+        "library",
+        "off-target",
+        "screen",
+        "sgrna"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/aureka-ai-opendde-project-2026-folding-reasoning-and-scaling-with-open-source",
+      "target": "synthesis/single-cell-scaling-versus-intervention-data",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7441,
+      "page_score": 0.7441,
+      "passage_score": 0.7328,
+      "shared_terms": [
+        "accuracy",
+        "affinity",
+        "design",
+        "drug",
+        "foundation",
+        "latent",
+        "laws",
+        "scaling"
+      ],
+      "shared_phrases": [
+        "scaling laws"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/baghbanzadeh-2025-seqlens-optimizing-language-models-for-genomic",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.872,
+      "page_score": 0.872,
+      "passage_score": 0.8557,
+      "shared_terms": [
+        "attention",
+        "fine-tuning",
+        "genomic",
+        "language",
+        "optimizing"
+      ],
+      "shared_phrases": [
+        "genomic language"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/brandes-2023-genome-wide-prediction-of-disease-variant",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.814,
+      "page_score": 0.8013,
+      "passage_score": 0.814,
+      "shared_terms": [
+        "benchmarks",
+        "clinvar",
+        "disease",
+        "effects",
+        "language",
+        "missense",
+        "variant"
+      ],
+      "shared_phrases": [
+        "disease variant",
+        "variant effects"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/drusinsky-2024-deep-learning-prediction-of-gene-expression",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7876,
+      "page_score": 0.7876,
+      "passage_score": 0.7781,
+      "shared_terms": [
+        "expression",
+        "generalization",
+        "held-out"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/dupire-2026-fifteen-challenges-for-generative-ai",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8029,
+      "page_score": 0.8029,
+      "passage_score": 0.7958,
+      "shared_terms": [
+        "architecture",
+        "biological",
+        "challenge",
+        "failure",
+        "interaction",
+        "out-of-distribution"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/fishman-2025-gena-lm-a-family-of-open-source",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8683,
+      "page_score": 0.8683,
+      "passage_score": 0.8598,
+      "shared_terms": [
+        "activity",
+        "attention",
+        "dna",
+        "genomic",
+        "genomics",
+        "language",
+        "long",
+        "sequence"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/fu-2025-a-foundation-model-of-transcription",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8058,
+      "page_score": 0.8058,
+      "passage_score": 0.792,
+      "shared_terms": [
+        "expression",
+        "scores",
+        "zero-shot"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/fu-2025-a-foundation-model-of-transcription",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8047,
+      "page_score": 0.7524,
+      "passage_score": 0.8047,
+      "shared_terms": [
+        "expression",
+        "scores"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/fu-2025-a-foundation-model-of-transcription",
+      "target": "synthesis/single-cell-scaling-versus-intervention-data",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.818,
+      "page_score": 0.818,
+      "passage_score": 0.8082,
+      "shared_terms": [
+        "expression",
+        "foundation",
+        "generalization",
+        "interaction",
+        "networks",
+        "scores",
+        "zero-shot"
+      ],
+      "shared_phrases": [
+        "interaction networks"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/fu-2025-a-foundation-model-of-transcription",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8295,
+      "page_score": 0.8258,
+      "passage_score": 0.8295,
+      "shared_terms": [
+        "expression",
+        "generalization",
+        "interaction",
+        "zero-shot"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/gschwind-2026-an-encyclopedia-of-human-enhancer-gene",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "uncertain",
+      "predicted": false,
+      "score": 0.8211,
+      "page_score": 0.8167,
+      "passage_score": 0.8211,
+      "shared_terms": [
+        "effects",
+        "perturbation"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/hingerl-2025-scooby-modeling-multimodal-genomic-profiles",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8246,
+      "page_score": 0.8246,
+      "passage_score": 0.7989,
+      "shared_terms": [
+        "coverage",
+        "expression",
+        "profile",
+        "profiles",
+        "resolution",
+        "scrna-seq"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/hingerl-2025-scooby-modeling-multimodal-genomic-profiles",
+      "target": "synthesis/single-cell-scaling-versus-intervention-data",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7921,
+      "page_score": 0.7825,
+      "passage_score": 0.7921,
+      "shared_terms": [
+        "coverage",
+        "expression",
+        "foundation",
+        "profiles"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/javed-2025-a-multi-modal-transformer-for-cell",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7885,
+      "page_score": 0.7885,
+      "passage_score": 0.7612,
+      "shared_terms": [],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/lal-2026-decoding-sequence-determinants-of-gene",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8118,
+      "page_score": 0.7544,
+      "passage_score": 0.8118,
+      "shared_terms": [
+        "cellular",
+        "design",
+        "disease",
+        "expression",
+        "state",
+        "states"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/larey-2026-gfmbench-api-a-standardized-interface-for-benchmarking",
+      "target": "synthesis/genomic-lm-training-data-preparation",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8176,
+      "page_score": 0.8176,
+      "passage_score": 0.8045,
+      "shared_terms": [
+        "foundation",
+        "genomic",
+        "tokenization"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/liu-2026-pre-training-genomic-language-model-with-variants",
+      "target": "synthesis/genomic-lm-training-data-preparation",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8382,
+      "page_score": 0.8382,
+      "passage_score": 0.8226,
+      "shared_terms": [
+        "better",
+        "dnabert2",
+        "functional",
+        "genomic",
+        "language",
+        "modeling",
+        "personalized",
+        "variants"
+      ],
+      "shared_phrases": [
+        "genomic language"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/liu-2026-pre-training-genomic-language-model-with-variants",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8299,
+      "page_score": 0.8299,
+      "passage_score": 0.8288,
+      "shared_terms": [
+        "better",
+        "enformer",
+        "eqtl",
+        "functional",
+        "genomic",
+        "genomics",
+        "language",
+        "personalized"
+      ],
+      "shared_phrases": [
+        "genomic language"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/lui-2026-splisync-genomic-language-model-driven-splice",
+      "target": "synthesis/genomic-lm-training-data-preparation",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8163,
+      "page_score": 0.8115,
+      "passage_score": 0.8163,
+      "shared_terms": [
+        "alignment",
+        "genomic",
+        "hyenadna",
+        "language",
+        "long"
+      ],
+      "shared_phrases": [
+        "genomic language"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/merchant-2025-semantic-design-of-functional-de",
+      "target": "synthesis/genomic-lm-training-data-preparation",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8047,
+      "page_score": 0.8047,
+      "passage_score": 0.7841,
+      "shared_terms": [
+        "context",
+        "design",
+        "evo",
+        "functional",
+        "genomic",
+        "language",
+        "novo",
+        "prokaryotic"
+      ],
+      "shared_phrases": [
+        "genomic language"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/merchant-2025-semantic-design-of-functional-de",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8457,
+      "page_score": 0.8198,
+      "passage_score": 0.8457,
+      "shared_terms": [
+        "context",
+        "design",
+        "evo",
+        "functional",
+        "generation",
+        "genomic",
+        "language",
+        "sequence"
+      ],
+      "shared_phrases": [
+        "genomic language"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/nagai-2026-toward-generalizable-and-interpretable-ai",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.831,
+      "page_score": 0.8071,
+      "passage_score": 0.831,
+      "shared_terms": [
+        "assay",
+        "design",
+        "mechanism",
+        "mechanistic",
+        "perturbation"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/poplin-2018-a-universal-snp-and-small-indel",
+      "target": "synthesis/variant-aware-crispr-off-target",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8072,
+      "page_score": 0.8072,
+      "passage_score": 0.7976,
+      "shared_terms": [
+        "calling",
+        "cnn",
+        "deep",
+        "encoding",
+        "genome",
+        "genotype",
+        "network",
+        "neural"
+      ],
+      "shared_phrases": [
+        "neural network"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/shao-2024-a-long-context-language-model-for-deciphering",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8639,
+      "page_score": 0.8541,
+      "passage_score": 0.8639,
+      "shared_terms": [
+        "architecture",
+        "efficiency",
+        "generation",
+        "genome",
+        "genomes",
+        "language",
+        "long-context",
+        "sequence"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "compbio/wang-2026-a-generalizable-hi-c-foundation-model",
+      "target": "synthesis/single-cell-scaling-versus-intervention-data",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.773,
+      "page_score": 0.7723,
+      "passage_score": 0.773,
+      "shared_terms": [
+        "architecture",
+        "autoencoder",
+        "foundation",
+        "generalization",
+        "integration",
+        "masked",
+        "pretraining"
+      ],
+      "shared_phrases": [
+        "masked autoencoder"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "genomics/alser-2020-technology-dictates-algorithms-recent-developments",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8133,
+      "page_score": 0.7915,
+      "passage_score": 0.8133,
+      "shared_terms": [
+        "alignment",
+        "genome",
+        "long",
+        "next-generation",
+        "rate",
+        "sequence",
+        "short"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "genomics/asri-2025-pangenome-aware-deepvariant",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8553,
+      "page_score": 0.835,
+      "passage_score": 0.8553,
+      "shared_terms": [
+        "giraffe",
+        "pangenome"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "genomics/engelhardt-2026-machine-learning-and-statistical-methods",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7243,
+      "page_score": 0.719,
+      "passage_score": 0.7243,
+      "shared_terms": [
+        "learning",
+        "statistical"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "genomics/ghiasi-2026-grains-storage-aware-algorithm-architecture-co-design-enabling",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8004,
+      "page_score": 0.7984,
+      "passage_score": 0.8004,
+      "shared_terms": [
+        "genome"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "genomics/li-2003-modeling-linkage-disequilibrium-and-identifying",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7503,
+      "page_score": 0.7239,
+      "passage_score": 0.7503,
+      "shared_terms": [
+        "estimation",
+        "rate"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "genomics/nowbandegani-2025-defining-and-cataloging-variants-in-pangenome",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8623,
+      "page_score": 0.8623,
+      "passage_score": 0.8566,
+      "shared_terms": [
+        "graph",
+        "graphs",
+        "haplotype",
+        "hprc",
+        "minigraph-cactus",
+        "pangenome",
+        "snp",
+        "variant"
+      ],
+      "shared_phrases": [
+        "pangenome graphs",
+        "pangenome hprc"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "genomics/pinto-2026-variant-calling-in-genomics-a-comparative",
+      "target": "synthesis/variant-aware-crispr-off-target",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8222,
+      "page_score": 0.8132,
+      "passage_score": 0.8222,
+      "shared_terms": [
+        "calling",
+        "genome",
+        "guide",
+        "precision",
+        "set",
+        "snv",
+        "tools",
+        "variant"
+      ],
+      "shared_phrases": [
+        "snv calling"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "genomics/yi-2026-panvariants-best-practice-for-pangenome-based",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8505,
+      "page_score": 0.8505,
+      "passage_score": 0.8361,
+      "shared_terms": [
+        "alignment",
+        "best",
+        "genome",
+        "giraffe",
+        "graph",
+        "k-mer",
+        "pangenome",
+        "pipeline"
+      ],
+      "shared_phrases": [
+        "pangenome graph"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "genomics/zheng-2021-symphonizing-pileup-and-full-alignment-for-deep",
+      "target": "synthesis/pangenome-graph-construction-alignment-and-variant-calling",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8218,
+      "page_score": 0.8013,
+      "passage_score": 0.8218,
+      "shared_terms": [
+        "calling",
+        "genotyping",
+        "giab",
+        "long-read",
+        "pileup",
+        "representation",
+        "variant"
+      ],
+      "shared_phrases": [
+        "variant calling"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "other/prousalis-2025-a-survey-on-sequence-alignment",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "uncertain",
+      "predicted": false,
+      "score": 0.8225,
+      "page_score": 0.8225,
+      "passage_score": 0.8082,
+      "shared_terms": [
+        "alignment",
+        "next-generation",
+        "sequence"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "other/yang-2025-cross-validated-causal-inference-a-modern",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7772,
+      "page_score": 0.7772,
+      "passage_score": 0.7514,
+      "shared_terms": [
+        "adaptive",
+        "combine",
+        "effect",
+        "empirical",
+        "estimation",
+        "selection",
+        "treatment",
+        "weight"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "other/yang-2025-cross-validated-causal-inference-a-modern",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "uncertain",
+      "predicted": false,
+      "score": 0.8151,
+      "page_score": 0.8151,
+      "passage_score": 0.7655,
+      "shared_terms": [
+        "causal",
+        "controlled",
+        "estimation",
+        "experimental",
+        "observational",
+        "selection"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/bunne-2024-how-to-build-the-virtual",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8326,
+      "page_score": 0.8218,
+      "passage_score": 0.8326,
+      "shared_terms": [
+        "biological",
+        "interaction"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/cui-2024-scgpt-toward-building-a-foundation",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8364,
+      "page_score": 0.8212,
+      "passage_score": 0.8364,
+      "shared_terms": [
+        "annotation",
+        "metric",
+        "perturbation",
+        "pretraining",
+        "scaling"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/daw-2026-celltypeai-cell-annotation-for-scrna-seq",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8667,
+      "page_score": 0.8588,
+      "passage_score": 0.8667,
+      "shared_terms": [
+        "annotation",
+        "pbmc",
+        "sapiens",
+        "scrna-seq",
+        "tabula"
+      ],
+      "shared_phrases": [
+        "tabula sapiens"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/daw-2026-celltypeai-cell-annotation-for-scrna-seq",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8536,
+      "page_score": 0.7837,
+      "passage_score": 0.8536,
+      "shared_terms": [
+        "annotation",
+        "sapiens",
+        "scrna-seq",
+        "sctype",
+        "tabula"
+      ],
+      "shared_phrases": [
+        "tabula sapiens"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/dehghannasiri-2026-reference-free-discovery-with-barcoded-single-cell",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.812,
+      "page_score": 0.812,
+      "passage_score": 0.7971,
+      "shared_terms": [
+        "cell-type"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/dehghannasiri-2026-reference-free-discovery-with-barcoded-single-cell",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8062,
+      "page_score": 0.7508,
+      "passage_score": 0.8062,
+      "shared_terms": [
+        "cell-type"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/denadel-2026-evaluating-the-role-of-pretraining",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "uncertain",
+      "predicted": true,
+      "score": 0.8347,
+      "page_score": 0.8347,
+      "passage_score": 0.8319,
+      "shared_terms": [
+        "cell-type",
+        "classification",
+        "corpus",
+        "evaluating",
+        "performance"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/denadel-2026-evaluating-the-role-of-pretraining",
+      "target": "synthesis/genomic-lm-training-data-preparation",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8448,
+      "page_score": 0.796,
+      "passage_score": 0.8448,
+      "shared_terms": [
+        "corpus",
+        "diversity",
+        "foundation",
+        "performance",
+        "point",
+        "pretraining",
+        "scaling"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/diaz-mejia-2019-evaluation-of-methods-to-assign",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8423,
+      "page_score": 0.7908,
+      "passage_score": 0.8423,
+      "shared_terms": [
+        "cluster",
+        "clusters",
+        "labeling",
+        "labels",
+        "liver",
+        "scrna-seq",
+        "tabula"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/gao-2025-projectsvr-mapping-single-cell-rna-seq-data",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.836,
+      "page_score": 0.836,
+      "passage_score": 0.8023,
+      "shared_terms": [
+        "atlas",
+        "embedding",
+        "embeddings",
+        "ensemble",
+        "label",
+        "mapping",
+        "regression",
+        "scoring"
+      ],
+      "shared_phrases": [
+        "label transfer"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/gold-2026-scoring-gene-importance-by-interpreting",
+      "target": "synthesis/single-cell-scaling-versus-intervention-data",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7891,
+      "page_score": 0.7891,
+      "passage_score": 0.7826,
+      "shared_terms": [
+        "disease",
+        "foundation"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/ianevski-2022-fully-automated-and-ultra-fast-cell-type-identification",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8716,
+      "page_score": 0.8714,
+      "passage_score": 0.8716,
+      "shared_terms": [
+        "annotation",
+        "cell-type",
+        "combinations",
+        "marker",
+        "markers",
+        "pbmc",
+        "score",
+        "transcriptomic"
+      ],
+      "shared_phrases": [
+        "cell-type annotation"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/ji-2023-scannotate-an-automated-cell-type-annotation",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.844,
+      "page_score": 0.8311,
+      "passage_score": 0.844,
+      "shared_terms": [
+        "annotation",
+        "cell-type",
+        "cross-platform",
+        "cross-species",
+        "pbmc"
+      ],
+      "shared_phrases": [
+        "cell-type annotation"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/ji-2023-scannotate-an-automated-cell-type-annotation",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8345,
+      "page_score": 0.7728,
+      "passage_score": 0.8345,
+      "shared_terms": [
+        "annotation",
+        "cell-type",
+        "cross-species"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/khan-2023-reusability-report-learning-the-transcriptional",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8444,
+      "page_score": 0.8444,
+      "passage_score": 0.8426,
+      "shared_terms": [
+        "annotation",
+        "cell-type",
+        "detection",
+        "novel",
+        "report"
+      ],
+      "shared_phrases": [
+        "cell-type annotation"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/khan-2023-reusability-report-learning-the-transcriptional",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8237,
+      "page_score": 0.7884,
+      "passage_score": 0.8237,
+      "shared_terms": [
+        "annotation",
+        "cell-type",
+        "detection",
+        "novel",
+        "report"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/lee-2026-annq-reference-based-quantification-of-cellular",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8312,
+      "page_score": 0.8312,
+      "passage_score": 0.8293,
+      "shared_terms": [
+        "annotation",
+        "atlas",
+        "perturbation",
+        "score",
+        "uncertainty"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/lotfollahi-2024-the-future-of-rapid-and-automated",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8553,
+      "page_score": 0.845,
+      "passage_score": 0.8553,
+      "shared_terms": [
+        "annotation",
+        "atlas",
+        "classification",
+        "future",
+        "label",
+        "mapping",
+        "scrna-seq",
+        "transfer"
+      ],
+      "shared_phrases": [
+        "label transfer"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/lotfollahi-2024-the-future-of-rapid-and-automated",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8532,
+      "page_score": 0.8078,
+      "passage_score": 0.8532,
+      "shared_terms": [
+        "annotation",
+        "atlas",
+        "classification",
+        "label",
+        "mapping",
+        "multimodal",
+        "scrna-seq",
+        "transfer"
+      ],
+      "shared_phrases": [
+        "label transfer"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/lotfollahi-2024-the-future-of-rapid-and-automated",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8349,
+      "page_score": 0.8264,
+      "passage_score": 0.8349,
+      "shared_terms": [
+        "annotation",
+        "atlas",
+        "classification"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/moro-2026-a-practical-guide-to-targeted",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8281,
+      "page_score": 0.8281,
+      "passage_score": 0.8213,
+      "shared_terms": [
+        "enrichment",
+        "practical",
+        "scrna-seq"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/nesari-2026-advances-and-challenges-in-single-cell",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8523,
+      "page_score": 0.8523,
+      "passage_score": 0.8432,
+      "shared_terms": [
+        "annotation",
+        "clustering",
+        "expression",
+        "review",
+        "scrna-seq"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/nesari-2026-advances-and-challenges-in-single-cell",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8304,
+      "page_score": 0.7675,
+      "passage_score": 0.8304,
+      "shared_terms": [
+        "annotation",
+        "clustering",
+        "expression",
+        "review",
+        "scrna-seq"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/nesari-2026-advances-and-challenges-in-single-cell",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8028,
+      "page_score": 0.8011,
+      "passage_score": 0.8028,
+      "shared_terms": [
+        "annotation",
+        "expression"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/proks-2024-deep-learning-based-models-for-preimplantation",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8561,
+      "page_score": 0.7972,
+      "passage_score": 0.8561,
+      "shared_terms": [
+        "atlas",
+        "classification",
+        "scrna-seq"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/proks-2024-deep-learning-based-models-for-preimplantation",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8384,
+      "page_score": 0.7403,
+      "passage_score": 0.8384,
+      "shared_terms": [
+        "atlas",
+        "classification",
+        "scrna-seq"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/rosen-2026-universal-cell-embedding-provides-a-foundation",
+      "target": "synthesis/single-cell-scaling-versus-intervention-data",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7931,
+      "page_score": 0.7931,
+      "passage_score": 0.7767,
+      "shared_terms": [
+        "foundation",
+        "transfer",
+        "zero-shot"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/shao-2020-sccatch-automatic-annotation-on-cell",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8589,
+      "page_score": 0.7911,
+      "passage_score": 0.8589,
+      "shared_terms": [
+        "annotation",
+        "automatic",
+        "cell-type",
+        "cluster",
+        "clusters",
+        "marker",
+        "scoring"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/sheth-2026-mapping-enhancer-gene-regulatory-interactions-from-single-cell",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.835,
+      "page_score": 0.835,
+      "passage_score": 0.8189,
+      "shared_terms": [
+        "correlation",
+        "perturbation",
+        "score"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/szaata-2024-transformers-in-single-cell-omics-a-review",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.8149,
+      "page_score": 0.8149,
+      "passage_score": 0.814,
+      "shared_terms": [
+        "architecture",
+        "expression",
+        "pretraining"
+      ],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "single-cell/youngblut-2026-scbasecount-an-ai-agent-curated-standardized",
+      "target": "synthesis/genomic-lm-training-data-preparation",
+      "label": "not_relevant",
+      "predicted": false,
+      "score": 0.7608,
+      "page_score": 0.7608,
+      "passage_score": 0.7376,
+      "shared_terms": [],
+      "shared_phrases": [],
+      "already_cited": false
+    },
+    {
+      "source": "statistics/heller-2014-repfdr-a-tool-for-replicability",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8143,
+      "page_score": 0.7496,
+      "passage_score": 0.8143,
+      "shared_terms": [
+        "discovery",
+        "empirical",
+        "false",
+        "fdr",
+        "rate",
+        "testing"
+      ],
+      "shared_phrases": [
+        "discovery rate",
+        "false discovery"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "statistics/ni-2024-computing-power-and-sample-size",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "not_relevant",
+      "predicted": true,
+      "score": 0.8233,
+      "page_score": 0.792,
+      "passage_score": 0.8233,
+      "shared_terms": [
+        "discovery",
+        "false",
+        "fdr",
+        "hypotheses",
+        "hypothesis",
+        "null",
+        "p-value",
+        "power"
+      ],
+      "shared_phrases": [
+        "discovery rate",
+        "false discovery"
+      ],
+      "already_cited": false
+    },
+    {
+      "source": "statistics/stephens-2016-false-discovery-rates-a-new",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "relevant",
+      "predicted": true,
+      "score": 0.8212,
+      "page_score": 0.7846,
+      "passage_score": 0.8212,
+      "shared_terms": [
+        "adaptive",
+        "assumption",
+        "discovery",
+        "effect",
+        "empirical",
+        "estimation",
+        "false",
+        "new"
+      ],
+      "shared_phrases": [
+        "discovery rate",
+        "false discovery"
+      ],
+      "already_cited": false
+    }
+  ]
+}

@@ -1,0 +1,226 @@
+{
+  "sampling": "24 uniform random paper pages, excluding tuning sources and independently nominated holdout sources",
+  "random_seed": 20261001,
+  "sampled_from": 437,
+  "sample_size": 24,
+  "median": 2.0,
+  "mean": 3.12,
+  "max": 8,
+  "counts": [
+    {
+      "source": "cgt/rochette-2026-diversity-generating-retroelements-for-programmable-targeted",
+      "candidate_count": 2,
+      "targets": [
+        "synthesis/deep-learning-tools-for-de-novo-protein-design",
+        "synthesis/gene-editing-approaches-for-hypercholesterolemia"
+      ]
+    },
+    {
+      "source": "compbio/candido-2026-language-modeling-materializes-a-world",
+      "candidate_count": 4,
+      "targets": [
+        "synthesis/biological-signal-dna-language-models-dont-use",
+        "ideas/compute-efficient-multimodal-dna-lm-for-variant-effects",
+        "synthesis/dna-foundation-models-in-the-hyena-evo-lineage",
+        "synthesis/genomic-lm-training-data-preparation"
+      ]
+    },
+    {
+      "source": "compbio/goodarzi-2026-virtual-cell-challenge-2026-benchmarking",
+      "candidate_count": 7,
+      "targets": [
+        "synthesis/variant-aware-crispr-off-target",
+        "synthesis/crispr-cas9-off-target-methods-2026",
+        "ideas/cas9-biochemical-activity-prediction-from-in-house-oligo-libraries",
+        "synthesis/dna-foundation-models-in-the-hyena-evo-lineage",
+        "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+        "synthesis/continual-learning-in-genomic-models",
+        "synthesis/sequence-to-expression-models"
+      ]
+    },
+    {
+      "source": "statistics/dohler-2016-a-discrete-modification-of-the-benjamini-yekutieli",
+      "candidate_count": 0,
+      "targets": []
+    },
+    {
+      "source": "genetics/islam-2026-functional-data-for-ldlr-variant",
+      "candidate_count": 1,
+      "targets": [
+        "ideas/cas9-biochemical-activity-prediction-from-in-house-oligo-libraries"
+      ]
+    },
+    {
+      "source": "genomics/ashraf-2026-building-and-applying-pangenome-references",
+      "candidate_count": 6,
+      "targets": [
+        "synthesis/variant-calling-algorithms",
+        "synthesis/structural-variant-detection-and-benchmarking-in-wgs",
+        "ideas/graphot-variant-aware-off-target-search",
+        "ideas/compute-efficient-multimodal-dna-lm-for-variant-effects",
+        "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+        "synthesis/continual-learning-in-genomic-models"
+      ]
+    },
+    {
+      "source": "genomics/zheng-2026-bioinformatics-for-human-long-read-whole-genome",
+      "candidate_count": 5,
+      "targets": [
+        "synthesis/structural-variant-detection-and-benchmarking-in-wgs",
+        "ideas/population-aware-personalized-pangenome-haplotype-sampling",
+        "synthesis/variant-calling-algorithms",
+        "synthesis/continual-learning-in-genomic-models",
+        "ideas/cas9-biochemical-activity-prediction-from-in-house-oligo-libraries"
+      ]
+    },
+    {
+      "source": "genomics/hickey-2023-pangenome-graph-construction-from-genome",
+      "candidate_count": 6,
+      "targets": [
+        "ideas/compute-efficient-multimodal-dna-lm-for-variant-effects",
+        "synthesis/variant-calling-algorithms",
+        "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+        "synthesis/structural-variant-detection-and-benchmarking-in-wgs",
+        "ideas/population-variant-pretraining-for-personalized-regulatory-effects",
+        "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441"
+      ]
+    },
+    {
+      "source": "compbio/ku-2025-systems-and-algorithms-for-convolutional",
+      "candidate_count": 2,
+      "targets": [
+        "synthesis/genomic-lm-training-data-preparation",
+        "synthesis/continual-learning-in-genomic-models"
+      ]
+    },
+    {
+      "source": "single-cell/leon-perinan-2026-ultrafast-and-reference-free-sequence-discovery",
+      "candidate_count": 2,
+      "targets": [
+        "synthesis/sequence-to-expression-models",
+        "synthesis/duplex-sequencing-clonal-selection-normal-tissues"
+      ]
+    },
+    {
+      "source": "single-cell/wang-2026-illuminating-cell-states-by-a-comprehensive",
+      "candidate_count": 1,
+      "targets": [
+        "synthesis/variant-aware-crispr-off-target"
+      ]
+    },
+    {
+      "source": "ai/zhukova-2025-contrastive-learning-using-graph-embeddings",
+      "candidate_count": 0,
+      "targets": []
+    },
+    {
+      "source": "genomics/chen-2026-a-k-mer-based-genome-wide-association-study",
+      "candidate_count": 4,
+      "targets": [
+        "ideas/population-aware-personalized-pangenome-haplotype-sampling",
+        "synthesis/pangenome-graph-construction-alignment-and-variant-calling",
+        "synthesis/structural-variant-detection-and-benchmarking-in-wgs",
+        "synthesis/variant-calling-algorithms"
+      ]
+    },
+    {
+      "source": "cgt/doench-2014-rational-design-of-highly-active",
+      "candidate_count": 6,
+      "targets": [
+        "synthesis/crispr-cas9-off-target-methods-2026",
+        "synthesis/variant-aware-crispr-off-target",
+        "synthesis/dsb-free-editing-axis",
+        "ideas/graphot-variant-aware-off-target-search",
+        "synthesis/machine-learning-for-rna-splicing-prediction",
+        "synthesis/deep-learning-for-protein-structure-and-function-prediction"
+      ]
+    },
+    {
+      "source": "cgt/kim-2019-spcas9-activity-prediction-by-deepspcas9",
+      "candidate_count": 7,
+      "targets": [
+        "synthesis/variant-aware-crispr-off-target",
+        "synthesis/sequence-to-expression-models",
+        "synthesis/low-frequency-crispr-off-target-detection-nanoseq-wgs-uncoverseq",
+        "synthesis/deep-learning-for-protein-structure-and-function-prediction",
+        "synthesis/programmable-genome-editing-and-in-vivo-delivery-tools",
+        "synthesis/deep-learning-tools-for-de-novo-protein-design",
+        "synthesis/engineering-rna-therapeutics-delivery-design-and-immune-tuning"
+      ]
+    },
+    {
+      "source": "other/pachitariu-2026-a-critical-initialization-for-biological",
+      "candidate_count": 1,
+      "targets": [
+        "synthesis/single-cell-scaling-versus-intervention-data"
+      ]
+    },
+    {
+      "source": "other/chen-2025-rapid-graph-recursive-all-pairs-shortest-paths",
+      "candidate_count": 0,
+      "targets": []
+    },
+    {
+      "source": "ai/razavi-2019-generating-diverse-high-fidelity-images-with-vq-vae-2",
+      "candidate_count": 0,
+      "targets": []
+    },
+    {
+      "source": "genomics/ondov-2015-mash-fast-genome-and-metagenome",
+      "candidate_count": 2,
+      "targets": [
+        "ideas/compute-efficient-multimodal-dna-lm-for-variant-effects",
+        "ideas/data-first-strategy-for-a-next-generation-genomic-language-model"
+      ]
+    },
+    {
+      "source": "cgt/baysoy-2026-large-scale-spatially-resolved-panoramic-crispr",
+      "candidate_count": 2,
+      "targets": [
+        "ideas/cas9-biochemical-activity-prediction-from-in-house-oligo-libraries",
+        "synthesis/duplex-sequencing-clonal-selection-normal-tissues"
+      ]
+    },
+    {
+      "source": "ai/klimesch-2026-designing-physics-experiments-with-artificial",
+      "candidate_count": 1,
+      "targets": [
+        "synthesis/deep-learning-for-protein-structure-and-function-prediction"
+      ]
+    },
+    {
+      "source": "cgt/khoshandam-2023-clinical-applications-of-the-crisprcas9",
+      "candidate_count": 8,
+      "targets": [
+        "synthesis/clinical-translation-of-base-editing-therapies",
+        "synthesis/crispr-cas9-off-target-methods-2026",
+        "synthesis/engineering-rna-therapeutics-delivery-design-and-immune-tuning",
+        "synthesis/gene-editing-approaches-for-hypercholesterolemia",
+        "ideas/cas9-biochemical-activity-prediction-from-in-house-oligo-libraries",
+        "synthesis/variant-aware-crispr-off-target",
+        "synthesis/dsb-free-large-dna-payload-genomic-insertion",
+        "synthesis/low-frequency-crispr-off-target-detection-nanoseq-wgs-uncoverseq"
+      ]
+    },
+    {
+      "source": "compbio/stelzer-2026-why-machines-dont-speak-biology",
+      "candidate_count": 3,
+      "targets": [
+        "synthesis/biological-signal-dna-language-models-dont-use",
+        "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+        "ideas/compute-efficient-multimodal-dna-lm-for-variant-effects"
+      ]
+    },
+    {
+      "source": "compbio/jiang-2026-intrinsically-disordered-regions-restrain-genomic",
+      "candidate_count": 5,
+      "targets": [
+        "synthesis/crispr-cas9-off-target-methods-2026",
+        "ideas/cas9-biochemical-activity-prediction-from-in-house-oligo-libraries",
+        "synthesis/deep-learning-for-protein-structure-and-function-prediction",
+        "synthesis/sequence-to-expression-models",
+        "synthesis/biological-signal-dna-language-models-dont-use"
+      ]
+    }
+  ]
+}

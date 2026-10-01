@@ -411,6 +411,8 @@ Coverage is tracked per stem with a fingerprint of the claims compared, so a reg
 
 **Step 5 — Check stale syntheses.** `researchwiki lint --json`; inspect `stale_synthesis`, `stale_by_content`, `p2_entries_with_anchor_hits`. Refresh or leave a one-liner in `log.md`.
 
+**Impact review after every completed paper ingest.** Agent promotion writes a local, model-free reverse-scan receipt under `.ingest/impact-review/<stem>.yaml`; the manual digest path runs the scan after its `db rebuild && reindex` step. It covers synthesis, active ideas, and active proposal records; `status` shows pending, stale, or unscanned receipts. Review each candidate and record `incorporated`, `not_relevant`, or `deferred` with a reason before calling the ingest session reviewed. This is independent of `--memory-evolve` and never edits authored pages automatically. See [`prompts/impact-review.md`](./prompts/impact-review.md) when a receipt is pending, stale, or unscanned.
+
 **Step 6 — Memory-evolution proposals (on demand).** Run `researchwiki evolve <category/stem>`, or pass `agent ingest --memory-evolve` when this paper should be checked immediately. Actionable proposals land under `.ingest/{stem}-evolution-proposals/`. **You are the reviewer** — read each proposal + target synthesis, verify patches against the source paper (numbers, framing, superlatives drift), one-paragraph verdict per proposal, ask user permission (one yes/no covers all from a single ingest unless specified). On approval: apply, remove the proposal dir, update synthesis `generated_at:` (the citation lands in the body — synthesis/idea have no `referenced_papers:`). Skip when `evolve` returned zero verdicts or paper is a reference doc.
 
 ### Import — bring in a reference-manager library

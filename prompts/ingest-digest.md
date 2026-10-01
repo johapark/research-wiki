@@ -14,8 +14,11 @@ researchwiki ingest inbox/<raw-filename>.pdf --category <category>
 # 3. Manually back-link every incoming cross-link on the citing page
 # 4. rm .ingest/{stem}-digest.md
 # 5. researchwiki lint --fix
-# 6. researchwiki evolve cgt/{stem}   (agent path runs this automatically)
+# 6. researchwiki evolve <category>/{stem}   # on demand; agent ingest requires --memory-evolve
 # 7. researchwiki db rebuild && researchwiki reindex
+# 8. Scan the finished paper for impact on synthesis, idea, and proposal pages:
+#    python -c 'from researchwiki.impact_review import scan; scan("<category>/<stem>")'
+#    Review and decide every candidate as described in prompts/impact-review.md.
 ```
 
 Manual back-link reconciliation is error-prone — `lint --fix` inserts placeholder `(auto-added; refine)` bullets that decay. Avoid for routine ingest.

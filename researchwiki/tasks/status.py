@@ -605,6 +605,18 @@ def _render_overview(ctx: dict) -> None:
         print(f"    - {f.name}")
     if len(ingest_files) > 5:
         print(f"    ... ({len(ingest_files) - 5} more)")
+    from ..impact_review import pending_reviews, unresolved_count
+
+    impact_pending = pending_reviews()
+    if impact_pending:
+        print(f"  impact reviews needing attention: {len(impact_pending)}")
+        for path, data in impact_pending[:5]:
+            pending_n = unresolved_count(data)
+            print(f"    - {data.get('source') or path.stem}: "
+                  f"{data.get('state', 'unscanned')}, {pending_n} unresolved candidate(s) "
+                  f"→ {path}")
+        if len(impact_pending) > 5:
+            print(f"    ... ({len(impact_pending) - 5} more)")
     web_awaiting_agent = [r for r in web_scout_runs if r["state"] == "requested"]
     web_invalid = [r for r in web_scout_runs if r["state"] == "invalid"]
     # Printed only when there is something to act on. A permanent

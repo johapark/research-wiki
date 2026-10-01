@@ -1,0 +1,1560 @@
+{
+  "name": "impact-review held-out audit 2026-10-01",
+  "selection": "Top 15 uncited paper nominations per target from researchwiki check-coverage, before impact scores were inspected. All nominated pairs were labeled.",
+  "reviewer": "Codex, single reviewer; no independent adjudication",
+  "criterion": "Relevant means the paper could materially change an existing claim, comparison axis, caveat, or proposed design; topical similarity alone is insufficient.",
+  "excluded_tuning_sources": [
+    "pullin-2024-a-comparison-of-marker-gene",
+    "chen-2024-directly-selecting-cell-type-marker-genes",
+    "dumitrascu-2021-optimal-marker-gene-selection-for-cell",
+    "vargo-2020-a-rank-based-marker-selection-method",
+    "vlot-2022-cluster-independent-marker-feature-identification-from-single-cell",
+    "chau-2025-orthologous-marker-groups-reveal-broad",
+    "kim-2024-sclens-data-driven-signal-detection-for-unbiased"
+  ],
+  "counts": {
+    "relevant": 22,
+    "not_relevant": 62,
+    "uncertain": 5
+  },
+  "pairs": [
+    {
+      "source": "single-cell/daw-2026-celltypeai-cell-annotation-for-scrna-seq",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "relevant",
+      "reason": "RAG changes the information supplied to an LLM annotator and its reported annotation accuracy.",
+      "nomination_rank": 1,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "CellTypeAI: cell annotation for scRNA-seq using local generative-AI",
+      "source_hook": "CellTypeAI’s local RAG-augmented Qwen3:235b reached 94.4% ± 6.4 annotation accuracy on PBMC3K, exceeding Gemini 2.5 Pro (86.6% ± 2.4), while RAG improved Tabula Sapiens liver accuracy by 10–15% across three local models.",
+      "source_fingerprint": "48fa4a98930a84088e6ff06e",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "645598dc158b7b4a179495dd64f1b1202505b79200844fe4b238549710e9328a",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "single-cell/ianevski-2022-fully-automated-and-ultra-fast-cell-type-identification",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "reason": "No distinct cell-typing comparison axis or directly comparable annotation result for this page.",
+      "nomination_rank": 2,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Fully-automated and ultra-fast cell-type identification using specific marker combinations from single-cell transcriptomic data",
+      "source_hook": "ScType annotated 72 of 73 cell types (98.6%) across six human and mouse scRNA-seq datasets, exceeded 94% cell-level accuracy in every dataset, and was more than 30 times faster than scSorter by scoring specific positive and negative marker combinations.",
+      "source_fingerprint": "c8b595e12467457915d1a0e5",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "2c1639d1938be651b095ccdd05e693d10807898f522b6611c8567b2bb4f6776f",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "single-cell/khan-2023-reusability-report-learning-the-transcriptional",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "relevant",
+      "reason": "Class imbalance changes the interpretation of cell-type annotation benchmarks.",
+      "nomination_rank": 3,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Reusability report: Learning the transcriptional grammar in single-cell RNA-sequencing data using transformers",
+      "source_hook": "Reusability evaluation of scBERT; identifies class-imbalance sensitivity in cell-type annotation.",
+      "source_fingerprint": "2e052ae21edf4a7161384cce",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "2e05b9696480db5ffa0c71e779b93bd6c3f3911c7a81a3e1678146033e202cbb",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "single-cell/ji-2023-scannotate-an-automated-cell-type-annotation",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "relevant",
+      "reason": "Cross-platform tests and dropout modelling add a concrete transfer and input-preparation comparison.",
+      "nomination_rank": 4,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "scAnnotate: an automated cell-type annotation tool for single-cell RNA-sequencing data",
+      "source_hook": "scAnnotate achieved the highest mean (80.27%) and median (81.92%) accuracy among 10 methods across 44 cross-platform scRNA-seq settings by explicitly modeling gene-level dropout and nonzero expression; its complementary errors could ideally raise one PBMC annotation to 98.50%.",
+      "source_fingerprint": "31866bb65cb34f11fe743984",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "6285b9494e32072a2a6202ecd3ca50cf1bddde0ccbfedabbc676431d16c1cfdc",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "single-cell/nesari-2026-advances-and-challenges-in-single-cell",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "reason": "No distinct cell-typing comparison axis or directly comparable annotation result for this page.",
+      "nomination_rank": 5,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Advances and challenges in single-cell RNA sequencing data analysis: a comprehensive review",
+      "source_hook": "Comprehensive benchmarking of scRNA-seq analysis across five pipeline stages identifies transformer-based annotation (scGPT, CellTypist >95% accuracy) and federated learning as solutions to standardization barriers blocking clinical translation, while flagging re-identification risks in rare-cell discovery.",
+      "source_fingerprint": "38a3a62ed6fa93b2a30c1a49",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "f451188d600cfb7245e81f3c7870d6de009fff781e980ade89151c55ef49cc8f",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "single-cell/gao-2025-projectsvr-mapping-single-cell-rna-seq-data",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "relevant",
+      "reason": "Reference projection quality and cross-technology transfer affect which cells are scored.",
+      "nomination_rank": 6,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "ProjectSVR: mapping single-cell RNA-seq data to reference atlases by supported vector regression",
+      "source_hook": "Maps query cells to reference atlases via support vector regression on gene-set scores, achieving 2.30 mean LISI on cross-technology PBMC data while flagging low-quality projections; outperforms integration methods without requiring the original reference pipeline.",
+      "source_fingerprint": "3677276e664a6f0f2da86a82",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "f5f9f2e617c5e7cd049566b379570ea21014635be3f3c9525fc98d567cf20d97",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "single-cell/proks-2024-deep-learning-based-models-for-preimplantation",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "reason": "No distinct cell-typing comparison axis or directly comparable annotation result for this page.",
+      "nomination_rank": 7,
+      "nomination_sources": [
+        "page-bm25",
+        "claim-semantic"
+      ],
+      "source_title": "Deep learning-based models for preimplantation mouse and human embryos based on single-cell RNA sequencing",
+      "source_hook": "Unified deep learning reference models for preimplantation embryo cell-type classification across 13 mouse and 6 human datasets (11 years, 5 sequencing technologies); novel SHAP-based feature attribution identifies lineage-defining genes and benchmarks in vitro pluripotent stem cell models.",
+      "source_fingerprint": "a294038f9a451b59150f0180",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "16a8ad67dbfe7906f80f9b390f4d00f1680d45c62d1a6d5171ea40409d6b13ee",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "single-cell/dehghannasiri-2026-reference-free-discovery-with-barcoded-single-cell",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "reason": "No distinct cell-typing comparison axis or directly comparable annotation result for this page.",
+      "nomination_rank": 8,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Reference-free discovery with barcoded single-cell sequencing.",
+      "source_hook": "Reference-free discovery pipeline discovers secreted repeat proteins in immune cells of non-model organisms (sponge, tunicate) absent from reference genomes; ~50× faster barcoded k-mer counting than existing tools, recovers V(D)J rearrangements and splicing variants without alignment.",
+      "source_fingerprint": "82b5d66d4410b08dd2762441",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "77d891500af7e9aaed9b0cfe1d68190534e162b5b239128caf49d206701dc8fa",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "compbio/hingerl-2025-scooby-modeling-multimodal-genomic-profiles",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "reason": "No distinct cell-typing comparison axis or directly comparable annotation result for this page.",
+      "nomination_rank": 9,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "scooby: modeling multimodal genomic profiles from DNA sequence at single-cell resolution",
+      "source_hook": "Deep learning model predicts single-cell RNA and ATAC profiles from 524 kb DNA sequence alone, achieving 0.87 Pearson R on gene expression (vs. 0.77 for seq2cells) and resolving cell-type-specific eQTL effects from bulk GTEx data without requiring annotations.",
+      "source_fingerprint": "d1ac93b948259d47a074a428",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "97f95ca6340a4500c7f65f0c9cc5f94b0c0ebf55abf6cf29ca0dd2b3bf53be6a",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "single-cell/moro-2026-a-practical-guide-to-targeted",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "reason": "No distinct cell-typing comparison axis or directly comparable annotation result for this page.",
+      "nomination_rank": 10,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "A practical guide to targeted single-cell RNA sequencing technologies",
+      "source_hook": "Systematic review organizing five categories of targeted single-cell RNA methods that overcome 60–90% transcript dropout in standard protocols; DART-seq achieves 430-fold viral enrichment and enables detection of fusion breakpoints, internal mutations, and non-polyadenylated transcripts invisible to conventional approaches.",
+      "source_fingerprint": "7d0dec22b3f8e0e3457465f4",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "0f35f9be68b9bcc69932772d4530c140d25a00b22d13cb6605442e6568c28b58",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "single-cell/denadel-2026-evaluating-the-role-of-pretraining",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "uncertain",
+      "reason": "Pretraining scale may affect typing comparisons, but the page does not currently analyze training-size scaling.",
+      "nomination_rank": 11,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Evaluating the role of pretraining dataset size and diversity on single-cell foundation model performance.",
+      "source_hook": "400 models × 6,400 experiments show single-cell foundation models plateau at 1% of the 22.2M-cell scTab corpus with no scaling-law behavior; neither diversity sampling nor Perturb-seq spike-ins help, and on held-out-cell-line drug response a no-change baseline beats every fine-tuned model for 3 of 4 drugs.",
+      "source_fingerprint": "6423044a4003904e721c371d",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "73d835af5fc8b37fe6f3d3ec732dc2266b379a87f87b8743a7984e97ba8a1a3f",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "compbio/fu-2025-a-foundation-model-of-transcription",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "reason": "No distinct cell-typing comparison axis or directly comparable annotation result for this page.",
+      "nomination_rank": 12,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "A foundation model of transcription across human cell types",
+      "source_hook": "interpretable foundation model for transcription across 213 human fetal/adult cell types; chromatin accessibility + motif scores as inputs; experimental-level accuracy on unseen cell types; PAX5–NR2C2 leukemia TF-TF interaction discovered; GET Catalog on HuggingFace.",
+      "source_fingerprint": "b34c22a48b642986dc032b80",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "e063e91038bf01f2a2ee3d130120162bb6ac7ebf55f7c45cda7ab0dadcb4dfbc",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "single-cell/lotfollahi-2024-the-future-of-rapid-and-automated",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "reason": "No distinct cell-typing comparison axis or directly comparable annotation result for this page.",
+      "nomination_rank": 13,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "The future of rapid and automated single-cell data analysis using reference mapping",
+      "source_hook": "Positions reference mapping onto curated atlases as the successor to manual clustering pipelines.",
+      "source_fingerprint": "a12e0efc1c7d2aab8d77bfea",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "a829fa9b1a0e9257ff4f57056716717014844ff6fd4b660202dc408d23f1d7ab",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "compbio/javed-2025-a-multi-modal-transformer-for-cell",
+      "target": "synthesis/cell-typing-benchmark-comparability",
+      "label": "not_relevant",
+      "reason": "No distinct cell-typing comparison axis or directly comparable annotation result for this page.",
+      "nomination_rank": 14,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "A multi-modal transformer for cell type-agnostic regulatory predictions",
+      "source_hook": "Multi-modal transformer jointly learns DNA sequence and chromatin accessibility, generalizing gene expression prediction to 17 held-out cell types (r=0.72 vs. Enformer r=0.57) and enabling caQTL discovery in inaccessible tissues via masked ATAC pre-training on 740 profiles.",
+      "source_fingerprint": "8af2a7254e1a2d98cb2515ce",
+      "target_fingerprint": "2d945ae78dc6d75182e110ed",
+      "source_file_sha256": "9b8602d6caf5e0282575994b2c7da6fa42fdf5c75e1845addf680fbf9d2d27ef",
+      "target_file_sha256": "2c10603f2126c165d8a19b6522ec6e9f6af65c65cf72452c592197664ec09a8d"
+    },
+    {
+      "source": "single-cell/daw-2026-celltypeai-cell-annotation-for-scrna-seq",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "reason": "Does not test absent reference types, calibrated abstention, or matched-coverage selective typing.",
+      "nomination_rank": 1,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "CellTypeAI: cell annotation for scRNA-seq using local generative-AI",
+      "source_hook": "CellTypeAI’s local RAG-augmented Qwen3:235b reached 94.4% ± 6.4 annotation accuracy on PBMC3K, exceeding Gemini 2.5 Pro (86.6% ± 2.4), while RAG improved Tabula Sapiens liver accuracy by 10–15% across three local models.",
+      "source_fingerprint": "48fa4a98930a84088e6ff06e",
+      "target_fingerprint": "8c3e63918f708e5a7dd1af5f",
+      "source_file_sha256": "645598dc158b7b4a179495dd64f1b1202505b79200844fe4b238549710e9328a",
+      "target_file_sha256": "1167795f179de1e4b5b5dedf98fa19d58aec3974cd4e976c3948926771d7381e"
+    },
+    {
+      "source": "single-cell/ji-2023-scannotate-an-automated-cell-type-annotation",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "reason": "Does not test absent reference types, calibrated abstention, or matched-coverage selective typing.",
+      "nomination_rank": 2,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "scAnnotate: an automated cell-type annotation tool for single-cell RNA-sequencing data",
+      "source_hook": "scAnnotate achieved the highest mean (80.27%) and median (81.92%) accuracy among 10 methods across 44 cross-platform scRNA-seq settings by explicitly modeling gene-level dropout and nonzero expression; its complementary errors could ideally raise one PBMC annotation to 98.50%.",
+      "source_fingerprint": "31866bb65cb34f11fe743984",
+      "target_fingerprint": "8c3e63918f708e5a7dd1af5f",
+      "source_file_sha256": "6285b9494e32072a2a6202ecd3ca50cf1bddde0ccbfedabbc676431d16c1cfdc",
+      "target_file_sha256": "1167795f179de1e4b5b5dedf98fa19d58aec3974cd4e976c3948926771d7381e"
+    },
+    {
+      "source": "single-cell/nesari-2026-advances-and-challenges-in-single-cell",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "reason": "Does not test absent reference types, calibrated abstention, or matched-coverage selective typing.",
+      "nomination_rank": 3,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Advances and challenges in single-cell RNA sequencing data analysis: a comprehensive review",
+      "source_hook": "Comprehensive benchmarking of scRNA-seq analysis across five pipeline stages identifies transformer-based annotation (scGPT, CellTypist >95% accuracy) and federated learning as solutions to standardization barriers blocking clinical translation, while flagging re-identification risks in rare-cell discovery.",
+      "source_fingerprint": "38a3a62ed6fa93b2a30c1a49",
+      "target_fingerprint": "8c3e63918f708e5a7dd1af5f",
+      "source_file_sha256": "f451188d600cfb7245e81f3c7870d6de009fff781e980ade89151c55ef49cc8f",
+      "target_file_sha256": "1167795f179de1e4b5b5dedf98fa19d58aec3974cd4e976c3948926771d7381e"
+    },
+    {
+      "source": "single-cell/dehghannasiri-2026-reference-free-discovery-with-barcoded-single-cell",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "reason": "Does not test absent reference types, calibrated abstention, or matched-coverage selective typing.",
+      "nomination_rank": 4,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Reference-free discovery with barcoded single-cell sequencing.",
+      "source_hook": "Reference-free discovery pipeline discovers secreted repeat proteins in immune cells of non-model organisms (sponge, tunicate) absent from reference genomes; ~50× faster barcoded k-mer counting than existing tools, recovers V(D)J rearrangements and splicing variants without alignment.",
+      "source_fingerprint": "82b5d66d4410b08dd2762441",
+      "target_fingerprint": "8c3e63918f708e5a7dd1af5f",
+      "source_file_sha256": "77d891500af7e9aaed9b0cfe1d68190534e162b5b239128caf49d206701dc8fa",
+      "target_file_sha256": "1167795f179de1e4b5b5dedf98fa19d58aec3974cd4e976c3948926771d7381e"
+    },
+    {
+      "source": "single-cell/lotfollahi-2024-the-future-of-rapid-and-automated",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "reason": "Does not test absent reference types, calibrated abstention, or matched-coverage selective typing.",
+      "nomination_rank": 5,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "The future of rapid and automated single-cell data analysis using reference mapping",
+      "source_hook": "Positions reference mapping onto curated atlases as the successor to manual clustering pipelines.",
+      "source_fingerprint": "a12e0efc1c7d2aab8d77bfea",
+      "target_fingerprint": "8c3e63918f708e5a7dd1af5f",
+      "source_file_sha256": "a829fa9b1a0e9257ff4f57056716717014844ff6fd4b660202dc408d23f1d7ab",
+      "target_file_sha256": "1167795f179de1e4b5b5dedf98fa19d58aec3974cd4e976c3948926771d7381e"
+    },
+    {
+      "source": "single-cell/shao-2020-sccatch-automatic-annotation-on-cell",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "reason": "Does not test absent reference types, calibrated abstention, or matched-coverage selective typing.",
+      "nomination_rank": 6,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "scCATCH: Automatic Annotation on Cell Types of Clusters from Single-Cell RNA Sequencing Data",
+      "source_hook": "scCATCH combines paired cluster marker selection with tissue-specific CellMatch scoring; it achieved 100% cluster-level consistency in three benchmark datasets and 83% average consistency across six further datasets.",
+      "source_fingerprint": "826aef28bf2258e7276db45c",
+      "target_fingerprint": "8c3e63918f708e5a7dd1af5f",
+      "source_file_sha256": "fa0c943b1e75f4ddad502e524a3b26656b86bb97613f106cb1b8eadba8d4c3cf",
+      "target_file_sha256": "1167795f179de1e4b5b5dedf98fa19d58aec3974cd4e976c3948926771d7381e"
+    },
+    {
+      "source": "single-cell/diaz-mejia-2019-evaluation-of-methods-to-assign",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "reason": "Does not test absent reference types, calibrated abstention, or matched-coverage selective typing.",
+      "nomination_rank": 7,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic"
+      ],
+      "source_title": "Evaluation of methods to assign cell type labels to cell clusters from single-cell RNA-sequencing data",
+      "source_hook": "Five-method scRNA-seq cluster-labeling benchmark across datasets of ~3,700–~68,000 cells found mean ROC AUC 0.91 (sd 0.06) but mean precision-recall AUC only 0.53 (sd 0.24); GSVA was the most robust overall, while METANEIGHBOR and GSVA were fastest.",
+      "source_fingerprint": "43d4336e6a2ec3d16b672b18",
+      "target_fingerprint": "8c3e63918f708e5a7dd1af5f",
+      "source_file_sha256": "1183430f933237983cc89b7d6be0261f682452064e7f53bc5d7ae962b21c5fbb",
+      "target_file_sha256": "1167795f179de1e4b5b5dedf98fa19d58aec3974cd4e976c3948926771d7381e"
+    },
+    {
+      "source": "single-cell/khan-2023-reusability-report-learning-the-transcriptional",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "reason": "Does not test absent reference types, calibrated abstention, or matched-coverage selective typing.",
+      "nomination_rank": 8,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Reusability report: Learning the transcriptional grammar in single-cell RNA-sequencing data using transformers",
+      "source_hook": "Reusability evaluation of scBERT; identifies class-imbalance sensitivity in cell-type annotation.",
+      "source_fingerprint": "2e052ae21edf4a7161384cce",
+      "target_fingerprint": "8c3e63918f708e5a7dd1af5f",
+      "source_file_sha256": "2e05b9696480db5ffa0c71e779b93bd6c3f3911c7a81a3e1678146033e202cbb",
+      "target_file_sha256": "1167795f179de1e4b5b5dedf98fa19d58aec3974cd4e976c3948926771d7381e"
+    },
+    {
+      "source": "compbio/fu-2025-a-foundation-model-of-transcription",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "reason": "Does not test absent reference types, calibrated abstention, or matched-coverage selective typing.",
+      "nomination_rank": 9,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "A foundation model of transcription across human cell types",
+      "source_hook": "interpretable foundation model for transcription across 213 human fetal/adult cell types; chromatin accessibility + motif scores as inputs; experimental-level accuracy on unseen cell types; PAX5–NR2C2 leukemia TF-TF interaction discovered; GET Catalog on HuggingFace.",
+      "source_fingerprint": "b34c22a48b642986dc032b80",
+      "target_fingerprint": "8c3e63918f708e5a7dd1af5f",
+      "source_file_sha256": "e063e91038bf01f2a2ee3d130120162bb6ac7ebf55f7c45cda7ab0dadcb4dfbc",
+      "target_file_sha256": "1167795f179de1e4b5b5dedf98fa19d58aec3974cd4e976c3948926771d7381e"
+    },
+    {
+      "source": "single-cell/proks-2024-deep-learning-based-models-for-preimplantation",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "reason": "Does not test absent reference types, calibrated abstention, or matched-coverage selective typing.",
+      "nomination_rank": 10,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Deep learning-based models for preimplantation mouse and human embryos based on single-cell RNA sequencing",
+      "source_hook": "Unified deep learning reference models for preimplantation embryo cell-type classification across 13 mouse and 6 human datasets (11 years, 5 sequencing technologies); novel SHAP-based feature attribution identifies lineage-defining genes and benchmarks in vitro pluripotent stem cell models.",
+      "source_fingerprint": "a294038f9a451b59150f0180",
+      "target_fingerprint": "8c3e63918f708e5a7dd1af5f",
+      "source_file_sha256": "16a8ad67dbfe7906f80f9b390f4d00f1680d45c62d1a6d5171ea40409d6b13ee",
+      "target_file_sha256": "1167795f179de1e4b5b5dedf98fa19d58aec3974cd4e976c3948926771d7381e"
+    },
+    {
+      "source": "cgt/ozden-2024-learning-to-quantify-uncertainty-in-off-target",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "reason": "Does not test absent reference types, calibrated abstention, or matched-coverage selective typing.",
+      "nomination_rank": 11,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Learning to quantify uncertainty in off-target activity for CRISPR guide RNAs",
+      "source_hook": "Neural network with calibrated uncertainty estimates for CRISPR off-target activity using Zero-Inflated Negative Binomial distribution; genome-wide specificity scores differentiate sgRNAs with similar point predictions across 5 independent test sets (Spearman ρ=0.51 on CHANGE-seq).",
+      "source_fingerprint": "7deba9305dc82b989d1bba78",
+      "target_fingerprint": "8c3e63918f708e5a7dd1af5f",
+      "source_file_sha256": "ce4ffdb91a59595108e8b8dad0ad1e2097e5e9a1068d8e5a21f2f1c5b0f249e1",
+      "target_file_sha256": "1167795f179de1e4b5b5dedf98fa19d58aec3974cd4e976c3948926771d7381e"
+    },
+    {
+      "source": "compbio/lal-2026-decoding-sequence-determinants-of-gene",
+      "target": "synthesis/selective-cell-typing-under-reference-mismatch",
+      "label": "not_relevant",
+      "reason": "Does not test absent reference types, calibrated abstention, or matched-coverage selective typing.",
+      "nomination_rank": 12,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Decoding sequence determinants of gene expression in diverse cellular and disease states",
+      "source_hook": "Sequence-to-function model trained on 22M single cells predicts cell-type and disease-specific gene expression from 524 kb DNA, recovering cis-regulatory mechanisms and enabling variant effect prediction without paired scATAC data.",
+      "source_fingerprint": "9c7edf3674a2854683891eb5",
+      "target_fingerprint": "8c3e63918f708e5a7dd1af5f",
+      "source_file_sha256": "f91d9f32e6781fb8be7dd389257081133591cfcdd2da88d21aa4654a1ee968b5",
+      "target_file_sha256": "1167795f179de1e4b5b5dedf98fa19d58aec3974cd4e976c3948926771d7381e"
+    },
+    {
+      "source": "cgt/sherkatghanad-2023-using-traditional-machine-learning-and-deep",
+      "target": "synthesis/crispr-cas9-off-target-methods-2026",
+      "label": "not_relevant",
+      "reason": "Does not add a specific Cas9 off-target prediction, discovery, measurement, or mitigation result beyond the mapped methods.",
+      "nomination_rank": 1,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Using traditional machine learning and deep learning methods for on- and off-target prediction in CRISPR/Cas9: a review",
+      "source_hook": "Systematic review of ML/DL methods for CRISPR on- and off-target prediction identifies hybrid CNN-RNN architectures as state-of-the-art but surfaces persistent challenges: data imbalance, poor cross-cell-type generalizability, and absent uncertainty quantification in clinical-grade models.",
+      "source_fingerprint": "5b1dc6f297aba59e66f3d233",
+      "target_fingerprint": "abdcd3c1d1cd205cd737d79d",
+      "source_file_sha256": "b111bbe2e553296c980ae84cff2475707a738b52382102794f7a06cd63d2e84f",
+      "target_file_sha256": "338a7162e5ee1fc6033919e574462c37649c5ee9e186f10a0ac2cf66fe4f70ef"
+    },
+    {
+      "source": "cgt/cohen-2026-context-dependent-determinants-of-crispr-cas9-editing",
+      "target": "synthesis/crispr-cas9-off-target-methods-2026",
+      "label": "not_relevant",
+      "reason": "Does not add a specific Cas9 off-target prediction, discovery, measurement, or mitigation result beyond the mapped methods.",
+      "nomination_rank": 2,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Context-dependent determinants of CRISPR-Cas9 editing efficiency revealed through cross-species endogenous editing analysis",
+      "source_hook": "60+ author consortium; 8 cell types across 4 species; existing efficiency models (DeepCRISPR, SPROUT) fail to generalize across cell types and experimental methods; ensemble regression outperforms all single models.",
+      "source_fingerprint": "2c286a0e03710eac9193ae68",
+      "target_fingerprint": "abdcd3c1d1cd205cd737d79d",
+      "source_file_sha256": "8928e6a48c6d22848c55f9d5ff7c5a3301758a5ca2d9c34d7bfb62a24bca551d",
+      "target_file_sha256": "338a7162e5ee1fc6033919e574462c37649c5ee9e186f10a0ac2cf66fe4f70ef"
+    },
+    {
+      "source": "cgt/xue-2015-crispr-cas9-for-medical-genetic-screens",
+      "target": "synthesis/crispr-cas9-off-target-methods-2026",
+      "label": "not_relevant",
+      "reason": "Does not add a specific Cas9 off-target prediction, discovery, measurement, or mitigation result beyond the mapped methods.",
+      "nomination_rank": 3,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "CRISPR-Cas9 for medical genetic screens: applications and future perspectives",
+      "source_hook": "early review of CRISPR-Cas9 functional-genomics screens — wt-Cas9 KO, nCas9 paired-nick, dCas9-VP64/KRAB activation/repression, scRNA-recruited RBPs, SunTag, and dRCas9 — vs. RNAi.",
+      "source_fingerprint": "3c1533434907c45fcfefe5fe",
+      "target_fingerprint": "abdcd3c1d1cd205cd737d79d",
+      "source_file_sha256": "d92eb9eb272b0c2cf5b6841222f144babaf666b5cbe2b75d63145661643c69fb",
+      "target_file_sha256": "338a7162e5ee1fc6033919e574462c37649c5ee9e186f10a0ac2cf66fe4f70ef"
+    },
+    {
+      "source": "cgt/jerabek-2026-highly-efficient-base-editing-at-pcsk9",
+      "target": "synthesis/variant-aware-crispr-off-target",
+      "label": "not_relevant",
+      "reason": "Does not test a variant-aware Cas9 off-target prediction or measurement method.",
+      "nomination_rank": 1,
+      "nomination_sources": [
+        "page-bm25",
+        "claim-semantic"
+      ],
+      "source_title": "Highly efficient base editing at PCSK9 and normal human embryo development",
+      "source_hook": "ABE8e-V106W RNP edited all PCSK9 target alleles (32/32) in cells and pronuclei from five human embryos while supporting blastocyst development; unlike Cas9, ABE samples had no detected short or large on-target deletions, but mosaic off-target editing and rare chromosome breakage remained.",
+      "source_fingerprint": "5f7789937e8e60b4f4466851",
+      "target_fingerprint": "aebe5aee4f79a3203835c5d3",
+      "source_file_sha256": "21500115d38036620249e0f5bbd98322a93796cafd4bfd424f6b7580fc03ea00",
+      "target_file_sha256": "5500267a922dc39e0b53d7d4db975e3e4cfc6530f61b310b7b9a3b8daa7a611f"
+    },
+    {
+      "source": "cgt/hsu-2026-mechanistic-machine-learning-for-prediction",
+      "target": "synthesis/variant-aware-crispr-off-target",
+      "label": "not_relevant",
+      "reason": "Does not test a variant-aware Cas9 off-target prediction or measurement method.",
+      "nomination_rank": 2,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Mechanistic machine learning for prediction of prime editing outcomes",
+      "source_hook": "Mechanistic ODE-based ML model (297,962 training edits) beats PRIDICT2.0/DeepPrime on pegRNA ranking (ρ=0.745 vs 0.399–0.590) and transfers zero-shot to PE3/twinPE; drove >40% in vivo Kif1a correction in mouse brain via just 15 pegRNA tests.",
+      "source_fingerprint": "176e6f6d1f49c865a6c0d4ea",
+      "target_fingerprint": "aebe5aee4f79a3203835c5d3",
+      "source_file_sha256": "361c1d029698fa9d2bd9e6c8120a06ef310e6cd8ba1c3d9ee7ab8489a0d8bd87",
+      "target_file_sha256": "5500267a922dc39e0b53d7d4db975e3e4cfc6530f61b310b7b9a3b8daa7a611f"
+    },
+    {
+      "source": "genomics/pinto-2026-variant-calling-in-genomics-a-comparative",
+      "target": "synthesis/variant-aware-crispr-off-target",
+      "label": "not_relevant",
+      "reason": "Does not test a variant-aware Cas9 off-target prediction or measurement method.",
+      "nomination_rank": 3,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Variant calling in genomics: A comparative performance analysis and decision guide",
+      "source_hook": "standardized comparison of GATK, FreeBayes, DeepVariant, Samtools, Strelka2, Octopus, and Varscan2 on NA12878 ~50× WGS (Isaac-aligned BAM, vcfeval against GIAB); DeepVariant tops chr20 F1 (0.875), Strelka2 best WGS precision (0.833), Octopus best WGS recall (0.984); no universal winner — tradeoffs depend on whether precision, recall, or compute is prioritized.",
+      "source_fingerprint": "1cb6cdcac9b2ff524c8c6c01",
+      "target_fingerprint": "aebe5aee4f79a3203835c5d3",
+      "source_file_sha256": "11929a2d5473247ca70b29a5347ea65c1bcc05109149c401583f3c5d8a824924",
+      "target_file_sha256": "5500267a922dc39e0b53d7d4db975e3e4cfc6530f61b310b7b9a3b8daa7a611f"
+    },
+    {
+      "source": "compbio/poplin-2018-a-universal-snp-and-small-indel",
+      "target": "synthesis/variant-aware-crispr-off-target",
+      "label": "not_relevant",
+      "reason": "Does not test a variant-aware Cas9 off-target prediction or measurement method.",
+      "nomination_rank": 4,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "A universal SNP and small-indel variant caller using deep neural networks",
+      "source_hook": "Inception CNN for SNP + indel calling via pileup images of aligned reads; won FDA precisionFDA Challenge (SNP F1 99.95%); generalizes across genome builds, mammalian species, and sequencing technologies; open source.",
+      "source_fingerprint": "0e4eaba912bd956f3fe23b30",
+      "target_fingerprint": "aebe5aee4f79a3203835c5d3",
+      "source_file_sha256": "a208a544243ad0cc621ffd18de74c3bfc69dc1cfaa694f357e194c0ae2a2afa7",
+      "target_file_sha256": "5500267a922dc39e0b53d7d4db975e3e4cfc6530f61b310b7b9a3b8daa7a611f"
+    },
+    {
+      "source": "genomics/zheng-2021-symphonizing-pileup-and-full-alignment-for-deep",
+      "target": "synthesis/pangenome-graph-construction-alignment-and-variant-calling",
+      "label": "not_relevant",
+      "reason": "Does not add a pangenome-graph construction, alignment, or graph-based variant-calling result.",
+      "nomination_rank": 1,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic"
+      ],
+      "source_title": "Symphonizing pileup and full-alignment for deep learning-based long-read variant calling",
+      "source_hook": "two-stage long-read deep-learning variant caller — fast Bi-LSTM **pileup network** triages all candidates, slow ResNet **full-alignment network** rescues the bottom 30% (variants) and bottom 10% (refs) after WhatsHap phasing; on GIAB HG003 ONT Guppy 5 (20×) reaches SNP precision/recall 99.22%/99.42% in ~5 h vs. PEPPER's ~20 h.",
+      "source_fingerprint": "ef6912cbd2e53acd4e5e2262",
+      "target_fingerprint": "714947177bae5af9bf49d5c3",
+      "source_file_sha256": "76cd6fc5b92e487218ff842145e20865be088db20ef61f4cc040336d166e8217",
+      "target_file_sha256": "fbcab0b82468c9abf4c2a6fb9364680f6454603fc078c58db2fb76642705e60f"
+    },
+    {
+      "source": "compbio/liu-2026-pre-training-genomic-language-model-with-variants",
+      "target": "synthesis/genomic-lm-training-data-preparation",
+      "label": "relevant",
+      "reason": "Population-variant pretraining is a distinct corpus-construction choice absent from the current synthesis.",
+      "nomination_rank": 1,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Pre-training genomic language model with variants for better modeling functional genomics",
+      "source_hook": "UKBioBERT pre-trains on 13 million UK Biobank variants and reaches 0.423 gene-function clustering score; its UKBioFormer fusion outperforms Personalized Enformer for 63.3% of genes with PCC > 0.6 and correctly signs 71% of top JUP eQTLs.",
+      "source_fingerprint": "97a1cbac4e410792c25aa79e",
+      "target_fingerprint": "d7bf93c1c82ca0aebdd00dd6",
+      "source_file_sha256": "eaad6665b5849661fe7160d146a8c02279b3aa5928cb16c1b2a75bcb3006c93f",
+      "target_file_sha256": "2366166246ce11ee4d7d7bcc24916912648ac08f39377a844f6f3427a1124d87"
+    },
+    {
+      "source": "single-cell/denadel-2026-evaluating-the-role-of-pretraining",
+      "target": "synthesis/genomic-lm-training-data-preparation",
+      "label": "not_relevant",
+      "reason": "Does not add a genomic DNA language-model pretraining corpus, curation, tokenization, or context choice.",
+      "nomination_rank": 2,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic"
+      ],
+      "source_title": "Evaluating the role of pretraining dataset size and diversity on single-cell foundation model performance.",
+      "source_hook": "400 models × 6,400 experiments show single-cell foundation models plateau at 1% of the 22.2M-cell scTab corpus with no scaling-law behavior; neither diversity sampling nor Perturb-seq spike-ins help, and on held-out-cell-line drug response a no-change baseline beats every fine-tuned model for 3 of 4 drugs.",
+      "source_fingerprint": "6423044a4003904e721c371d",
+      "target_fingerprint": "d7bf93c1c82ca0aebdd00dd6",
+      "source_file_sha256": "73d835af5fc8b37fe6f3d3ec732dc2266b379a87f87b8743a7984e97ba8a1a3f",
+      "target_file_sha256": "2366166246ce11ee4d7d7bcc24916912648ac08f39377a844f6f3427a1124d87"
+    },
+    {
+      "source": "compbio/lui-2026-splisync-genomic-language-model-driven-splice",
+      "target": "synthesis/genomic-lm-training-data-preparation",
+      "label": "not_relevant",
+      "reason": "Does not add a genomic DNA language-model pretraining corpus, curation, tokenization, or context choice.",
+      "nomination_rank": 3,
+      "nomination_sources": [
+        "page-bm25",
+        "claim-semantic"
+      ],
+      "source_title": "SpliSync: Genomic language model-driven splice site correction of long RNA sequencing reads",
+      "source_hook": "fine-tunes HyenaDNA + a 1D U-Net head to correct splice-junction coordinates in long-read (ONT) RNA-seq alignments — improves splice-site precision 27–194% and alternative-splicing detection 26–330%, annotation-free, though downstream assembly gains are modest.",
+      "source_fingerprint": "62fc5cd3e404521d7ffe41f2",
+      "target_fingerprint": "d7bf93c1c82ca0aebdd00dd6",
+      "source_file_sha256": "ea334531ddb38483a74493ee43440f299d10b0fad0c5d15cb54305809349f4e7",
+      "target_file_sha256": "2366166246ce11ee4d7d7bcc24916912648ac08f39377a844f6f3427a1124d87"
+    },
+    {
+      "source": "compbio/larey-2026-gfmbench-api-a-standardized-interface-for-benchmarking",
+      "target": "synthesis/genomic-lm-training-data-preparation",
+      "label": "not_relevant",
+      "reason": "Does not add a genomic DNA language-model pretraining corpus, curation, tokenization, or context choice.",
+      "nomination_rank": 4,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic"
+      ],
+      "source_title": "GFMBench-API: A Standardized Interface for Benchmarking Genomic Foundation Models",
+      "source_hook": "Standardized Python middleware for benchmarking genomic foundation models across 5 models and 8 task suites (100 bp–160 kb sequences), eliminating preprocessing fragmentation and metric drift through unified abstraction layer and inference-driven metric compatibility.",
+      "source_fingerprint": "58cbe9cf349a949fb1c3d1de",
+      "target_fingerprint": "d7bf93c1c82ca0aebdd00dd6",
+      "source_file_sha256": "d07966136fcbef2131a63b1a57c7938545f6ba0cbd943c6c606d6140e3b25832",
+      "target_file_sha256": "2366166246ce11ee4d7d7bcc24916912648ac08f39377a844f6f3427a1124d87"
+    },
+    {
+      "source": "compbio/merchant-2025-semantic-design-of-functional-de",
+      "target": "synthesis/genomic-lm-training-data-preparation",
+      "label": "not_relevant",
+      "reason": "Does not add a genomic DNA language-model pretraining corpus, curation, tokenization, or context choice.",
+      "nomination_rank": 5,
+      "nomination_sources": [
+        "page-bm25",
+        "claim-semantic"
+      ],
+      "source_title": "Semantic design of functional de novo genes from a genomic language model",
+      "source_hook": "Evo 1.5 leverages prokaryotic genomic context (DNA prompt) to design functional de novo genes without fine-tuning; validated anti-CRISPR proteins and toxin–antitoxin systems (17–50% success); SynGenome database of 120B bp AI-generated sequences.",
+      "source_fingerprint": "b829cca02d8625add5be37f6",
+      "target_fingerprint": "d7bf93c1c82ca0aebdd00dd6",
+      "source_file_sha256": "453a0bb8a86f1dda07f05b96589350fa78de0575cc42a72f78eaf2488ea76cb2",
+      "target_file_sha256": "2366166246ce11ee4d7d7bcc24916912648ac08f39377a844f6f3427a1124d87"
+    },
+    {
+      "source": "single-cell/youngblut-2026-scbasecount-an-ai-agent-curated-standardized",
+      "target": "synthesis/genomic-lm-training-data-preparation",
+      "label": "not_relevant",
+      "reason": "Does not add a genomic DNA language-model pretraining corpus, curation, tokenization, or context choice.",
+      "nomination_rank": 6,
+      "nomination_sources": [
+        "page-bm25"
+      ],
+      "source_title": "scBaseCount: An AI agent-curated, standardized, auto-updated single-cell data repository.",
+      "source_hook": "scBaseCount mines and uniformly reprocesses public 10x SRA data into over 502 million cells across 27 organisms and 75 tissues; State training on 214 million cells improved perturbation classification by 23.9% and perturbation-DE AUROC from 0.477±0.006 to 0.559±0.006.",
+      "source_fingerprint": "892cdeb400d1c63485b02f4c",
+      "target_fingerprint": "d7bf93c1c82ca0aebdd00dd6",
+      "source_file_sha256": "0a0c8df3a2a5d6ac265da8ea1fe87b53b0c32b434b7a3749b109f63a76b1f730",
+      "target_file_sha256": "2366166246ce11ee4d7d7bcc24916912648ac08f39377a844f6f3427a1124d87"
+    },
+    {
+      "source": "compbio/fu-2025-a-foundation-model-of-transcription",
+      "target": "synthesis/single-cell-scaling-versus-intervention-data",
+      "label": "not_relevant",
+      "reason": "Does not compare observational scale with intervention data for cross-context perturbation prediction.",
+      "nomination_rank": 1,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "A foundation model of transcription across human cell types",
+      "source_hook": "interpretable foundation model for transcription across 213 human fetal/adult cell types; chromatin accessibility + motif scores as inputs; experimental-level accuracy on unseen cell types; PAX5–NR2C2 leukemia TF-TF interaction discovered; GET Catalog on HuggingFace.",
+      "source_fingerprint": "b34c22a48b642986dc032b80",
+      "target_fingerprint": "17169f4edf60ea08840430ac",
+      "source_file_sha256": "e063e91038bf01f2a2ee3d130120162bb6ac7ebf55f7c45cda7ab0dadcb4dfbc",
+      "target_file_sha256": "80b163eba4a1afa1727d5c82c9a368401c598dbe3328bc6bd0c445d30130317e"
+    },
+    {
+      "source": "single-cell/rosen-2026-universal-cell-embedding-provides-a-foundation",
+      "target": "synthesis/single-cell-scaling-versus-intervention-data",
+      "label": "not_relevant",
+      "reason": "Does not compare observational scale with intervention data for cross-context perturbation prediction.",
+      "nomination_rank": 2,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Universal cell embedding provides a foundation model for cell biology",
+      "source_hook": "Zero-shot transformer maps 36 million cells across 8 species into unified 1,280-dimensional space without fine-tuning, outperforming supervised methods on cross-species transfer and enabling discovery of conserved cell types like Norn cells across tissues.",
+      "source_fingerprint": "83228c5e5277ec1c8f66a6de",
+      "target_fingerprint": "17169f4edf60ea08840430ac",
+      "source_file_sha256": "05eef1af1dc16f33fed3f8acab44c91c3fe92667375be2d325a0a07715ccc8ec",
+      "target_file_sha256": "80b163eba4a1afa1727d5c82c9a368401c598dbe3328bc6bd0c445d30130317e"
+    },
+    {
+      "source": "compbio/hingerl-2025-scooby-modeling-multimodal-genomic-profiles",
+      "target": "synthesis/single-cell-scaling-versus-intervention-data",
+      "label": "not_relevant",
+      "reason": "Does not compare observational scale with intervention data for cross-context perturbation prediction.",
+      "nomination_rank": 3,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "scooby: modeling multimodal genomic profiles from DNA sequence at single-cell resolution",
+      "source_hook": "Deep learning model predicts single-cell RNA and ATAC profiles from 524 kb DNA sequence alone, achieving 0.87 Pearson R on gene expression (vs. 0.77 for seq2cells) and resolving cell-type-specific eQTL effects from bulk GTEx data without requiring annotations.",
+      "source_fingerprint": "d1ac93b948259d47a074a428",
+      "target_fingerprint": "17169f4edf60ea08840430ac",
+      "source_file_sha256": "97f95ca6340a4500c7f65f0c9cc5f94b0c0ebf55abf6cf29ca0dd2b3bf53be6a",
+      "target_file_sha256": "80b163eba4a1afa1727d5c82c9a368401c598dbe3328bc6bd0c445d30130317e"
+    },
+    {
+      "source": "compbio/wang-2026-a-generalizable-hi-c-foundation-model",
+      "target": "synthesis/single-cell-scaling-versus-intervention-data",
+      "label": "not_relevant",
+      "reason": "Does not compare observational scale with intervention data for cross-context perturbation prediction.",
+      "nomination_rank": 4,
+      "nomination_sources": [
+        "page-bm25"
+      ],
+      "source_title": "A generalizable Hi-C foundation model for chromatin architecture, single-cell and multiomics analysis across species",
+      "source_hook": "Foundation model pretrained on 1,015 Hi-C experiments across 300+ species achieves 81.6% loop detection F1, generalizes loop and epigenomic prediction to non-human species despite human-only training, and reveals >800 new chromatin loops gained during neutrophil differentiation.",
+      "source_fingerprint": "91a4fec5e45c60f1f8b2500d",
+      "target_fingerprint": "17169f4edf60ea08840430ac",
+      "source_file_sha256": "290bc6689d1dc8599a2777646af6de50759aed7779d9d8e0ce89798e65c5aafd",
+      "target_file_sha256": "80b163eba4a1afa1727d5c82c9a368401c598dbe3328bc6bd0c445d30130317e"
+    },
+    {
+      "source": "single-cell/gold-2026-scoring-gene-importance-by-interpreting",
+      "target": "synthesis/single-cell-scaling-versus-intervention-data",
+      "label": "not_relevant",
+      "reason": "Does not compare observational scale with intervention data for cross-context perturbation prediction.",
+      "nomination_rank": 5,
+      "nomination_sources": [
+        "page-bm25"
+      ],
+      "source_title": "Scoring gene importance by interpreting single-cell foundation models",
+      "source_hook": "Gradient-based attributions from single-cell foundation models (SCimilarity+IG) beat 5 gene-set scoring methods in 23/32 classification tests, and querying the MS1 monocyte signature across 412 studies (~22M cells) uncovered novel MS1 activation in Kawasaki disease, HLH and SFTS—validated by KD serum inducing the MS1 phenotype in vitro.",
+      "source_fingerprint": "aa6acf858d2759003d677c0a",
+      "target_fingerprint": "17169f4edf60ea08840430ac",
+      "source_file_sha256": "a45c6d598dd851c53c91904d7b0c8ddd72a7f4048c1de61520346582840fac8b",
+      "target_file_sha256": "80b163eba4a1afa1727d5c82c9a368401c598dbe3328bc6bd0c445d30130317e"
+    },
+    {
+      "source": "compbio/aureka-ai-opendde-project-2026-folding-reasoning-and-scaling-with-open-source",
+      "target": "synthesis/single-cell-scaling-versus-intervention-data",
+      "label": "not_relevant",
+      "reason": "Does not compare observational scale with intervention data for cross-context perturbation prediction.",
+      "nomination_rank": 6,
+      "nomination_sources": [
+        "page-bm25"
+      ],
+      "source_title": "Folding, Reasoning, and Scaling with Open-source Drug Discovery Engine",
+      "source_hook": "Open-source 655M-parameter co-folding model matches closed IsoDDE-level accuracy, beating AlphaFold3/Chai-1/Boltz-1/Protenix-v1/ESMFold2 on antibody-antigen DockQ success (51-70% vs. best baseline ~58%) and showing oracle success climbing to >90% with hundreds of inference-time seeds.",
+      "source_fingerprint": "84d3b21d0c6dfc55956f43ab",
+      "target_fingerprint": "17169f4edf60ea08840430ac",
+      "source_file_sha256": "d3a6f2f3e28343bcbfb6fb4dcf94ed13f12fb1a7aba2ec48665ae35412e950b6",
+      "target_file_sha256": "80b163eba4a1afa1727d5c82c9a368401c598dbe3328bc6bd0c445d30130317e"
+    },
+    {
+      "source": "ai/guo-2026-toward-autonomous-science-with-agentic",
+      "target": "synthesis/ai-in-scientific-workflows-productivity-quality-partnership",
+      "label": "not_relevant",
+      "reason": "Does not add a distinct productivity, scientific-quality, or partnership result to this synthesis.",
+      "nomination_rank": 1,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Toward autonomous science with agentic artificial intelligence.",
+      "source_hook": "Co-Scientist, Robin, and Biomni illustrate agentic biomedical AI: KIRA6 inhibited AML cells at up to 18-fold lower concentrations than controls, while Robin tested 15 dAMD candidates across two iterations and confirmed 2 hits—but the Perspective finds no benchmark yet measures novel, scientifically promising hypotheses.",
+      "source_fingerprint": "8304773e4235c644c10c9a2c",
+      "target_fingerprint": "f8139fae98c08f5c98735b5c",
+      "source_file_sha256": "11e5a2d599617815d46e14796651505e30b3c0d4bb44e71df485ffb32ca97e1c",
+      "target_file_sha256": "788e6b03b329564d2012ddddee77222f0a7b0c8c3709b647a4eb0e303b0849e4"
+    },
+    {
+      "source": "ai/luan-2018-multi-task-identification-of-entities-relations",
+      "target": "synthesis/ai-in-scientific-workflows-productivity-quality-partnership",
+      "label": "not_relevant",
+      "reason": "Does not add a distinct productivity, scientific-quality, or partnership result to this synthesis.",
+      "nomination_rank": 2,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Multi-Task Identification of Entities, Relations, and Coreference for Scientific Knowledge Graph Construction",
+      "source_hook": "Joint multi-task neural framework for entities, relations, and coreference in scientific text achieves 39.3 F1 on relation extraction (13.1% improvement over prior work) using shared span representations; SCIERC dataset of 500 abstracts provides 7× more relations per document than SemEval benchmarks.",
+      "source_fingerprint": "1a8c470197663162e0476efd",
+      "target_fingerprint": "f8139fae98c08f5c98735b5c",
+      "source_file_sha256": "9d72ab1cf7dec9ed1e594853b5a082c5fcf88dd8064b16a2aac5f5db1eee360b",
+      "target_file_sha256": "788e6b03b329564d2012ddddee77222f0a7b0c8c3709b647a4eb0e303b0849e4"
+    },
+    {
+      "source": "ai/kirgis-2026-can-ai-agents-conduct-open-ended",
+      "target": "synthesis/ai-in-scientific-workflows-productivity-quality-partnership",
+      "label": "relevant",
+      "reason": "Original-author scoring of autonomous open-ended research supplies direct quality evidence.",
+      "nomination_rank": 3,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic"
+      ],
+      "source_title": "Can AI agents conduct open-ended AI research? Early evidence from two case studies",
+      "source_hook": "Shadow evaluations of two unpublished NeurIPS 2026 questions found frontier agents could autonomously execute research engineering but earned 2/6 and 1/6 from original authors; a Codex/GPT-5.6 Sol rerun reproduced the same judgment and backtracking failures.",
+      "source_fingerprint": "6c2e68b9be8d227bc42bb146",
+      "target_fingerprint": "f8139fae98c08f5c98735b5c",
+      "source_file_sha256": "509fffdce0915bf755ee88dfa36389efd402decf45e9702effef580feef56196",
+      "target_file_sha256": "788e6b03b329564d2012ddddee77222f0a7b0c8c3709b647a4eb0e303b0849e4"
+    },
+    {
+      "source": "ai/miao-2026-reimagining-research-papers-as-interactive",
+      "target": "synthesis/ai-in-scientific-workflows-productivity-quality-partnership",
+      "label": "relevant",
+      "reason": "Paper2Agent adds measured agentification and task-answering results to the workflow evidence.",
+      "nomination_rank": 4,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic"
+      ],
+      "source_title": "Reimagining research papers as interactive and reliable AI agents.",
+      "source_hook": "Paper2Agent agentified 74 of 100 computational-biology papers without manual intervention; its AlphaGenome agent reached 98.7% tutorial-query accuracy and 100.0% novel-query accuracy while reducing median runtime by up to 3.8× versus Biomni.",
+      "source_fingerprint": "b7ec6fe0f026feed0063f480",
+      "target_fingerprint": "f8139fae98c08f5c98735b5c",
+      "source_file_sha256": "803cd565677339359ba7bdf17b950506acd46eb56fe706355e88426946abd3ee",
+      "target_file_sha256": "788e6b03b329564d2012ddddee77222f0a7b0c8c3709b647a4eb0e303b0849e4"
+    },
+    {
+      "source": "ai/falck-2026-training-ai-scientists-to-replicate",
+      "target": "synthesis/ai-in-scientific-workflows-productivity-quality-partnership",
+      "label": "relevant",
+      "reason": "Held-out replication tasks directly test scientific-workflow reliability.",
+      "nomination_rank": 5,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic"
+      ],
+      "source_title": "Training AI Scientists to Replicate Research",
+      "source_hook": "Replica trains Faraday, a 27B AI Scientist, on 310 redacted-figure replication tasks; it scored 0.791 on 68 held-out AI-for-science tasks versus 0.748 for Claude Opus 4.8 and 0.729 for Codex GPT-5.5.",
+      "source_fingerprint": "ac53bd4ed941289c952a4903",
+      "target_fingerprint": "f8139fae98c08f5c98735b5c",
+      "source_file_sha256": "cddbbd436b7bb975bec799abad4a8e018701ed7b1db7c390c6babfdb3bb3254a",
+      "target_file_sha256": "788e6b03b329564d2012ddddee77222f0a7b0c8c3709b647a4eb0e303b0849e4"
+    },
+    {
+      "source": "genomics/asri-2025-pangenome-aware-deepvariant",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "relevant",
+      "reason": "Pangenome-aware variant calling affects the VCF input quality assumed by the variant-driven search engine.",
+      "nomination_rank": 1,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Pangenome-aware DeepVariant",
+      "source_hook": "Pangenome-aware DeepVariant reduced held-out HG003 errors by up to 25.5%; on HG002 Element/vg-giraffe data it cut errors from 61,796 to 56,347 while reaching 99.65% precision and 99.1% recall by adding HPRC haplotypes to DeepVariant pileup images.",
+      "source_fingerprint": "ff71b50753ac297f8192f81a",
+      "target_fingerprint": "4ae34e841af29e8f05cd71fb",
+      "source_file_sha256": "de0fa741092faed7dd0cc502fb954f24a26ea527dce1bc3cb51e5750faa8e026",
+      "target_file_sha256": "01c62089f13f6bab01c53dc25ef714a800d285d554346a76680dd4727b793470"
+    },
+    {
+      "source": "cgt/silverstein-2025-custom-crispr-cas9-pam-variants-via",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "relevant",
+      "reason": "Engineered PAM preferences bear directly on the idea’s PAM-aware multi-editor search design.",
+      "nomination_rank": 2,
+      "nomination_sources": [
+        "page-bm25",
+        "claim-semantic"
+      ],
+      "source_title": "Custom CRISPR–Cas9 PAM variants via scalable engineering and machine learning",
+      "source_hook": "saturation mutagenesis of 6 PAM-interacting residues + bacterial selection + neural network that predicts PAM from Cas9 sequence; in silico screen of 64M SpCas9 variants; bespoke enzymes beat generalists on on-target and off-target; ISDE web tool; allele-selective editing of RHO P23H in mice.",
+      "source_fingerprint": "fd1804784e0f86ee8d9d0de9",
+      "target_fingerprint": "4ae34e841af29e8f05cd71fb",
+      "source_file_sha256": "42888ea2eed801264dfd00151c5e6698f8260187687abd5ab009ee6ba5f3cdad",
+      "target_file_sha256": "01c62089f13f6bab01c53dc25ef714a800d285d554346a76680dd4727b793470"
+    },
+    {
+      "source": "cgt/lin-2018-off-target-predictions-in-crispr-cas9-gene",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "not_relevant",
+      "reason": "Does not materially change GraphOT search inputs, scoring, PAM handling, or validation.",
+      "nomination_rank": 3,
+      "nomination_sources": [
+        "page-bm25",
+        "claim-semantic"
+      ],
+      "source_title": "Off-target predictions in CRISPR-Cas9 gene editing using deep learning",
+      "source_hook": "Deep learning models (CNN achieving 97.2% AUC) predict CRISPR-Cas9 off-targets ~6% more accurately than prior scoring methods, learning directly from experimental data rather than relying on fixed mismatch rules.",
+      "source_fingerprint": "dea198bbf2598f677e51d1f9",
+      "target_fingerprint": "4ae34e841af29e8f05cd71fb",
+      "source_file_sha256": "c143235e86fe0649427c92ed1f84b19977e579b82e8fe3786ce6061971aaa30e",
+      "target_file_sha256": "01c62089f13f6bab01c53dc25ef714a800d285d554346a76680dd4727b793470"
+    },
+    {
+      "source": "genomics/nowbandegani-2025-defining-and-cataloging-variants-in-pangenome",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "relevant",
+      "reason": "Graph-variant representation and reference-absent alleles bear on local graph search completeness.",
+      "nomination_rank": 4,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Defining and cataloging variants in pangenome graphs",
+      "source_hook": "Formal variant definition in pangenome graphs identifies 29.6M variants in 90 human haplotypes, including 3.5M with reference alleles absent from GRCh38; detects 46% more SNPs in segmental duplications than superbubble methods.",
+      "source_fingerprint": "efadfb2411b8f5ef6d21f6eb",
+      "target_fingerprint": "4ae34e841af29e8f05cd71fb",
+      "source_file_sha256": "2ddcea8aaec45b744f2a5b60767b53dc401863e5f53dcbf47804e99ddcb9e24a",
+      "target_file_sha256": "01c62089f13f6bab01c53dc25ef714a800d285d554346a76680dd4727b793470"
+    },
+    {
+      "source": "cgt/luo-2024-interpretable-crisprcas9-off-target-activities-with-mismatches",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "relevant",
+      "reason": "Mismatch-and-indel activity scoring is a candidate comparator for GraphOT’s site-ranking stage.",
+      "nomination_rank": 5,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Interpretable CRISPR/Cas9 off-target activities with mismatches and indels prediction using BERT",
+      "source_hook": "Dual CNN+BERT architecture achieves state-of-the-art off-target prediction for both mismatches and indels across 7 datasets; adaptive batch-wise balancing handles extreme class imbalance (up to 6846.6:1) with attention-based interpretability of nucleotide patterns.",
+      "source_fingerprint": "2271bbee349d8f03800398f8",
+      "target_fingerprint": "4ae34e841af29e8f05cd71fb",
+      "source_file_sha256": "cec7bcaf677406abcb4cfa8911f6443441df5f0732fd41fd4eef1d9145876d7e",
+      "target_file_sha256": "01c62089f13f6bab01c53dc25ef714a800d285d554346a76680dd4727b793470"
+    },
+    {
+      "source": "genomics/yi-2026-panvariants-best-practice-for-pangenome-based",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "relevant",
+      "reason": "Pangenome variant calls can supply the graph and variant inputs to the proposed search workflow.",
+      "nomination_rank": 6,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "PanVariants: Best Practice for Pangenome-based Variant Calling Pipeline and Framework",
+      "source_hook": "Pangenome-based variant calling reduces SNV errors 73% vs. BWA+GATK and achieves 89.39% SV F1-score on short reads, approaching long-read performance while detecting both known and novel variants across SNVs, indels, and structural variants including CNVs and STRs.",
+      "source_fingerprint": "0be3dcdd4797b4c1dfb6e490",
+      "target_fingerprint": "4ae34e841af29e8f05cd71fb",
+      "source_file_sha256": "926f01254cbd7ba63ce52aef345faed1c3545079e567fa35eb71d46215084131",
+      "target_file_sha256": "01c62089f13f6bab01c53dc25ef714a800d285d554346a76680dd4727b793470"
+    },
+    {
+      "source": "cgt/hwang-2026-analysing-long-read-crispr-experiments-with-crisprlungo",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "uncertain",
+      "reason": "Long-read editing outcomes might validate off-target nominations, but GraphOT primarily proposes site search.",
+      "nomination_rank": 7,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Analysing long-read CRISPR experiments with CRISPRLungo.",
+      "source_hook": "CRISPRLungo detected inversions missed in 8 published UMI-PacBio HSPC samples (median 0.11%, maximum 0.44%) while maintaining simulated control-filter false-discovery rates of 0.008 at 90% and 0.004 at 99% sequencing accuracy.",
+      "source_fingerprint": "51cb9b03a6ea84af9772f311",
+      "target_fingerprint": "4ae34e841af29e8f05cd71fb",
+      "source_file_sha256": "c9c31dc1c3b8f0f430a33e859e925597031ba3e1b0a1e90fb06221c2af107a10",
+      "target_file_sha256": "01c62089f13f6bab01c53dc25ef714a800d285d554346a76680dd4727b793470"
+    },
+    {
+      "source": "cgt/cohen-2026-context-dependent-determinants-of-crispr-cas9-editing",
+      "target": "ideas/graphot-variant-aware-off-target-search",
+      "label": "not_relevant",
+      "reason": "Does not materially change GraphOT search inputs, scoring, PAM handling, or validation.",
+      "nomination_rank": 8,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Context-dependent determinants of CRISPR-Cas9 editing efficiency revealed through cross-species endogenous editing analysis",
+      "source_hook": "60+ author consortium; 8 cell types across 4 species; existing efficiency models (DeepCRISPR, SPROUT) fail to generalize across cell types and experimental methods; ensemble regression outperforms all single models.",
+      "source_fingerprint": "2c286a0e03710eac9193ae68",
+      "target_fingerprint": "4ae34e841af29e8f05cd71fb",
+      "source_file_sha256": "8928e6a48c6d22848c55f9d5ff7c5a3301758a5ca2d9c34d7bfb62a24bca551d",
+      "target_file_sha256": "01c62089f13f6bab01c53dc25ef714a800d285d554346a76680dd4727b793470"
+    },
+    {
+      "source": "compbio/liu-2026-pre-training-genomic-language-model-with-variants",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "relevant",
+      "reason": "Observed variant pretraining bears directly on the personalized-genome data-first premise.",
+      "nomination_rank": 1,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Pre-training genomic language model with variants for better modeling functional genomics",
+      "source_hook": "UKBioBERT pre-trains on 13 million UK Biobank variants and reaches 0.423 gene-function clustering score; its UKBioFormer fusion outperforms Personalized Enformer for 63.3% of genes with PCC > 0.6 and correctly signs 71% of top JUP eQTLs.",
+      "source_fingerprint": "97a1cbac4e410792c25aa79e",
+      "target_fingerprint": "ff950117df51a83b368c6bf0",
+      "source_file_sha256": "eaad6665b5849661fe7160d146a8c02279b3aa5928cb16c1b2a75bcb3006c93f",
+      "target_file_sha256": "1d353620bd33ed3c07bf6c0443e521c8d7147a6de5f47c261278f12d17318b7d"
+    },
+    {
+      "source": "compbio/shao-2024-a-long-context-language-model-for-deciphering",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "relevant",
+      "reason": "A domain-specific phage-genome corpus is an additional data-composition and context-length case.",
+      "nomination_rank": 2,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "A long-context language model for deciphering and generating bacteriophage genomes",
+      "source_hook": "145M-parameter multiscale transformer trained on 99.7K phage genomes at single-nucleotide resolution hits AUROC 0.86 for zero-shot essential-gene prediction and generates 96Kbp de novo genomes with real promoters, RBS motifs, and ESMFold-plausible proteins (pLDDT 28 vs 18 random).",
+      "source_fingerprint": "10c32f48f5e30b3bf5b40d30",
+      "target_fingerprint": "ff950117df51a83b368c6bf0",
+      "source_file_sha256": "f67c8a31eca05237c2b7d4d2803aecbbbfdae9abf78129bf027ee226ac9c51bf",
+      "target_file_sha256": "1d353620bd33ed3c07bf6c0443e521c8d7147a6de5f47c261278f12d17318b7d"
+    },
+    {
+      "source": "compbio/merchant-2025-semantic-design-of-functional-de",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "relevant",
+      "reason": "Functional design from prokaryotic genomic context tests the conditioning-data premise.",
+      "nomination_rank": 3,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Semantic design of functional de novo genes from a genomic language model",
+      "source_hook": "Evo 1.5 leverages prokaryotic genomic context (DNA prompt) to design functional de novo genes without fine-tuning; validated anti-CRISPR proteins and toxin–antitoxin systems (17–50% success); SynGenome database of 120B bp AI-generated sequences.",
+      "source_fingerprint": "b829cca02d8625add5be37f6",
+      "target_fingerprint": "ff950117df51a83b368c6bf0",
+      "source_file_sha256": "453a0bb8a86f1dda07f05b96589350fa78de0575cc42a72f78eaf2488ea76cb2",
+      "target_file_sha256": "1d353620bd33ed3c07bf6c0443e521c8d7147a6de5f47c261278f12d17318b7d"
+    },
+    {
+      "source": "genomics/ghiasi-2026-grains-storage-aware-algorithm-architecture-co-design-enabling",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "not_relevant",
+      "reason": "Does not materially change the genomic-LM corpus, conditioning, tokenizer, or objective design.",
+      "nomination_rank": 4,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "GRAINS: Storage-Aware Algorithm-Architecture Co-Design Enabling High-Performance and Low-Cost Graph-Based Genome Analysis",
+      "source_hook": "first storage-centric system for large-scale genome-graph analysis — graph-aware batching + lightweight in-flash processing units + die-level scheduling; 2.7–47.8× speedup and 4.4–31.6× energy reduction over software tools on k-mer lookup, alignment-free mapping, and SeGraM alignment-based mapping.",
+      "source_fingerprint": "7487f6497f744c5d7beea28f",
+      "target_fingerprint": "ff950117df51a83b368c6bf0",
+      "source_file_sha256": "1728c95c11bcf4c0670a6ea842d9045bdeeb9557e497d5a19939bd520b880454",
+      "target_file_sha256": "1d353620bd33ed3c07bf6c0443e521c8d7147a6de5f47c261278f12d17318b7d"
+    },
+    {
+      "source": "compbio/baghbanzadeh-2025-seqlens-optimizing-language-models-for-genomic",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "relevant",
+      "reason": "Tokenizer and model ablations inform the idea’s data representation choice.",
+      "nomination_rank": 5,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic"
+      ],
+      "source_title": "seqLens: Optimizing Language Models for Genomic Predictions",
+      "source_hook": "DeBERTa-v2-based genomic language model beats similarly-sized models in 13/19 phenotypic prediction tasks after ablating 52 gLMs and 5 BPE tokenizers; recovers 16S rRNA phylogeny zero-shot better than Nucleotide Transformer (Mantel r=0.585 vs. 0.168–0.210).",
+      "source_fingerprint": "3fcc98ad543cbb051190ab52",
+      "target_fingerprint": "ff950117df51a83b368c6bf0",
+      "source_file_sha256": "9990bcb92428542a4b042361ecf2941bd80629843b5cf036ddc7492c5e0e7c3e",
+      "target_file_sha256": "1d353620bd33ed3c07bf6c0443e521c8d7147a6de5f47c261278f12d17318b7d"
+    },
+    {
+      "source": "compbio/brandes-2023-genome-wide-prediction-of-disease-variant",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "not_relevant",
+      "reason": "Does not materially change the genomic-LM corpus, conditioning, tokenizer, or objective design.",
+      "nomination_rank": 6,
+      "nomination_sources": [
+        "page-bm25"
+      ],
+      "source_title": "Genome-wide prediction of disease variant effects with a deep protein language model",
+      "source_hook": "Protein language model predicts pathogenicity of all ~450 million human missense variants across 42,336 isoforms without sequence alignment, achieving 90.5% ROC-AUC on ClinVar and outperforming 45 existing methods on deep mutational scans.",
+      "source_fingerprint": "d2cacb139d9333b2efd0bb31",
+      "target_fingerprint": "ff950117df51a83b368c6bf0",
+      "source_file_sha256": "3432eb5ad303ab0c483b7ab2677c90f11f48e0f08878c627c6ce18e8eb6b91c2",
+      "target_file_sha256": "1d353620bd33ed3c07bf6c0443e521c8d7147a6de5f47c261278f12d17318b7d"
+    },
+    {
+      "source": "compbio/fishman-2025-gena-lm-a-family-of-open-source",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "relevant",
+      "reason": "BPE tokenization and context-length results bear on the proposed tokenizer tradeoff.",
+      "nomination_rank": 7,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "GENA-LM: a family of open-source foundational DNA language models for long sequences",
+      "source_hook": "Open-source transformer DNA language models processing up to 36 kb (extended to 50 kb via recurrent memory) using BPE tokenization achieve state-of-the-art on promoter prediction, splice sites, chromatin profiling, and enhancer annotation across human, multispecies, and model organism genomes.",
+      "source_fingerprint": "535e0a8e7bc5b4a0b1d0b6ed",
+      "target_fingerprint": "ff950117df51a83b368c6bf0",
+      "source_file_sha256": "45e1a2a2f5d8b2f58cc6ed721ca9bd4b94220ba5c42e05e16435748895df9f47",
+      "target_file_sha256": "1d353620bd33ed3c07bf6c0443e521c8d7147a6de5f47c261278f12d17318b7d"
+    },
+    {
+      "source": "other/prousalis-2025-a-survey-on-sequence-alignment",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "uncertain",
+      "reason": "Alignment algorithms could support curation, but this survey does not test genomic-LM training.",
+      "nomination_rank": 8,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "A Survey on Sequence Alignment Algorithms and State-of-the-Art Aligners",
+      "source_hook": "Comprehensive 158-document review of 42 PSA and 116 MSA tools (1980–2022) identifies speed–completeness trade-off as fundamental design tension and flags standardized benchmarking absence as critical gap; quantum and optics-enabled approaches emerge as next frontier.",
+      "source_fingerprint": "ec79b2dce2c92ff40b3e88ca",
+      "target_fingerprint": "ff950117df51a83b368c6bf0",
+      "source_file_sha256": "a0514f6727f793618837c0598f1d84bbf7eeea9538e90e1d21f8d149f8d7b88d",
+      "target_file_sha256": "1d353620bd33ed3c07bf6c0443e521c8d7147a6de5f47c261278f12d17318b7d"
+    },
+    {
+      "source": "genomics/alser-2020-technology-dictates-algorithms-recent-developments",
+      "target": "ideas/data-first-strategy-for-a-next-generation-genomic-language-model",
+      "label": "not_relevant",
+      "reason": "Does not materially change the genomic-LM corpus, conditioning, tokenizer, or objective design.",
+      "nomination_rank": 9,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Technology dictates algorithms: recent developments in read alignment",
+      "source_hook": "Systematic review of 107 alignment tools (1988–2020) demonstrates technology-driven algorithmic evolution across sequencing platforms; benchmarks reveal alignment errors as a major source of trans-eQTL false positives in clinical studies.",
+      "source_fingerprint": "64020025955daadf6a80fd92",
+      "target_fingerprint": "ff950117df51a83b368c6bf0",
+      "source_file_sha256": "03ca1bfcaf63b37770a933d8ac839f284a3b61787d4e36f00252fa1234f34431",
+      "target_file_sha256": "1d353620bd33ed3c07bf6c0443e521c8d7147a6de5f47c261278f12d17318b7d"
+    },
+    {
+      "source": "statistics/stephens-2016-false-discovery-rates-a-new",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "relevant",
+      "reason": "Empirical-Bayes FDR and false-sign-rate assumptions add a distinct branch to the ledger.",
+      "nomination_rank": 1,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "False Discovery Rates: A New Deal",
+      "source_hook": "Introduces ash (adaptive shrinkage), an Empirical Bayes FDR method using a unimodal-prior convex optimization that fits 100,000 tests in ~20s; shows existing tools (qvalue, locfdr, mixfdr) create a spurious \"hole\" at z=0 that ash's unimodal assumption corrects, and defines the local false sign rate as a more robust significance measure than local FDR.",
+      "source_fingerprint": "34e0444f6fa4e3c0bdb2b164",
+      "target_fingerprint": "fbcd5fe6ddbe25d70851e0e3",
+      "source_file_sha256": "27f54c0417f9ebe3b4d2dfc3951fd4cf6d7bf5477e3754ed035ae85feb2e340e",
+      "target_file_sha256": "8b99d09189a59ec96bb0b7acdb83e317803f75d99791b70e7799bf4f998e7c90"
+    },
+    {
+      "source": "other/yang-2025-cross-validated-causal-inference-a-modern",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "not_relevant",
+      "reason": "Does not add an FDR-control procedure or assumption relevant to the proposed ledger.",
+      "nomination_rank": 2,
+      "nomination_sources": [
+        "page-bm25",
+        "claim-semantic"
+      ],
+      "source_title": "Cross-Validated Causal Inference: a Modern Method to Combine Experimental and Observational Data",
+      "source_hook": "ERM framework combining RCT + observational data for ATE estimation via a weighted combination of experimental + observational losses; the weight is chosen adaptively by cross-validating the causal parameter across experimental folds.",
+      "source_fingerprint": "7489059842e46d56b28bba0f",
+      "target_fingerprint": "fbcd5fe6ddbe25d70851e0e3",
+      "source_file_sha256": "66ea6ff43b6d5f5021f5a2b42f816a64d854a57e7cab7fd9b899939df2e10f0f",
+      "target_file_sha256": "8b99d09189a59ec96bb0b7acdb83e317803f75d99791b70e7799bf4f998e7c90"
+    },
+    {
+      "source": "statistics/ni-2024-computing-power-and-sample-size",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "not_relevant",
+      "reason": "Does not add an FDR-control procedure or assumption relevant to the proposed ledger.",
+      "nomination_rank": 3,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic"
+      ],
+      "source_title": "Computing Power and Sample Size for the False Discovery Rate in Multiple Applications",
+      "source_hook": "Introduces FDRsamplesize2 (CRAN R package) using a three-rectangle p-value histogram approximation to derive closed-form FDR power/sample-size formulas across 11 test types (t-test, Cox, negative binomial, Fisher's exact, etc.); simulations show accurate results with exact power formulas but failure to meet FDR/power targets when asymptotic normal approximations are used.",
+      "source_fingerprint": "621aea4cdcaf505a20ed220e",
+      "target_fingerprint": "fbcd5fe6ddbe25d70851e0e3",
+      "source_file_sha256": "19fd20508e1d9352f12f8544d06ec4f4fcec75c34f1bdb6044273a86eeb632e2",
+      "target_file_sha256": "8b99d09189a59ec96bb0b7acdb83e317803f75d99791b70e7799bf4f998e7c90"
+    },
+    {
+      "source": "cgt/clement-2019-crispresso2-provides-accurate-and-rapid",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "not_relevant",
+      "reason": "Does not add an FDR-control procedure or assumption relevant to the proposed ledger.",
+      "nomination_rank": 4,
+      "nomination_sources": [
+        "page-bm25",
+        "claim-semantic"
+      ],
+      "source_title": "CRISPResso2 provides accurate and rapid genome editing sequence analysis",
+      "source_hook": "de-facto standard amplicon-sequencing analysis tool for CRISPR editing; adds native base-editor analysis, allele-specific outcome quantification (P23H/WT), biologically-informed alignment (no distal misalignment), and ~10× speedup over CRISPResso for pooled off-target screens; 1300+ citations.",
+      "source_fingerprint": "e31cce6a2b2cbab90eaa701f",
+      "target_fingerprint": "fbcd5fe6ddbe25d70851e0e3",
+      "source_file_sha256": "a09f93fef880ae0b6463fa8326e97e4bb5a22dd4c0160a0be4f05a2eda16223d",
+      "target_file_sha256": "8b99d09189a59ec96bb0b7acdb83e317803f75d99791b70e7799bf4f998e7c90"
+    },
+    {
+      "source": "genomics/li-2003-modeling-linkage-disequilibrium-and-identifying",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "not_relevant",
+      "reason": "Does not add an FDR-control procedure or assumption relevant to the proposed ledger.",
+      "nomination_rank": 5,
+      "nomination_sources": [
+        "page-bm25",
+        "claim-semantic"
+      ],
+      "source_title": "Modeling Linkage Disequilibrium and Identifying Recombination Hotspots Using Single-Nucleotide Polymorphism Data",
+      "source_hook": "Product-of-approximate-conditionals likelihood relates haplotype patterns directly to recombination rates across entire chromosomes; identifies fine-scale recombination hotspots from population SNP data without assuming block structure.",
+      "source_fingerprint": "a33ce416ec86d8938ab984e5",
+      "target_fingerprint": "fbcd5fe6ddbe25d70851e0e3",
+      "source_file_sha256": "1a716cb68d7f3afaa466ce5ce7c6cf00ae128972dd2fa7c3f5005b2d89f13c14",
+      "target_file_sha256": "8b99d09189a59ec96bb0b7acdb83e317803f75d99791b70e7799bf4f998e7c90"
+    },
+    {
+      "source": "statistics/heller-2014-repfdr-a-tool-for-replicability",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "relevant",
+      "reason": "Cross-study replicability uses a different null and Bayes-FDR rule from single-study discovery.",
+      "nomination_rank": 6,
+      "nomination_sources": [
+        "page-bm25"
+      ],
+      "source_title": "repfdr: a tool for replicability analysis for genome-wide association studies",
+      "source_hook": "R/C package for empirical-Bayes replicability analysis: bins per-study z-scores and EM-estimates joint association-status probabilities across studies, then thresholds Bayes FDR. On three simulated GWAS (249,024 SNPs each), meta-analysis mode found 239 SNPs but only 119 replicated — the 120-SNP gap is the follow-up candidate list. EM parameters scale 3ⁿ, capping practical use near 5–6 studies.",
+      "source_fingerprint": "d4b4c0dc621d98d74cbbf36d",
+      "target_fingerprint": "fbcd5fe6ddbe25d70851e0e3",
+      "source_file_sha256": "8e5c3827b20c396c8215d32dd4cc3e60ea4917712e65455a7f35d5ad4eec3906",
+      "target_file_sha256": "8b99d09189a59ec96bb0b7acdb83e317803f75d99791b70e7799bf4f998e7c90"
+    },
+    {
+      "source": "genomics/engelhardt-2026-machine-learning-and-statistical-methods",
+      "target": "proposals/from-bh-to-e-bh-an-assumption-ledger-for-adaptive-weighted-and-d--c34b8bd2",
+      "label": "not_relevant",
+      "reason": "Does not add an FDR-control procedure or assumption relevant to the proposed ledger.",
+      "nomination_rank": 7,
+      "nomination_sources": [
+        "page-bm25"
+      ],
+      "source_title": "Machine learning and statistical methods for molecular quantitative trait loci",
+      "source_hook": "A framework for molQTL discovery and interpretation spanning cohorts of 31,684 eQTLGen participants and 54,219 UK Biobank proteomics participants; it identifies context-aware inference and integration with RVEP deep learning as the route beyond standard association mapping.",
+      "source_fingerprint": "6388f94e3ff00c25fc0b5bfb",
+      "target_fingerprint": "fbcd5fe6ddbe25d70851e0e3",
+      "source_file_sha256": "2d0854323aff3940e9c90c58be5206c663cc6455013300a43d876a15e94b65ac",
+      "target_file_sha256": "8b99d09189a59ec96bb0b7acdb83e317803f75d99791b70e7799bf4f998e7c90"
+    },
+    {
+      "source": "single-cell/szaata-2024-transformers-in-single-cell-omics-a-review",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "reason": "Does not directly inform the equal-budget observational-versus-intervention CRISPRi comparison.",
+      "nomination_rank": 1,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Transformers in single-cell omics: a review and new perspectives",
+      "source_hook": "Reviews transformer architectures applied to single-cell omics; identifies open challenges in benchmarking and generalization.",
+      "source_fingerprint": "406e83d2d68aa227b2804662",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "ce6e33e16d81a7d45068ccdbd81c7c004b0f54f823ccc749e45d0b887e667ae3",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "single-cell/cui-2024-scgpt-toward-building-a-foundation",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "relevant",
+      "reason": "Observationally pretrained scGPT plus perturbation fine-tuning is a concrete baseline for the equal-budget comparison.",
+      "nomination_rank": 2,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "scGPT: toward building a foundation model for single-cell multi-omics using generative AI",
+      "source_hook": "scGPT is a generative pretrained transformer foundation model for single-cell biology, pretrained on over 33 million cells from large cell atlases.",
+      "source_fingerprint": "a1dda2ee003d1eee6e6b3b6e",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "d4f9d7ff542c8c913849a0512e039eef090a0653de069845c1631b9923dfd6c6",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "single-cell/lotfollahi-2024-the-future-of-rapid-and-automated",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "reason": "Does not directly inform the equal-budget observational-versus-intervention CRISPRi comparison.",
+      "nomination_rank": 3,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "The future of rapid and automated single-cell data analysis using reference mapping",
+      "source_hook": "Positions reference mapping onto curated atlases as the successor to manual clustering pipelines.",
+      "source_fingerprint": "a12e0efc1c7d2aab8d77bfea",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "a829fa9b1a0e9257ff4f57056716717014844ff6fd4b660202dc408d23f1d7ab",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "single-cell/bunne-2024-how-to-build-the-virtual",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "reason": "Does not directly inform the equal-budget observational-versus-intervention CRISPRi comparison.",
+      "nomination_rank": 4,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "How to build the virtual cell with artificial intelligence: Priorities and opportunities",
+      "source_hook": "Perspective articulating a research agenda for AI Virtual Cells spanning molecules, cells, and tissues.",
+      "source_fingerprint": "2f9b02564220eb96b82ae876",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "d4da7e9dfe4976410a295506c7d74492fab8ca867416baf071f5c3bc8b1f2824",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "single-cell/sheth-2026-mapping-enhancer-gene-regulatory-interactions-from-single-cell",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "relevant",
+      "reason": "A CRISPR-trained cell-type regulatory graph supplies a concrete graph-source ablation.",
+      "nomination_rank": 5,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Mapping enhancer–gene regulatory interactions from single-cell data",
+      "source_hook": "scE2G maps enhancer–gene links across 45 single-cell-resolved cell types; its multiome model achieved 13.9% eQTL recall with 14.9-fold enrichment and linked GWAS credible sets to likely causal genes at 24.2% recall.",
+      "source_fingerprint": "a3a585b6117b7207c6093149",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "ca47c23f9eda97b8ecda45472c8b7669f27da37b48e95d11e30a0b00d24d0292",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "single-cell/nesari-2026-advances-and-challenges-in-single-cell",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "reason": "Does not directly inform the equal-budget observational-versus-intervention CRISPRi comparison.",
+      "nomination_rank": 6,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Advances and challenges in single-cell RNA sequencing data analysis: a comprehensive review",
+      "source_hook": "Comprehensive benchmarking of scRNA-seq analysis across five pipeline stages identifies transformer-based annotation (scGPT, CellTypist >95% accuracy) and federated learning as solutions to standardization barriers blocking clinical translation, while flagging re-identification risks in rare-cell discovery.",
+      "source_fingerprint": "38a3a62ed6fa93b2a30c1a49",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "f451188d600cfb7245e81f3c7870d6de009fff781e980ade89151c55ef49cc8f",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "compbio/dupire-2026-fifteen-challenges-for-generative-ai",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "reason": "Does not directly inform the equal-budget observational-versus-intervention CRISPRi comparison.",
+      "nomination_rank": 7,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "Fifteen challenges for generative AI applications to cell biology",
+      "source_hook": "Perspective proposing 15 Hilbert-style challenges across four levels (molecular interactions → translation) to move Gen-AI in cell biology from retrospective benchmarks to prospectively validated discovery; argues scaling cannot suffice because biological data supply 10^10–10^11 tokens against language models' trillions, and urges architectures pre-wired with interaction-network priors.",
+      "source_fingerprint": "2a0d6883dc158ccfbfa4fb34",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "f1845b6100e167e1aaf1566e9a495df615367291f64fbef818093337479cc313",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "single-cell/lee-2026-annq-reference-based-quantification-of-cellular",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "reason": "Does not directly inform the equal-budget observational-versus-intervention CRISPRi comparison.",
+      "nomination_rank": 8,
+      "nomination_sources": [
+        "page-bm25",
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "AnnQ: reference-based quantification of cellular abnormality at single-cell resolution",
+      "source_hook": "AnnQ converted annotation uncertainty into OOR abnormality scores across 144 500 mouse brain cells and cancer cohorts; it found G1 identity ambiguity reached 90.4% at postnatal day 4 and Fezf2 homozygotes had a 46.9% versus 11.1% high-OOR corticothalamic-neuron tail.",
+      "source_fingerprint": "b8e58d92ff5e4183ef1757e2",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "6e1fd4f5f92f35468797bfb4d8137e6104c7f48951c6800043ae2a6f17c8e0e0",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "compbio/nagai-2026-toward-generalizable-and-interpretable-ai",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "reason": "Does not directly inform the equal-budget observational-versus-intervention CRISPRi comparison.",
+      "nomination_rank": 9,
+      "nomination_sources": [
+        "page-bm25",
+        "claim-semantic"
+      ],
+      "source_title": "Toward generalizable and interpretable AI in regulatory genomics.",
+      "source_hook": "Review of sequence-to-function models in regulatory genomics organized around the gap between held-out accuracy and true generalization — a taxonomy of six deployment scenarios mapped to distribution-shift types, interpretability methods, and an AI-experiment feedback loop.",
+      "source_fingerprint": "9468cbf9cbc252589cb873f6",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "3cfaab042b2fa6b7b95c14a793281c7d3c8f3161f9e1ea3d829a3a68fa7d5f6e",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "compbio/drusinsky-2024-deep-learning-prediction-of-gene-expression",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "reason": "Does not directly inform the equal-budget observational-versus-intervention CRISPRi comparison.",
+      "nomination_rank": 10,
+      "nomination_sources": [
+        "page-bm25",
+        "claim-semantic"
+      ],
+      "source_title": "Deep-learning prediction of gene expression from personal genomes",
+      "source_hook": "Fine-tuned Enformer predicts tissue-specific gene expression from personal genomes, achieving 97.4% sign agreement with elastic net eQTL weights and recovering cis-heritability ceiling on held-out individuals, but reveals deep models fail to learn transferable regulatory grammar across unseen genes.",
+      "source_fingerprint": "0b8d462dfb2bfed8174988d1",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "072a40e0ae96e447eb245e558e690c2024a7c488116ff72ebeca18741e4ca9c8",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "compbio/gschwind-2026-an-encyclopedia-of-human-enhancer-gene",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "uncertain",
+      "reason": "Enhancer–gene links could supply graph edges, but direct CRISPRi transfer is untested.",
+      "nomination_rank": 11,
+      "nomination_sources": [
+        "page-bm25",
+        "claim-semantic"
+      ],
+      "source_title": "An encyclopedia of human enhancer-gene regulatory interactions.",
+      "source_hook": "Genome-wide map of 92 million enhancer-gene interactions across 1,458 biosamples trained on CRISPR perturbations; achieves 79% precision linking noncoding GWAS variants to causal genes and cell types, outperforming prior methods by 1.4–2.3-fold.",
+      "source_fingerprint": "888a5de5c806afe6752410f1",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "a7f8a4fb1f7efdaf82aeb1aeceb09838ae3846624760c0aee021aa71d0c63455",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "ai/neves-2026-robust-out-of-distribution-prediction-of-buchwald-hartwig",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "reason": "Does not directly inform the equal-budget observational-versus-intervention CRISPRi comparison.",
+      "nomination_rank": 12,
+      "nomination_sources": [
+        "page-bm25"
+      ],
+      "source_title": "Robust out-of-distribution prediction of Buchwald–Hartwig reactions",
+      "source_hook": "11,300-reaction active-learning HTE dataset plus a new diversity metric (CRDS, r=0.79 with flOOD ROC AUC vs. 0.60 for size alone) rescues 10/11 historically failed BH couplings and gives 1.64-fold enrichment screening 2.46×10¹¹ untested reactions.",
+      "source_fingerprint": "1e2c959154266eb40d21927c",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "0a369add390b3f25da0618e4207099ed422833f8f87f96f8a1c74a1511630002",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "other/yang-2025-cross-validated-causal-inference-a-modern",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "uncertain",
+      "reason": "RCT/observational weighting is a possible cross-domain method, but not an intervention-budget result.",
+      "nomination_rank": 13,
+      "nomination_sources": [
+        "page-bm25"
+      ],
+      "source_title": "Cross-Validated Causal Inference: a Modern Method to Combine Experimental and Observational Data",
+      "source_hook": "ERM framework combining RCT + observational data for ATE estimation via a weighted combination of experimental + observational losses; the weight is chosen adaptively by cross-validating the causal parameter across experimental folds.",
+      "source_fingerprint": "7489059842e46d56b28bba0f",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "66ea6ff43b6d5f5021f5a2b42f816a64d854a57e7cab7fd9b899939df2e10f0f",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    },
+    {
+      "source": "compbio/fu-2025-a-foundation-model-of-transcription",
+      "target": "proposals/the-intervention-information-budget-hypothesis-for-cross-cell-li--4513f441",
+      "label": "not_relevant",
+      "reason": "Does not directly inform the equal-budget observational-versus-intervention CRISPRi comparison.",
+      "nomination_rank": 14,
+      "nomination_sources": [
+        "page-semantic",
+        "claim-semantic"
+      ],
+      "source_title": "A foundation model of transcription across human cell types",
+      "source_hook": "interpretable foundation model for transcription across 213 human fetal/adult cell types; chromatin accessibility + motif scores as inputs; experimental-level accuracy on unseen cell types; PAX5–NR2C2 leukemia TF-TF interaction discovered; GET Catalog on HuggingFace.",
+      "source_fingerprint": "b34c22a48b642986dc032b80",
+      "target_fingerprint": "bf4a3e526366cdffef3581cc",
+      "source_file_sha256": "e063e91038bf01f2a2ee3d130120162bb6ac7ebf55f7c45cda7ab0dadcb4dfbc",
+      "target_file_sha256": "609e3eaa5341eb1da350e544f807552b5aaf1ad42b53661d3ddec2c50f82babf"
+    }
+  ],
+  "snapshot_note": "Hashes represent the wiki revision at labeling; GraphOT still had category: [ideas]. Its category was corrected after baseline scoring. The runner refuses to rescore this label set against a changed revision."
+}

@@ -475,6 +475,32 @@ def _cmd_ingest(args) -> int:
     print()
     _print_ingest_receipt(ctx)
 
+    # Local reverse review runs for every promoted paper, independently of
+    # model-backed --memory-evolve. A post-promotion failure must remain visible
+    # without turning a completed ingest into an apparent retryable failure.
+    if ctx.outcome == "promoted" and ctx.committed_path and not args.stub:
+        from .. import impact_review
+
+        source_key = f"{ctx.committed_path.parent.name}/{ctx.paper_stem}"
+        try:
+            impact = impact_review.scan(source_key)
+        except Exception as exc:
+            try:
+                impact = impact_review.record_unscanned(source_key, str(exc))
+            except Exception:
+                impact = {"state": "unscanned", "error": str(exc), "candidates": []}
+        review_state = ("unscanned" if impact["state"] != "complete" else
+                        "pending" if impact_review.unresolved_count(impact) else "reviewed")
+        print(f"  Impact review: {review_state} "
+              f"({len(impact['candidates'])} candidate(s)); "
+              f"{impact_review.review_path(ctx.paper_stem)}")
+        if impact.get("error"):
+            print(f"    ⚠ {impact['error']}")
+        elif impact["candidates"]:
+            for row in impact["candidates"][:5]:
+                print(f"    → {row['target']} ({row['type']}, "
+                      f"semantic={row['semantic_score']:.2f})")
+
     # Post-commit hooks — skip when the ingest refused to promote (duplicate PDF,
     # sandbox, etc.). committed_path is None in those cases and the hooks would
     # crash on the None path since they all take an os.PathLike.

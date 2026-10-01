@@ -19,7 +19,7 @@ VALID_ROLES = {
     "reconcile", "extract", "target_claims", "crosslinks", "author",
     "grade", "grade_persist", "tournament", "critic", "debug", "short_name",
     "keywords", "commit", "memory_evolve", "pdf_upgrade", "claim_support",
-    "budget",
+    "budget", "duplicate",
     "promote", "index_update",
     "attempt",
 }

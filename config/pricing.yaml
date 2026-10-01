@@ -35,7 +35,7 @@
 # machine. `model_config.unpriced_models()` is what tells that apart from a cloud
 # model that is merely missing from this table.
 
-as_of: "2026-08-03"
+as_of: "2026-09-30"
 
 sources:
   anthropic: "https://platform.claude.com/docs/en/about-claude/pricing"
@@ -83,6 +83,8 @@ models:
   # ---- OpenAI -------------------------------------------------------------
   # Short-context standard rates. Long-context tiers cost more and aren't
   # modelled; see the source URL.
+  gpt-6-sol:           {in: 2.0,   out: 10.0,  provider: openai}  # official model page, checked 2026-09-30
+  gpt-6-luna:          {in: 0.1,   out: 0.5,   provider: openai}  # official model page, checked 2026-09-30
   gpt-5.6-sol:         {in: 5.0,   out: 30.0,  provider: openai}
   gpt-5.6-terra:       {in: 2.0,   out: 12.0,  provider: openai}
   gpt-5.6-luna:        {in: 0.2,   out: 1.2,   provider: openai}
