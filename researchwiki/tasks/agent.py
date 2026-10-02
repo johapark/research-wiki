@@ -472,6 +472,11 @@ def _cmd_ingest(args) -> int:
         traceback.print_exc()
         return 3
 
+    return _finish_ingest(ctx, args)
+
+
+def _finish_ingest(ctx, args) -> int:
+    """Report the result and run post-promotion work for a single PDF."""
     print()
     _print_ingest_receipt(ctx)
 
