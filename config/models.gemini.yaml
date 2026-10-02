@@ -35,8 +35,9 @@
 # three Flash-Lite roles share one 15 RPM budget. Lower these if 429s persist;
 # raise/remove on a paid tier.
 #
-# Phases fall back to _FALLBACK_PHASES via the config merge, so only roles
-# need defining here.
+# Most phases fall back to _FALLBACK_PHASES via the config merge. Target-claim
+# extraction is pinned to Flash: the source-wide coverage checklist warrants
+# the stronger model, at the cost of one more 5-RPM Flash call per ingest.
 #
 # ingest.n_drafts: default author-draft count when `-n` is omitted. Set to 1
 # on this rate-limited free tier — a 2-draft tournament doubles the (5 RPM /
@@ -92,3 +93,6 @@ roles:
     temperature: 0.0
     max_tokens: 800
     rpm: 15
+
+phases:
+  target_claims: {role: judge, temperature: 0.0, max_tokens: 4000}

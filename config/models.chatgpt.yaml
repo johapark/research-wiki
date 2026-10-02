@@ -60,9 +60,7 @@ roles:
     temperature: 0.3
     max_tokens: 200
 
-  # Extractor — title/authors/DOI/abstract from PDF first page, and the
-  # target-claims list. Luna is cheaper per token (see note at top)
-  # and the phase wants specificity, not judgement.
+  # Extractor — narrow title/authors/DOI/abstract fields from the PDF's first page.
   extractor:
     provider: openai-compatible
     model: gpt-6-luna
@@ -83,13 +81,8 @@ phases:
   synthesis_judge:  {role: judge}
   eval_judge:       {role: judge}
   reconcile:        {role: extractor}
-  # Structured extraction, not synthesis — the author phase consumes this as a
-  # coverage checklist. Was {role: judge}, which sent a transcription-shaped
-  # task to the top tier: 32K input tokens across a 4-paper batch, 41% of the
-  # terra bill. The role is what costs money; max_tokens is only a ceiling
-  # (you are billed for tokens emitted, ~1.3K observed). 4000 is ~3x observed
-  # — headroom for a long claims list without the dead ceiling 8000 gave, and
-  # a truncated list silently strips the author's coverage checklist, so do
-  # not trim this toward the observed figure.
-  target_claims:    {role: extractor, max_tokens: 4000}
+  # Paper-wide coverage extraction is quality-sensitive: use the Sol judge
+  # while keeping routine first-page metadata extraction on Luna. 4000 output
+  # tokens gives headroom for the observed ~1300-token claims lists.
+  target_claims:    {role: judge, temperature: 0.0, max_tokens: 4000}
   claim_support:    {role: judge}

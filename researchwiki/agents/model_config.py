@@ -187,7 +187,7 @@ _FALLBACK_PHASES: dict[str, dict] = {
     "cross_paper_judge": {"role": "judge", "temperature": 0.0, "max_tokens": 400},
     "claim_overlap_judge": {"role": "judge", "temperature": 0.0, "max_tokens": 400},
     "reconcile":         {"role": "extractor"},
-    "target_claims":     {"role": "extractor", "max_tokens": 4000},
+    "target_claims":     {"role": "judge", "temperature": 0.0, "max_tokens": 4000},
     "claim_support":     {"role": "judge"},
 }
 
@@ -538,7 +538,7 @@ _DEFAULT_TARGET_CLAIMS_MAX_CHARS = 120_000
 
 def target_claims_max_chars() -> int:
     """Char budget for the target-claims extraction prompt (`ingest.
-    target_claims_max_chars`). The extractor is fed the whole substantive
+    target_claims_max_chars`). The phase is fed the whole substantive
     paper (references excluded) up to this many chars — high enough that a
     normal-length paper is sent in full, but bounded so a huge paper or a
     small-context local model doesn't overflow. Defaults generous (cloud

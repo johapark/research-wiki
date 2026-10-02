@@ -19,10 +19,10 @@ when diagnosing "the author had access to claim X but didn't include
 it" — that's a synthesis-side issue, distinguishable from "the agent
 never extracted X" which is upstream).
 
-Cost: one LLM call per ingest. Empirically ~5K input + ~1K output =
-~$0.030 added per ingest at Sonnet/Haiku rates. Phase config in
-config/models.yaml; defaults to the `extractor` role (same as reconcile —
-this is the second structured-extraction call in the pipeline).
+Cost: one LLM call per ingest, with input proportional to the sampled PDF
+text. Phase config in config/models.yaml; defaults to the `judge` role because
+this source-wide coverage checklist is more consequential than first-page
+metadata extraction.
 """
 
 from __future__ import annotations
@@ -194,6 +194,7 @@ def extract_target_claims(
         )
 
     from .. import model_config
+    target_cfg = model_config.for_phase("target_claims")
     prompt = _build_prompt(
         metadata, sections, pdf_full_text,
         max_chars=model_config.target_claims_max_chars(),
@@ -204,6 +205,12 @@ def extract_target_claims(
             prompt=prompt,
             system=_SYSTEM_PROMPT,
             schema=_JSON_SCHEMA,
+            # Claude's adaptive thinking can consume the visible JSON budget.
+            # Keep configured reasoning effort for other providers.
+            disable_thinking=(
+                target_cfg.provider == "anthropic"
+                and target_cfg.model.startswith("claude-")
+            ),
         )
     except EnvironmentFailure:
         raise  # house rule 1 (errors.py): never author from a hidden outage

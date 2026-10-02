@@ -50,7 +50,7 @@
 base_url: http://localhost:1234/v1
 
 ingest:
-  # Char budget for the target-claims extraction prompt. The extractor is fed
+  # Char budget for the target-claims extraction prompt. The phase is fed
   # the whole substantive paper (references excluded) up to this many chars.
   # The default (120K ≈ 30K tokens) assumes cloud-scale context; on a 32K-ctx
   # local model that would overflow once the target_claims thinking budget
@@ -118,11 +118,11 @@ phases:
   eval_judge:       {role: judge}
   claim_support:    {role: judge, max_tokens: 12000}
   reconcile:        {role: extractor}
-  # These three inherit tiny budgets from _FALLBACK_PHASES (target_claims
-  # 2500, the two judges 400) — fine for low-thinking cloud models but far
+  # These three inherit small budgets from _FALLBACK_PHASES (target_claims
+  # 4000, the two judges 400) — fine for low-thinking cloud models but far
   # too small for an always-thinking local model, which spends the whole
   # budget reasoning and returns EMPTY content (a skipped target-claims
   # checklist, a dropped cross-link verdict). Raise them like the rest.
-  target_claims:       {role: extractor, max_tokens: 16000}
+  target_claims:       {role: judge, temperature: 0.0, max_tokens: 16000}
   cross_paper_judge:   {role: judge, temperature: 0.0, max_tokens: 12000}
   claim_overlap_judge: {role: judge, temperature: 0.0, max_tokens: 12000}
