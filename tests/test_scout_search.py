@@ -105,6 +105,43 @@ def test_a_shared_title_alone_does_not_merge_distinct_papers(wiki, monkeypatch):
         "10.1234/ed-one", "10.5678/ed-two", "10.9012/ed-three"]
 
 
+def test_shared_initials_are_not_a_shared_author(wiki, monkeypatch):
+    """PubMed's `AV` initials block once counted as a matching name token."""
+    _sources(monkeypatch, pubmed=[
+        _pm("1", title="Editorial", authors=["Smith AV"]),
+        _pm("2", title="Editorial", authors=["Jones AV"]),
+    ])
+    assert len(S.run("q", today=TODAY)["leads"]) == 2
+
+
+def test_different_pmids_are_different_works_even_with_one_surname(wiki, monkeypatch):
+    _sources(monkeypatch, pubmed=[
+        _pm("1", title="Editorial", authors=["Smith AV"]),
+        _pm("2", title="Editorial", authors=["Smith J"]),
+    ])
+    assert len(S.run("q", today=TODAY)["leads"]) == 2
+
+
+def test_wiki_page_sharing_only_a_given_name_does_not_hide_a_lead(wiki, monkeypatch):
+    _page(wiki, "cgt/smith-2026-editorial", title="Editorial", type="paper",
+          doi="10.1234/held", authors="Carol Smith", year=2026)
+    _sources(monkeypatch, arxiv=[_ax("2401.00003", title="Editorial", authors=("Carol Dunn",))])
+    snap = S.run("q", sources=["arxiv"], today=TODAY)
+    assert [r["key"] for r in snap["leads"]] == ["10.48550/arxiv.2401.00003"]
+
+
+@pytest.mark.parametrize(("name", "expected"), [
+    ("Smith AV", "smith"), ("Andrew V. Smith", "smith"), ("Andrew V Smith", "smith"),
+    ("Dunn C", "dunn"), ("Carol Dunn", "dunn"),
+    ("van der Berg JM", "berg"), ("Jan M van der Berg", "berg"),
+    ("García-López A", "garcialopez"), ("Szałata A", "szalata"),
+    ("Guohui Chuai et al.", "chuai"), ("Smith J Jr", "smith"),
+    ("DeepSeek-AI", "deepseekai"), ("et al.", ""), ("", ""),
+])
+def test_surname_reads_both_name_orders(name, expected):
+    assert S.surname(name) == expected
+
+
 def test_title_match_refuses_contradicting_years_between_published_records(wiki, monkeypatch):
     _sources(monkeypatch, pubmed=[
         _pm("1", title="Annual review", authors=["Smith J"], year=2018),

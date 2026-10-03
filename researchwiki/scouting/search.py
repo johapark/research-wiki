@@ -57,15 +57,36 @@ _NCT_RE = re.compile(r"\bNCT\d{8}\b", re.IGNORECASE)
 
 # ---------- same work, by title ----------
 
-def _name_tokens(name: str) -> frozenset[str]:
-    """Name tokens to compare first authors across formats.
+#: PubMed's initials block: `AV`, `A V`, `A.V.` — never a surname.
+_INITIALS_RE = re.compile(r"(?:[A-Z]\.?\s*){1,4}")
+_NAME_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv"})
 
-    PubMed writes `Anzalone AV`, arXiv `Andrew V. Anzalone`, a wiki page
-    either. A shared token of two or more letters is the surname in practice;
-    single letters are initials, and `et al.` identifies nobody.
+
+def surname(name: str) -> str:
+    """The first author's surname, normalized, from either name order.
+
+    PubMed writes `Smith AV` (surname, then an initials block); arXiv,
+    Europe PMC and wiki pages write `Andrew V. Smith` or `Andrew V Smith`. The
+    initials block is recognised by shape — capitals only, at most four,
+    optionally dotted — so `Smith AV` gives `smith` and `Andrew V Smith` gives
+    `smith`. A multi-word surname compares on its last word in both orders
+    (`van der Berg JM` and `Jan M van der Berg` both give `berg`); a
+    hyphenated one stays whole. Comparing every name token instead let a shared `av` (or a shared
+    given name) pass two different people as one. A mononym (`DeepSeek-AI`) is
+    its own surname; `et al.`, `Jr` and an empty name give "".
     """
-    toks = re.findall(r"[a-z0-9]+", strip_diacritics(name or "").lower())
-    return frozenset(t for t in toks if len(t) >= 2 and t not in UNUSABLE_SURNAMES)
+    toks = [t for t in (name or "").replace(",", " ").split()
+            if t.lower().strip(".") not in _NAME_SUFFIXES]
+    if not toks:
+        return ""
+    if len(toks) >= 2 and _INITIALS_RE.fullmatch(toks[-1]):
+        raw = toks[-2]             # `Smith AV`; `van der Berg JM` -> `Berg`
+    elif toks[-1].lower().strip(".") == "al" and len(toks) >= 3:
+        raw = toks[-3]             # `Guohui Chuai et al.`
+    else:
+        raw = toks[-1]
+    norm = re.sub(r"[^a-z0-9]", "", strip_diacritics(raw).lower())
+    return "" if norm in UNUSABLE_SURNAMES else norm
 
 
 @dataclass(frozen=True)
@@ -73,9 +94,10 @@ class WorkSig:
     """What a title-only match must agree on before it counts as one work."""
 
     dois: frozenset[str]
-    first_author: frozenset[str]
+    first_author: str               # normalized surname; "" when unknown
     year: int | None
     preprint: bool
+    pmids: frozenset[str] = frozenset()
 
 
 def same_work_by_title(a: WorkSig, b: WorkSig) -> bool:
@@ -83,16 +105,22 @@ def same_work_by_title(a: WorkSig, b: WorkSig) -> bool:
 
     A title is not an identity — "Editorial", "Correction", "Reply" and many
     real titles recur across unrelated papers — so a title match must be
-    corroborated by the first author and is refused on any contradiction:
+    corroborated by the first author's surname and is refused on any
+    contradiction:
 
-    - the first authors share no name token, or either is unknown;
+    - the surnames differ, or either is unknown;
+    - both sides have a PMID and they differ — PubMed indexes a work once;
     - both sides carry a DOI of the same kind (preprint or published) and
       they differ: a preprint and its journal version legitimately have two
       DOIs, two journal articles with one title are two papers;
     - the years differ by more than `YEAR_TOLERANCE` and neither side is a
       preprint (a journal version can follow its preprint by years).
+
+    Wiki pages record no PMID, so against a page the surname and DOI carry it.
     """
-    if not (a.first_author & b.first_author):
+    if not a.first_author or a.first_author != b.first_author:
+        return False
+    if a.pmids and b.pmids and not (a.pmids & b.pmids):
         return False
     if any(da != db and is_preprint_doi(da) == is_preprint_doi(db)
            for da in a.dois for db in b.dois):
@@ -180,10 +208,11 @@ class Lead:
         dois = frozenset(self.dois())
         return WorkSig(
             dois=dois,
-            first_author=_name_tokens(self.authors[0]) if self.authors else frozenset(),
+            first_author=surname(self.authors[0]) if self.authors else "",
             year=self.year,
             preprint=bool(set(self.sources) & _PREPRINT_SOURCES)
             or any(is_preprint_doi(d) for d in dois),
+            pmids=frozenset({self.ids["pmid"]}) if self.ids.get("pmid") else frozenset(),
         )
 
     def to_dict(self) -> dict:
@@ -358,7 +387,7 @@ def page_work_sig(page: Page) -> WorkSig:
         first = str(authors[0]) if authors else ""
     else:
         first = re.split(r"[;,]", str(authors or ""), maxsplit=1)[0]
-    return WorkSig(frozenset(dois), _name_tokens(first), R._year(page) or None,
+    return WorkSig(frozenset(dois), surname(first), R._year(page) or None,
                    any(is_preprint_doi(d) for d in dois))
 
 
