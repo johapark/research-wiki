@@ -36,9 +36,11 @@ from dataclasses import dataclass, field
 
 from ..fsatomic import read_json, write_json_atomic
 from ..log import log
+from ..metadata_sanity import UNUSABLE_SURNAMES, YEAR_TOLERANCE, is_preprint_doi
 from ..paths import web_cache_dir
 from ..providers import arxiv, clinicaltrials, europepmc, pubmed
 from ..providers._http import ProviderRequestRejected, StructuredProviderUnavailable
+from ..stems import strip_diacritics
 from ..wiki import Page, read_pages
 from . import recent as R
 
@@ -49,7 +51,55 @@ DEFAULT_SOURCES = ("pubmed", "arxiv", "biorxiv", "medrxiv")
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 PREPRINT_DOI_PREFIXES = ("10.1101/", "10.64898/")
+_PREPRINT_SOURCES = frozenset({"arxiv", "biorxiv", "medrxiv"})
 _NCT_RE = re.compile(r"\bNCT\d{8}\b", re.IGNORECASE)
+
+
+# ---------- same work, by title ----------
+
+def _name_tokens(name: str) -> frozenset[str]:
+    """Name tokens to compare first authors across formats.
+
+    PubMed writes `Anzalone AV`, arXiv `Andrew V. Anzalone`, a wiki page
+    either. A shared token of two or more letters is the surname in practice;
+    single letters are initials, and `et al.` identifies nobody.
+    """
+    toks = re.findall(r"[a-z0-9]+", strip_diacritics(name or "").lower())
+    return frozenset(t for t in toks if len(t) >= 2 and t not in UNUSABLE_SURNAMES)
+
+
+@dataclass(frozen=True)
+class WorkSig:
+    """What a title-only match must agree on before it counts as one work."""
+
+    dois: frozenset[str]
+    first_author: frozenset[str]
+    year: int | None
+    preprint: bool
+
+
+def same_work_by_title(a: WorkSig, b: WorkSig) -> bool:
+    """Whether two records sharing a normalized title describe one work.
+
+    A title is not an identity — "Editorial", "Correction", "Reply" and many
+    real titles recur across unrelated papers — so a title match must be
+    corroborated by the first author and is refused on any contradiction:
+
+    - the first authors share no name token, or either is unknown;
+    - both sides carry a DOI of the same kind (preprint or published) and
+      they differ: a preprint and its journal version legitimately have two
+      DOIs, two journal articles with one title are two papers;
+    - the years differ by more than `YEAR_TOLERANCE` and neither side is a
+      preprint (a journal version can follow its preprint by years).
+    """
+    if not (a.first_author & b.first_author):
+        return False
+    if any(da != db and is_preprint_doi(da) == is_preprint_doi(db)
+           for da in a.dois for db in b.dois):
+        return False
+    if a.year and b.year and not (a.preprint or b.preprint):
+        return abs(a.year - b.year) <= YEAR_TOLERANCE
+    return True
 
 
 # ---------- leads ----------
@@ -125,6 +175,16 @@ class Lead:
 
     def dois(self) -> set[str]:
         return {k for k in self.alias_keys() if k.startswith("10.")}
+
+    def work_sig(self) -> WorkSig:
+        dois = frozenset(self.dois())
+        return WorkSig(
+            dois=dois,
+            first_author=_name_tokens(self.authors[0]) if self.authors else frozenset(),
+            year=self.year,
+            preprint=bool(set(self.sources) & _PREPRINT_SOURCES)
+            or any(is_preprint_doi(d) for d in dois),
+        )
 
     def to_dict(self) -> dict:
         out = {
@@ -256,15 +316,18 @@ def gather(query: str, sources: list[str], *, limit: int, since: _dt.date | None
 def arxiv_id_text(value) -> str:
     """An `arxiv_id:` frontmatter value as the identifier it was written as.
 
-    Unquoted, `arxiv_id: 2003.02320` parses as the float `2003.0232`: YAML
-    drops the trailing zero, and the alias would match nothing. New-style ids
-    have a fixed-width sequence number — five digits from 1501 (January
-    2015), four before — so the zeros are recoverable by padding. `promote`
+    Unquoted, `arxiv_id: 2003.02320` parses as the float `2003.0232` and
+    `0704.0001` as `704.0001`: YAML drops trailing zeros and, for 2007-2009
+    ids, the leading one, and the alias would match nothing. New-style ids
+    are fixed-width — a four-digit YYMM, then a sequence number of five digits
+    from 1501 (January 2015) and four before — so both are recoverable. `promote`
     quotes the value for exactly this reason; older and hand-written pages
     don't always.
     """
     if isinstance(value, float):
         yymm, _, seq = repr(value).partition(".")
+        # 0704.0001 parses as 704.0001: the year's leading zero goes too.
+        yymm = yymm.zfill(4)
         width = 5 if yymm >= "1501" else 4
         return f"{yymm}.{seq.ljust(width, '0')}"
     return str(value or "").strip().lower()
@@ -284,21 +347,40 @@ def wiki_doi_aliases(pages: list[Page]) -> set[str]:
     return dois
 
 
+def page_work_sig(page: Page) -> WorkSig:
+    dois = set()
+    if (doi := R._doi(page)):
+        dois.add(doi)
+    if (arxiv_id := arxiv_id_text(page.fm.get("arxiv_id"))):
+        dois.add(f"10.48550/arxiv.{arxiv_id}")
+    authors = page.fm.get("authors")
+    if isinstance(authors, list):
+        first = str(authors[0]) if authors else ""
+    else:
+        first = re.split(r"[;,]", str(authors or ""), maxsplit=1)[0]
+    return WorkSig(frozenset(dois), _name_tokens(first), R._year(page) or None,
+                   any(is_preprint_doi(d) for d in dois))
+
+
 def merge(leads: list[Lead]) -> list[Lead]:
-    """One lead per work: shared identifier first, then normalized title.
+    """One lead per work: a shared identifier, or a corroborated title.
 
     The first lead seen (source order) keeps its key and title; later ones add
     their sources and fill identifiers it lacked. A journal paper on PubMed and
-    its arXiv preprint merge through the arXiv entry's `journal_doi`.
+    its arXiv preprint merge through the arXiv entry's `journal_doi`; without
+    one, through the same normalized title *and* `same_work_by_title`. Trials
+    always carry an NCT id, so they merge on it alone.
     """
     out: list[Lead] = []
     by_key: dict[str, Lead] = {}
-    by_title: dict[tuple[str, str], Lead] = {}
+    by_title: dict[str, list[Lead]] = {}
     for lead in leads:
-        title_key = (lead.kind, R._norm_title(lead.title))
+        title = R._norm_title(lead.title) if lead.kind == "paper" else ""
         match = next((by_key[k] for k in lead.alias_keys() if k in by_key), None)
-        if match is None and title_key[1]:
-            match = by_title.get(title_key)
+        if match is None and title:
+            sig = lead.work_sig()
+            match = next((m for m in by_title.get(title, ())
+                          if same_work_by_title(sig, m.work_sig())), None)
         if match is None:
             out.append(lead)
             match = lead
@@ -316,29 +398,45 @@ def merge(leads: list[Lead]) -> list[Lead]:
             match.year = match.year or lead.year
         for k in match.alias_keys():
             by_key[k] = match
-        if title_key[1]:
-            by_title[title_key] = match
+        if title:
+            same = by_title.setdefault(title, [])
+            if not any(m is match for m in same):
+                same.append(match)
     return out
 
 
 @dataclass
 class WikiIndex:
     dois: set[str]
-    titles: set[str]
+    titles: dict[str, list[WorkSig]]
     ncts: set[str]
 
     @classmethod
     def from_pages(cls, pages: list[Page]) -> "WikiIndex":
         dois = wiki_doi_aliases(pages)
-        titles = {R._norm_title(str(p.fm.get("title") or "")) for p in R._paper_pages(pages)} - {""}
+        titles: dict[str, list[WorkSig]] = {}
+        for p in R._paper_pages(pages):
+            title = R._norm_title(str(p.fm.get("title") or ""))
+            if title:
+                titles.setdefault(title, []).append(page_work_sig(p))
         ncts = {m.lower() for p in pages
                 for m in _NCT_RE.findall(p.str_field("document_id"))}
         return cls(dois, titles, ncts)
 
     def holds(self, lead: Lead) -> bool:
+        """Held under a shared DOI, or a title the page's own record corroborates.
+
+        The title path catches a preprint whose journal version the wiki holds
+        under another DOI; `same_work_by_title` keeps it from also hiding an
+        unrelated paper that happens to share the title.
+        """
         if lead.kind == "trial":
             return (lead.ids.get("nct_id") or "").lower() in self.ncts
-        return bool(lead.dois() & self.dois) or R._norm_title(lead.title) in self.titles
+        if lead.dois() & self.dois:
+            return True
+        sig = lead.work_sig()
+        return any(same_work_by_title(sig, page)
+                   for page in self.titles.get(R._norm_title(lead.title), ()))
 
 
 def filter_leads(leads: list[Lead], *, wiki: WikiIndex, declined: set[str],

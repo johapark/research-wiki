@@ -142,7 +142,17 @@ def fetch(keys: list[str], *, dry_run: bool = False) -> dict:
     inbox = inbox_dir()
     for raw in keys:
         try:
-            p = plan(raw)
+            try:
+                key = normalize_key(raw)
+            except DeclineKeyError as exc:
+                report["skipped"].append({"key": raw, "reason": str(exc)})
+                continue
+            # Before `plan`: it may ask bioRxiv or Europe PMC, and an outage
+            # there would stop the run over a paper it was never going to fetch.
+            if key in wiki_dois:
+                report["skipped"].append({"key": key, "reason": "already in the wiki"})
+                continue
+            p = plan(key)
             if p.refused:
                 report["skipped"].append({"key": p.key, "reason": p.refused})
                 continue

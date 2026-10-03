@@ -41,8 +41,11 @@ researchwiki scout search --query fetch                          # a query that 
 
 - `--limit N` is per source (default 20, max 100). Source query syntax passes
   through: PubMed field tags (`crispr[tiab]`), arXiv prefixes (`ti:`, `cat:`).
-- Results already in the wiki (DOI, journal DOI, PMID, normalized title, or a
-  reference page's `document_id: NCT…`) and declined ones are dropped.
+- Results already in the wiki (DOI, journal DOI, retained `arxiv_id`, or a
+  reference page's `document_id: NCT…`) and declined ones are dropped. A
+  matching title counts only when the first author agrees and nothing
+  contradicts it (two different journal DOIs, years far apart), so two
+  papers that are both called "Editorial" stay distinct.
 - Leads near a synthesis/idea page's *What would update this page* bullet
   appear first, exactly as in `scout recent`. A match means *on-topic*, not
   *confirmed update* — judge it yourself.

@@ -49,14 +49,14 @@ def _page(root, rel, **fm):
 
 def _pm(pmid, doi=None, title="t", abstract="pubmed abstract", **kw):
     return {"pmid": pmid, "doi": doi, "pmcid": kw.get("pmcid"), "title": title,
-            "authors": ["A B"], "journal": "J", "pub_date": kw.get("date", "2026-09-01"),
-            "year": 2026, "pubtypes": [], "retracted": kw.get("retracted", False),
-            "abstract": abstract}
+            "authors": kw.get("authors", ["Baker A"]), "journal": "J",
+            "pub_date": kw.get("date", "2026-09-01"), "year": kw.get("year", 2026),
+            "pubtypes": [], "retracted": kw.get("retracted", False), "abstract": abstract}
 
 
-def _ax(aid, title="t", journal_doi=None, abstract="arxiv abstract"):
+def _ax(aid, title="t", journal_doi=None, abstract="arxiv abstract", authors=("Carol Dunn",)):
     return {"arxiv_id": aid, "version": "1", "doi": f"10.48550/arxiv.{aid}", "title": title,
-            "authors": ["C D"], "published": "2026-09-02", "updated": "2026-09-02",
+            "authors": list(authors), "published": "2026-09-02", "updated": "2026-09-02",
             "year": 2026, "primary_category": "q-bio.GN", "journal_doi": journal_doi,
             "journal_ref": "", "abstract": abstract}
 
@@ -87,10 +87,45 @@ def test_journal_paper_and_its_arxiv_preprint_merge(wiki, monkeypatch):
 
 
 def test_title_match_merges_records_without_shared_ids(wiki, monkeypatch):
-    _sources(monkeypatch, pubmed=[_pm("1", title="Prime Editing: A Review.")],
+    """PubMed `Dunn C` and arXiv `Carol Dunn` are one first author."""
+    _sources(monkeypatch, pubmed=[_pm("1", title="Prime Editing: A Review.", authors=["Dunn C"])],
              arxiv=[_ax("2401.00002", title="prime editing a review")])
     snap = S.run("q", today=TODAY)
     assert len(snap["leads"]) == 1
+
+
+def test_a_shared_title_alone_does_not_merge_distinct_papers(wiki, monkeypatch):
+    _sources(monkeypatch, pubmed=[
+        _pm("1", doi="10.1234/ed-one", title="Editorial", authors=["Smith J"]),
+        _pm("2", doi="10.5678/ed-two", title="Editorial", authors=["Lee K"], year=2025),
+        _pm("3", doi="10.9012/ed-three", title="Editorial", authors=["Smith J"]),
+    ])
+    snap = S.run("q", today=TODAY)
+    assert sorted(r["key"] for r in snap["leads"]) == [
+        "10.1234/ed-one", "10.5678/ed-two", "10.9012/ed-three"]
+
+
+def test_title_match_refuses_contradicting_years_between_published_records(wiki, monkeypatch):
+    _sources(monkeypatch, pubmed=[
+        _pm("1", title="Annual review", authors=["Smith J"], year=2018),
+        _pm("2", title="Annual review", authors=["Smith J"], year=2026),
+    ])
+    assert len(S.run("q", today=TODAY)["leads"]) == 2
+
+
+def test_wiki_title_hides_only_the_corroborated_work(wiki, monkeypatch):
+    _page(wiki, "cgt/smith-2026-editorial", title="Editorial", type="paper",
+          doi="10.1234/held", authors="John Smith, Ann Lee", year=2026)
+    _page(wiki, "cgt/dunn-2026-prime", title="Prime editing a review", type="paper",
+          doi="10.1038/journal", authors="Carol Dunn", year=2026)
+    _sources(monkeypatch,
+             pubmed=[_pm("2", doi="10.5678/other", title="Editorial", authors=["Lee K"])],
+             arxiv=[_ax("2401.00002", title="Prime Editing: A Review")])
+    snap = S.run("q", today=TODAY)
+    # A different journal DOI by a different author is a different paper; the
+    # arXiv preprint of the held journal article is the same one.
+    assert [r["key"] for r in snap["leads"]] == ["10.5678/other"]
+    assert snap["counts"]["in_wiki"] == 1
 
 
 def test_journal_page_retaining_arxiv_id_is_filtered(wiki, monkeypatch):
@@ -118,6 +153,8 @@ def test_unquoted_arxiv_id_still_counts_as_held(wiki, monkeypatch):
     (2510.102, "2510.10200"),      # two lost
     (2509.06917, "2509.06917"),    # nothing lost
     (1412.698, "1412.6980"),       # 4-digit era
+    (704.0001, "0704.0001"),       # leading zero of a 2007 id lost too
+    (912.1, "0912.1000"),          # leading and trailing
     ("2003.02320", "2003.02320"),  # quoted: verbatim
     ("hep-th/9901001", "hep-th/9901001"),
     (None, ""),
@@ -127,7 +164,8 @@ def test_arxiv_id_text_restores_yaml_float_ids(value, expected):
 
 
 def test_in_wiki_and_declined_leads_never_resurface(wiki, monkeypatch):
-    _page(wiki, "cgt/a-2026-x", title="Held Paper", type="paper", doi="10.1234/held")
+    _page(wiki, "cgt/a-2026-x", title="Held Paper", type="paper", doi="10.1234/held",
+          authors="Ann Baker", year=2026)
     _page(wiki, "references/nct-x", title="Protocol", type="protocol",
           document_id="NCT01234567")
     R.add_decline("pmid:7", "off-topic", source="search")
@@ -348,6 +386,21 @@ def test_fetch_skips_arxiv_id_retained_by_journal_page(wiki, downloads):
     assert report["skipped"] == [{"key": "10.48550/arxiv.2401.00002",
                                   "reason": "already in the wiki"}]
     assert report["fetched"] == [] and downloads == []
+
+
+def test_fetch_skips_a_held_preprint_without_asking_any_provider(wiki, downloads, monkeypatch):
+    """An outage must not stop the run over a paper it was never going to fetch."""
+    _page(wiki, "cgt/w-2025-x", title="T", type="paper", doi="10.1101/2025.11.03.686307")
+
+    def offline(*a, **k):
+        raise StructuredProviderUnavailable("biorxiv API unavailable (offline)")
+    monkeypatch.setattr(F.biorxiv, "lookup", offline)
+    monkeypatch.setattr(F.europepmc, "oa_status", offline)
+    report = F.fetch(["10.1101/2025.11.03.686307", "arxiv:2401.00001"])
+    assert report["skipped"] == [{"key": "10.1101/2025.11.03.686307",
+                                  "reason": "already in the wiki"}]
+    assert report["stopped_on"] is None
+    assert [e["key"] for e in report["fetched"]] == ["10.48550/arxiv.2401.00001"]
 
 
 def test_fetch_never_overwrites_an_inbox_file(wiki, downloads):
