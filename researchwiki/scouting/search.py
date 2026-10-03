@@ -17,8 +17,8 @@ prompt — that takes the ingested PDF.
 
 **Sources fail independently.** `errors.py` rule 3 says a loop over items
 stops at the first `EnvironmentFailure`, because failures across items are
-correlated. Four sources are four unrelated services: arXiv shedding load
-says nothing about PubMed, so one unavailable source is recorded and the rest
+correlated. These source queries run separately, including one Europe PMC
+query per preprint server, so an unavailable source is recorded and the rest
 still answer. The CLI exits 2 after printing them.
 
 **Ranking reuses `scout recent`'s scorer** (`recent.score_candidates`): fit to
@@ -214,32 +214,19 @@ def from_trial(r: dict) -> Lead:
 
 # ---------- per-source runs ----------
 
-def _run_source(group: str, query: str, *, servers: list[str], limit: int,
+def _run_source(source: str, query: str, *, limit: int,
                 since: _dt.date | None, max_age_days: float) -> list[Lead]:
-    if group == "pubmed":
+    if source == "pubmed":
         return [from_pubmed(r) for r in pubmed.search(query, limit=limit, since=since,
                                                       max_age_days=max_age_days)]
-    if group == "arxiv":
+    if source == "arxiv":
         return [from_arxiv(r) for r in arxiv.search(query, limit=limit, since=since,
                                                     max_age_days=max_age_days)]
-    if group == "preprints":
+    if source in ("biorxiv", "medrxiv"):
         return [from_preprint(r) for r in europepmc.search_preprints(
-            query, servers=servers, limit=limit, since=since, max_age_days=max_age_days)]
+            query, servers=[source], limit=limit, since=since, max_age_days=max_age_days)]
     return [from_trial(r) for r in clinicaltrials.search(query, limit=limit, since=since,
                                                          max_age_days=max_age_days)]
-
-
-def _groups(sources: list[str]) -> list[tuple[str, list[str]]]:
-    """bioRxiv and medRxiv share one Europe PMC query."""
-    out: list[tuple[str, list[str]]] = []
-    servers = [s for s in sources if s in ("biorxiv", "medrxiv")]
-    for s in sources:
-        if s in ("biorxiv", "medrxiv"):
-            if s == servers[0]:
-                out.append(("preprints", servers))
-        else:
-            out.append((s, [s]))
-    return out
 
 
 def gather(query: str, sources: list[str], *, limit: int, since: _dt.date | None,
@@ -247,29 +234,38 @@ def gather(query: str, sources: list[str], *, limit: int, since: _dt.date | None
     """Every requested source's leads, plus a per-source status map."""
     leads: list[Lead] = []
     status: dict[str, dict] = {}
-    for group, names in _groups(sources):
+    for source in sources:
         try:
-            got = _run_source(group, query, servers=names, limit=limit, since=since,
+            got = _run_source(source, query, limit=limit, since=since,
                               max_age_days=max_age_days)
         except ProviderRequestRejected as exc:
-            for n in names:
-                status[n] = {"status": "rejected", "returned": 0, "error": str(exc)}
+            status[source] = {"status": "rejected", "returned": 0, "error": str(exc)}
             log(f"WARN: {exc}", tag=LOG_TAG)
             continue
         except StructuredProviderUnavailable as exc:
-            for n in names:
-                status[n] = {"status": "unavailable", "returned": 0, "error": str(exc)}
+            status[source] = {"status": "unavailable", "returned": 0, "error": str(exc)}
             log(f"WARN: {exc}", tag=LOG_TAG)
             continue
-        for n in names:
-            count = (sum(1 for lead in got if n in lead.sources)
-                     if group == "preprints" else len(got))
-            status[n] = {"status": "ok", "returned": count, "error": None}
+        status[source] = {"status": "ok", "returned": len(got), "error": None}
         leads.extend(got)
     return leads, status
 
 
 # ---------- merge and filter ----------
+
+def wiki_doi_aliases(pages: list[Page]) -> set[str]:
+    """DOIs already held by the wiki, including a paper's retained arXiv ID.
+
+    A preprint page may later switch its `doi` to the journal DOI while keeping
+    `arxiv_id`. Both versions must still count as the same held paper.
+    """
+    dois = {d for p in pages if (d := R._doi(p))}
+    for page in R._paper_pages(pages):
+        arxiv_id = page.str_field("arxiv_id").strip().lower()
+        if arxiv_id:
+            dois.add(f"10.48550/arxiv.{arxiv_id}")
+    return dois
+
 
 def merge(leads: list[Lead]) -> list[Lead]:
     """One lead per work: shared identifier first, then normalized title.
@@ -316,7 +312,7 @@ class WikiIndex:
 
     @classmethod
     def from_pages(cls, pages: list[Page]) -> "WikiIndex":
-        dois = {d for p in pages if (d := R._doi(p))}
+        dois = wiki_doi_aliases(pages)
         titles = {R._norm_title(str(p.fm.get("title") or "")) for p in R._paper_pages(pages)} - {""}
         ncts = {m.lower() for p in pages
                 for m in _NCT_RE.findall(p.str_field("document_id"))}

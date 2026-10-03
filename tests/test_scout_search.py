@@ -93,6 +93,15 @@ def test_title_match_merges_records_without_shared_ids(wiki, monkeypatch):
     assert len(snap["leads"]) == 1
 
 
+def test_journal_page_retaining_arxiv_id_is_filtered(wiki, monkeypatch):
+    _page(wiki, "cgt/a-2026-x", title="Published title", type="paper",
+          doi="10.1234/journal", arxiv_id="2401.00002")
+    _sources(monkeypatch, arxiv=[_ax("2401.00002", title="Different preprint title")])
+    snap = S.run("q", sources=["arxiv"], today=TODAY)
+    assert snap["leads"] == []
+    assert snap["counts"]["in_wiki"] == 1
+
+
 def test_in_wiki_and_declined_leads_never_resurface(wiki, monkeypatch):
     _page(wiki, "cgt/a-2026-x", title="Held Paper", type="paper", doi="10.1234/held")
     _page(wiki, "references/nct-x", title="Protocol", type="protocol",
@@ -187,12 +196,35 @@ def test_rejected_query_exits_1(wiki, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["sources"]["clinicaltrials"]["status"] == "rejected"
 
 
-def test_biorxiv_and_medrxiv_share_one_query(wiki, monkeypatch):
+def test_biorxiv_and_medrxiv_each_get_the_full_source_limit(wiki, monkeypatch):
     calls = []
-    monkeypatch.setattr(S.europepmc, "search_preprints",
-                        lambda q, **kw: calls.append(kw["servers"]) or [])
-    S.gather("q", ["biorxiv", "medrxiv"], limit=5, since=None, max_age_days=1)
-    assert calls == [["biorxiv", "medrxiv"]]
+
+    def preprints(query, *, servers, limit, **kw):
+        [server] = servers
+        calls.append((server, limit))
+        return [{"doi": f"10.1101/{server}-{i}", "server": server,
+                 "title": f"{server} result {i}"} for i in range(limit)]
+
+    monkeypatch.setattr(S.europepmc, "search_preprints", preprints)
+    leads, status = S.gather("q", ["biorxiv", "medrxiv"], limit=3,
+                             since=None, max_age_days=1)
+    assert calls == [("biorxiv", 3), ("medrxiv", 3)]
+    assert len(leads) == 6
+    assert status["biorxiv"]["returned"] == status["medrxiv"]["returned"] == 3
+
+
+def test_preprint_source_failure_keeps_the_other_source(wiki, monkeypatch):
+    def preprints(query, *, servers, **kw):
+        if servers == ["biorxiv"]:
+            raise StructuredProviderUnavailable("Europe PMC bioRxiv query failed")
+        return [{"doi": "10.1101/med-1", "server": "medrxiv", "title": "Med lead"}]
+
+    monkeypatch.setattr(S.europepmc, "search_preprints", preprints)
+    leads, status = S.gather("q", ["biorxiv", "medrxiv"], limit=3,
+                             since=None, max_age_days=1)
+    assert [lead.title for lead in leads] == ["Med lead"]
+    assert status["biorxiv"]["status"] == "unavailable"
+    assert status["medrxiv"] == {"status": "ok", "returned": 1, "error": None}
 
 
 @pytest.mark.parametrize("argv", [[], ["q", "--limit", "0"], ["q", "--since", "nope"],
@@ -283,6 +315,15 @@ def test_fetch_refuses_closed_access_trials_and_ingested_papers(wiki, downloads,
     assert "trial" in reasons["nct:nct01234567"]
     assert reasons["10.48550/arxiv.2401.00001"] == "already in the wiki"
     assert downloads == []
+
+
+def test_fetch_skips_arxiv_id_retained_by_journal_page(wiki, downloads):
+    _page(wiki, "cgt/a-2026-x", title="Published title", type="paper",
+          doi="10.1234/journal", arxiv_id="2401.00002")
+    report = F.fetch(["arxiv:2401.00002"])
+    assert report["skipped"] == [{"key": "10.48550/arxiv.2401.00002",
+                                  "reason": "already in the wiki"}]
+    assert report["fetched"] == [] and downloads == []
 
 
 def test_fetch_never_overwrites_an_inbox_file(wiki, downloads):

@@ -33,8 +33,9 @@ from ..log import log
 from ..paths import inbox_dir
 from ..providers import biorxiv, europepmc
 from ..providers._http import DownloadRefused, curl_download
-from ..wiki import read_wiki_dois
+from ..wiki import read_pages
 from .recent import DeclineKeyError, normalize_key
+from .search import wiki_doi_aliases
 
 LOG_TAG = "scout-fetch"
 MAX_BYTES = 100 * 1024 * 1024
@@ -137,7 +138,7 @@ def fetch(keys: list[str], *, dry_run: bool = False) -> dict:
     """
     report: dict = {"fetched": [], "already_present": [], "skipped": [], "manual": [],
                     "stopped_on": None, "error": None, "dry_run": dry_run}
-    wiki_dois = set(read_wiki_dois())
+    wiki_dois = wiki_doi_aliases(read_pages())
     inbox = inbox_dir()
     for raw in keys:
         try:
