@@ -102,6 +102,30 @@ def test_journal_page_retaining_arxiv_id_is_filtered(wiki, monkeypatch):
     assert snap["counts"]["in_wiki"] == 1
 
 
+def test_unquoted_arxiv_id_still_counts_as_held(wiki, monkeypatch):
+    """`arxiv_id: 2003.02320` unquoted is the float 2003.0232; the trailing
+    zero must come back or the preprint resurfaces and fetch re-downloads it."""
+    (wiki / "wiki" / "cgt" / "a-2020-x.md").write_text(
+        "---\ntitle: Published title\ntype: paper\ndoi: 10.1234/journal\n"
+        "arxiv_id: 2003.02320\n---\n\n## Summary\n\nx\n", encoding="utf-8")
+    _sources(monkeypatch, arxiv=[_ax("2003.02320", title="Different preprint title")])
+    snap = S.run("q", sources=["arxiv"], today=TODAY)
+    assert snap["leads"] == [] and snap["counts"]["in_wiki"] == 1
+
+
+@pytest.mark.parametrize(("value", "expected"), [
+    (2003.0232, "2003.02320"),     # 5-digit era, one trailing zero lost
+    (2510.102, "2510.10200"),      # two lost
+    (2509.06917, "2509.06917"),    # nothing lost
+    (1412.698, "1412.6980"),       # 4-digit era
+    ("2003.02320", "2003.02320"),  # quoted: verbatim
+    ("hep-th/9901001", "hep-th/9901001"),
+    (None, ""),
+])
+def test_arxiv_id_text_restores_yaml_float_ids(value, expected):
+    assert S.arxiv_id_text(value) == expected
+
+
 def test_in_wiki_and_declined_leads_never_resurface(wiki, monkeypatch):
     _page(wiki, "cgt/a-2026-x", title="Held Paper", type="paper", doi="10.1234/held")
     _page(wiki, "references/nct-x", title="Protocol", type="protocol",

@@ -253,6 +253,23 @@ def gather(query: str, sources: list[str], *, limit: int, since: _dt.date | None
 
 # ---------- merge and filter ----------
 
+def arxiv_id_text(value) -> str:
+    """An `arxiv_id:` frontmatter value as the identifier it was written as.
+
+    Unquoted, `arxiv_id: 2003.02320` parses as the float `2003.0232`: YAML
+    drops the trailing zero, and the alias would match nothing. New-style ids
+    have a fixed-width sequence number — five digits from 1501 (January
+    2015), four before — so the zeros are recoverable by padding. `promote`
+    quotes the value for exactly this reason; older and hand-written pages
+    don't always.
+    """
+    if isinstance(value, float):
+        yymm, _, seq = repr(value).partition(".")
+        width = 5 if yymm >= "1501" else 4
+        return f"{yymm}.{seq.ljust(width, '0')}"
+    return str(value or "").strip().lower()
+
+
 def wiki_doi_aliases(pages: list[Page]) -> set[str]:
     """DOIs already held by the wiki, including a paper's retained arXiv ID.
 
@@ -261,7 +278,7 @@ def wiki_doi_aliases(pages: list[Page]) -> set[str]:
     """
     dois = {d for p in pages if (d := R._doi(p))}
     for page in R._paper_pages(pages):
-        arxiv_id = page.str_field("arxiv_id").strip().lower()
+        arxiv_id = arxiv_id_text(page.fm.get("arxiv_id"))
         if arxiv_id:
             dois.add(f"10.48550/arxiv.{arxiv_id}")
     return dois
