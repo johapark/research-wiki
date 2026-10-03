@@ -48,8 +48,13 @@ def _page(root, rel, **fm):
 
 
 def _pm(pmid, doi=None, title="t", abstract="pubmed abstract", **kw):
+    """A PubMed record. Like the real provider, the surname is its own field:
+    `authors` is Vancouver display text (`Smith AV`), never parsed for it."""
+    authors = kw.get("authors", ["Baker A"])
     return {"pmid": pmid, "doi": doi, "pmcid": kw.get("pmcid"), "title": title,
-            "authors": kw.get("authors", ["Baker A"]), "journal": "J",
+            "authors": authors,
+            "first_author_surname": kw.get("surname", authors[0].split()[0] if authors else ""),
+            "journal": "J",
             "pub_date": kw.get("date", "2026-09-01"), "year": kw.get("year", 2026),
             "pubtypes": [], "retracted": kw.get("retracted", False), "abstract": abstract}
 
@@ -131,15 +136,42 @@ def test_wiki_page_sharing_only_a_given_name_does_not_hide_a_lead(wiki, monkeypa
 
 
 @pytest.mark.parametrize(("name", "expected"), [
-    ("Smith AV", "smith"), ("Andrew V. Smith", "smith"), ("Andrew V Smith", "smith"),
-    ("Dunn C", "dunn"), ("Carol Dunn", "dunn"),
-    ("van der Berg JM", "berg"), ("Jan M van der Berg", "berg"),
-    ("García-López A", "garcialopez"), ("Szałata A", "szalata"),
+    ("Alice Smith", "smith"), ("Andrew V. Smith", "smith"), ("Andrew V Smith", "smith"),
+    ("John LI", "li"),                       # an uppercase surname is not initials
+    ("Smith A V", "smith"), ("Smith A.V.", "smith"),  # stray spaced/dotted initials
+    ("Jan M van der Berg", "vanderberg"), ("Ana García-López", "garcialopez"),
     ("Guohui Chuai et al.", "chuai"), ("Smith J Jr", "smith"),
     ("DeepSeek-AI", "deepseekai"), ("et al.", ""), ("", ""),
 ])
-def test_surname_reads_both_name_orders(name, expected):
+def test_surname_reads_given_first_names(name, expected):
     assert S.surname(name) == expected
+
+
+def test_spaced_initials_still_match_the_given_first_spelling(wiki, monkeypatch):
+    """`Smith A V` once parsed as surname `a` and missed `Alice Smith`."""
+    _sources(monkeypatch,
+             pubmed=[_pm("1", title="Prime editing a review", authors=["Smith A V"])],
+             arxiv=[_ax("2401.00004", title="Prime Editing: A Review", authors=("Alice Smith",))])
+    assert len(S.run("q", today=TODAY)["leads"]) == 1
+
+
+def test_structured_surname_wins_over_the_display_string(wiki, monkeypatch):
+    """PubMed's `LastName` is authoritative: `Li J` is surname Li, and so is
+    arXiv's `John LI`, though the strings have opposite name order."""
+    _sources(monkeypatch,
+             pubmed=[_pm("1", title="Prime editing a review", authors=["Li J"], surname="Li")],
+             arxiv=[_ax("2401.00005", title="Prime Editing: A Review", authors=("John LI",))])
+    assert len(S.run("q", today=TODAY)["leads"]) == 1
+
+
+def test_doi_less_preprint_records_are_not_leads(wiki, monkeypatch):
+    _sources(monkeypatch, preprints=[
+        {"doi": None, "server": "biorxiv", "title": "No DOI", "authors": [], "abstract": ""},
+        {"doi": "10.1101/2026.01.01.1", "server": "biorxiv", "title": "Has DOI",
+         "authors": ["Ann Lee"], "abstract": ""},
+    ])
+    snap = S.run("q", sources=["biorxiv"], today=TODAY)
+    assert [r["key"] for r in snap["leads"]] == ["10.1101/2026.01.01.1"]
 
 
 def test_title_match_refuses_contradicting_years_between_published_records(wiki, monkeypatch):

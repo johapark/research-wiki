@@ -57,36 +57,50 @@ _NCT_RE = re.compile(r"\bNCT\d{8}\b", re.IGNORECASE)
 
 # ---------- same work, by title ----------
 
-#: PubMed's initials block: `AV`, `A V`, `A.V.` — never a surname.
-_INITIALS_RE = re.compile(r"(?:[A-Z]\.?\s*){1,4}")
 _NAME_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv"})
+#: Lowercase surname particles that belong to the surname in given-first order.
+_PARTICLES = frozenset({"van", "von", "der", "den", "de", "del", "della", "di", "da",
+                        "du", "la", "le", "ten", "ter", "dos", "das", "bin", "al"})
+#: A bare or dotted initial: `A`, `A.`, `A.V.`. Never the end of a given-first
+#: name. An undotted run (`AV`, `LI`) is deliberately *not* one: `John LI` is a
+#: surname, and `Smith AV` is a format no free-text source here produces.
+_INITIAL_RE = re.compile(r"[A-Z]\.?|(?:[A-Za-z]\.){2,4}")
+
+
+def normalize_surname(raw: str) -> str:
+    """A surname as recorded (`van der Berg`, `García-López`) → `vanderberg`."""
+    norm = re.sub(r"[^a-z0-9]", "", strip_diacritics(raw or "").lower())
+    return "" if norm in UNUSABLE_SURNAMES else norm
 
 
 def surname(name: str) -> str:
-    """The first author's surname, normalized, from either name order.
+    """The surname of a given-first name: `Andrew V. Smith`, `John LI`.
 
-    PubMed writes `Smith AV` (surname, then an initials block); arXiv,
-    Europe PMC and wiki pages write `Andrew V. Smith` or `Andrew V Smith`. The
-    initials block is recognised by shape — capitals only, at most four,
-    optionally dotted — so `Smith AV` gives `smith` and `Andrew V Smith` gives
-    `smith`. A multi-word surname compares on its last word in both orders
-    (`van der Berg JM` and `Jan M van der Berg` both give `berg`); a
-    hyphenated one stays whole. Comparing every name token instead let a shared `av` (or a shared
-    given name) pass two different people as one. A mononym (`DeepSeek-AI`) is
-    its own surname; `et al.`, `Jr` and an empty name give "".
+    Only arXiv and wiki pages reach this — both write the given name first.
+    PubMed and Europe PMC supply `LastName` as its own field, because name
+    order cannot be read from a string: `Smith AV` (surname, initials) and
+    `John LI` (given name, uppercase surname) have the same shape.
+
+    Trailing bare or dotted initials are dropped first, so a stray Vancouver
+    string with spaced initials (`Smith A V`) still yields `smith`; so are
+    `et al.` and `Jr`. Lowercase particles before the last word belong to the
+    surname (`Jan M van der Berg` → `vanderberg`). Any disagreement this
+    leaves (an unhyphenated double surname, say) can only fail a title match,
+    which shows a possible duplicate rather than hiding a paper.
     """
-    toks = [t for t in (name or "").replace(",", " ").split()
-            if t.lower().strip(".") not in _NAME_SUFFIXES]
+    toks = (name or "").replace(",", " ").split()
+    if len(toks) >= 2 and toks[-2].lower() == "et" and toks[-1].lower().strip(".") == "al":
+        toks = toks[:-2]
+    while toks and toks[-1].lower().strip(".") in _NAME_SUFFIXES:
+        toks.pop()
+    while len(toks) >= 2 and _INITIAL_RE.fullmatch(toks[-1]):
+        toks.pop()
     if not toks:
         return ""
-    if len(toks) >= 2 and _INITIALS_RE.fullmatch(toks[-1]):
-        raw = toks[-2]             # `Smith AV`; `van der Berg JM` -> `Berg`
-    elif toks[-1].lower().strip(".") == "al" and len(toks) >= 3:
-        raw = toks[-3]             # `Guohui Chuai et al.`
-    else:
-        raw = toks[-1]
-    norm = re.sub(r"[^a-z0-9]", "", strip_diacritics(raw).lower())
-    return "" if norm in UNUSABLE_SURNAMES else norm
+    start = len(toks) - 1
+    while start > 1 and toks[start - 1] in _PARTICLES:
+        start -= 1
+    return normalize_surname("".join(toks[start:]))
 
 
 @dataclass(frozen=True)
@@ -151,6 +165,9 @@ class Lead:
     #: Verbatim abstract (papers). `score_text` is the embedding input and is
     #: not serialized; for a trial it is title + conditions + interventions.
     abstract: str = field(default="", repr=False)
+    #: The first author's surname as the source recorded it, when it records
+    #: one separately (PubMed, Europe PMC). Otherwise parsed from `authors[0]`.
+    first_surname: str = field(default="", repr=False)
     score_text: str = field(default="", repr=False)
 
     @property
@@ -208,7 +225,8 @@ class Lead:
         dois = frozenset(self.dois())
         return WorkSig(
             dois=dois,
-            first_author=surname(self.authors[0]) if self.authors else "",
+            first_author=(normalize_surname(self.first_surname) if self.first_surname
+                          else surname(self.authors[0]) if self.authors else ""),
             year=self.year,
             preprint=bool(set(self.sources) & _PREPRINT_SOURCES)
             or any(is_preprint_doi(d) for d in dois),
@@ -256,7 +274,7 @@ def from_pubmed(r: dict) -> Lead:
         title=r.get("title") or "", authors=list(r.get("authors") or []),
         venue=r.get("journal") or "", publication_date=r.get("pub_date") or None,
         year=r.get("year"), retracted=bool(r.get("retracted")),
-        abstract=r.get("abstract") or "",
+        abstract=r.get("abstract") or "", first_surname=r.get("first_author_surname") or "",
     )
 
 
@@ -280,7 +298,7 @@ def from_preprint(r: dict) -> Lead:
         title=r.get("title") or "", authors=list(r.get("authors") or []),
         venue={"biorxiv": "bioRxiv", "medrxiv": "medRxiv"}.get(server, server),
         publication_date=r.get("pub_date") or None, year=r.get("year"),
-        abstract=r.get("abstract") or "",
+        abstract=r.get("abstract") or "", first_surname=r.get("first_author_surname") or "",
     )
 
 
@@ -312,8 +330,11 @@ def _run_source(source: str, query: str, *, limit: int,
         return [from_arxiv(r) for r in arxiv.search(query, limit=limit, since=since,
                                                     max_age_days=max_age_days)]
     if source in ("biorxiv", "medrxiv"):
+        # A bioRxiv/medRxiv preprint always has a DOI; a record without one
+        # could be neither fetched nor declined, so it is not a usable lead.
         return [from_preprint(r) for r in europepmc.search_preprints(
-            query, servers=[source], limit=limit, since=since, max_age_days=max_age_days)]
+            query, servers=[source], limit=limit, since=since, max_age_days=max_age_days)
+            if r.get("doi")]
     return [from_trial(r) for r in clinicaltrials.search(query, limit=limit, since=since,
                                                          max_age_days=max_age_days)]
 
@@ -422,7 +443,9 @@ def merge(leads: list[Lead]) -> list[Lead]:
             if len(lead.abstract) > len(match.abstract):
                 match.abstract = lead.abstract
             match.retracted = match.retracted or lead.retracted
-            match.authors = match.authors or lead.authors
+            if not match.authors:
+                match.authors = lead.authors
+            match.first_surname = match.first_surname or lead.first_surname
             match.publication_date = match.publication_date or lead.publication_date
             match.year = match.year or lead.year
         for k in match.alias_keys():

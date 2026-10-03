@@ -34,7 +34,8 @@ SEARCH_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 POLITE_SLEEP = 0.2
 SERVERS = {"biorxiv": "bioRxiv", "medrxiv": "medRxiv"}
 SEARCH_FIELDS = (
-    "id", "doi", "server", "title", "authors", "pub_date", "year", "abstract",
+    "id", "doi", "server", "title", "authors", "first_author_surname", "pub_date",
+    "year", "abstract",
 )
 OA_FIELDS = ("is_open_access", "license", "pmid", "pmcid", "doi", "pdf_urls")
 
@@ -72,6 +73,21 @@ def _authors(record: dict) -> list[str]:
     return [s.strip() for s in str(record.get("authorString") or "").rstrip(".").split(",") if s.strip()]
 
 
+def _first_surname(record: dict) -> str:
+    """The first author's `lastName`, or the surname half of `authorString`.
+
+    `authorString` is Europe PMC's Vancouver form — `Menendez A, Ramos C` —
+    so its first entry is the surname followed by one initials block.
+    """
+    authors = (record.get("authorList") or {}).get("author") or []
+    if authors:
+        first = authors[0]
+        return str(first.get("lastName") or first.get("collectiveName") or "")
+    entry = str(record.get("authorString") or "").split(",")[0].strip().rstrip(".")
+    toks = entry.split()
+    return " ".join(toks[:-1]) if len(toks) > 1 else entry
+
+
 def search_preprints(query: str, *, servers: list[str], limit: int = 20,
                      since: date | None = None, max_age_days: float = 1) -> list[dict]:
     """Preprints on the named servers matching `query`, relevance-ordered."""
@@ -92,6 +108,7 @@ def search_preprints(query: str, *, servers: list[str], limit: int = 20,
             "server": publisher.lower() or None,
             "title": " ".join(str(r.get("title") or "").split()),
             "authors": _authors(r),
+            "first_author_surname": _first_surname(r),
             "pub_date": pub_date,
             "year": int(year) if year.isdigit() else None,
             "abstract": str(r.get("abstractText") or ""),

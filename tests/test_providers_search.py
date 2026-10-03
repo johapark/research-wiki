@@ -95,6 +95,7 @@ def test_efetch_parse_is_the_declared_schema():
     assert rec["pmcid"] == "PMC6907074"
     assert rec["title"] == "Search-and-replace genome editing without double-strand breaks"
     assert rec["authors"] == ["Anzalone AV", "Some Consortium"]
+    assert rec["first_author_surname"] == "Anzalone"
     assert rec["pub_date"] == "2019-10-21"  # electronic date wins over the issue date
     assert rec["year"] == 2019
     assert rec["retracted"] is True
@@ -166,7 +167,7 @@ EPMC_PREPRINT = {"hitCount": 1, "resultList": {"result": [{
     "id": "PPR1", "source": "PPR", "doi": "10.1101/2025.11.03.686307",
     "title": "Generating  long deletions", "firstPublicationDate": "2025-11-04",
     "pubYear": "2025", "abstractText": "We built a screen.",
-    "authorList": {"author": [{"fullName": "Weller J"}]},
+    "authorList": {"author": [{"fullName": "Weller J", "lastName": "Weller", "firstName": "Juliane"}]},
     "bookOrReportDetails": {"publisher": "bioRxiv"},
     "isOpenAccess": "N", "citedByCount": 3,
 }]}}
@@ -178,7 +179,14 @@ def test_preprint_search_schema_and_query(cache, monkeypatch):
     [rec] = europepmc.search_preprints("long deletions", servers=["biorxiv", "medrxiv"], limit=5)
     assert set(rec) == set(europepmc.SEARCH_FIELDS)
     assert rec["server"] == "biorxiv" and rec["title"] == "Generating long deletions"
+    assert rec["first_author_surname"] == "Weller"
     assert "SRC%3APPR" in urls[0] and "medRxiv" in urls[0]
+
+
+def test_preprint_surname_falls_back_to_the_vancouver_author_string():
+    assert europepmc._first_surname({"authorString": "van der Berg JM, Lee K."}) == "van der Berg"
+    assert europepmc._first_surname({"authorString": "Menendez A"}) == "Menendez"
+    assert europepmc._first_surname({}) == ""
 
 
 def test_europepmc_busy_body_is_an_outage(cache, monkeypatch):

@@ -140,8 +140,8 @@ def retraction_status(doi: str) -> dict:
 # ranks and displays it as a discovery lead, never as wiki evidence.
 
 SEARCH_FIELDS = (
-    "pmid", "doi", "pmcid", "title", "authors", "journal", "pub_date", "year",
-    "pubtypes", "retracted", "abstract",
+    "pmid", "doi", "pmcid", "title", "authors", "first_author_surname", "journal",
+    "pub_date", "year", "pubtypes", "retracted", "abstract",
 )
 #: NCBI allows 10 requests/second with an API key, 3 without.
 KEYED_SLEEP = 0.11
@@ -201,6 +201,13 @@ def _author(el) -> str:
     return " ".join(x for x in (last, initials) if x)
 
 
+def _surname(el) -> str:
+    """`LastName` as PubMed records it — no parsing of the display string."""
+    if el is None:
+        return ""
+    return _text(el.find("CollectiveName")) or _text(el.find("LastName"))
+
+
 def parse_efetch(xml_text: str) -> list[dict]:
     """PubMed efetch XML → fixed-schema records (`SEARCH_FIELDS`)."""
     root = parse_xml(xml_text, provider="pubmed")
@@ -233,6 +240,7 @@ def parse_efetch(xml_text: str) -> list[dict]:
             "pmcid": pmcid.upper() if pmcid else None,
             "title": _text(article.find("ArticleTitle") if article is not None else None).rstrip("."),
             "authors": [a for a in (_author(x) for x in cit.findall("Article/AuthorList/Author")) if a],
+            "first_author_surname": _surname(cit.find("Article/AuthorList/Author")),
             "journal": _text(cit.find("Article/Journal/Title")),
             "pub_date": pub_date,
             "year": int(pub_date[:4]) if pub_date[:4].isdigit() else None,
