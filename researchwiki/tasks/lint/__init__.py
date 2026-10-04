@@ -55,6 +55,7 @@ from .concept_contract import find_concept_contract_violations
 from .dashboard_contract import find_dashboard_contract_violations
 from .idea_contract import find_idea_contract_violations
 from .proposal_contract import find_proposal_contract_violations
+from .synthesis_contract import find_synthesis_contract_violations
 from ...eval.pointers import broken as broken_prompt_pointers
 from ...eval.pointers import orphans as orphan_prompt_files
 from .db_checks import (
@@ -139,6 +140,7 @@ def main(argv: list[str]) -> int:
                              "dangling_claim_anchors, "
                              "concept_contract_violations, "
                              "idea_contract_violations, proposal_contract_violations, "
+                             "synthesis_contract_violations, "
                              "dashboard_contract_violations, "
                              "orphan_prompts, "
                              "broken_prompt_pointers, db_drift, "
@@ -222,6 +224,7 @@ def main(argv: list[str]) -> int:
     concept_contract = find_concept_contract_violations(pages, pages_body, pages_fm)
     idea_contract = find_idea_contract_violations(pages, pages_body, pages_fm)
     proposal_contract = find_proposal_contract_violations(pages, pages_body, pages_fm)
+    synthesis_contract = find_synthesis_contract_violations(pages, pages_body, pages_fm)
     dashboard_contract = find_dashboard_contract_violations()
     # Docs-layer reachability. Same class of check as broken_wikilinks, one
     # layer up: a prompt no CLAUDE.md pointer reaches is a procedure the agent
@@ -292,6 +295,7 @@ def main(argv: list[str]) -> int:
             concept_contract=concept_contract,
             idea_contract=idea_contract,
             proposal_contract=proposal_contract,
+            synthesis_contract=synthesis_contract,
             dashboard_contract=dashboard_contract,
             orphan_prompts=orphan_prompts,
             broken_prompt_pointers=broken_pointers,
@@ -328,6 +332,7 @@ def main(argv: list[str]) -> int:
         concept_contract=concept_contract,
         idea_contract=idea_contract,
         proposal_contract=proposal_contract,
+        synthesis_contract=synthesis_contract,
         dashboard_contract=dashboard_contract,
         orphan_prompts=orphan_prompts,
         broken_prompt_pointers=broken_pointers,
