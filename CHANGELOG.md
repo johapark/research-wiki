@@ -20,6 +20,8 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-03
+
 ### Added
 
 - `researchwiki scout search "<query>"` searches the primary literature
@@ -107,9 +109,32 @@ the reasoning behind any line below.
   DOI, sends it to S2 as a negative seed. It takes a DOI in any common
   spelling or a Semantic Scholar paper URL, including one copied from the
   browser with its title slug, and refuses anything else.
+- Every promoted paper now gets a local, model-free impact review: ingest
+  compares it against synthesis pages, open/scoping/validated ideas and active
+  proposal records, and writes a receipt to
+  `.ingest/impact-review/<stem>.yaml` listing the pages that may need updating.
+  It is a decision queue, not an edit — each candidate is marked
+  `incorporated`, `not_relevant` or `deferred` with a reason, and a decision
+  without a reason stays pending. `status` lists pending, stale and unscanned
+  receipts, and ingest prints the top candidates. It runs independently of
+  `--memory-evolve`, and a scan failure is recorded as `unscanned` rather than
+  failing an ingest that has already landed. Procedure in
+  `prompts/impact-review.md`.
+- `config/models.chatgpt.yaml` routes the quality-sensitive roles (author,
+  critic, judge) to `gpt-6-sol` and every other role to `gpt-6-luna`, with
+  `reasoning_effort: none` on the classifier, proposer and extractor.
+  `config/pricing.yaml` gains both models and moves its `as_of` to 2026-09-30.
 
 ### Fixed
 
+- Target-claim extraction now runs on the `judge` role at temperature 0
+  instead of `extractor`. It is the coverage checklist that can block a
+  promotion, so it is more consequential than first-page metadata extraction,
+  and the shipped model configs route it accordingly. On a `claude-*` model it
+  is called with thinking disabled, because adaptive thinking could spend the
+  token budget before the JSON answer.
+- `ingest_iterations` accepts the `duplicate` phase role that a byte-identical
+  re-deposit (`already_present`) has recorded since 0.5.1.
 - `grade synthesis` no longer misgrades claims written as Markdown list items.
   PDF passage retrieval passed claim text straight to Tantivy's query parser,
   which reads a leading `-` as "exclude the next term". A bullet therefore
@@ -2409,7 +2434,8 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/johapark/research-wiki/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/johapark/research-wiki/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/johapark/research-wiki/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/johapark/research-wiki/compare/v0.4.4...v0.4.5
