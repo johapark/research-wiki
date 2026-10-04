@@ -405,3 +405,18 @@ def test_apply_skips_when_edge_no_longer_confirmed(isolated_wiki, monkeypatch):
     assert stats.applied == 0
     assert stats.skipped_stale == 1
     assert synth_path.read_text() == before
+
+
+def test_corroborates_lands_in_cross_cutting_insights_on_structured_pages():
+    """A page in the fixed synthesis structure has no `## Evidence`; the bullet
+    must go under Cross-cutting insights rather than a new heading appended
+    after References."""
+    from researchwiki.claim_graph.promote import _CORROBORATES_HEADINGS
+    text = ("## Findings\n\n### A\n\nx\n\n## Cross-cutting insights\n\nold\n\n"
+            "## Outlook\n\ny\n\n## References\n\n[^a]: [[a]]\n")
+    out = _insert_bullet_under_section(
+        text, _CORROBORATES_HEADINGS, _CORROBORATES_HEADINGS[0], "- new\n",
+    )
+    assert out.count("## Cross-cutting insights") == 1
+    assert out.index("- new") < out.index("## Outlook")
+    assert "## Evidence" not in out
