@@ -114,6 +114,10 @@ config/profiles/
 # permissions and local hooks.
 .claude/*
 !.claude/skills/
+# Reference material dropped in for reading, not repo content. Leading slash so
+# it matches only this root directory, never `.claude/skills/`, which is
+# tracked two lines above.
+/skills/
 *.base
 
 # OS / editor detritus
