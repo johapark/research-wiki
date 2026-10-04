@@ -7,7 +7,7 @@ description: Write, update, or upgrade a synthesis page in this research wiki (w
 
 A synthesis page is this wiki's review article on one subject: organized around ideas rather than papers, readable by a newcomer, and in the same structure every time.
 
-**Read [`references/synthesis-page-author.md`](references/synthesis-page-author.md) before writing anything.** It holds the fixed structure, the writing rules that keep a page from turning into a list of papers, the citation and source-label rules, and the step-by-step procedure. While this skill is under test, that file takes precedence over the synthesis section of CLAUDE.md where the two differ.
+**Read [`prompts/synthesis-page-author.md`](../../../prompts/synthesis-page-author.md) before writing anything** (relative to the repo root: `prompts/synthesis-page-author.md`). It holds the fixed structure, the writing rules that keep a page from turning into a list of papers, the citation and source-label rules, and the step-by-step procedure for all three modes. That file is the canonical procedure — every agent working in this repo reads the same copy, so nothing here restates it.
 
 ## Pick the mode
 
@@ -23,4 +23,4 @@ Check `ls wiki/synthesis/` and `researchwiki search "<topic>" --mode auto` first
 
 - The four rules in CLAUDE.md still hold: every claim grounds in a PDF the wiki has, and nothing comes from web search.
 - Every section except `Outlook` is strictly cited. `Outlook` may add the author's own inferences (`*(inference)*` plus the papers they follow from) and background knowledge (`*(model prior)*`), each labelled.
-- The page is done only when `check-grounding` and `grade synthesis` both exit 0 and every `check-coverage` hit is cited or excluded with a reason.
+- The page is done only when `check-grounding` and `grade synthesis` both exit 0 — with a non-zero graded count — and every `check-coverage` hit is cited or excluded with a reason.
