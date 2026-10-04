@@ -233,6 +233,33 @@ def _wikilink_to_stem(link: str) -> str:
     return target.rsplit("/", 1)[-1].strip()
 
 
+# Page types whose pages are the wiki's own authored analysis rather than a
+# document it holds: citing one is a cross-reference ("the case is argued at
+# length on …"), not a source being leaned on. `references/` is deliberately
+# NOT here — a guidance document or whitepaper has a real PDF in `papers/`
+# and is a perfectly good source (all 14 reference pages have one), which is
+# why this is a narrow list rather than `categories.PAGE_TYPE_DIRS`.
+_CROSSREF_DIRS = frozenset({"synthesis", "ideas", "proposals", "concepts"})
+
+
+def _is_page_crossref(link: str) -> bool:
+    """True when a link points at the wiki's own analysis rather than a source.
+
+    Judged on the category prefix the author wrote, which is why this runs
+    before `_wikilink_to_stem` strips it.
+
+    Load-bearing for the inference premise check: that check treats an
+    unavailable citation as an unverifiable premise, and without this
+    distinction a see-also link to a sibling synthesis page failed an
+    inference whose actual premises were three cited papers with readable
+    PDFs. A paper stem with no PDF stays unresolved — that one *is* a missing
+    premise.
+    """
+    target = link.split("|", 1)[0].split("#", 1)[0].strip()
+    head = target.rsplit("/", 1)[0] if "/" in target else ""
+    return head.strip().lower() in _CROSSREF_DIRS
+
+
 def _resolve_cited_stems(
     unit_text: str, footnote_targets: dict[str, list[str]]
 ) -> tuple[list[str], list[str]]:
@@ -240,8 +267,10 @@ def _resolve_cited_stems(
 
     Citations come from inline `[[wikilink]]`s and from `[^id]` footnote refs
     resolved through `footnote_targets`. A stem is gradable iff
-    `papers/{stem}.pdf` exists (links to other synthesis/reference pages, or to
-    papers without a local PDF, fall into `unresolved`).
+    `papers/{stem}.pdf` exists. A paper without a local PDF falls into
+    `unresolved`; a link to another wiki page (`[[synthesis/…]]`,
+    `[[ideas/…]]`) is dropped from both lists, because it is a
+    cross-reference rather than a source — see `_is_page_crossref`.
     """
     links: list[str] = list(_WIKILINK_RE.findall(unit_text))
     for fid in _FOOTNOTE_REF_RE.findall(unit_text):
@@ -251,6 +280,8 @@ def _resolve_cited_stems(
     unresolved: list[str] = []
     seen: set[str] = set()
     for link in links:
+        if _is_page_crossref(link):
+            continue
         stem = _wikilink_to_stem(link)
         if stem in seen:
             continue

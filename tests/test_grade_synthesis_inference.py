@@ -188,3 +188,63 @@ def test_uncited_prose_without_the_label_stays_advisory(tmp_path, monkeypatch):
     report = _graded_no_pdf(tmp_path, monkeypatch, plain)
     assert [c.verdict for c in report.claims] == ["uncited"]
     assert report.ok
+
+
+# ---------- a page cross-reference is not a premise ----------
+
+CROSSREF_PAGE = """---
+type: synthesis
+author_model: "claude-opus-5"
+---
+
+## Outlook
+
+Variant-aware prediction is blocked on modelling rather than data *(inference)*.[^real]
+The case is argued at length on [[synthesis/variant-aware-crispr-off-target]].
+
+[^real]: [[cgt/foo-2024-bar]] — a paper with a PDF
+"""
+
+
+def test_a_sibling_page_link_does_not_make_an_inference_ungradable(tmp_path, monkeypatch):
+    """Requiring every cited source to have a readable PDF flagged the landed
+    CRISPR page: its inference cited three real papers and also pointed at a
+    sibling synthesis page for the longer argument. A `[[synthesis/…]]` link is
+    a cross-reference, not a premise, so it must not count toward the check."""
+    monkeypatch.setattr(fidelity, "resolve_pdf", lambda stem: stem)
+    monkeypatch.setattr(fidelity, "_full_text", lambda stem, cache: "modelling work remains")
+    page = tmp_path / "x.md"
+    page.write_text(CROSSREF_PAGE, encoding="utf-8")
+    report = fidelity.grade_synthesis(page, semantic=False)
+    assert report.n_inference_ungradable == 0
+    assert report.n_inference == 1
+    assert report.ok
+
+
+def test_reference_documents_still_count_as_sources():
+    """`references/` is NOT a cross-reference dir: a guidance document or
+    whitepaper has a real PDF in `papers/` — all 14 reference pages do — and
+    citing one is citing a source. Excluding the whole page-type-dir set
+    dropped FDA guidance from an inference's premises."""
+    assert not fidelity._is_page_crossref("references/fda-2026-safety-assessment-of-genome-editing")
+    assert not fidelity._is_page_crossref("cgt/bae-2014-cas-offinder-a-fast-and-versatile")
+    for authored in ("synthesis/foo", "ideas/bar", "proposals/baz", "concepts/qux"):
+        assert fidelity._is_page_crossref(authored), authored
+
+
+def test_crossref_detection_handles_alias_anchor_and_case():
+    for link in ("synthesis/foo|see also", "synthesis/foo#kc-abcd1234", "Synthesis/Foo"):
+        assert fidelity._is_page_crossref(link), link
+
+
+def test_an_inference_citing_only_a_page_crossref_still_fails(tmp_path, monkeypatch):
+    """The dropped link must not become a free pass: with nothing else cited
+    there are no premises at all, which is the original P1."""
+    monkeypatch.setattr(fidelity, "resolve_pdf", lambda stem: stem)
+    only_ref = CROSSREF_PAGE.replace("[^real]", "").replace(
+        "[^real]: [[cgt/foo-2024-bar]] — a paper with a PDF", "")
+    page = tmp_path / "y.md"
+    page.write_text(only_ref, encoding="utf-8")
+    report = fidelity.grade_synthesis(page, semantic=False)
+    assert report.n_inference_ungradable == 1
+    assert not report.ok
