@@ -20,6 +20,28 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- Fixed H2 structure for synthesis pages — `Question` → `Short answer` → `Background` → `Organizing framework` → `Findings` → `Cross-cutting insights` → `Tensions / open questions` → `Outlook` → `References`. `synthesize` scaffolds it, and `lint --json` gains `synthesis_contract_violations` (advisory) to check it: missing or misordered sections, unexpected H2s, a `Findings` with no themes, source labels outside `Outlook`, undefined footnotes. A page in the old shape reports one `synthesis_legacy_spine` finding rather than one per section. Procedure in `prompts/synthesis-page-author.md`, which absorbs the old citation-format file and is also what the `synthesis-page` Claude Code skill reads.
+- `lint --json` key `undefined_footnote_refs`: pages citing a `[^id]` with no definition line. Both page gates under-report this — `check-grounding` fails a unit only when the undefined footnote is its *sole* citation, so a paragraph citing `[^a][^b]` with `b` undefined passes, and `grade synthesis` then grades it against `a` alone and reports no unresolved citation. Both gates go green while a paper's worth of claims was never checked. Advisory.
+- `lint --json` key `crosslink_impossible_citations`: *Related Papers* bullets whose citation direction the two pages' `year:` fields rule out — a `cites this paper` bullet whose target is the older paper, or `cited by this paper` whose target is newer. This is the one part of the cross-link corollary checkable without opening a PDF, and no other check sees a bullet's claim: `missing_backlinks` is satisfied by its presence and both gates parse paragraphs. 177 findings on the current corpus; three spot-checks confirmed the older paper's PDF never mentions the newer one. Advisory.
+- `*(model prior)*` on a synthesis `Outlook` unit grounds a *qualitative* forecast only: with a quantity present and nothing cited, the unit stays ungrounded. Numbers never come from training knowledge, and the fidelity grader skips an uncited unit, so the label would otherwise launder a fabricated figure past both gates. Idea `Opportunities`/`Plans` are deliberately exempt — their numbers are design parameters being proposed, not results being asserted.
+- `*(inference)*` source label, alongside `*(model prior)*`, in a page's labelled sections (idea `Opportunities`/`Plans`, synthesis `Outlook`): a conclusion drawn by combining the cited papers. It grounds a unit only together with a wiki citation, and `grade synthesis` records it as the new `inference` verdict instead of grading the wording — while still requiring every number in the unit to come from a cited paper. `check-grounding --json` gains `inference_claims` and per-unit `is_inference`; the fidelity report gains `n_inference`.
+
+### Changed
+
+- `Outlook` replaces `What would update this page` on synthesis pages, and is what `impact_review` and `scout recent` now read as a page's update triggers. The old heading stays gate-exempt for legacy pages.
+- `synthesize` writes its pre-pulled claim evidence to `.ingest/synthesis/<slug>/evidence.md` instead of inlining it in the page, so a field-scale page isn't buried under hundreds of claim bullets.
+- `claim-graph promote` files corroborating edges under `## Cross-cutting insights` first.
+
+### Fixed
+
+- `grade synthesis` ignores links to the wiki's own authored pages (`synthesis/`, `ideas/`, `proposals/`, `concepts/`) when resolving a unit's sources: those are cross-references, not premises. `references/` documents still count, since each has a real PDF. Without this a see-also link to a sibling synthesis page made an inference `inference_ungradable` even with three cited papers behind it.
+- `grade synthesis` fails an `*(inference)*` unit if any cited premise lacks readable PDF text (`inference_ungradable` verdict, exit 1). The label asserts the conclusion follows from every paper cited *and* suppresses the retrieval and negation checks, so one missing or unreadable source previously left the inference uncheckable while both required gates passed. Plain `uncited` prose stays advisory — it asserts no provenance, and a scope sentence pointing at a sibling synthesis page is legitimate.
+- `check-coverage` no longer dies with an internal error (exit 3) on a draft page outside `wiki/`, so recall can be reviewed before a page is landed.
+- A decimal point lost in PDF text extraction (`p <0 0065` for `p < 0.0065`) no longer reads as numeric drift. The repaired form is appended to the evidence rather than substituted, so a `0 12` that is really two table cells keeps both readings. Rare — 0 of 40 sampled corpus PDFs — but it mangles every number on a page where it occurs.
+- `read_page` returns `None` for a missing file instead of raising, so one removed page can no longer crash `status` through a stale impact-review receipt. Page keys live in durable records that outlive a `remove`, and every call site already branches on `None`.
+
 ## [0.5.2] - 2026-10-03
 
 ### Added

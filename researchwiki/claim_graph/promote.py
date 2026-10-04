@@ -41,6 +41,10 @@ _CONTRADICTS_HEADINGS = (
     "## Contradictions",
 )
 _CORROBORATES_HEADINGS = (
+    # The fixed synthesis structure's home for agreement across papers. First,
+    # so a page written to the structure never grows an appended `## Evidence`
+    # after its References; legacy pages still match `## Evidence…` below.
+    "## Cross-cutting insights",
     "## Evidence",
     "## Corroborating evidence",
     "## Support",

@@ -52,7 +52,7 @@ from pathlib import Path
 import yaml
 
 from .lint.staleness import unreferenced_top_hits
-from .lint.walk import all_pages, page_key
+from .lint.walk import all_pages, page_key, self_key as _self_key
 from ..log import log
 
 
@@ -178,7 +178,8 @@ def main(argv: list[str]) -> int:
     # claims could only annotate a page BM25 had already found, which made the
     # recall check incapable of repairing a lexical false negative.
     linked_stems = {key.split("/", 1)[-1] for key in linked}
-    self_key = page_key(md)
+    # None for a draft outside wiki/: it can't be in its own results anyway.
+    self_key = _self_key(md)
     key_by_stem = {key.split("/", 1)[-1]: key for key in known}
     title_by_key: dict[str, str] = {}
     for page_path in pages:

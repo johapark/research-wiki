@@ -151,3 +151,65 @@ def test_anthropic_user_content_legacy_cache_prompt_single_block():
 def test_anthropic_user_content_bare_string_when_no_caching():
     from researchwiki.agents.llm import _anthropic_user_content
     assert _anthropic_user_content("P", cache_prefix=None, cache_prompt=False) == "P"
+
+
+# ---------- decimals lost in PDF extraction ----------
+
+
+def test_lost_decimal_in_evidence_is_repaired():
+    """Some typesetters encode the decimal point as a glyph pdfium renders as a
+    space, so otero-2024's `p < 0.0065` extracts as `p <0 0065` and a correctly
+    transcribed claim reads as numeric drift against its own paper."""
+    from researchwiki.grade.primitives import check_numerics
+    tokens, unmatched = check_numerics(
+        "Patients carrying only these variants showed a higher event rate (OR 4.5, p<0.0065).",
+        "", "(OR 4.5, p <0 0065) (data in supplementary table SPTB2).",
+    )
+    assert tokens == ["4.5", "0.0065"]
+    assert unmatched == []
+
+
+def test_repair_is_additive_not_a_substitution():
+    """`0 12` in a table may be two cells. Rewriting it to `0.12` in place would
+    delete both tokens from the evidence and could fail a claim that passed
+    before, so the repaired form is appended alongside them."""
+    from researchwiki.grade.primitives import check_numerics, restore_lost_decimals
+    assert check_numerics("12 samples", "", "row 0 12 end") == (["12"], [])
+    assert check_numerics("0 samples here", "", "row 0 12 end")[1] == []
+    assert "0 12" in restore_lost_decimals("row 0 12 end")
+
+
+def test_repair_leaves_thousands_and_plain_pairs_alone():
+    from researchwiki.grade.primitives import restore_lost_decimals
+    for text in ("300 000", "1 158 017", "40 4 ± 18 3", "value 12 5"):
+        assert restore_lost_decimals(text) == text
+
+
+def test_real_drift_still_fails_through_the_repair():
+    from researchwiki.grade.primitives import check_numerics
+    _, unmatched = check_numerics("p<0.9999", "", "(OR 4.5, p <0 0065)")
+    assert unmatched == ["0.9999"]
+
+
+def test_adjacent_table_cells_are_not_fused_into_a_decimal():
+    """Review finding: the repair fired on any `0 NNN`, so a table row reading
+    `control 0 12 treated` became evidence for a claimed 0.12 — manufacturing
+    support from two numbers the paper never printed together. It is now gated
+    on a preceding comparison operator, which every real occurrence has."""
+    from researchwiki.grade.primitives import check_numerics, restore_lost_decimals
+    assert restore_lost_decimals("Table: control 0 12 treated") == "Table: control 0 12 treated"
+    tokens, unmatched = check_numerics("The rate was 0.12", "", "Table: control 0 12 treated")
+    assert tokens == ["0.12"] and unmatched == ["0.12"]
+
+
+def test_every_real_lost_decimal_shape_still_repairs():
+    """The shapes actually present in otero-2024, which is what the repair is
+    for: all follow `p <`, `p =` or a bare threshold `<`."""
+    from researchwiki.grade.primitives import restore_lost_decimals
+    for text, want in [
+        ("(OR 4.5, p <0 0065)", "0.0065"),
+        ("allele frequency < 0 01", "0.01"),
+        ("101 0.874 p =0 5099", "0.5099"),
+        ("(p <0 0001)", "0.0001"),
+    ]:
+        assert want in restore_lost_decimals(text), text

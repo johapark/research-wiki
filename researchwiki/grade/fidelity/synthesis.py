@@ -46,7 +46,32 @@ Verdicts:
                         `[[stem#slug]]` but a numeric token in the sentence
                         is absent from that specific claim's text (though the
                         paper as a whole may contain it). Hard failure.
-  uncited               no cited paper has a gradable PDF. Skipped.
+  uncited               no cited paper has a gradable PDF. Skipped — the unit
+                        asserts no source, so there is nothing to be wrong
+                        about; `check-grounding` owns "has a citation".
+  inference_ungradable  labelled `*(inference)*` but at least one cited source
+                        has no readable PDF text. Hard failure. The label is a
+                        *claim about provenance* — that the conclusion follows
+                        from all the papers cited — so an unavailable premise
+                        makes the inference uncheckable.
+  inference             labelled `*(inference)*` in a page's labelled section
+                        (synthesis Outlook). The citation names the papers the
+                        conclusion is drawn from, but the conclusion itself is
+                        the author's, so no cited PDF is expected to state it.
+                        Retrieval is skipped; every number in the unit must
+                        still appear in a cited paper's full text, or the unit
+                        is `misattributed`. Counted so the share whose wording
+                        went unchecked is visible.
+
+What no verdict here catches: a *qualitative* claim that is simply false. BM25
+and the bi-encoder measure topical proximity, so a sentence asserting the
+opposite of its source still retrieves it strongly — an adversarial review
+confirmed "Cas-OFFinder has been withdrawn and its results are fabricated"
+scores 11.8 against Cas-OFFinder's own PDF and grades `supported` with no
+label involved. That is a property of retrieval-based fidelity, not of the
+`*(inference)*` path, and it is why `grade synthesis` is a floor rather than
+a proof: it catches numbers ascribed to papers that lack them, and leaves the
+reading of prose to a human.
 
 Only `misattributed` and `anchor_misattributed` are hard failures. Retrieval
 (BM25/semantic) is uncalibrated — `paper.py` is explicit about that — so it
@@ -139,7 +164,7 @@ class FidelityClaim:
     best_semantic: float | None
     numeric_unmatched: list[str]    # numbers in the claim found in NO cited paper
     negation_mismatch: bool
-    verdict: str                    # supported|weak|composite|misattributed|anchor_misattributed|uncited
+    verdict: str                    # supported|weak|composite|misattributed|anchor_misattributed|uncited|inference|inference_ungradable
     # Fine-grained mode only:
     anchor_misattributions: list[dict] = field(default_factory=list)
     # each dict: {stem, slug, numeric_tokens_missing: [...]}
@@ -159,12 +184,24 @@ class SynthesisFidelityReport:
     n_uncited: int                  # claim-shaped units with no gradable cited PDF
     semantic_available: bool
     n_anchor_misattributed: int = 0  # fine-grained mode only
+    n_inference: int = 0            # cited, labelled *(inference)*, not graded
+    n_inference_ungradable: int = 0  # labelled *(inference)*, unavailable PDF premise
     claims: list[FidelityClaim] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        """True when no claim is misattributed (paper- or anchor-level)."""
-        return self.n_misattributed == 0 and self.n_anchor_misattributed == 0
+        """True when nothing is misattributed and every inference is checkable.
+
+        `n_inference_ungradable` fails the gate because the `*(inference)*`
+        label asserts the conclusion follows from all the papers it cites. If
+        any premise lacks readable PDF text, that assertion is unverifiable.
+        The label suppresses retrieval and negation checks, so passing it would
+        let an unverifiable inference clear both gates. Plain
+        `uncited` prose stays advisory: it asserts no provenance, and
+        `check-grounding` is what owns "a citation must be present".
+        """
+        return (self.n_misattributed == 0 and self.n_anchor_misattributed == 0
+                and self.n_inference_ungradable == 0)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -206,6 +243,62 @@ def _wikilink_to_stem(link: str) -> str:
     return target.rsplit("/", 1)[-1].strip()
 
 
+# Page types whose pages are the wiki's own authored analysis rather than a
+# document it holds: citing one is a cross-reference ("the case is argued at
+# length on …"), not a source being leaned on. `references/` is deliberately
+# NOT here — a guidance document or whitepaper has a real PDF in `papers/`
+# and is a perfectly good source (all 14 reference pages have one), which is
+# why this is a narrow list rather than `categories.PAGE_TYPE_DIRS`.
+_CROSSREF_DIRS = frozenset({"synthesis", "ideas", "proposals", "concepts"})
+
+#: Lazily-built stem set for `_authored_page_stems`; None until first use.
+_AUTHORED_STEMS: frozenset[str] | None = None
+
+
+def _authored_page_stems() -> frozenset[str]:
+    """Stems of every page under the authored page-type directories.
+
+    Cached for the process: a page gate reads it once per unit and the set
+    changes only when a page is added. Empty on any filesystem problem, which
+    degrades to prefix-only detection rather than failing a grade run.
+    """
+    global _AUTHORED_STEMS
+    if _AUTHORED_STEMS is None:
+        try:
+            from ...paths import wiki_dir
+            root = wiki_dir()
+            _AUTHORED_STEMS = frozenset(
+                md.stem for d in _CROSSREF_DIRS for md in (root / d).glob("*.md")
+            )
+        except Exception:
+            _AUTHORED_STEMS = frozenset()
+    return _AUTHORED_STEMS
+
+
+def _is_page_crossref(link: str) -> bool:
+    """True when a link points at the wiki's own analysis rather than a source.
+
+    Two ways to tell, because both citation forms are sanctioned: the category
+    prefix the author wrote (`[[synthesis/foo]]`), and failing that the stem
+    itself resolving to a page in one of those directories. CLAUDE.md permits
+    a bare `[[stem]]` "when the paragraph refers to the paper as a whole" and
+    the authoring prompt *requires* bare stems inside tables, so judging on the
+    prefix alone made a documented form fail where the prefixed form passed.
+
+    Load-bearing for the inference premise check: that check treats an
+    unavailable citation as an unverifiable premise, and without this
+    distinction a see-also link to a sibling synthesis page failed an
+    inference whose actual premises were three cited papers with readable
+    PDFs. A paper stem with no PDF stays unresolved — that one *is* a missing
+    premise.
+    """
+    target = link.split("|", 1)[0].split("#", 1)[0].strip()
+    head = target.rsplit("/", 1)[0] if "/" in target else ""
+    if head.strip().lower() in _CROSSREF_DIRS:
+        return True
+    return target.rsplit("/", 1)[-1].strip() in _authored_page_stems()
+
+
 def _resolve_cited_stems(
     unit_text: str, footnote_targets: dict[str, list[str]]
 ) -> tuple[list[str], list[str]]:
@@ -213,8 +306,10 @@ def _resolve_cited_stems(
 
     Citations come from inline `[[wikilink]]`s and from `[^id]` footnote refs
     resolved through `footnote_targets`. A stem is gradable iff
-    `papers/{stem}.pdf` exists (links to other synthesis/reference pages, or to
-    papers without a local PDF, fall into `unresolved`).
+    `papers/{stem}.pdf` exists. A paper without a local PDF falls into
+    `unresolved`; a link to another wiki page (`[[synthesis/…]]`,
+    `[[ideas/…]]`) is dropped from both lists, because it is a
+    cross-reference rather than a source — see `_is_page_crossref`.
     """
     links: list[str] = list(_WIKILINK_RE.findall(unit_text))
     for fid in _FOOTNOTE_REF_RE.findall(unit_text):
@@ -224,6 +319,8 @@ def _resolve_cited_stems(
     unresolved: list[str] = []
     seen: set[str] = set()
     for link in links:
+        if _is_page_crossref(link):
+            continue
         stem = _wikilink_to_stem(link)
         if stem in seen:
             continue
@@ -359,6 +456,55 @@ def _grade_claim(
     cited, unresolved = _resolve_cited_stems(unit.text, footnote_targets)
     claim_text = unit.text
 
+    if unit.is_inference:
+        # An inference combines its cited premises. One missing PDF makes the
+        # combination uncheckable even when the other citations resolve. A
+        # present but unreadable PDF is equally uncheckable; unlike ordinary
+        # claims, this branch skips the PDF index, so check extractability here.
+        unavailable = list(unresolved)
+        if not unavailable:
+            unavailable.extend(
+                stem for stem in cited if not _full_text(stem, fulltext_cache).strip()
+            )
+        if not cited or unavailable:
+            return FidelityClaim(
+                unit_index=unit.index, line_start=unit.line_start, text=claim_text,
+                cited_stems=cited, unresolved_citations=unavailable, best_stem=None,
+                best_bm25=0.0, best_semantic=None, numeric_unmatched=[],
+                negation_mismatch=False, verdict="inference_ungradable",
+            )
+
+        # Retrieval is skipped: the conclusion is the author's, so no cited
+        # PDF is expected to contain it, and a retrieval floor would flag every
+        # honest inference. Its *numbers* are premises, though, and must come
+        # from a cited paper — otherwise the label would exempt any figure.
+        # Full text only, since there is no retrieval neighbourhood here.
+        cleaned = _strip_for_numerics(claim_text)
+        tokens = NUMERIC_TOKEN_RE.findall(cleaned)
+        unmatched = set(tokens)
+        full_texts = []
+        for stem in cited:
+            full = _full_text(stem, fulltext_cache)
+            full_texts.append(full)
+            if unmatched:
+                _, um = check_numerics(cleaned, "", full)
+                unmatched &= set(um)
+        numeric_unmatched = [t for t in tokens if t in unmatched]
+        # Negation parity is computed rather than assumed: it is the one signal
+        # that survives the retrieval skip, because it compares the claim's own
+        # polarity against the premises instead of expecting the conclusion to
+        # appear in them. Advisory, exactly as on the graded path — the lexicon
+        # is coarse, and a conclusion may legitimately negate what its premises
+        # assert ("neither assay detects X, so Y is unreachable").
+        neg_mismatch = negation_mismatch(claim_text, " ".join(full_texts))
+        return FidelityClaim(
+            unit_index=unit.index, line_start=unit.line_start, text=claim_text,
+            cited_stems=cited, unresolved_citations=unresolved, best_stem=None,
+            best_bm25=0.0, best_semantic=None, numeric_unmatched=numeric_unmatched,
+            negation_mismatch=neg_mismatch,
+            verdict="misattributed" if numeric_unmatched else "inference",
+        )
+
     if not cited:
         return FidelityClaim(
             unit_index=unit.index, line_start=unit.line_start, text=claim_text,
@@ -486,7 +632,8 @@ def grade_synthesis(
     path = Path(page_path)
     text = path.read_text(encoding="utf-8")
 
-    permissive = grounding._is_idea_page(text)  # idea pages: model-prior units OK
+    # Idea Opportunities/Plans and synthesis Outlook: source labels apply.
+    permissive = grounding.has_labelled_sections(text)
     units = grounding.parse_units(text, permissive=permissive)
     footnote_targets = _footnote_targets(text)
     use_semantic = semantic and semantic_mod.is_available()
@@ -503,15 +650,19 @@ def grade_synthesis(
         return sum(1 for c in claims if c.verdict == v)
 
     n_uncited = _count("uncited")
+    n_inference = _count("inference")
+    n_inference_ungradable = _count("inference_ungradable")
     return SynthesisFidelityReport(
         page_path=str(path),
-        n_claims=len(claims) - n_uncited,
+        n_claims=len(claims) - n_uncited - n_inference - n_inference_ungradable,
         n_supported=_count("supported"),
         n_weak=_count("weak"),
         n_composite=_count("composite"),
         n_misattributed=_count("misattributed"),
         n_anchor_misattributed=_count("anchor_misattributed"),
         n_uncited=n_uncited,
+        n_inference=n_inference,
+        n_inference_ungradable=n_inference_ungradable,
         semantic_available=use_semantic,
         claims=claims,
     )

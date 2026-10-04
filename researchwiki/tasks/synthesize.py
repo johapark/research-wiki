@@ -9,9 +9,14 @@
    scaffold a synthesis from zero papers — list the actual referenced
    wiki stems via `--papers`, otherwise the page violates Rule 1.
 
-Creates a YAML-compliant stub page in `wiki/synthesis/` with a pre-populated
-`referenced_papers:` list. The LLM then fills the body, grounding every
-claim in `[[wikilinks]]` to real wiki papers (Rule 1).
+Creates a YAML-compliant stub page in `wiki/synthesis/` laid out in the fixed
+synthesis structure (CLAUDE.md §2; procedure in
+`prompts/synthesis-page-author.md`). The LLM then fills the body, grounding
+every claim in `[[wikilinks]]` to real wiki papers (Rule 1).
+
+The pre-pulled claim evidence goes to `.ingest/synthesis/<slug>/evidence.md`,
+not into the page: a field-scale page cites dozens of papers, and inlining
+every claim would bury the structure the author is meant to fill.
 
 Exit codes: 0 = stub written; 1 = user-input error (target page exists
 without `--force`, or title produces an empty slug).
@@ -33,7 +38,7 @@ from datetime import date
 from ..categories import PAGE_TYPE_DIRS
 from ..fsatomic import write_text_atomic
 from ..log import append_log_md, log
-from ..paths import wiki_dir
+from ..paths import ingest_dir, wiki_dir
 from ..stems import slugify_phrase
 from ..wiki import commit_page, find_stem_collision, read_pages
 
@@ -112,7 +117,7 @@ def _evidence_block(
     seed_k: int,
     per_paper_k: int | None,
 ) -> str:
-    """Build the pre-grounded `## Evidence from the wiki` body.
+    """Build the pre-grounded claim evidence the author drafts from.
 
     Two sub-sections, both populated from the structured claims table so
     every line is cite-ready by `[[stem#claim_slug]]`:
@@ -123,7 +128,7 @@ def _evidence_block(
          claims (capped at `per_paper_k` to keep the stub scannable;
          `None` = uncapped).
 
-    Returns markdown that slots straight into the page body.
+    Returns markdown for `.ingest/synthesis/<slug>/evidence.md`.
     """
     from ..search import claim_lookup, claims_by_stem
 
@@ -141,7 +146,7 @@ def _evidence_block(
         out.append(
             f"<!-- claim_lookup({_safe_comment(repr(topic_seed))}, k={seed_k}). "
             "Curate: keep the units relevant to the question, drop the rest. "
-            "Cite by [[stem#slug]] in the prose above (durable content-"
+            "Cite by [[stem#slug]] in the page prose (durable content-"
             "addressed anchor; see the bullet heads below). -->"
         )
         try:
@@ -156,7 +161,7 @@ def _evidence_block(
                 out.append("")
         else:
             out.append("")
-            out.append("<!-- (no claim_lookup hits — broaden topic_seed or write Evidence by hand) -->")
+            out.append("<!-- (no claim_lookup hits — broaden topic_seed or gather claims by hand) -->")
             out.append("")
 
     if referenced:
@@ -192,12 +197,39 @@ def _evidence_block(
     return "\n".join(out).rstrip() + "\n"
 
 
+# The fixed synthesis structure: (H2, purpose comment). Names are exact —
+# `Outlook` is the section the grounding gate labels and `Short answer` is what
+# the semantic index embeds first — and lint's `synthesis_contract` checks them.
+SECTIONS: tuple[tuple[str, str], ...] = (
+    ("Question", "Scope: what the page covers, what it leaves out and why, and "
+                 "links to neighbouring synthesis pages."),
+    ("Short answer", "The argument in miniature: one framing sentence, then 4–6 "
+                     "takeaways. Write last."),
+    ("Background", "What a newcomer needs first: the problem, key terms, the "
+                   "shared experimental setup."),
+    ("Organizing framework", "How this page sorts the evidence and why that "
+                             "explains the field, then a table placing every "
+                             "cited paper (bare [[stem]] links)."),
+    ("Findings", "One H3 per theme the framework defines, never one per paper: "
+                 "point → evidence → conditions → limits."),
+    ("Cross-cutting insights", "What appears only when the themes are read "
+                               "together: agreements, conflicts, shared "
+                               "mechanisms, trade-offs."),
+    ("Tensions / open questions", "Genuine disagreements, with the evidence on "
+                                  "each side."),
+    ("Outlook", "Where the field is heading. Cite the papers' own next steps; "
+                "label your conclusions *(inference)* with the papers they follow "
+                "from, and background knowledge *(model prior)*."),
+    ("References", "[^id]: [[category/stem]], one per source paper."),
+)
+
+
 def _template(
     title: str,
     referenced: list[str],
     topic_seed: str | None = None,
     *,
-    evidence_block: str = "",
+    evidence_path: str | None = None,
 ) -> str:
     today = date.today().isoformat()
     seed_line = (
@@ -227,25 +259,13 @@ def _template(
     # the exact model id; a scaffold cannot know which model will complete it.
     yaml.append('author_model: "TODO"  # the LLM model that authored this synthesis (e.g. claude-sonnet-4-6, claude-opus-4-7); fill on save')
     yaml.append("tags: [synthesis]")
-    evidence_section = evidence_block.rstrip() + "\n\n" if evidence_block else (
-        "<!-- The load-bearing section. Group findings by theme; "
-        "every claim followed by [[stem#claim_slug]] (durable) or "
-        "[[category/stem]] when a paper-level cite is enough. -->\n\n"
-    )
-    body = (
-        "## Question\n"
-        "<!-- The cross-paper question this page answers, in one sentence. -->\n\n"
-        "## Short answer\n"
-        "<!-- ≤100 words. The headline, cited. -->\n\n"
-        "## Evidence from the wiki\n"
-        f"{evidence_section}"
-        "## Tensions / open questions\n"
-        "<!-- ≤150 words. Where the wiki papers disagree or leave gaps. -->\n\n"
-        "## What would update this page\n"
-        "<!-- ≤3 bullets. Kinds of future paper whose ingestion would change the answer. -->\n\n"
-        "## References\n"
-        "<!-- [^id]: [[category/stem]], one per source paper. Required once the body\n             uses [^id] markers — this is where they are defined. -->\n"
-    )
+
+    parts = []
+    if evidence_path:
+        parts.append(f"<!-- Pre-pulled claim evidence: {evidence_path} -->\n\n")
+    for heading, purpose in SECTIONS:
+        parts.append(f"## {heading}\n<!-- {purpose} -->\n\n")
+    body = "".join(parts).rstrip() + "\n"
 
     yaml_block = "---\n" + "\n".join(yaml) + "\n---\n\n"
     return yaml_block + body
@@ -269,14 +289,14 @@ def main(argv: list[str]) -> int:
                              "to detect when new papers topically-relevant to the page "
                              "enter the wiki without being cited — i.e., when the page "
                              "becomes stale-by-content rather than stale-by-mtime. "
-                             "Also drives the pre-populated Evidence section: top-K "
-                             "claim_lookup hits inline as cite-ready [[stem#slug]] bullets.")
+                             "Also seeds the evidence file: top-K claim_lookup hits "
+                             "as cite-ready [[stem#slug]] bullets.")
     parser.add_argument("--seed-k", type=int, default=10,
-                        help="Number of topic-seed claim_lookup hits to inline (default 10). "
+                        help="Number of topic-seed claim_lookup hits to pull (default 10). "
                              "Ignored when --topic-seed is omitted.")
     parser.add_argument("--per-paper-k", type=int, default=None,
-                        help="Max claims to inline per --papers entry. Default: all "
-                             "(typically 10–25 per paper). Set lower to keep the stub scannable.")
+                        help="Max claims to pull per --papers entry. Default: all "
+                             "(typically 10–25 per paper).")
     args = parser.parse_args(argv)
 
     slug = args.slug or _slugify(args.title)
@@ -318,11 +338,19 @@ def main(argv: list[str]) -> int:
         per_paper_k=args.per_paper_k,
     )
 
+    evidence_rel: str | None = None
+    if evidence_block:
+        evidence_file = ingest_dir() / "synthesis" / slug / "evidence.md"
+        evidence_file.parent.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(evidence_file, f"# Evidence for {args.title}\n\n{evidence_block}")
+        evidence_rel = f".ingest/synthesis/{slug}/evidence.md"
+        log(f"wrote {evidence_file}", tag="synthesize")
+
     content = _template(
         title=args.title,
         referenced=resolved,
         topic_seed=args.topic_seed,
-        evidence_block=evidence_block,
+        evidence_path=evidence_rel,
     )
     write_text_atomic(out, content)
     commit_page(out)
@@ -342,7 +370,7 @@ def main(argv: list[str]) -> int:
     append_log_md("synthesize", headline, details)
 
     # Advisory grounding summary — synthesis stubs are skeletal at write time
-    # (Question/Short answer/Tensions are placeholders), so this report is
+    # (every section is a placeholder comment), so this report is
     # informational, not a gate. The point is to remind the LLM author that
     # any prose they add later will be checked against this surface.
     try:

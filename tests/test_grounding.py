@@ -304,3 +304,167 @@ def test_quoted_type_idea_still_detected():
         doc = IDEA_DOC.replace("type: idea", variant)
         rep = grounding.check(doc, permissive=True)
         assert rep.model_prior_claims == 1, variant
+
+
+# ---------- labelled Outlook on synthesis pages ----------
+
+# One claim per section. Background stays strict; Outlook holds a cited
+# inference, a model prior, and an uncited inference (which must fail).
+SYNTH_DOC = """---
+type: synthesis
+---
+
+## Background
+
+Background claim with enough words to count as a real claim [[compbio/foo-2024-bar]].
+
+## Outlook
+
+Combining both assays implies a shared detection floor across the field *(inference)*.[^foo][^baz]
+
+Long-read sequencing will probably be the next route around that floor *(model prior)*.
+
+Another conclusion with enough words to count but no cited papers at all *(inference)*.
+
+[^foo]: [[compbio/foo-2024-bar]]
+[^baz]: [[compbio/baz-2025-qux]]
+"""
+
+
+def _claims(rep):
+    return [u for u in rep.units if u.is_claim]
+
+
+def test_synthesis_outlook_accepts_both_labels():
+    """Outlook is the synthesis page's labelled section: a cited inference is
+    grounded and flagged, a model prior is reported as a warning, and an
+    inference with nothing cited stays ungrounded."""
+    rep = grounding.check(SYNTH_DOC, permissive=True, valid_anchors=set())
+    assert rep.total_claims == 4
+    assert rep.inference_claims == 1
+    assert rep.model_prior_claims == 1
+    assert rep.grounded_claims == 2          # Background + the cited inference
+    (bad,) = rep.ungrounded_units
+    assert "no cited papers" in bad.text
+    assert bad.flag_reason == "*(inference)* without the papers it is drawn from"
+
+
+def test_inference_label_does_not_ground_without_a_citation():
+    """The label relabels a grounded unit; it is never a citation by itself.
+    Otherwise an author could exempt any Outlook sentence from both gates."""
+    rep = grounding.check(SYNTH_DOC, permissive=True, valid_anchors=set())
+    uncited = [u for u in _claims(rep) if "no cited papers" in u.text]
+    assert uncited and not uncited[0].has_citation
+    assert not uncited[0].is_inference
+
+
+def test_labels_outside_outlook_have_no_effect_on_synthesis():
+    """Background stays strictly grounded: a label there neither grounds the
+    unit nor marks it as an inference."""
+    doc = SYNTH_DOC.replace(
+        "Background claim with enough words to count as a real claim [[compbio/foo-2024-bar]].",
+        "Background claim with enough words to count as a real claim *(model prior)*.",
+    )
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    background = next(u for u in _claims(rep) if u.text.startswith("Background"))
+    assert not background.has_citation
+    assert rep.model_prior_claims == 1      # only the Outlook one
+
+
+def test_cited_inference_outside_outlook_is_an_ordinary_claim():
+    """Outside a labelled section the label is prose: the unit is graded as a
+    normal cited claim, so the fidelity gate still checks it."""
+    doc = SYNTH_DOC.replace("## Outlook", "## Findings")
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.inference_claims == 0
+    assert rep.model_prior_claims == 0
+
+
+def test_strict_ignores_both_labels_on_synthesis():
+    """`--strict`: the model prior and the uncited inference both fail, and
+    the cited inference is an ordinary cited claim."""
+    rep = grounding.check(SYNTH_DOC, permissive=False, valid_anchors=set())
+    assert rep.inference_claims == 0
+    assert rep.model_prior_claims == 0
+    assert len(rep.ungrounded_units) == 2
+    assert rep.grounded_claims == 2
+
+
+def test_outlook_is_not_labelled_on_idea_pages():
+    """Each page type labels only its own sections: an idea page's Outlook
+    heading (not part of the idea contract) stays strict."""
+    doc = SYNTH_DOC.replace("type: synthesis", "type: idea")
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.model_prior_claims == 0
+    assert rep.inference_claims == 0
+
+
+def test_idea_pages_accept_the_inference_label():
+    """Opportunities/Plans take `*(inference)*` too, so the two labels mean
+    the same thing on both page types."""
+    doc = IDEA_DOC.replace(
+        "Plans claim with enough words to count as a real claim with no citation.",
+        "Plans claim with enough words to count as a real claim [[ai/foo-2025-bar]] *(inference)*.",
+    )
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.inference_claims == 1
+    assert rep.model_prior_claims == 1
+
+
+def test_model_prior_carrying_a_number_stays_ungrounded():
+    """Review finding: `*(model prior)*` grounded a unit whatever it said, so an
+    uncited "98% efficacy" passed check-grounding — and the fidelity gate skips
+    an uncited unit, so a fabricated figure cleared both. CLAUDE.md §4 is
+    explicit that numbers always need a paper citation, so the marker grounds a
+    qualitative forecast only."""
+    doc = SYNTH_DOC.replace(
+        "Long-read sequencing will probably be the next route around that floor *(model prior)*.",
+        "Long-read assays will likely reach 98% efficacy at detecting these sites *(model prior)*.",
+    )
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    numeric = next(u for u in _claims(rep) if "98%" in u.text)
+    assert not numeric.has_citation
+    assert not numeric.is_model_prior
+    assert "carrying a number" in (numeric.flag_reason or "")
+    assert numeric in rep.ungrounded_units
+
+
+def test_qualitative_model_prior_still_grounds():
+    """The counterpart: a forecast with no quantity is exactly what the label
+    is for, and must not be collateral damage."""
+    doc = SYNTH_DOC.replace(
+        "Long-read sequencing will probably be the next route around that floor *(model prior)*.",
+        "Long-read assays are likely to become the standard route around that floor *(model prior)*.",
+    )
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.model_prior_claims == 1
+
+
+def test_digits_inside_a_name_are_not_a_quantity():
+    """`Cas9`, `ABE8e`, `p53` must not count as numbers, or the rule would
+    forbid naming an editor in a model prior. Shares the fidelity grader's
+    tokenizer, whose lookbehind already excludes word-internal digits."""
+    doc = SYNTH_DOC.replace(
+        "Long-read sequencing will probably be the next route around that floor *(model prior)*.",
+        "A Cas9 variant engineered on ABE8e scaffolds will probably solve this *(model prior)*.",
+    )
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.model_prior_claims == 1
+
+
+def test_idea_design_parameters_may_carry_numbers_under_the_marker():
+    """The numeric rule is synthesis-only, and the asymmetry is deliberate. An
+    idea page's Opportunities numbers are parameters the author is *choosing*
+    ("enumeration cap of 64", "be-window 4-8"), not results being asserted —
+    proposing them is what the section is for. Applying the synthesis rule here
+    flagged 12 units across 5 existing idea pages, every one a parameter."""
+    doc = IDEA_DOC.replace(
+        "Opportunities claim with enough words to count as a real claim *(model prior)*.",
+        "Use a tied-path enumeration cap of 64 with a deterministic tiebreaker *(model prior)*.",
+    )
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.model_prior_claims == 1
+    # IDEA_DOC's Background/Plans/Caveats claims are deliberately uncited, so
+    # assert about the parameter unit itself rather than the whole report.
+    param = next(u for u in _claims(rep) if "cap of 64" in u.text)
+    assert param.is_model_prior and param.flag_reason is None

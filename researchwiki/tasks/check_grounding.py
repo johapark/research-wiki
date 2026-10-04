@@ -16,12 +16,18 @@ Grounding categories (per claim-unit, default mode):
                  that resolves to one. Legacy `claim_id:NNN` tokens are
                  tolerated by the grader for backward compat but new pages
                  should use `[[stem#slug]]` (durable content-addressed).
-  model_prior  — has only the *(model prior)* marker (idea pages, in
-                 Opportunities/Plans only — see CLAUDE.md §4)
+  model_prior  — has only the *(model prior)* marker, inside a labelled
+                 section: idea Opportunities/Plans or synthesis Outlook
+                 (see CLAUDE.md §4)
   ungrounded   — has neither; counts as a failure (exit 1)
 
-  --strict collapses model_prior into ungrounded — every claim must be
-  wiki-grounded regardless of marker.
+  A grounded unit in a labelled section may also carry *(inference)*: a
+  conclusion drawn by combining the papers it cites. It counts as grounded
+  and is reported in `inference_claims`; `grade synthesis` skips it. An
+  *(inference)* unit with no citation is ungrounded.
+
+  --strict ignores both labels — every claim must be wiki-grounded, and an
+  inference counts as an ordinary cited claim.
 
 This is the *structural* gate: it checks a citation is present, not that it
 holds. For synthesis/idea pages, pair it with `researchwiki grade synthesis`,
@@ -66,7 +72,7 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--strict", action="store_true",
-        help=("Treat the *(model prior)* marker as ungrounded — every claim "
+        help=("Ignore the *(model prior)* and *(inference)* labels — every claim "
               "must carry a wiki citation regardless of section (CLAUDE.md §4)."),
     )
     args = parser.parse_args(argv)
@@ -110,6 +116,7 @@ def main(argv: list[str]) -> int:
             "total_claims": report.total_claims,
             "grounded_claims": report.grounded_claims,
             "model_prior_claims": report.model_prior_claims,
+            "inference_claims": report.inference_claims,
             "ungrounded_claims": len(report.ungrounded_units),
             "coverage": round(report.coverage, 3),
             "permissive": permissive,
@@ -121,6 +128,7 @@ def main(argv: list[str]) -> int:
                     "is_claim": u.is_claim,
                     "has_citation": u.has_citation,
                     "is_model_prior": u.is_model_prior,
+                    "is_inference": u.is_inference,
                     "citations": u.citations,
                     "flag_reason": u.flag_reason,
                     "preview": (u.text[:160].replace("\n", " ")
@@ -138,9 +146,11 @@ def main(argv: list[str]) -> int:
     if not args.quiet and not args.json:
         mp = report.model_prior_claims
         mp_part = f", {mp} model prior" if mp else ""
+        inf = report.inference_claims
+        inf_part = f" ({inf} labelled inference)" if inf else ""
         print(
             f"\n[grounding] {report.grounded_claims}/{report.total_claims} "
-            f"claim-units wiki-cited{mp_part} "
+            f"claim-units wiki-cited{inf_part}{mp_part} "
             f"({report.coverage * 100:.0f}% acknowledged)",
             file=sys.stderr,
         )

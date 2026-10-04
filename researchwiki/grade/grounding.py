@@ -99,14 +99,24 @@ _SKIP_REGION_RE = re.compile(
 # Matched non-greedily so adjacent comments don't get merged.
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
-# Idea pages: in permissive mode, units inside Opportunities/Plans H2 sections
-# may use the `*(model prior)*` marker as an explicit acknowledgment that the
-# claim comes from training knowledge rather than a wiki paper (CLAUDE.md §4).
-# `\b` lets the title carry a descriptive suffix like "## Plans — how to ...".
-_PERMISSIVE_IDEA_SECTION_RE = re.compile(r"^(opportunities|plans)\b", re.IGNORECASE)
+# Labelled sections: in permissive mode, units inside these H2 sections may
+# say where a claim comes from instead of citing a paper for it (CLAUDE.md §4).
+#   - `*(model prior)*`: training knowledge, not a wiki paper. Grounds the
+#     unit on its own; reported as `model_prior` (a warning, not a failure).
+#   - `*(inference)*`: a conclusion the author draws by combining the cited
+#     papers. Grounds the unit only alongside a wiki citation naming the papers
+#     it follows from; the fidelity grader then skips it, because no one cited
+#     paper states the combined conclusion.
+# Idea pages label Opportunities/Plans; synthesis pages label Outlook. `\b`
+# lets the title carry a descriptive suffix like "## Plans — how to ...".
+_LABELLED_SECTION_RES: dict[str, re.Pattern[str]] = {
+    "idea": re.compile(r"^(opportunities|plans)\b", re.IGNORECASE),
+    "synthesis": re.compile(r"^outlook\b", re.IGNORECASE),
+}
 _FRONTMATTER_TYPE_RE = re.compile(r"^type:\s*([^\s#]+)", re.MULTILINE)
 _H2_RE = re.compile(r"^##[ \t]+(.+?)\s*$", re.MULTILINE)
 _MODEL_PRIOR_RE = re.compile(r"\*\(\s*model\s+prior\s*\)\*", re.IGNORECASE)
+_INFERENCE_RE = re.compile(r"\*\(\s*inference\s*\)\*", re.IGNORECASE)
 
 # Sections whose content is *meta-commentary* about wiki coverage rather than
 # factual claims about source PDFs. Synthesis and idea pages declare their gaps
@@ -115,6 +125,21 @@ _MODEL_PRIOR_RE = re.compile(r"\*\(\s*model\s+prior\s*\)\*", re.IGNORECASE)
 # these sections at parse time means the grounding gate stops treating
 # legitimate coverage-declaration prose as ungrounded.
 _GATE_SKIP_SECTION_RE = re.compile(r"^what would update this page\b", re.IGNORECASE)
+
+def _has_quantity(text: str) -> bool:
+    """True if the unit states a number of its own.
+
+    Citation markup is stripped first: a footnote id (`[^lazzarotto-2025]`), a
+    stem (`[[cgt/bae-2014-...]]`) and a claim slug all carry digits that are
+    not claims about the world, and an ISO date in an editorial header is not
+    a quantity either. Shares `_strip_for_numerics`/`NUMERIC_TOKEN_RE` with the
+    fidelity grader so "is this a number?" has one answer across both gates —
+    notably one that ignores digits inside a name (`Cas9`, `ABE8e`, `p53`).
+    """
+    from .primitives import NUMERIC_TOKEN_RE
+    from .fidelity.synthesis import _strip_for_numerics
+    return bool(NUMERIC_TOKEN_RE.findall(_strip_for_numerics(text)))
+
 
 # Minimum word count to treat a unit as a "claim". Below this, it's
 # probably a label/lead-in/punctuation noise, not a factual claim.
@@ -131,6 +156,7 @@ class Unit:
     is_claim: bool            # passed the claim-shape heuristic
     has_citation: bool        # wiki-cited OR (marker-cited in eligible context)
     is_model_prior: bool = False  # grounded only by the *(model prior)* marker
+    is_inference: bool = False    # wiki-cited, and labelled *(inference)*
     citations: list[str] = field(default_factory=list)
     flag_reason: str | None = None  # set when ungrounded
 
@@ -177,6 +203,12 @@ class GroundingReport:
         return [u for u in self.units if u.is_claim and u.is_model_prior]
 
     @property
+    def inference_claims(self) -> int:
+        """Cited claims labelled `*(inference)*`. A subset of grounded_claims:
+        the citation is present, but the fidelity grader won't check it."""
+        return sum(1 for u in self.units if u.is_claim and u.is_inference)
+
+    @property
     def ungrounded_units(self) -> list[Unit]:
         return [u for u in self.units if u.is_claim and not u.has_citation]
 
@@ -200,26 +232,32 @@ def _blank_region(match: re.Match) -> str:
     return "\n" * match.group(0).count("\n")
 
 
-def _is_idea_page(text: str) -> bool:
-    """True if frontmatter declares `type: idea`. Tolerates `"idea"` / `'idea'`
+def _page_type(text: str) -> str | None:
+    """The frontmatter `type:` value, lowercased. Tolerates `"idea"` / `'idea'`
     in case an author quotes the value defensively (YAML accepts both)."""
     fm = _FRONTMATTER_RE.match(text)
     if not fm:
-        return False
+        return None
     m = _FRONTMATTER_TYPE_RE.search(fm.group(0))
-    return bool(m and m.group(1).strip("\"'").lower() == "idea")
+    return m.group(1).strip("\"'").lower() if m else None
 
 
-def _o_p_line_ranges(cleaned: str) -> list[tuple[int, int]]:
-    """Line ranges (1-based, half-open) covered by Opportunities/Plans H2
-    sections. Each range runs from the H2 header line to the next H2 (or EOF).
+def has_labelled_sections(text: str) -> bool:
+    """True if this page type has sections where source labels count."""
+    return _page_type(text) in _LABELLED_SECTION_RES
+
+
+def _labelled_line_ranges(cleaned: str, section_re: re.Pattern[str]) -> list[tuple[int, int]]:
+    """Line ranges (1-based, half-open) covered by the H2 sections that
+    `section_re` matches. Each range runs from the H2 header line to the next
+    H2 (or EOF).
 
     Operates on already-cleaned text (frontmatter / code / skip regions blanked)
-    so that an Opportunities-shaped header inside a code block can't leak in."""
+    so that an Outlook-shaped header inside a code block can't leak in."""
     headers = list(_H2_RE.finditer(cleaned))
     ranges: list[tuple[int, int]] = []
     for i, m in enumerate(headers):
-        if not _PERMISSIVE_IDEA_SECTION_RE.match(m.group(1).strip()):
+        if not section_re.match(m.group(1).strip()):
             continue
         start_line = cleaned.count("\n", 0, m.start()) + 1
         end_pos = headers[i + 1].start() if i + 1 < len(headers) else len(cleaned)
@@ -365,10 +403,11 @@ def parse_units(
     independently. A new top-level unit starts only when a bullet at indent
     ≤ the current parent's indent appears.
 
-    When `permissive=True` AND the document is an idea page, units inside
-    Opportunities/Plans H2 sections may use the `*(model prior)*` marker as
-    a citation token (per CLAUDE.md §4). Those units are reported as
-    `model_prior` rather than `grounded`.
+    When `permissive=True`, units inside a page type's labelled sections
+    (idea: Opportunities/Plans; synthesis: Outlook) may carry a source label
+    (per CLAUDE.md §4). `*(model prior)*` alone grounds the unit and reports
+    it as `model_prior` rather than `grounded`; `*(inference)*` plus a wiki
+    citation reports it as grounded with `is_inference` set.
 
     `valid_anchors`: set of `(stem, slug)` pairs that resolve against
     state.db. When None, claim anchors are NOT validated (any `[[stem#slug]]`
@@ -385,7 +424,13 @@ def parse_units(
     # conventionally placed at the very bottom — computing on `cleaned` silently
     # dropped them, marking every footnote-only claim ungrounded.
     grounded_fn = _grounded_footnotes(text)
-    op_ranges = _o_p_line_ranges(cleaned) if (permissive and _is_idea_page(text)) else []
+    page_type = _page_type(text) or ""
+    section_re = _LABELLED_SECTION_RES.get(page_type) if permissive else None
+    op_ranges = _labelled_line_ranges(cleaned, section_re) if section_re else []
+    # See `_make_unit`: only synthesis Outlook treats a marker-only number as
+    # ungrounded. An idea page's Opportunities/Plans numbers are design
+    # parameters, which the section exists to propose.
+    numeric_needs_cite = page_type == "synthesis"
     lines = cleaned.splitlines()
 
     units: list[Unit] = []
@@ -404,7 +449,8 @@ def parse_units(
             units.append(_make_unit(len(units), buf_start, unit_text,
                                     buf_kind or "paragraph", grounded_fn,
                                     _eligible(buf_start),
-                                    valid_anchors=valid_anchors))
+                                    valid_anchors=valid_anchors,
+                                    numeric_claims_need_citation=numeric_needs_cite))
         buf = []
         buf_kind = None
         parent_bullet_indent = None
@@ -418,7 +464,8 @@ def parse_units(
             _flush()
             units.append(_make_unit(len(units), i, raw.rstrip(), "heading",
                                     grounded_fn, _eligible(i),
-                                    valid_anchors=valid_anchors))
+                                    valid_anchors=valid_anchors,
+                                    numeric_claims_need_citation=numeric_needs_cite))
             continue
         bm = _BULLET_RE.match(raw)
         if bm:
@@ -448,7 +495,8 @@ def parse_units(
 def _make_unit(index: int, line_start: int, text: str, kind: str,
                grounded_fn: frozenset[str] | set[str] = frozenset(),
                model_prior_eligible: bool = False,
-               valid_anchors: set[tuple[str, str]] | None = None) -> Unit:
+               valid_anchors: set[tuple[str, str]] | None = None,
+               numeric_claims_need_citation: bool = False) -> Unit:
     # Wikilinks split into two classes: (a) plain wikilinks (no anchor) —
     # always count as citations at grounding time; (b) claim anchors
     # `[[stem#slug]]` — count only when the pair resolves via valid_anchors
@@ -474,18 +522,46 @@ def _make_unit(index: int, line_start: int, text: str, kind: str,
     citations = counted + _CLAIM_ID_RE.findall(text)
     citations += [f"[^{fid}]" for fid in _FOOTNOTE_REF_RE.findall(text) if fid in grounded_fn]
     has_wiki = bool(citations)
+    # In synthesis `Outlook` a number under `*(model prior)*` is an empirical
+    # claim about the world, and CLAUDE.md §4 requires a citation for it; the
+    # marker would otherwise launder a fabricated figure past both gates, since
+    # the fidelity grader skips an uncited unit too. So there the marker grounds
+    # a *qualitative* forecast only.
+    #
+    # Idea `Opportunities`/`Plans` are exempt, and the asymmetry is the point:
+    # their numbers are design parameters the author is *choosing* ("tied-path
+    # enumeration cap of 64", "be-window 4-8"), not results being asserted, and
+    # proposing them is what the section exists for. CLAUDE.md §4 asks for a
+    # citation on "numbers/benchmark results" there, meaning measured values —
+    # applying it to chosen ones flagged 12 units across 5 existing idea pages,
+    # every one a parameter.
     has_marker = model_prior_eligible and bool(_MODEL_PRIOR_RE.search(text))
-    if has_marker:
+    marker_carries_number = (has_marker and not has_wiki
+                             and numeric_claims_need_citation
+                             and _has_quantity(text))
+    if has_marker and not marker_carries_number:
         citations.append("*(model prior)*")
-    has_citation = has_wiki or has_marker
-    is_model_prior = has_marker and not has_wiki
+    has_citation = has_wiki or (has_marker and not marker_carries_number)
+    is_model_prior = has_marker and not has_wiki and not marker_carries_number
+    # An inference is a conclusion drawn from cited papers, so it never
+    # grounds a unit by itself: it only relabels one the wiki already grounds.
+    has_inference = model_prior_eligible and bool(_INFERENCE_RE.search(text))
+    is_inference = has_inference and has_wiki
     is_claim, reason = _classify_claim(text, kind)
     # Dangling-anchor-only units aren't grounded — report the specific fault
     # rather than the generic "no citation" so authors know it's a slug
     # mistake, not a missing citation.
     flag_reason: str | None = None
     if is_claim and not has_citation:
-        flag_reason = "claim with dangling [[stem#slug]] anchor" if (dangling and not counted) else reason
+        if dangling and not counted:
+            flag_reason = "claim with dangling [[stem#slug]] anchor"
+        elif marker_carries_number:
+            flag_reason = ("*(model prior)* carrying a number — cite the paper the "
+                           "figure comes from, or state it qualitatively")
+        elif has_inference:
+            flag_reason = "*(inference)* without the papers it is drawn from"
+        else:
+            flag_reason = reason
     return Unit(
         index=index,
         line_start=line_start,
@@ -494,6 +570,7 @@ def _make_unit(index: int, line_start: int, text: str, kind: str,
         is_claim=is_claim,
         has_citation=has_citation,
         is_model_prior=is_model_prior,
+        is_inference=is_inference,
         citations=citations,
         flag_reason=flag_reason,
     )

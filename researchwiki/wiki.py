@@ -101,13 +101,23 @@ class Page:
 def read_page(md: Path) -> Page | None:
     """Parse a wiki markdown file into frontmatter + body.
 
-    Returns None only when the file has no frontmatter block at all (no leading
-    `---` fence) — i.e. it isn't a wiki page. A present-but-malformed YAML block
-    yields a Page with `fm={}` rather than None, so a single typo never silently
-    drops the page from search / scout / lint (which flag the bad YAML
-    separately via `invalid_frontmatter`).
+    Returns None when the path is not a readable wiki page: it doesn't exist,
+    or it has no frontmatter block at all (no leading `---` fence). A
+    present-but-malformed YAML block yields a Page with `fm={}` rather than
+    None, so a single typo never silently drops the page from search / scout /
+    lint (which flag the bad YAML separately via `invalid_frontmatter`).
+
+    A missing file returns None rather than raising, because callers hold page
+    *keys* from durable records — impact-review receipts, claim-graph edges,
+    index bullets — and a key can outlive its page by one `remove`. Every
+    caller already branches on None (usually to mark the record stale, which is
+    the right answer for a deleted page); a raise instead crashed `status`
+    wholesale when one receipt named a removed page.
     """
-    text = md.read_text(encoding="utf-8")
+    try:
+        text = md.read_text(encoding="utf-8")
+    except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+        return None
     if not text.startswith("---\n"):
         return None
     end = text.find("\n---\n", 4)

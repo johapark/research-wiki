@@ -52,7 +52,10 @@ def _source_text(page: Page) -> str:
 
 def _target_text(page: Page) -> str:
     headings = {
-        "synthesis": ("Question", "Short answer", "What would update this page"),
+        # Outlook replaces "What would update this page" on synthesis pages
+        # written to the fixed structure; legacy pages still carry the old one.
+        "synthesis": ("Question", "Short answer", "Outlook",
+                      "What would update this page"),
         "idea": ("Verdict", "Background", "Opportunities", "Plans", "Caveats"),
         "proposal": ("Question", "Provisional thesis or hypothesis",
                      "Why this connection matters", "Decisive uncertainty"),
@@ -89,6 +92,7 @@ def _target_passages(page: Page, source_terms: set[str]) -> list[str]:
         extract_section(page.body, "Short answer"),
         extract_section(page.body, "Verdict"),
         extract_section(page.body, "Provisional thesis or hypothesis"),
+        extract_section(page.body, "Outlook"),
         extract_section(page.body, "What would update this page"),
         extract_section(page.body, "Decisive uncertainty"),
     ]))[:2000]

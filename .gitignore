@@ -108,7 +108,16 @@ config/profiles/
 
 # Editor / vault configs (user-specific)
 .obsidian/
-.claude/
+# `.claude/*` rather than `.claude/`: git cannot re-include a path whose parent
+# directory is excluded, and `.claude/skills/` is shared project tooling that
+# belongs in the repo. Settings files stay ignored — they carry per-user
+# permissions and local hooks.
+.claude/*
+!.claude/skills/
+# Reference material dropped in for reading, not repo content. Leading slash so
+# it matches only this root directory, never `.claude/skills/`, which is
+# tracked two lines above.
+/skills/
 *.base
 
 # OS / editor detritus

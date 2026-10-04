@@ -470,7 +470,7 @@ headings, list bullets, or tables:
   "confidence": 0.75,
   "rationale": "one sentence explaining why refine (bullet/line) wouldn't carry the same information",
   "patch": {
-    "target_section": "## Evidence from the wiki",           // section the paragraph lives under
+    "target_section": "## Findings",                         // section the paragraph lives under
     "target_paragraph_match": "verbatim first ~120 chars of the existing paragraph — the anchor by which the reviewer locates it",
     "new_paragraph": "Full rewrite of that paragraph. MUST cite [[source/key]]. MUST preserve every [^footnote-id] reference present in the original paragraph — do not drop citations. Do NOT introduce numbers not stated in the new paper or the target's cited papers."
   }
@@ -701,7 +701,7 @@ def _insert_in_referenced_papers(fm: str, wikilink: str) -> tuple[str, bool]:
 
 def _insert_bullet_under(body: str, heading: str, bullet_text: str) -> tuple[str, bool]:
     """Append `- {bullet_text}` at the end of the section identified by
-    `heading` (exact line, e.g. '## Evidence from the wiki'). Section
+    `heading` (exact line, e.g. '## Findings'). Section
     ends at the next heading of the same or higher level (lower count of
     `#` chars), or end of body. Returns (new_body, did_insert)."""
     target = heading.strip()

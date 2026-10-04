@@ -124,3 +124,18 @@ def test_year_int_handles_int_and_string():
     assert _page({"year": "TODO"}).year_int() is None
     assert _page({}).year_int() is None
     assert _page({"year": True}).year_int() is None      # bool is not a year
+
+
+def test_read_page_missing_file_returns_none(tmp_path):
+    """A page key can outlive its page by one `remove`, and callers hold keys
+    from durable records: impact-review receipts, claim-graph edges, index
+    bullets. Raising made `status` crash wholesale when a single receipt named
+    a page that had been removed; None lets each caller mark its record stale,
+    which is what every call site already does."""
+    assert read_page(tmp_path / "gone.md") is None
+
+
+def test_read_page_directory_returns_none(tmp_path):
+    """Same contract for a path that exists but isn't a file."""
+    (tmp_path / "a-dir.md").mkdir()
+    assert read_page(tmp_path / "a-dir.md") is None

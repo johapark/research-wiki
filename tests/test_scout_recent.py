@@ -142,6 +142,20 @@ def test_triggers_come_from_update_sections_and_open_proposals(wiki):
     }
 
 
+
+def test_outlook_is_a_trigger_section_on_synthesis_pages(wiki):
+    """A synthesis page written to the fixed structure states what would move
+    it under `## Outlook`, which replaces `## What would update this page`."""
+    _write(wiki, "synthesis/s", {"title": "S", "type": "synthesis"},
+           "## Short answer\n\nNot a trigger at all, just an ordinary claim here.\n\n"
+           "## Outlook\n\n"
+           "- A prospective cohort measuring off-target edits in treated patients.\n\n"
+           "## References\n\n[^a]: [[single-cell/a-2020-x]]\n")
+    got = {(t.page, t.text) for t in R.collect_triggers(R.read_pages())}
+    assert got == {
+        ("synthesis/s", "A prospective cohort measuring off-target edits in treated patients."),
+    }
+
 def test_trigger_text_keeps_the_words_of_a_linked_stem():
     assert R._clean("fixed by [[genomics/siren-2021-pangenomics-enables]] and "
                     "[[x|Giraffe]][^a]") == "fixed by siren 2021 pangenomics enables and Giraffe"
