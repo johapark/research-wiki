@@ -92,3 +92,108 @@ def test_provider_outage_never_becomes_empty_success(
 def test_timeout_type_remains_available_for_transport_mocks():
     """Keep the public test seam explicit: timeout comes from subprocess."""
     assert issubclass(subprocess.TimeoutExpired, Exception)
+
+
+# ---------- keyword-search transport (`scout search`) ----------
+
+def test_400_is_retried_by_default_but_rejected_fast_when_opted_in(monkeypatch):
+    """DOI lookups keep their old behaviour; search callers opt into exit 1."""
+    calls = []
+    monkeypatch.setattr(_http.subprocess, "run",
+                        lambda *a, **k: calls.append(1) or _Proc("bad field\n400"))
+    monkeypatch.setattr(_http.time, "sleep", lambda *_: None)
+    with pytest.raises(StructuredProviderUnavailable, match="400"):
+        _http.curl_json("https://example.test", provider="test", retries=2)
+    assert len(calls) == 2
+    calls.clear()
+    with pytest.raises(_http.ProviderRequestRejected, match="bad field"):
+        _http.curl_json("https://example.test", provider="test", retries=3, reject_400=True)
+    assert len(calls) == 1
+
+
+def test_curl_body_returns_text_and_none_on_404(monkeypatch):
+    monkeypatch.setattr(_http.subprocess, "run", lambda *a, **k: _Proc("<feed/>\n200"))
+    assert _http.curl_body("https://example.test", provider="test") == "<feed/>"
+    monkeypatch.setattr(_http.subprocess, "run", lambda *a, **k: _Proc("\n404"))
+    assert _http.curl_body("https://example.test", provider="test") is None
+
+
+def test_secret_query_never_reaches_argv_or_logs(monkeypatch, capsys):
+    seen = {}
+
+    def run(cmd, **kwargs):
+        seen["cmd"], seen["input"] = cmd, kwargs.get("input")
+        return _Proc("{}\n200")
+
+    monkeypatch.setattr(_http.subprocess, "run", run)
+    _http.curl_json("https://example.test/q?term=x", provider="test",
+                    secret_query={"api_key": "sekrit"})
+    assert not any("sekrit" in part for part in seen["cmd"])
+    assert seen["cmd"][-2:] == ["-K", "-"]
+    assert 'url = "https://example.test/q?term=x&api_key=sekrit"' in seen["input"]
+    assert "sekrit" not in capsys.readouterr().err
+
+
+def test_redact_blanks_secret_looking_params():
+    assert _http.redact("https://x.test/a?term=q&api_key=k1&email=a@b") == (
+        "https://x.test/a?term=q&api_key=***&email=***")
+
+
+def _download_run(responses):
+    """Fake curl: each call pops (status, redirect, body) and writes the -o file."""
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(cmd[-1 - cmd[::-1].index("-o") + 1] if "-o" in cmd else None)
+        status, redirect, body = responses.pop(0)
+        out = cmd[cmd.index("-o") + 1]
+        with open(out, "wb") as fh:
+            fh.write(body)
+        return _Proc(f"{status}\n{redirect}")
+    return run, calls
+
+
+def test_download_follows_allowed_redirects_and_lands_atomically(tmp_path, monkeypatch):
+    run, _ = _download_run([
+        ("302", "https://b.test/real.pdf", b""),
+        ("200", "", b"%PDF-1.7 body"),
+    ])
+    monkeypatch.setattr(_http.subprocess, "run", run)
+    dest = tmp_path / "x.pdf"
+    assert _http.curl_download("https://a.test/x", dest, provider="t",
+                               allowed_hosts={"a.test", "b.test"}, max_bytes=1000) == dest
+    assert dest.read_bytes().startswith(b"%PDF-")
+    assert [p.name for p in tmp_path.iterdir()] == ["x.pdf"]
+
+
+@pytest.mark.parametrize(("responses", "reason"), [
+    ([("302", "https://evil.test/x.pdf", b"")], "off-allowlist"),
+    ([("302", "http://a.test/x.pdf", b"")], "not-https"),
+    ([("200", "", b"<!DOCTYPE html>challenge")], "not-pdf"),
+    ([("403", "", b"denied")], "http-403"),
+])
+def test_download_refusals_leave_no_file(tmp_path, monkeypatch, responses, reason):
+    run, _ = _download_run(responses)
+    monkeypatch.setattr(_http.subprocess, "run", run)
+    with pytest.raises(_http.DownloadRefused) as exc:
+        _http.curl_download("https://a.test/x", tmp_path / "x.pdf", provider="t",
+                            allowed_hosts={"a.test"}, max_bytes=1000)
+    assert exc.value.reason == reason
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_download_never_overwrites(tmp_path, monkeypatch):
+    dest = tmp_path / "x.pdf"
+    dest.write_bytes(b"%PDF-original")
+    monkeypatch.setattr(_http.subprocess, "run", lambda *a, **k: pytest.fail("fetched"))
+    with pytest.raises(FileExistsError):
+        _http.curl_download("https://a.test/x", dest, provider="t",
+                            allowed_hosts={"a.test"}, max_bytes=1000)
+    assert dest.read_bytes() == b"%PDF-original"
+
+
+def test_download_refuses_an_off_list_start_url_before_any_request(tmp_path, monkeypatch):
+    monkeypatch.setattr(_http.subprocess, "run", lambda *a, **k: pytest.fail("fetched"))
+    with pytest.raises(_http.DownloadRefused, match="off-allowlist"):
+        _http.curl_download("https://evil.test/x", tmp_path / "x.pdf", provider="t",
+                            allowed_hosts={"a.test"}, max_bytes=1000)

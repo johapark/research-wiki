@@ -42,7 +42,10 @@ _ROUTING_KEYS = frozenset({
     "RW_LLM_BASE_URL",
     "ANTHROPIC_BASE_URL",
 })
-CREDENTIAL_KEYS = frozenset({"OPENAI_API_KEY", "ANTHROPIC_API_KEY"})
+#: Keys whose literal value is a secret, so a world-readable profile holding
+#: one draws a permissions warning. `NCBI_API_KEY` is optional (`scout search`
+#: works without it at a lower PubMed rate limit) but is still a credential.
+CREDENTIAL_KEYS = frozenset({"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "NCBI_API_KEY"})
 
 
 class EnvProfileFailure(EnvironmentFailure):

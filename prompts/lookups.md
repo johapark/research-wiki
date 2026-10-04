@@ -1,6 +1,6 @@
-# Whitelist-API lookups — retraction-check, preprint-check, orcid-lookup
+# Structured-API lookups — retraction-check, preprint-check, orcid-lookup
 
-Three CLI wrappers around PubMed / bioRxiv / ORCID. Use as needed — none is part of routine ingest. All access is mediated through `researchwiki` (Rule 1 whitelist); never raw `WebFetch`/`WebSearch`.
+Three CLI wrappers around PubMed / bioRxiv / ORCID. Use as needed — none is part of routine ingest. Use the `researchwiki` wrappers (Rule 1) rather than raw `WebFetch`/`WebSearch`, so caching and rate limits apply.
 
 ## retraction-check — PubMed retraction lookup
 
@@ -22,7 +22,7 @@ researchwiki preprint-check --all
 researchwiki preprint-check --all --json
 ```
 
-Key signal: `published_doi` + `published_in_wiki`. Two workflows:
+Key signal: `published_doi` + `published_in_wiki`. Each record also carries `license` (`cc_by`, `cc_no`, …) — the preprint's reuse terms, which `scout search fetch` reports. Two workflows:
 
 1. **Preprint → journal update**: update YAML `doi:`/`title:`/venue, **keep stem** — preserves back-links.
 2. **Duplicate prevention**: `--all` warns if `published_doi` is already a separate page.

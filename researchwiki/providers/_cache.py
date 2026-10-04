@@ -19,6 +19,13 @@ Two guarantees every provider gets, one way or the other:
   preprint DOI that Crossref/bioRxiv hasn't indexed yet — is stamped so it
   auto-expires and is re-fetched after `NEG_TTL_DAYS`, instead of condemning
   the DOI as "not found" forever.
+
+A DOI's metadata barely changes, so positive entries never expire by default.
+A keyword *search* answer does — new papers appear daily — so `scout search`
+passes `max_age_days` and stores its responses through `write_text_cache`,
+which stamps the write time. The XML the PubMed efetch and arXiv Atom
+endpoints return rides inside a JSON wrapper so it gets the same guarded read
+and atomic write as everything else here.
 """
 
 from __future__ import annotations
@@ -60,10 +67,38 @@ def _stale_negative(data) -> bool:
     return (_dt.datetime.now() - written).total_seconds() / 86400.0 > NEG_TTL_DAYS
 
 
-def read_cache(cache: Path):
-    """Return cached JSON, or None on miss / corrupt / expired-negative."""
+def _older_than(cache: Path, data, max_age_days: float) -> bool:
+    """Whether the entry is older than `max_age_days`. 0 is always stale.
+
+    The write stamp wins when present; otherwise the file's mtime, which is
+    the write time for every file this module writes atomically.
+    """
+    if max_age_days <= 0:
+        return True
+    written = None
+    if isinstance(data, dict):
+        try:
+            written = _dt.datetime.fromisoformat(data.get(_NEG_AT))
+        except (TypeError, ValueError):
+            written = None
+    if written is None:
+        try:
+            written = _dt.datetime.fromtimestamp(cache.stat().st_mtime)
+        except OSError:
+            return True
+    return (_dt.datetime.now() - written).total_seconds() / 86400.0 > max_age_days
+
+
+def read_cache(cache: Path, *, max_age_days: float | None = None):
+    """Return cached JSON, or None on miss / corrupt / expired-negative.
+
+    `max_age_days` additionally expires positive entries; None (the default)
+    keeps the historical never-expire behaviour for DOI-keyed lookups.
+    """
     data = read_json(cache)
     if data is None or _stale_negative(data):
+        return None
+    if max_age_days is not None and _older_than(cache, data, max_age_days):
         return None
     return data
 
@@ -71,6 +106,33 @@ def read_cache(cache: Path):
 def write_cache(cache: Path, data) -> None:
     """Atomically persist `data` (utf-8)."""
     write_json_atomic(cache, data)
+
+
+def _now_stamp() -> str:
+    return _dt.datetime.now().replace(microsecond=0).isoformat()
+
+
+def write_text_cache(cache: Path, body: str, *, url: str, fmt: str) -> None:
+    """Persist a non-JSON response body (Atom, XML) with its write time.
+
+    `url` must already be secret-free; it is recorded for whoever inspects
+    the cache by hand, never re-requested.
+    """
+    write_json_atomic(cache, {_NEG_AT: _now_stamp(), "url": url,
+                              "format": fmt, "body": body})
+
+
+def read_text_cache(cache: Path, *, max_age_days: float | None = None) -> str | None:
+    """The body `write_text_cache` stored, or None on miss / corrupt / stale."""
+    data = read_cache(cache, max_age_days=max_age_days)
+    if not isinstance(data, dict) or not isinstance(data.get("body"), str):
+        return None
+    return data["body"]
+
+
+def write_stamped_cache(cache: Path, data: dict) -> None:
+    """Persist a JSON response with its write time, for `max_age_days` reads."""
+    write_json_atomic(cache, {**data, _NEG_AT: _now_stamp()})
 
 
 def safe_cache_key(raw: str, max_len: int = 160) -> str:

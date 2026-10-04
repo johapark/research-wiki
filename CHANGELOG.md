@@ -22,6 +22,52 @@ the reasoning behind any line below.
 
 ### Added
 
+- `researchwiki scout search "<query>"` searches the primary literature
+  databases by keyword: PubMed, arXiv, bioRxiv/medRxiv (through Europe PMC,
+  since api.biorxiv.org has no search endpoint) and, with `--source
+  clinicaltrials`, ClinicalTrials.gov. Until now the wiki could find new papers
+  only through Semantic Scholar's citation graph and recommendations, so a
+  topic the corpus didn't already touch was unreachable. Results from
+  different sources merge into one lead per work (a journal paper and its arXiv
+  preprint, via the preprint's journal DOI), drop out when the wiki holds them
+  under any identifier or the user declined them, and rank like `scout recent`:
+  fit to the nearest paper pages, with leads near a synthesis page's *What
+  would update this page* bullet first. Trials are their own record — status,
+  phase, sponsor, dates, enrollment, linked PMIDs, posted protocol/SAP, and the
+  registry's brief summary. Each lead keeps its verbatim abstract (or trial
+  summary) in `--json` and the snapshot for triage, and `--abstracts` prints it
+  in the terminal; none of it reaches page authoring or the claims DB. Sources
+  fail independently: an unreachable one is named and the command
+  exits 2 after printing the rest, and a query a source rejects (HTTP 400, or
+  arXiv's error-as-200 entry) is exit 1 rather than a retried "outage".
+  `--decline` shares `scout recent`'s ledger, which now accepts `arxiv:`,
+  `pmid:`, `pmcid:` and `nct:` keys; search declines are kept out of S2's
+  negative seeds. `--json` contract in CLAUDE.md; procedure in
+  `prompts/scout-search.md`.
+- `researchwiki scout search fetch <key>…` downloads open-access PDFs into
+  `inbox/`, closing the gap between a lead and an ingest. It fetches only what
+  structured metadata says is open — arXiv, bioRxiv/medRxiv (latest version,
+  licence recorded), or a Europe PMC `isOpenAccess: Y` record with an OA PDF
+  link — from a fixed host allowlist checked on every redirect hop. Files land
+  atomically via a dot-prefixed `.part` (so `status` and `inbox/*.pdf` globs
+  never see a partial one), must start with `%PDF-`, and never overwrite. A
+  403, rate limit, or bot-challenge page becomes a `manual` entry carrying the
+  URL. It prints the exact `agent ingest <pdf> --doi <DOI>` per file (arXiv as
+  `10.48550/arXiv.<id>`, the spelling `promote` turns into `arxiv_id:`), or
+  with `--ingest` runs one checkpointed batch with per-file DOI overrides.
+- CLAUDE.md's Rule 1 now separates discovery from grounding. It always
+  governed what may *support* a claim, but its whitelist table read as a gate
+  on which APIs could be searched at all, and its closing line said to "lean
+  toward not fetching". Finding papers through the literature APIs is now
+  stated as fine at any time, with what they return a lead until its PDF is
+  ingested; the table lists what each API is used for, and the closing line
+  reads "search freely, but cite only what you have ingested". Prose fields
+  (abstracts, `tldr`, trial summaries) stay triage-only and are never
+  paraphrased into the wiki, and `scout web` keeps its explicit-request gate.
+- The structured-provider transport keeps secrets out of argv, log lines and
+  cache filenames: an optional `NCBI_API_KEY` (and `RW_CONTACT_EMAIL`) travel
+  in a curl config on stdin. `preprint-check --json` gains a `license` key.
+
 - `researchwiki scout recent report` merges every saved `scout recent`
   snapshot into one current view. Each run writes its own snapshot keyed by
   its seed set, and a category run and a page run overlap heavily, so reading

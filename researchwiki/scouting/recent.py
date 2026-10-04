@@ -62,6 +62,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 
@@ -457,7 +458,18 @@ def _load_page_index() -> tuple[np.ndarray, list[dict]] | None:
     return pages_semantic.load_index()
 
 
-def score_candidates(candidates: list[Candidate], triggers: list[Trigger]) -> bool:
+class Scorable(Protocol):
+    """What `score_candidates` and `rank` touch, so other lead types can reuse
+    them (`scouting.search.Lead`): two attributes read, three written."""
+
+    title: str
+    score_text: str
+    fit: float | None
+    nearest: list[dict]
+    triggers: list[dict]
+
+
+def score_candidates(candidates: list[Scorable], triggers: list[Trigger]) -> bool:
     """Fill `fit`, `nearest` and `triggers` in place. False when the page
     index or the embedding model is unavailable; candidates stay unscored."""
     if not candidates:
@@ -538,7 +550,7 @@ def score_candidates(candidates: list[Candidate], triggers: list[Trigger]) -> bo
     return True
 
 
-def rank(candidates: list[Candidate]) -> tuple[list[Candidate], list[Candidate]]:
+def rank(candidates: list[Scorable]) -> tuple[list[Scorable], list[Scorable]]:
     """(possible page updates, everything else), each best-first."""
     def fit(c: Candidate) -> float:
         return c.fit if c.fit is not None else -1.0
@@ -562,6 +574,18 @@ _S2_PAPER_URL_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _DOI_RE = re.compile(r"10\.\d{4,9}/\S+")
+#: Non-DOI keys `scout search` gives its leads. arXiv ids are not among them:
+#: every arXiv paper has the DataCite DOI `10.48550/arxiv.<id>`, so an arXiv
+#: spelling normalizes to that DOI rather than to a second key for one paper.
+_PREFIXED_KEY_RES = (
+    re.compile(r"pmid:\d{1,9}"),
+    re.compile(r"pmcid:pmc\d{1,9}"),
+    re.compile(r"nct:nct\d{8}"),
+)
+_ARXIV_KEY_RE = re.compile(
+    r"(?:arxiv:|https?://(?:www\.|export\.)?arxiv\.org/(?:abs|pdf)/)"
+    r"((?:\d{4}\.\d{4,5})|(?:[a-z-]+(?:\.[a-z]{2})?/\d{7}))(?:v\d+)?(?:\.pdf)?/?",
+)
 
 
 class DeclineKeyError(ValueError):
@@ -577,9 +601,22 @@ def normalize_key(value: str) -> str:
     lowercased too. Raises `DeclineKeyError` for anything else: stored as-is,
     such a key would match no candidate and be sent to S2 as a bogus negative
     DOI, a decline that reports success and does nothing.
+
+    The declines ledger is shared with `scout search`, so its key forms are
+    accepted too: `pmid:<n>`, `pmcid:pmc<n>`, `nct:nct<8 digits>`, and arXiv
+    spellings (`arxiv:2401.01234v2`, `arxiv.org/abs/…`), which become the
+    paper's `10.48550/arxiv.<id>` DOI. A bare number is never accepted — it
+    names no database.
     """
     v = value.strip()
     low = v.lower()
+    arxiv = _ARXIV_KEY_RE.fullmatch(low)
+    if arxiv:
+        return f"10.48550/arxiv.{arxiv.group(1)}"
+    if low.startswith("pmcid:") and not low.startswith("pmcid:pmc"):
+        low = "pmcid:pmc" + low[len("pmcid:"):]
+    if any(r.fullmatch(low) for r in _PREFIXED_KEY_RES):
+        return low
     for prefix in ("https://doi.org/", "http://doi.org/", "doi.org/", "doi:"):
         if low.startswith(prefix):
             low = low[len(prefix):]
@@ -593,7 +630,8 @@ def normalize_key(value: str) -> str:
     if _DOI_RE.fullmatch(low):
         return low
     raise DeclineKeyError(
-        f"{value!r} is not a DOI, a Semantic Scholar paper URL, or s2:<paper-id>"
+        f"{value!r} is not a DOI, a Semantic Scholar paper URL, s2:<paper-id>, "
+        "arxiv:<id>, pmid:<n>, pmcid:PMC<n>, or nct:NCT<n>"
     )
 
 
@@ -620,11 +658,19 @@ def load_declines() -> dict[str, dict]:
     return declines
 
 
-def add_decline(key: str, reason: str) -> str:
-    """Permanent until removed: a paper does not become relevant with time."""
+def add_decline(key: str, reason: str, *, source: str | None = None) -> str:
+    """Permanent until removed: a paper does not become relevant with time.
+
+    `source` names the command that declined it. Entries from anything other
+    than `scout recent` (stored with no source, as before) stay out of S2's
+    negative seeds — see `negative_dois`.
+    """
     key = normalize_key(key)
     declines = load_declines()
-    declines[key] = {"reason": reason, "declined_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    entry = {"reason": reason, "declined_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    if source:
+        entry["source"] = source
+    declines[key] = entry
     write_json_atomic(_declines_path(), declines)
     return key
 
@@ -658,9 +704,14 @@ def remove_decline(key: str) -> bool:
 
 
 def negative_dois(declines: dict[str, dict], cap: int = MAX_NEGATIVES) -> list[str]:
-    """Most recently declined DOIs first; S2 and malformed legacy keys stay local."""
+    """Most recently declined DOIs first; S2 and malformed legacy keys stay local.
+
+    Only declines made here steer S2. A paper rejected from a keyword search
+    is off-topic for *that query*, not evidence about this seed set, and those
+    declines would otherwise crowd the 20 negative slots.
+    """
     dois = [(v.get("declined_at", ""), k) for k, v in declines.items()
-            if _DOI_RE.fullmatch(k)]
+            if _DOI_RE.fullmatch(k) and not v.get("source")]
     return [k for _, k in sorted(dois, reverse=True)[:cap]]
 
 

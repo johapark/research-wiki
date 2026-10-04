@@ -14,25 +14,30 @@ Original PDF (immutable) → wiki/{category}/*.md (the single LLM-authored page)
 
 1. **No web search for prose content.** Never `WebSearch`/`WebFetch` to pull summaries or facts into the wiki. Every claim grounds in a PDF we have.
 
-   **Exception — structured-metadata APIs.** Whitelist for *structural metadata only*, all mediated through `researchwiki` CLI wrappers (never raw `WebFetch`/`WebSearch`). Responses cache under `.s2-cache/` / `.crossref-cache/` / `.web-cache/`.
+   **Finding papers is not grounding them.** Rule 1 governs what may *support* a claim, not what may be searched. Discovering papers through the literature APIs below is fine at any time; what discovery returns is a **lead** — it can steer which PDF to obtain, but cannot support wiki prose, a claims-DB entry, a `[[wikilink]]`, or the substance of an answer until its PDF is ingested. Say "there's a 2025 preprint on this you don't have" — not what it found.
 
-   | API | Allowed fields | Used by |
+   **Use the `researchwiki` wrappers for these APIs**, not raw `WebFetch`/`WebSearch`: they handle rate limits, caching (`.s2-cache/` / `.crossref-cache/` / `.web-cache/`), credential hygiene, and dedupe against the wiki. That is housekeeping, not a grounding gate.
+
+   | API | What it is used for | Command |
    |---|---|---|
-   | Semantic Scholar Graph | title, authors, year, venue, `publicationDate`, externalIds, references, citations, `/recommendations`, `abstract` (verbatim), `tldr` (draft/cross-check only) | `ingest`, `scout`, `neighbors` |
-   | Crossref | title, authors, year, container-title, ISSN, `reference` list, `type` | `ingest` (S2 fallback) |
-   | PubMed E-utilities | PMID, `pubtype`, `pubdate`, retraction linkage | `retraction-check` |
-   | bioRxiv/medRxiv | `server`, `version`, `date`, `category`, `type`, `published` DOI. `abstract` **not re-exposed** | `preprint-check` |
-   | ORCID Public API | names, latest employment. `biography`/`keywords`/`email` **not re-exposed** | `orcid-lookup` |
+   | Semantic Scholar Graph | ingest metadata, citation graph, recommendations; `abstract` verbatim, `tldr` draft/cross-check only | `ingest`, `scout`, `neighbors` |
+   | Crossref | ingest metadata fallback, reference lists | `ingest` |
+   | PubMed E-utilities | keyword search; retraction status (`pubtype`) | `scout search`, `retraction-check` |
+   | arXiv API | keyword search | `scout search` |
+   | Europe PMC REST | bioRxiv/medRxiv keyword search; open-access status + PDF links | `scout search`, `scout search fetch` |
+   | bioRxiv/medRxiv | preprint ↔ journal pairing, version, licence | `preprint-check`, `scout search fetch` |
+   | ClinicalTrials.gov v2 | trial search (registry record incl. brief summary) | `scout search --source clinicaltrials` |
+   | ORCID Public API | author identity, affiliation | `orcid-lookup` |
 
-   **Prose fields:** S2 `abstract` verbatim OK; S2 `tldr` draft/cross-check only (record `tldr_source: semantic-scholar`). Everything else prose-y (venue blurbs, retraction reasons, ORCID bio) banned.
+   **Metadata vs prose.** Structured fields (ids, dates, DOIs, `pubtype`, licence, trial status/phase) may inform *decisions* and YAML. Prose fields — abstracts, S2 `tldr`, trial summaries, retraction notices, ORCID biographies — are for triage: read them to decide what to ingest, never paraphrase them into the wiki. Two narrow, recorded exceptions on an ingested paper's own page: the S2 `abstract` as fallback source for a PDF that won't text-extract (`abstract_source: semantic-scholar` + `pdf_extraction_note:`), and the S2 `tldr` as a draft seed verified against the PDF (`tldr_source: semantic-scholar`).
 
-   **Provenance.** Whitelist claims carry source + fetch date (YAML or inline `(PubMed, fetched 2026-05-07)`).
+   **Open-access PDFs.** `researchwiki scout search fetch <key>` downloads a PDF into `inbox/` when structured metadata says it is openly available — this is how Rule 3's PDF *arrives*, and it then goes through the normal ingest gates. Never route around a paywall or a bot challenge. See [`prompts/scout-search.md`](./prompts/scout-search.md).
 
-   **Extraction, not ingestion.** Fields inform *decisions*, never paraphrased into prose.
+   **Provenance.** A structured fact used before ingest carries source + fetch date (YAML or inline `(PubMed, fetched 2026-05-07)`).
 
    **Exception — agent-native web scouting.** Only when the user explicitly asks for `researchwiki scout web`, the active chat agent may use its native web-search harness for broad discovery. The CLI emits a bounded handoff but has no search provider of its own; the agent answers conversationally with native citations, while the repository caches only a minimal, self-attested, `discovery-only` source receipt under `.scout-cache/`—never research prose or a formal report. Web results cannot support wiki prose, claims, or wikilinks until the underlying PDF is ingested. On a resumed session use `researchwiki scout web list` / `show <run-id> --json` rather than duplicating a request. Read [`prompts/scout-web.md`](./prompts/scout-web.md) before running it.
 
-   **Source credibility (non-whitelist).** For wiki evidence, peer-reviewed journals + author-hosted PDFs OK; blogs, Wikipedia, aggregators, social, press releases — do not paraphrase. Preprints only via `inbox/`. Web-scout discovery may surface those source types as leads, but does not promote them to evidence.
+   **Source credibility.** For wiki evidence, peer-reviewed journals + author-hosted PDFs OK; blogs, Wikipedia, aggregators, social, press releases — do not paraphrase. Preprints only via `inbox/`. Web-scout discovery may surface those source types as leads, but does not promote them to evidence.
 
    **User-provided URL exception.** User explicitly hands you a URL/repo → authorized to `WebFetch` (or `gh`) *that exact URL* for the **conversational answer**. Bounds: only the given URL (no transitive links); wiki prose still needs the PDF (Rule 3); cite inline (`per the README at github.com/…`), no `[[wikilink]]`; GitHub via `gh` preferred; doesn't apply to URLs Claude generated.
 
@@ -540,9 +545,13 @@ Two edge kinds: `[[wikilinks]]` (what authors wrote) and typed claim edges from 
 
 Use it to decide whether a cluster deserves a synthesis page (pairs with `candidates synthesis`), or to spot an isolated component. **Not** for factual questions — it shows structure, not claims.
 
-### Whitelist-API lookups — `retraction-check`, `preprint-check`, `orcid-lookup`
+### Structured-API lookups — `retraction-check`, `preprint-check`, `orcid-lookup`
 
 CLI wrappers around PubMed / bioRxiv / ORCID. Usage, YAML-recording rules, and workflow split for each in [`prompts/lookups.md`](./prompts/lookups.md).
+
+### Literature search — `scout search`
+
+`researchwiki scout search "<query>"` queries PubMed, arXiv, bioRxiv/medRxiv (via Europe PMC) and — with `--source clinicaltrials` — ClinicalTrials.gov, drops what the wiki holds or you declined, and ranks the rest like `scout recent`. Every hit is a **discovery-only lead**; `scout search fetch <key>…` downloads open-access PDFs into `inbox/` for `agent ingest`. Trigger: the user asks to search the literature / find papers on a topic, or to download a lead. Read [`prompts/scout-search.md`](./prompts/scout-search.md) before running it.
 
 ### Agent output — prefer `--json`
 
@@ -552,6 +561,7 @@ CLI wrappers around PubMed / bioRxiv / ORCID. Usage, YAML-recording rules, and w
 - `export --json` → `{format, records, by_entry_type, venue_missing, venue_furniture, doi_missing, authors_unparseable, skipped}` — the *report*, not the bibliography, so it claims stdout and suppresses the payload unless `--out` is also given. **`--format okf --json` returns a different contract** (see Export above): `{format, okf_version, concepts, by_type, links_rewritten, links_unresolved, sources_emitted, verified_emitted, verified_absent_no_gate_record, generated_missing_actor, description_missing, skipped, stale_files}`. Dispatch on `format`. `records + len(skipped)` equals the number of pages selected, and every list except `by_entry_type` is a page-defect to-do list rather than a statistic.
 - `scout --json` (and deprecated `audit --json`) → `{papers_skipped_no_doi, papers_intentional_no_doi, total_paper_pages, papers, cross_wiki_citations, edge_summary, recommended_additions, shared_citation_anchors, anchor_groups, s2_missing, duplicate_dois}`; `categories`/`category_breadth`/`count_normalized` are per-entry fields nested inside `recommended_additions`/`shared_citation_anchors`, not top-level. `duplicate_dois` lists ambiguous DOI-to-page assignments whose graph edges are skipped. `scout web` uses a separate versioned request/receipt/manifest contract documented in [`prompts/scout-web.md`](./prompts/scout-web.md), never this citation snapshot.
 - `scout recent report --json` → `{schema_version, generated_at, window, counts, runs, trigger_gates, papers, by_page}`; `counts` carries `{snapshots, runs_used, runs_superseded, snapshots_skipped_version, papers, papers_with_matches, pages_with_papers, dropped}` and each `papers[]` row `{key, doi, paper_id, title, venue, publication_date, year, citation_count, has_abstract, fit, first_seen, nearest, matches, runs, best_z, decline_command}`. `schema_version` is the report's own, separate from a snapshot's: adding a key is safe, renaming one breaks any dashboard reading it. Abstracts are never included — `has_abstract` is the flag.
+- `scout search --json` → `{schema_version, generated_at, query, sources_requested, limit, since, sources, counts, scored, triggers_indexed, page_matches, leads, trials, snapshot_path}`; `sources` maps each source to `{status: ok|unavailable|rejected, returned, error}`; each row carries `{key, kind, sources, doi, ids, fetch_key, title, authors, venue, publication_date, year, retracted, has_abstract, fit, nearest, triggers, first_seen}` plus `trial` on trial rows (with `brief_summary`) and `abstract` on paper rows. `fetch_key` is what to pass `fetch` (an arXiv/bioRxiv/PMC id when the lead's own key is a journal DOI). `scout search fetch --json` → `{fetched, already_present, skipped, manual, stopped_on, error, dry_run}`; fetched/present entries are `{key, path, url, license, best_effort, ingest_doi, ingest_command}`, `manual` entries `{key, url, reason}`.
 - `scout web list --json` → `{schema_version, runs[]}`; each run carries `{run_id, state, query, created_at, source_count, discovery_method, next_command, error}`. States are `requested`, `recorded`, `invalid`. `scout web show <run-id> --json` re-emits the versioned request plus `{state, request_path, cached_result}` so a different chat-agent host can resume it exactly; `cached_result` is `null` while requested and otherwise carries the exact cached `{receipt, manifest, receipt_path, manifest_path}`. Receipts and requests are `schema_version: 3`; a version-2 artifact (no `discovery_method`) is hard-rejected rather than migrated. No formal report is generated.
 
 ### Exit-code contract
@@ -622,4 +632,4 @@ Open `wiki/` as an [Obsidian](https://obsidian.md/) vault for visual navigation,
 
 ---
 
-**When in doubt, follow Rule 1 — lean toward not fetching.**
+**When in doubt, follow Rule 1 — search freely, but cite only what you have ingested.**

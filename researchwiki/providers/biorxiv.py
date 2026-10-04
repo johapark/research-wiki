@@ -1,9 +1,10 @@
 """bioRxiv / medRxiv details API — thin client.
 
 Narrow-use provider for the Rule-1 structured-API whitelist. Exposes only
-structured fields: server, version, date, type, category, `published`
-(the journal-version DOI if bioRxiv's Crossref cross-referencing has
-detected one). Prose fields present in the API response — `abstract`
+structured fields: server, version, date, type, category, license, and
+`published` (the journal-version DOI if bioRxiv's Crossref cross-referencing
+has detected one). `license` lets `scout search fetch` report a preprint's
+reuse terms alongside the PDF it downloads. Prose fields present in the API response — `abstract`
 (verbatim authors' text, comparable to S2's abstract exception) and
 `jatsxml` (URL to full-text XML, banned) — are deliberately NOT re-exposed
 by this helper. Callers get the fields they need for structural
@@ -70,6 +71,7 @@ def lookup(doi: str) -> dict:
       "category": str,               # bioRxiv taxonomy, e.g. "molecular biology"
       "type": str,                   # "new results" / "confirmatory results" / etc.
       "published_doi": str | None,   # journal DOI if detected, else None
+      "license": str,                # e.g. "cc_by", "cc_no" — "" when absent
       "source": "biorxiv",
       "fetched_at": "YYYY-MM-DD",
     }
@@ -86,6 +88,7 @@ def lookup(doi: str) -> dict:
         "category": "",
         "type": "",
         "published_doi": None,
+        "license": "",
         "source": "biorxiv",
         "fetched_at": date.today().isoformat(),
     }
@@ -105,6 +108,7 @@ def lookup(doi: str) -> dict:
         out["date_posted"] = str(latest.get("date") or "")
         out["category"] = str(latest.get("category") or "")
         out["type"] = str(latest.get("type") or "")
+        out["license"] = str(latest.get("license") or "")
         pub = latest.get("published")
         # bioRxiv uses "NA" string for "no journal version detected yet".
         if pub and pub != "NA":

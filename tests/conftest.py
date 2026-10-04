@@ -39,6 +39,8 @@ def _isolate_provider_environment(monkeypatch):
         "RW_LLM_PROVIDER",
         "RW_LLM_BASE_URL",
         "ANTHROPIC_BASE_URL",
+        "NCBI_API_KEY",
+        "RW_CONTACT_EMAIL",
     ):
         monkeypatch.delenv(key, raising=False)
 

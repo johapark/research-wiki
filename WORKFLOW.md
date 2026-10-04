@@ -1093,6 +1093,16 @@ It reads structured metadata only and does not validate every existing
 `[[wikilink]]`. `scout citations` is the explicit spelling, and `audit` remains
 a deprecated compatibility alias.
 
+`scout search "<query>"` is the keyword counterpart: it queries PubMed, arXiv,
+bioRxiv/medRxiv (via Europe PMC) and, opt-in, ClinicalTrials.gov through the
+same `researchwiki` API wrappers, merges duplicates across sources, drops what the
+wiki holds or you declined, and ranks the rest against the corpus the way
+`scout recent` does. Every result is a discovery-only lead. `scout search fetch
+<key>…` downloads the open-access ones into `inbox/` — only when structured
+metadata says they are open, only from an allowlist of hosts — and prints the
+`agent ingest --doi` command for each. See
+[`prompts/scout-search.md`](./prompts/scout-search.md).
+
 `scout web` is deliberately a different protocol. The executable creates a
 bounded JSON request, but performs no network access: the active chat agent uses
 whatever native web-search harness its host provides and returns its answer in
@@ -1148,7 +1158,9 @@ up. Not everything outside `wiki/` is disposable.
 - **`.grade-cache/{stem}/`** is per-paper PDF chunk index + embeddings.
   Gitignored. Built lazily on first grade call per paper.
 - **`.s2-cache/`, `.crossref-cache/`, `.web-cache/`** are external-API
-  responses. Gitignored. Built lazily.
+  responses. Gitignored. Built lazily. `.web-cache/search/` holds `scout
+  search` responses (re-queried after `--max-age-days`), its first-seen ledger,
+  and per-run snapshots under `runs/`.
 - **`.scout-cache/`** holds write-once request/receipt/manifest artifacts from
   agent-native web scouting. It is gitignored, discovery-only, and deliberately
   separate from `.web-cache/` (the structured-API cache). It is not a DB or
