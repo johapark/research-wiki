@@ -51,6 +51,20 @@ def page_key(md: Path) -> str:
     return rel.with_suffix("").as_posix()
 
 
+
+def self_key(md: Path) -> str | None:
+    """`page_key(md)`, or None when `md` sits outside `wiki/`.
+
+    For gates that run on a page and exclude it from its own results. A draft
+    under `.ingest/` or `output/` has no wiki identity, so nothing can match
+    it — which is the correct exclusion, not an error. `page_key` stays strict
+    because the link graph needs every key to be a real page.
+    """
+    try:
+        return page_key(md)
+    except ValueError:
+        return None
+
 def extract_links(text: str, known: set[str]) -> set[str]:
     """Resolve every `[[...]]` in `text` to a known page key.
 

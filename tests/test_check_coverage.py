@@ -174,3 +174,39 @@ def test_corroborated_semantic_claim_can_add_candidate_bm25_missed(tmp_path, mon
     assert "other/semantic" in out
     assert "page-semantic" in out
     assert "claim-semantic" in out
+
+
+def test_draft_outside_wiki_is_checked_not_crashed(tmp_path, monkeypatch, capsys):
+    """A draft under `.ingest/` or `output/` has no wiki page key. The gate
+    used to call `page_key` on it to exclude the page from its own hits and
+    died with an internal error (exit 3) — so a page could only be
+    coverage-checked after it was already landed in `wiki/`. Run the real
+    `page_key` against a wiki root the draft is not under."""
+    wiki = tmp_path / "wiki"
+    cited = _write(wiki / "cgt" / "cited.md", "---\ntitle: Cited\n---\n")
+    missed = _write(wiki / "cgt" / "missed.md", "---\ntitle: Missed\n---\n")
+    draft = _write(
+        tmp_path / ".ingest" / "draft.md",
+        "---\ntitle: t\ntopic_seed: alpha beta\n---\n\nbody [[cgt/cited]]\n",
+    )
+
+    class _Hit:
+        def __init__(self, key):
+            self.key, self.stem, self.score, self.title = key, key.split("/")[-1], 1.0, key
+
+    class _Backend:
+        def query(self, q, limit=1):
+            return []
+        def more_like_text(self, seed, limit, page_type=None):
+            return [_Hit("cgt/cited"), _Hit("cgt/missed")]
+
+    import researchwiki.search as search_mod
+    monkeypatch.setattr(search_mod, "get_default_backend", lambda: _Backend(), raising=False)
+    monkeypatch.setattr("researchwiki.tasks.lint.walk.wiki_dir", lambda: wiki)
+    monkeypatch.setattr("researchwiki.tasks.check_coverage.all_pages",
+                        lambda: [cited, missed])
+
+    rc = check_coverage.main([str(draft), "--json"])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "cgt/missed" in out and "cgt/cited" not in out

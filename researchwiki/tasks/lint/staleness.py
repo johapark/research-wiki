@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from ...paths import ingest_dir
-from .walk import extract_links, page_key
+from .walk import extract_links, page_key, self_key
 
 
 def _source_change_date(md: Path, fm: dict, db_dates: dict | None = None):
@@ -179,7 +179,7 @@ def unreferenced_top_hits(
     """
     text = md.read_text(encoding="utf-8")
     linked = extract_links(text, known)
-    self_key = page_key(md)
+    own_key = self_key(md)
     try:
         hits = backend.more_like_text(seed, limit=top_n, page_type="paper")
     except Exception:
@@ -187,7 +187,7 @@ def unreferenced_top_hits(
     return [
         {"key": h.key, "stem": h.stem, "score": round(h.score, 2), "title": h.title}
         for h in hits
-        if h.key not in linked and h.key != self_key
+        if h.key not in linked and h.key != own_key
     ]
 
 
