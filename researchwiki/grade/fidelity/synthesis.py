@@ -49,14 +49,11 @@ Verdicts:
   uncited               no cited paper has a gradable PDF. Skipped — the unit
                         asserts no source, so there is nothing to be wrong
                         about; `check-grounding` owns "has a citation".
-  inference_ungradable  labelled `*(inference)*` but no cited paper has a
-                        gradable PDF. Hard failure. The label is a *claim about
-                        provenance* — that the conclusion follows from the
-                        papers cited — so unlike plain uncited prose it asserts
-                        something, and with no gradable PDF that assertion can
-                        never be checked. Without this the label would be a way
-                        to put an unverifiable number on a page that passes
-                        both gates.
+  inference_ungradable  labelled `*(inference)*` but at least one cited source
+                        has no readable PDF text. Hard failure. The label is a
+                        *claim about provenance* — that the conclusion follows
+                        from all the papers cited — so an unavailable premise
+                        makes the inference uncheckable.
   inference             labelled `*(inference)*` in a page's labelled section
                         (synthesis Outlook). The citation names the papers the
                         conclusion is drawn from, but the conclusion itself is
@@ -178,7 +175,7 @@ class SynthesisFidelityReport:
     semantic_available: bool
     n_anchor_misattributed: int = 0  # fine-grained mode only
     n_inference: int = 0            # cited, labelled *(inference)*, not graded
-    n_inference_ungradable: int = 0  # labelled *(inference)*, no gradable PDF
+    n_inference_ungradable: int = 0  # labelled *(inference)*, unavailable PDF premise
     claims: list[FidelityClaim] = field(default_factory=list)
 
     @property
@@ -186,10 +183,10 @@ class SynthesisFidelityReport:
         """True when nothing is misattributed and every inference is checkable.
 
         `n_inference_ungradable` fails the gate because the `*(inference)*`
-        label asserts the conclusion follows from the papers it cites. If none
-        of them has a PDF, that assertion is unverifiable rather than merely
-        unsourced — and the label suppresses the retrieval and negation checks,
-        so passing it would let an unverifiable number clear both gates. Plain
+        label asserts the conclusion follows from all the papers it cites. If
+        any premise lacks readable PDF text, that assertion is unverifiable.
+        The label suppresses retrieval and negation checks, so passing it would
+        let an unverifiable inference clear both gates. Plain
         `uncited` prose stays advisory: it asserts no provenance, and
         `check-grounding` is what owns "a citation must be present".
         """
@@ -389,20 +386,24 @@ def _grade_claim(
     cited, unresolved = _resolve_cited_stems(unit.text, footnote_targets)
     claim_text = unit.text
 
-    if unit.is_inference and not cited:
-        # Labelled an inference, but every citation resolves to a page without
-        # a PDF (another synthesis page, or a paper the wiki holds no PDF for).
-        # Its own verdict rather than `uncited`: the label asserts the
-        # conclusion follows from the cited papers, so an unverifiable one is a
-        # defect, and `ok` fails on it.
-        return FidelityClaim(
-            unit_index=unit.index, line_start=unit.line_start, text=claim_text,
-            cited_stems=[], unresolved_citations=unresolved, best_stem=None,
-            best_bm25=0.0, best_semantic=None, numeric_unmatched=[],
-            negation_mismatch=False, verdict="inference_ungradable",
-        )
-
     if unit.is_inference:
+        # An inference combines its cited premises. One missing PDF makes the
+        # combination uncheckable even when the other citations resolve. A
+        # present but unreadable PDF is equally uncheckable; unlike ordinary
+        # claims, this branch skips the PDF index, so check extractability here.
+        unavailable = list(unresolved)
+        if not unavailable:
+            unavailable.extend(
+                stem for stem in cited if not _full_text(stem, fulltext_cache).strip()
+            )
+        if not cited or unavailable:
+            return FidelityClaim(
+                unit_index=unit.index, line_start=unit.line_start, text=claim_text,
+                cited_stems=cited, unresolved_citations=unavailable, best_stem=None,
+                best_bm25=0.0, best_semantic=None, numeric_unmatched=[],
+                negation_mismatch=False, verdict="inference_ungradable",
+            )
+
         # The conclusion is the author's, so retrieval and negation aren't
         # checked. Its *numbers* are premises, though, and must come from a
         # cited paper: otherwise the label would exempt any figure from the

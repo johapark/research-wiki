@@ -138,6 +138,46 @@ def test_inference_with_no_gradable_pdf_fails_the_gate(tmp_path, monkeypatch):
     assert report.to_dict()["n_inference_ungradable"] == 1
 
 
+def test_inference_with_one_missing_pdf_fails_the_gate(tmp_path, monkeypatch):
+    """One available source cannot substantiate an inference from two papers."""
+    def resolve(stem):
+        if stem == "bar-2025-baz":
+            raise FileNotFoundError(stem)
+        return tmp_path / f"{stem}.pdf"
+
+    monkeypatch.setattr(fidelity, "resolve_pdf", resolve)
+    page = tmp_path / "x.md"
+    page.write_text(PAGE, encoding="utf-8")
+    report = fidelity.grade_synthesis(page, semantic=False)
+
+    assert not report.ok
+    assert report.n_inference_ungradable == 1
+    assert report.n_inference == 0
+    assert report.claims[0].unresolved_citations == ["bar-2025-baz"]
+
+
+def test_qualitative_inference_with_unreadable_pdf_fails(tmp_path, monkeypatch):
+    """A file's existence alone does not make its contents checkable."""
+    page = tmp_path / "x.md"
+    page.write_text(PAGE.replace("a shared floor near 0.1%", "a shared mechanism"),
+                    encoding="utf-8")
+    bad_pdf = tmp_path / "unreadable.pdf"
+    bad_pdf.write_bytes(b"not a PDF")
+    monkeypatch.setattr(fidelity, "resolve_pdf", lambda stem: bad_pdf)
+
+    def cannot_extract(*args, **kwargs):
+        raise ValueError("unreadable PDF")
+
+    monkeypatch.setattr(fidelity, "extract_pdf", cannot_extract)
+    report = fidelity.grade_synthesis(page, semantic=False)
+
+    assert not report.ok
+    assert report.n_inference_ungradable == 1
+    assert set(report.claims[0].unresolved_citations) == {
+        "foo-2024-bar", "bar-2025-baz",
+    }
+
+
 def test_uncited_prose_without_the_label_stays_advisory(tmp_path, monkeypatch):
     """The intentional skip the review asked to preserve: an unlabelled unit
     citing only a PDF-less page asserts no provenance, so it stays `uncited`

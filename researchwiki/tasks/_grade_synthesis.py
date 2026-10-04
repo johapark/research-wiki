@@ -25,7 +25,7 @@ Exit codes:
   0  Nothing misattributed and every *(inference)* checkable (weak/composite/
      uncited are advisory).
   1  ≥1 misattributed claim (a number cited to a paper that lacks it), or an
-     *(inference)* whose cited pages have no PDF to check it against.
+     *(inference)* with a cited premise lacking readable PDF text.
   2  Bad input / I/O error.
 """
 
@@ -76,15 +76,15 @@ def _format_text_report(report, show_advisory: bool) -> str:
 
     inf_bad = [c for c in report.claims if c.verdict == "inference_ungradable"]
     if inf_bad:
-        lines.append("  ✗ inference with nothing to check it against "
-                     "(*(inference)* asserts the conclusion follows from the cited "
-                     "papers; none of these has a PDF):")
+        lines.append("  ✗ inference with an unavailable premise "
+                     "(*(inference)* asserts the conclusion follows from every "
+                     "cited paper; at least one has no readable PDF text):")
         for c in inf_bad:
             unresolved = ", ".join(c.unresolved_citations) or "—"
             lines.append(f"    L{c.line_start} cites [{unresolved}]")
             lines.append(f"      claim: {c.text[:160]}")
-        lines.append("    → cite the paper the conclusion rests on, or drop the "
-                     "*(inference)* label and the premises with it.")
+        lines.append("    → cite papers with readable PDFs for every premise, "
+                     "or revise the inference.")
         lines.append("")
 
     anchor_mis = [c for c in report.claims if c.verdict == "anchor_misattributed"]
