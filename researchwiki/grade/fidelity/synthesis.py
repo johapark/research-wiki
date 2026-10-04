@@ -51,7 +51,10 @@ Verdicts:
                         (synthesis Outlook). The citation names the papers the
                         conclusion is drawn from, but the conclusion itself is
                         the author's, so no cited PDF is expected to state it.
-                        Skipped, and counted so the unchecked share is visible.
+                        Retrieval is skipped; every number in the unit must
+                        still appear in a cited paper's full text, or the unit
+                        is `misattributed`. Counted so the share whose wording
+                        went unchecked is visible.
 
 Only `misattributed` and `anchor_misattributed` are hard failures. Retrieval
 (BM25/semantic) is uncalibrated — `paper.py` is explicit about that — so it
@@ -366,13 +369,25 @@ def _grade_claim(
     claim_text = unit.text
 
     if unit.is_inference:
-        # Checked before retrieval: the PDFs would be read only to grade a
-        # conclusion none of them is expected to contain.
+        # The conclusion is the author's, so retrieval and negation aren't
+        # checked. Its *numbers* are premises, though, and must come from a
+        # cited paper: otherwise the label would exempt any figure from the
+        # gate. Full text only — no retrieval neighbourhood to match against.
+        cleaned = _strip_for_numerics(claim_text)
+        tokens = NUMERIC_TOKEN_RE.findall(cleaned)
+        unmatched = set(tokens)
+        for stem in cited:
+            if not unmatched:
+                break
+            _, um = check_numerics(cleaned, "", _full_text(stem, fulltext_cache))
+            unmatched &= set(um)
+        numeric_unmatched = [t for t in tokens if t in unmatched] if cited else []
         return FidelityClaim(
             unit_index=unit.index, line_start=unit.line_start, text=claim_text,
             cited_stems=cited, unresolved_citations=unresolved, best_stem=None,
-            best_bm25=0.0, best_semantic=None, numeric_unmatched=[],
-            negation_mismatch=False, verdict="inference",
+            best_bm25=0.0, best_semantic=None, numeric_unmatched=numeric_unmatched,
+            negation_mismatch=False,
+            verdict="misattributed" if numeric_unmatched else "inference",
         )
 
     if not cited:

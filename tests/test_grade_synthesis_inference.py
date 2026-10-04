@@ -32,9 +32,10 @@ def _inference_unit():
 
 
 def test_inference_unit_gets_its_own_verdict_without_retrieval(monkeypatch):
-    """The verdict is set before any PDF is indexed; the number in the
-    sentence (0.1%) is never checked against the cited papers."""
+    """No PDF index is built for an inference: the conclusion isn't graded.
+    (Its numbers are checked against full text — see the tests below.)"""
     monkeypatch.setattr(fidelity, "resolve_pdf", lambda stem: stem)
+    monkeypatch.setattr(fidelity, "_full_text", lambda stem, cache: "a floor near 0.1%")
 
     def _no_index(stem):
         raise AssertionError(f"PDF index built for an inference unit: {stem}")
@@ -53,6 +54,7 @@ def test_report_counts_inference_separately(monkeypatch, tmp_path):
     """`n_inference` is reported, and inference units are excluded from
     `n_claims` (graded) so a page can't look fully checked when it isn't."""
     monkeypatch.setattr(fidelity, "resolve_pdf", lambda stem: stem)
+    monkeypatch.setattr(fidelity, "_full_text", lambda stem, cache: "a floor near 0.1%")
     page = tmp_path / "x.md"
     page.write_text(PAGE, encoding="utf-8")
     report = fidelity.grade_synthesis(page, semantic=False)
@@ -69,3 +71,27 @@ def test_label_on_a_paper_page_is_graded_normally(monkeypatch):
     assert not grounding.has_labelled_sections(page)
     units = grounding.parse_units(page, permissive=True)
     assert not any(u.is_inference for u in units)
+
+
+def test_numbers_in_an_inference_must_come_from_a_cited_paper(monkeypatch):
+    """The label exempts the conclusion, not its premises. A figure that no
+    cited paper contains is misattributed, exactly as it would be unlabelled —
+    otherwise *(inference)* would let any number past the fidelity gate."""
+    monkeypatch.setattr(fidelity, "resolve_pdf", lambda stem: stem)
+    monkeypatch.setattr(fidelity, "_full_text",
+                        lambda stem, cache: "a detection floor of 0.5% in both assays")
+    unit = _inference_unit()
+    claim = fidelity._grade_claim(unit, fidelity._footnote_targets(PAGE),
+                                  use_semantic=False, fulltext_cache={})
+    assert claim.verdict == "misattributed"
+    assert claim.numeric_unmatched
+
+
+def test_inference_whose_numbers_are_in_a_cited_paper_stays_unchecked(monkeypatch):
+    monkeypatch.setattr(fidelity, "resolve_pdf", lambda stem: stem)
+    monkeypatch.setattr(fidelity, "_full_text",
+                        lambda stem, cache: "both assays share a floor near 0.1% indels")
+    unit = _inference_unit()
+    claim = fidelity._grade_claim(unit, fidelity._footnote_targets(PAGE),
+                                  use_semantic=False, fulltext_cache={})
+    assert claim.verdict == "inference"
