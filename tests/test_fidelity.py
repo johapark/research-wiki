@@ -151,3 +151,41 @@ def test_anthropic_user_content_legacy_cache_prompt_single_block():
 def test_anthropic_user_content_bare_string_when_no_caching():
     from researchwiki.agents.llm import _anthropic_user_content
     assert _anthropic_user_content("P", cache_prefix=None, cache_prompt=False) == "P"
+
+
+# ---------- decimals lost in PDF extraction ----------
+
+
+def test_lost_decimal_in_evidence_is_repaired():
+    """Some typesetters encode the decimal point as a glyph pdfium renders as a
+    space, so otero-2024's `p < 0.0065` extracts as `p <0 0065` and a correctly
+    transcribed claim reads as numeric drift against its own paper."""
+    from researchwiki.grade.primitives import check_numerics
+    tokens, unmatched = check_numerics(
+        "Patients carrying only these variants showed a higher event rate (OR 4.5, p<0.0065).",
+        "", "(OR 4.5, p <0 0065) (data in supplementary table SPTB2).",
+    )
+    assert tokens == ["4.5", "0.0065"]
+    assert unmatched == []
+
+
+def test_repair_is_additive_not_a_substitution():
+    """`0 12` in a table may be two cells. Rewriting it to `0.12` in place would
+    delete both tokens from the evidence and could fail a claim that passed
+    before, so the repaired form is appended alongside them."""
+    from researchwiki.grade.primitives import check_numerics, restore_lost_decimals
+    assert check_numerics("12 samples", "", "row 0 12 end") == (["12"], [])
+    assert check_numerics("0 samples here", "", "row 0 12 end")[1] == []
+    assert "0 12" in restore_lost_decimals("row 0 12 end")
+
+
+def test_repair_leaves_thousands_and_plain_pairs_alone():
+    from researchwiki.grade.primitives import restore_lost_decimals
+    for text in ("300 000", "1 158 017", "40 4 ± 18 3", "value 12 5"):
+        assert restore_lost_decimals(text) == text
+
+
+def test_real_drift_still_fails_through_the_repair():
+    from researchwiki.grade.primitives import check_numerics
+    _, unmatched = check_numerics("p<0.9999", "", "(OR 4.5, p <0 0065)")
+    assert unmatched == ["0.9999"]

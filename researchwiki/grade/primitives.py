@@ -141,6 +141,36 @@ def collapse_spaced_thousands(text: str) -> str:
         text,
     )
 
+# A decimal point lost in PDF text extraction: `p <0 0065` for `p < 0.0065`,
+# `40 4 ± 18 3` for `40.4 ± 18.3`. Some typesetters encode the period as a glyph
+# pdfium renders as a space, so the paper's own number is unfindable in its own
+# extracted text and a correctly-transcribed claim reads as drift. Rare — 0 of
+# 40 randomly sampled corpus PDFs show it — but it mangles every number on the
+# page where it does occur (10 in otero-2024), so the page's whole statistics
+# section becomes ungradable.
+#
+# Narrow by construction: a leading `0` is the only digit group this fires on,
+# because `0 NNN` is never a thousands group (nobody writes `0 065`) and is
+# never two real quantities in a row in the shapes seen here. `12 5` stays
+# untouched, which is the right call — `12 5` could be two table cells.
+_LOST_DECIMAL_RE = re.compile(r"(?<![\d.,])0[    ](\d{2,})(?!\d)(?![    ]\d)")
+
+
+def restore_lost_decimals(text: str) -> str:
+    """Append the repaired form of every space-separated `0 0065` as `0.0065`.
+
+    Appends rather than rewrites, so this is strictly additive: `0 12` in a
+    table might be the two cells `0` and `12`, and substituting `0.12` in place
+    would delete both of those tokens from the evidence and could fail a claim
+    that previously passed. Returning `text + " 0.12"` keeps all three readings
+    and can only make matching more permissive.
+    """
+    if not text:
+        return text
+    repaired = {"0." + m.group(1) for m in _LOST_DECIMAL_RE.finditer(text)}
+    return text + " " + " ".join(sorted(repaired)) if repaired else text
+
+
 # Negation lexicon. Catches the dominant contradiction failure mode: the page
 # asserts a negation that the cited evidence doesn't echo. Deliberately coarse —
 # recall over precision; callers treat it as a soft signal, not an auto-fail.
@@ -213,6 +243,11 @@ def check_numerics(
     claim_text = collapse_spaced_thousands(claim_text)
     retrieved_text = collapse_spaced_thousands(retrieved_text)
     full_text = collapse_spaced_thousands(full_text)
+    # Repair decimals the PDF extractor lost (`0 0065` → `0.0065`) in the
+    # evidence only. The claim is authored text and its decimals are intact; a
+    # claim that really says "0 0065" is a typo worth flagging.
+    retrieved_text = restore_lost_decimals(retrieved_text)
+    full_text = restore_lost_decimals(full_text)
     tokens = NUMERIC_TOKEN_RE.findall(claim_text)
     if not tokens:
         return [], []

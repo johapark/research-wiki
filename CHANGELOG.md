@@ -34,6 +34,7 @@ the reasoning behind any line below.
 ### Fixed
 
 - `check-coverage` no longer dies with an internal error (exit 3) on a draft page outside `wiki/`, so recall can be reviewed before a page is landed.
+- A decimal point lost in PDF text extraction (`p <0 0065` for `p < 0.0065`) no longer reads as numeric drift. The repaired form is appended to the evidence rather than substituted, so a `0 12` that is really two table cells keeps both readings. Rare — 0 of 40 sampled corpus PDFs — but it mangles every number on a page where it occurs.
 - `read_page` returns `None` for a missing file instead of raising, so one removed page can no longer crash `status` through a stale impact-review receipt. Page keys live in durable records that outlive a `remove`, and every call site already branches on `None`.
 
 ## [0.5.2] - 2026-10-03
