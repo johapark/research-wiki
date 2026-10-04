@@ -248,3 +248,59 @@ def test_an_inference_citing_only_a_page_crossref_still_fails(tmp_path, monkeypa
     report = fidelity.grade_synthesis(page, semantic=False)
     assert report.n_inference_ungradable == 1
     assert not report.ok
+
+
+def test_bare_stem_crossref_is_recognised_like_the_prefixed_form(monkeypatch):
+    """Adversarial review: judging on the written prefix alone made a
+    *documented* citation form fail where the prefixed one passed. CLAUDE.md
+    allows a bare `[[stem]]` when referring to a paper as a whole, and the
+    authoring prompt requires bare stems inside tables, so the two forms must
+    resolve identically. Checked against the real page corpus."""
+    monkeypatch.setattr(fidelity, "_AUTHORED_STEMS",
+                        frozenset({"variant-aware-crispr-off-target"}))
+    assert fidelity._is_page_crossref("synthesis/variant-aware-crispr-off-target")
+    assert fidelity._is_page_crossref("variant-aware-crispr-off-target")
+    assert fidelity._is_page_crossref("variant-aware-crispr-off-target|see also")
+    # A paper stem is still a source in either form.
+    assert not fidelity._is_page_crossref("cgt/bae-2014-cas-offinder")
+    assert not fidelity._is_page_crossref("bae-2014-cas-offinder")
+
+
+def test_authored_stem_lookup_degrades_quietly(monkeypatch):
+    """A filesystem problem must not fail a grade run: the lookup falls back to
+    prefix-only detection rather than raising."""
+    monkeypatch.setattr(fidelity, "_AUTHORED_STEMS", None)
+    monkeypatch.setattr("researchwiki.paths.wiki_dir",
+                        lambda: (_ for _ in ()).throw(OSError("boom")))
+    assert fidelity._authored_page_stems() == frozenset()
+    assert fidelity._is_page_crossref("synthesis/foo")      # prefix still works
+
+
+NEGATING_PAGE = """---
+type: synthesis
+author_model: "claude-opus-5"
+---
+
+## Outlook
+
+Neither assay detects sites below the floor, so the question cannot be settled with present tools *(inference)*.[^a]
+
+[^a]: [[cgt/foo-2024-bar]] — a paper
+"""
+
+
+def test_negation_parity_is_computed_on_the_inference_path(tmp_path, monkeypatch):
+    """It was hard-coded False. Negation parity is the one signal that survives
+    the retrieval skip, because it compares the claim's polarity against the
+    premises instead of expecting the conclusion to appear in them. Advisory,
+    as on the graded path."""
+    monkeypatch.setattr(fidelity, "resolve_pdf", lambda stem: stem)
+    monkeypatch.setattr(fidelity, "_full_text",
+                        lambda stem, cache: "both assays detect sites at this frequency")
+    page = tmp_path / "n.md"
+    page.write_text(NEGATING_PAGE, encoding="utf-8")
+    report = fidelity.grade_synthesis(page, semantic=False)
+    (claim,) = report.claims
+    assert claim.verdict == "inference"
+    assert claim.negation_mismatch is True      # surfaced, not swallowed
+    assert report.ok                            # advisory, not a failure

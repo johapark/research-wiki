@@ -27,10 +27,12 @@ that sees a missing or misplaced section.
     All present required sections are there but out of order.
 
   synthesis_duplicate_section
-    A required H2 appears more than once. Not cosmetic: the grounding gate's
-    labelled-source range runs from a heading to the *next* H2, so labels in a
-    second `## Outlook` are silently inert, and split `## References` blocks
-    scatter the footnote definitions.
+    A required H2 appears more than once. Split `## References` blocks scatter
+    the footnote definitions, and `wiki.extract_section` — which `impact_review`
+    and the semantic index both use — reads only the first occurrence, so the
+    second copy is invisible to every consumer that works by section name.
+    (Grounding's labelled ranges do cover both copies; the risk is the reader's
+    and the tooling's, not a lost label.)
 
   synthesis_unexpected_h2
     An H2 outside the structure. Extra material belongs in an H3 under
@@ -80,7 +82,12 @@ _H2_RE = re.compile(r"^##[ \t]+(.+?)\s*$", re.MULTILINE)
 _H3_RE = re.compile(r"^###[ \t]+", re.MULTILINE)
 _LABEL_RE = re.compile(r"\*\(\s*(?:inference|model\s+prior)\s*\)\*", re.IGNORECASE)
 _FOOTNOTE_REF_RE = re.compile(r"\[\^([^\]\s]+)\](?!:)")
-_FOOTNOTE_DEF_RE = re.compile(r"^\[\^([^\]\s]+)\]:", re.MULTILINE)
+# Leading indent allowed, matching `grounding._FOOTNOTE_DEF_RE` and
+# `claim_anchors`: an indented definition is valid CommonMark (and is how
+# the authoring prompt's own fenced example renders), so rejecting it here
+# reported a false `synthesis_footnotes_undefined` on a page the other two
+# readers were happy with.
+_FOOTNOTE_DEF_RE = re.compile(r"^[ \t]*\[\^([^\]\s]+)\]:", re.MULTILINE)
 _FENCED_CODE_RE = re.compile(r"^```.*?^```", re.DOTALL | re.MULTILINE)
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
@@ -144,18 +151,20 @@ def check_page(path: Path, body: str) -> list[dict]:
         if key not in seen:
             seen.append(key)
 
-    # A repeated section is not a cosmetic slip. Two `## Outlook` blocks mean
-    # the labelled-source range the grounding gate computes covers only the
-    # first (its range ends at the next H2), so labels in the second are
-    # silently inert; two `## References` split the footnote definitions a
-    # reader has to find. De-duplicating into `seen` is what let this pass.
+    # A repeated section is not a cosmetic slip, though not for the reason it
+    # might seem: `_labelled_line_ranges` iterates *every* matching header, so
+    # labels in a second `## Outlook` are live, not inert. What breaks is the
+    # reader's model of the page — two `## References` split the footnote
+    # definitions, and a second `## Outlook` puts labelled prose where nobody
+    # looks for it. De-duplicating into `seen` is what let this pass.
     for key, n in counts.items():
         if n > 1:
             violations.append({
                 "page": path,
                 "kind": "synthesis_duplicate_section",
                 "detail": f"`## {key[0].upper() + key[1:]}` appears {n} times; "
-                          "merge them — only the first is treated as the section",
+                          "merge them — a reader (and `extract_section`) finds "
+                          "only the first",
             })
 
     for key in required:
@@ -223,7 +232,12 @@ def find_synthesis_contract_violations(
         if md.parent.name != "synthesis":
             continue
         fm = pages_fm.get(md, {}) or {}
-        if str(fm.get("type", "")).strip("\"'") != "synthesis":
+        # `.lower()` to agree with `grounding._page_type`, which lowercases.
+        # A page typed `Synthesis` otherwise got the Outlook label privileges
+        # from both gates while being invisible to the only check that reads
+        # its headings — so a renamed or duplicated `## Outlook` went
+        # unreported on exactly the pages holding the gate exemption.
+        if str(fm.get("type", "")).strip("\"'").lower() != "synthesis":
             continue
         out.extend(check_page(md, pages_body.get(md, "")))
     return out

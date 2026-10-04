@@ -63,6 +63,16 @@ Verdicts:
                         is `misattributed`. Counted so the share whose wording
                         went unchecked is visible.
 
+What no verdict here catches: a *qualitative* claim that is simply false. BM25
+and the bi-encoder measure topical proximity, so a sentence asserting the
+opposite of its source still retrieves it strongly — an adversarial review
+confirmed "Cas-OFFinder has been withdrawn and its results are fabricated"
+scores 11.8 against Cas-OFFinder's own PDF and grades `supported` with no
+label involved. That is a property of retrieval-based fidelity, not of the
+`*(inference)*` path, and it is why `grade synthesis` is a floor rather than
+a proof: it catches numbers ascribed to papers that lack them, and leaves the
+reading of prose to a human.
+
 Only `misattributed` and `anchor_misattributed` are hard failures. Retrieval
 (BM25/semantic) is uncalibrated — `paper.py` is explicit about that — so it
 never fails a build here; it only annotates `weak`. Run periodically and
@@ -241,12 +251,39 @@ def _wikilink_to_stem(link: str) -> str:
 # why this is a narrow list rather than `categories.PAGE_TYPE_DIRS`.
 _CROSSREF_DIRS = frozenset({"synthesis", "ideas", "proposals", "concepts"})
 
+#: Lazily-built stem set for `_authored_page_stems`; None until first use.
+_AUTHORED_STEMS: frozenset[str] | None = None
+
+
+def _authored_page_stems() -> frozenset[str]:
+    """Stems of every page under the authored page-type directories.
+
+    Cached for the process: a page gate reads it once per unit and the set
+    changes only when a page is added. Empty on any filesystem problem, which
+    degrades to prefix-only detection rather than failing a grade run.
+    """
+    global _AUTHORED_STEMS
+    if _AUTHORED_STEMS is None:
+        try:
+            from ...paths import wiki_dir
+            root = wiki_dir()
+            _AUTHORED_STEMS = frozenset(
+                md.stem for d in _CROSSREF_DIRS for md in (root / d).glob("*.md")
+            )
+        except Exception:
+            _AUTHORED_STEMS = frozenset()
+    return _AUTHORED_STEMS
+
 
 def _is_page_crossref(link: str) -> bool:
     """True when a link points at the wiki's own analysis rather than a source.
 
-    Judged on the category prefix the author wrote, which is why this runs
-    before `_wikilink_to_stem` strips it.
+    Two ways to tell, because both citation forms are sanctioned: the category
+    prefix the author wrote (`[[synthesis/foo]]`), and failing that the stem
+    itself resolving to a page in one of those directories. CLAUDE.md permits
+    a bare `[[stem]]` "when the paragraph refers to the paper as a whole" and
+    the authoring prompt *requires* bare stems inside tables, so judging on the
+    prefix alone made a documented form fail where the prefixed form passed.
 
     Load-bearing for the inference premise check: that check treats an
     unavailable citation as an unverifiable premise, and without this
@@ -257,7 +294,9 @@ def _is_page_crossref(link: str) -> bool:
     """
     target = link.split("|", 1)[0].split("#", 1)[0].strip()
     head = target.rsplit("/", 1)[0] if "/" in target else ""
-    return head.strip().lower() in _CROSSREF_DIRS
+    if head.strip().lower() in _CROSSREF_DIRS:
+        return True
+    return target.rsplit("/", 1)[-1].strip() in _authored_page_stems()
 
 
 def _resolve_cited_stems(
@@ -435,24 +474,34 @@ def _grade_claim(
                 negation_mismatch=False, verdict="inference_ungradable",
             )
 
-        # The conclusion is the author's, so retrieval and negation aren't
-        # checked. Its *numbers* are premises, though, and must come from a
-        # cited paper: otherwise the label would exempt any figure from the
-        # gate. Full text only — no retrieval neighbourhood to match against.
+        # Retrieval is skipped: the conclusion is the author's, so no cited
+        # PDF is expected to contain it, and a retrieval floor would flag every
+        # honest inference. Its *numbers* are premises, though, and must come
+        # from a cited paper — otherwise the label would exempt any figure.
+        # Full text only, since there is no retrieval neighbourhood here.
         cleaned = _strip_for_numerics(claim_text)
         tokens = NUMERIC_TOKEN_RE.findall(cleaned)
         unmatched = set(tokens)
+        full_texts = []
         for stem in cited:
-            if not unmatched:
-                break
-            _, um = check_numerics(cleaned, "", _full_text(stem, fulltext_cache))
-            unmatched &= set(um)
+            full = _full_text(stem, fulltext_cache)
+            full_texts.append(full)
+            if unmatched:
+                _, um = check_numerics(cleaned, "", full)
+                unmatched &= set(um)
         numeric_unmatched = [t for t in tokens if t in unmatched]
+        # Negation parity is computed rather than assumed: it is the one signal
+        # that survives the retrieval skip, because it compares the claim's own
+        # polarity against the premises instead of expecting the conclusion to
+        # appear in them. Advisory, exactly as on the graded path — the lexicon
+        # is coarse, and a conclusion may legitimately negate what its premises
+        # assert ("neither assay detects X, so Y is unreachable").
+        neg_mismatch = negation_mismatch(claim_text, " ".join(full_texts))
         return FidelityClaim(
             unit_index=unit.index, line_start=unit.line_start, text=claim_text,
             cited_stems=cited, unresolved_citations=unresolved, best_stem=None,
             best_bm25=0.0, best_semantic=None, numeric_unmatched=numeric_unmatched,
-            negation_mismatch=False,
+            negation_mismatch=neg_mismatch,
             verdict="misattributed" if numeric_unmatched else "inference",
         )
 

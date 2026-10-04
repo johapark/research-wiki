@@ -20,10 +20,20 @@ in 2026-10 that the older paper's PDF does not mention the newer one at all.
   crosslink_impossible_citation
     One bullet. Names the pair, both years, and which phrasing is wrong.
 
-Years come from each page's YAML `year:`. A pair is reported only when both
-years are integers and strictly ordered, so a missing or malformed year is
-skipped rather than guessed at. Same-year pairs are never reported: a paper
-can legitimately cite a preprint from earlier the same year.
+Years come from each page's YAML `year:`, and a pair is reported only when
+both are integers and the gap is at least `MIN_YEAR_GAP` (2). A missing or
+malformed year is skipped rather than guessed at.
+
+The two-year floor exists because a one-year "impossibility" is usually a
+**preprint citation**, not an error: a 2019 paper citing the 2020-published
+version of a preprint it read in 2019 looks backwards against journal years.
+Measured on this corpus, 174 of 177 one-year findings were that pattern and 11
+were confirmed real citations by reading the PDFs — e.g. `chin-2019` genuinely
+cites `zook-2020` ("a robust benchmark for detection of germline large
+insertions and deletions"), because Chin was submitted in 2019 and published
+in 2020. `lint`'s own `stem_year_drift` reports the same preprint/journal
+skew from the other direction. Raising the floor drops that whole class and
+keeps the findings whose gap no publication lag explains.
 
 Warn-only, like the other contract checks.
 """
@@ -37,9 +47,22 @@ from ...backlinks import _CITED_BY_CLAIM, _CITES_CLAIM
 
 # A Related Papers bullet: `- [[cat/stem]] — note` or `- [[cat/stem]]: note`.
 # The note may be empty; the link may carry an `|alias` or `#anchor`.
-_BULLET_RE = re.compile(r"^-\s+\[\[([^\]|#]+)[^\]]*\]\]\s*[—:-]?\s*(.*)$", re.MULTILINE)
+#
+# Tolerant about the bullet's shape on purpose. `backlinks.py` always writes
+# `- [[…]] — …`, but a wrong direction is likeliest in *hand-edited* prose,
+# which is exactly where `*` markers, an indented continuation bullet and a
+# bolded `**[[…]]**` link turn up — all three parsed to nothing before.
+_BULLET_RE = re.compile(
+    r"^[ \t]*[-*+]\s+\*{0,2}\[\[([^\]|#]+)[^\]]*\]\]\*{0,2}\s*[—:-]?\s*(.*)$",
+    re.MULTILINE,
+)
 _RELATED_HEADING_RE = re.compile(r"^##\s+Related Papers\s*$", re.MULTILINE | re.IGNORECASE)
 _NEXT_H2_RE = re.compile(r"^##\s+", re.MULTILINE)
+
+#: Minimum year gap before a reversed citation claim is reported. See the
+#: module docstring: at a gap of 1 the finding is dominated by papers citing
+#: the preprint of a work whose journal year is later.
+MIN_YEAR_GAP = 2
 
 
 def _related_section(body: str) -> str:
@@ -88,11 +111,11 @@ def find_impossible_citation_directions(
             lowered = note.lower()
             # "cites this paper" → the target cites this page, so the target
             # must be the newer of the two.
-            if _CITES_CLAIM in lowered and tgt_year < own_year:
+            if _CITES_CLAIM in lowered and own_year - tgt_year >= MIN_YEAR_GAP:
                 claim, older, newer = _CITES_CLAIM, tgt_stem, md.stem
             # "cited by this paper" → this page cites the target, so the
             # target must be the older one.
-            elif _CITED_BY_CLAIM in lowered and tgt_year > own_year:
+            elif _CITED_BY_CLAIM in lowered and tgt_year - own_year >= MIN_YEAR_GAP:
                 claim, older, newer = _CITED_BY_CLAIM, md.stem, tgt_stem
             else:
                 continue

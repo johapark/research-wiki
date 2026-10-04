@@ -323,7 +323,7 @@ researchwiki check-coverage wiki/synthesis/<slug>.md --top-n <candidate count>
 ```
 
 - `check-grounding` must report 0 ungrounded. Its summary line also reports the labelled inferences and model priors — read them: if Outlook is mostly model priors, the page is leaning on you rather than the corpus.
-- `grade synthesis` must report 0 misattributed and **more than 0 graded**. Read the graded count every time: `0 graded` with exit 0 means the fidelity gate silently did nothing — the citations aren't in a form it can resolve, or no cited stem has a PDF — which is worse than a failure, because the page looks checked. Look at the `weak` units it lists too: each is a sentence the cited paper barely supports.
+- `grade synthesis` must report 0 misattributed and **more than 0 graded**. Know its ceiling: it checks numbers against the cited PDFs and leaves prose to retrieval scores, which measure topical proximity — a sentence asserting the *opposite* of its source still retrieves it strongly and grades `supported`. The gate catches a figure ascribed to a paper that lacks it; only reading catches a claim that misreads one. Read the graded count every time: `0 graded` with exit 0 means the fidelity gate silently did nothing — the citations aren't in a form it can resolve, or no cited stem has a PDF — which is worse than a failure, because the page looks checked. Look at the `weak` units it lists too: each is a sentence the cited paper barely supports.
 - `check-coverage` is advisory, but every hit must be dealt with: cited, or excluded with a reason. An unreviewed hit is a failure of the review; a reviewed exclusion is fine.
 
 **Land the page:**

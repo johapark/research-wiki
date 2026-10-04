@@ -176,3 +176,24 @@ def test_duplicate_references_is_flagged():
 
 def test_a_single_copy_of_each_section_is_not_flagged():
     assert "synthesis_duplicate_section" not in _kinds(check_page(PATH, _body()))
+
+
+def test_type_match_is_case_insensitive():
+    """`grounding._page_type` lowercases, so a page typed `Synthesis` got the
+    Outlook label privileges from both gates while being invisible to the only
+    check that reads its headings. The two readers must agree."""
+    legacy = "## Question\n\nQ.\n\n## What would update this page\n\n- x\n"
+    page = Path("wiki/synthesis/a.md")
+    for declared in ("synthesis", "Synthesis", "SYNTHESIS", '"synthesis"'):
+        got = find_synthesis_contract_violations([page], {page: legacy},
+                                                 {page: {"type": declared}})
+        assert [v["kind"] for v in got] == ["synthesis_legacy_spine"], declared
+
+
+def test_indented_footnote_definition_is_accepted():
+    """An indented definition is valid CommonMark and the other two footnote
+    readers accept it; rejecting it here was a false
+    `synthesis_footnotes_undefined`."""
+    body = _body(findings="### Theme A\n\nText.[^a]\n").replace(
+        "[^a]: [[cgt/a-2024-x]]", "  [^a]: [[cgt/a-2024-x]]")
+    assert "synthesis_footnotes_undefined" not in _kinds(check_page(PATH, body))
