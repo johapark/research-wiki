@@ -36,6 +36,7 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- `grade synthesis` ignores links to the wiki's own authored pages (`synthesis/`, `ideas/`, `proposals/`, `concepts/`) when resolving a unit's sources: those are cross-references, not premises. `references/` documents still count, since each has a real PDF. Without this a see-also link to a sibling synthesis page made an inference `inference_ungradable` even with three cited papers behind it.
 - `grade synthesis` fails an `*(inference)*` unit if any cited premise lacks readable PDF text (`inference_ungradable` verdict, exit 1). The label asserts the conclusion follows from every paper cited *and* suppresses the retrieval and negation checks, so one missing or unreadable source previously left the inference uncheckable while both required gates passed. Plain `uncited` prose stays advisory — it asserts no provenance, and a scope sentence pointing at a sibling synthesis page is legitimate.
 - `check-coverage` no longer dies with an internal error (exit 3) on a draft page outside `wiki/`, so recall can be reviewed before a page is landed.
 - A decimal point lost in PDF text extraction (`p <0 0065` for `p < 0.0065`) no longer reads as numeric drift. The repaired form is appended to the evidence rather than substituted, so a `0 12` that is really two table cells keeps both readings. Rare — 0 of 40 sampled corpus PDFs — but it mangles every number on a page where it occurs.
