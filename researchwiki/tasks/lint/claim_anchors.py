@@ -9,10 +9,22 @@ its slug).
 
 Emits per-page hit lists; the JSON key `dangling_claim_anchors` lets CI
 gate on zero-drift.
+
+`find_undefined_footnote_refs` is the footnote-level sibling, keyed
+`undefined_footnote_refs`. A `[^id]` with no `[^id]: …` definition line is
+worse than it looks: `check-grounding` only reports a unit whose *sole*
+citation is that footnote, so a paragraph citing `[^a][^b]` where only `b` is
+undefined passes the structural gate, and `grade synthesis` then silently
+grades it against `a` alone — reporting an empty `unresolved_citations`, with
+no trace that half the citation went nowhere. A page can clear both gates with
+a paper's worth of claims never checked. Unlike the anchor check this needs no
+DB, and it covers every page type (the synthesis contract checks the same thing
+for pages under `wiki/synthesis/`).
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ...grade.grounding import (
@@ -61,3 +73,40 @@ def find_dangling_claim_anchors(
                     "slug": slug,
                 })
     return dangling
+
+
+_FOOTNOTE_REF_RE = re.compile(r"\[\^([^\]\s]+)\](?!:)")
+_FOOTNOTE_DEF_RE = re.compile(r"^[ \t]*\[\^([^\]\s]+)\]:", re.MULTILINE)
+_FENCED_CODE_RE = re.compile(r"^```.*?^```", re.DOTALL | re.MULTILINE)
+
+
+def find_undefined_footnote_refs(
+    pages_body: dict[Path, str],
+) -> list[dict]:
+    """Return [{page, kind, detail}] for pages citing an undefined `[^id]`.
+
+    Root meta pages are skipped: `log.md` quotes footnote ids in prose about
+    citations rather than carrying citations of its own, the same reason
+    `broken_wikilinks` excludes them.
+    """
+    out: list[dict] = []
+    for md, body in sorted(pages_body.items(), key=lambda kv: str(kv[0])):
+        if md.parent.name == "wiki":
+            continue
+        text = _FENCED_CODE_RE.sub("", body)
+        refs = {m.group(1) for m in _FOOTNOTE_REF_RE.finditer(text)}
+        if not refs:
+            continue
+        defs = {m.group(1) for m in _FOOTNOTE_DEF_RE.finditer(text)}
+        missing = sorted(refs - defs)
+        if not missing:
+            continue
+        shown = ", ".join(f"`[^{r}]`" for r in missing[:5])
+        more = f" (+{len(missing) - 5} more)" if len(missing) > 5 else ""
+        out.append({
+            "page": md,
+            "kind": "undefined_footnote_ref",
+            "detail": f"{len(missing)} footnote ref(s) with no definition: {shown}{more}"
+                      " — grade synthesis will skip or under-grade the citing units",
+        })
+    return out

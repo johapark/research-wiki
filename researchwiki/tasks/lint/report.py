@@ -102,6 +102,7 @@ def _emit_json(**kw) -> int:
         "proposal_contract_violations": _contract_json(kw["proposal_contract"]),
         "synthesis_contract_violations": _contract_json(kw["synthesis_contract"]),
         "crosslink_impossible_citations": _contract_json(kw["crosslink_direction"]),
+        "undefined_footnote_refs": _contract_json(kw["undefined_footnotes"]),
         "dashboard_contract_violations": _contract_json(kw["dashboard_contract"]),
         "ungraded_papers": kw["ungraded_papers"],
         "venue_suspect": kw["venue_suspect"],
