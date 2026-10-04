@@ -140,6 +140,8 @@ def test_wiki_page_sharing_only_a_given_name_does_not_hide_a_lead(wiki, monkeypa
     ("John LI", "li"),                       # an uppercase surname is not initials
     ("Smith A V", "smith"), ("Smith A.V.", "smith"),  # stray spaced/dotted initials
     ("Jan M van der Berg", "vanderberg"), ("Ana García-López", "garcialopez"),
+    ("Florestan De Moor", "demoor"), ("S. De Winter", "dewinter"),  # capitalized particles
+    ("Van Nguyen", "nguyen"),                # a leading token is a given name
     ("Guohui Chuai et al.", "chuai"), ("Smith J Jr", "smith"),
     ("DeepSeek-AI", "deepseekai"), ("et al.", ""), ("", ""),
 ])
@@ -162,6 +164,20 @@ def test_structured_surname_wins_over_the_display_string(wiki, monkeypatch):
              pubmed=[_pm("1", title="Prime editing a review", authors=["Li J"], surname="Li")],
              arxiv=[_ax("2401.00005", title="Prime Editing: A Review", authors=("John LI",))])
     assert len(S.run("q", today=TODAY)["leads"]) == 1
+
+
+def test_capitalized_particle_on_a_page_matches_the_structured_surname(wiki, monkeypatch):
+    """The page's `Florestan De Moor` once parsed as `moor`; the preprint's
+    structured `De Moor` as `demoor`, so the held paper resurfaced."""
+    _page(wiki, "cgt/de-moor-2025-x", title="De-Bruijn graph partitioning for DNA storage",
+          type="paper", doi="10.1093/bioinformatics/btaf618",
+          authors="Florestan De Moor, Olivier Boulle", year=2025)
+    _sources(monkeypatch, preprints=[{
+        "doi": "10.1101/2025.01.01.1", "server": "biorxiv",
+        "title": "De-Bruijn graph partitioning for DNA storage", "authors": ["De Moor F"],
+        "first_author_surname": "De Moor", "abstract": "", "year": 2025}])
+    snap = S.run("q", sources=["biorxiv"], today=TODAY)
+    assert snap["leads"] == [] and snap["counts"]["in_wiki"] == 1
 
 
 def test_doi_less_preprint_records_are_not_leads(wiki, monkeypatch):

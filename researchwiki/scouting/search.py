@@ -58,7 +58,9 @@ _NCT_RE = re.compile(r"\bNCT\d{8}\b", re.IGNORECASE)
 # ---------- same work, by title ----------
 
 _NAME_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv"})
-#: Lowercase surname particles that belong to the surname in given-first order.
+#: Surname particles that belong to the surname in given-first order, compared
+#: case-insensitively: `Jan van der Berg`, but also `Florestan De Moor`, whose
+#: structured `LastName` is `De Moor`.
 _PARTICLES = frozenset({"van", "von", "der", "den", "de", "del", "della", "di", "da",
                         "du", "la", "le", "ten", "ter", "dos", "das", "bin", "al"})
 #: A bare or dotted initial: `A`, `A.`, `A.V.`. Never the end of a given-first
@@ -83,9 +85,11 @@ def surname(name: str) -> str:
 
     Trailing bare or dotted initials are dropped first, so a stray Vancouver
     string with spaced initials (`Smith A V`) still yields `smith`; so are
-    `et al.` and `Jr`. Lowercase particles before the last word belong to the
-    surname (`Jan M van der Berg` → `vanderberg`). Any disagreement this
-    leaves (an unhyphenated double surname, say) can only fail a title match,
+    `et al.` and `Jr`. Particles before the last word belong to the surname,
+    in either case (`Jan M van der Berg` → `vanderberg`, `Florestan De Moor` →
+    `demoor`); the first token is always a given name, so `Van Nguyen` is
+    `nguyen`. Any disagreement this leaves (an unhyphenated double surname, a
+    middle name that happens to be a particle) can only fail a title match,
     which shows a possible duplicate rather than hiding a paper.
     """
     toks = (name or "").replace(",", " ").split()
@@ -98,7 +102,7 @@ def surname(name: str) -> str:
     if not toks:
         return ""
     start = len(toks) - 1
-    while start > 1 and toks[start - 1] in _PARTICLES:
+    while start > 1 and toks[start - 1].lower() in _PARTICLES:
         start -= 1
     return normalize_surname("".join(toks[start:]))
 
