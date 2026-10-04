@@ -409,3 +409,62 @@ def test_idea_pages_accept_the_inference_label():
     rep = grounding.check(doc, permissive=True, valid_anchors=set())
     assert rep.inference_claims == 1
     assert rep.model_prior_claims == 1
+
+
+def test_model_prior_carrying_a_number_stays_ungrounded():
+    """Review finding: `*(model prior)*` grounded a unit whatever it said, so an
+    uncited "98% efficacy" passed check-grounding — and the fidelity gate skips
+    an uncited unit, so a fabricated figure cleared both. CLAUDE.md §4 is
+    explicit that numbers always need a paper citation, so the marker grounds a
+    qualitative forecast only."""
+    doc = SYNTH_DOC.replace(
+        "Long-read sequencing will probably be the next route around that floor *(model prior)*.",
+        "Long-read assays will likely reach 98% efficacy at detecting these sites *(model prior)*.",
+    )
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    numeric = next(u for u in _claims(rep) if "98%" in u.text)
+    assert not numeric.has_citation
+    assert not numeric.is_model_prior
+    assert "carrying a number" in (numeric.flag_reason or "")
+    assert numeric in rep.ungrounded_units
+
+
+def test_qualitative_model_prior_still_grounds():
+    """The counterpart: a forecast with no quantity is exactly what the label
+    is for, and must not be collateral damage."""
+    doc = SYNTH_DOC.replace(
+        "Long-read sequencing will probably be the next route around that floor *(model prior)*.",
+        "Long-read assays are likely to become the standard route around that floor *(model prior)*.",
+    )
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.model_prior_claims == 1
+
+
+def test_digits_inside_a_name_are_not_a_quantity():
+    """`Cas9`, `ABE8e`, `p53` must not count as numbers, or the rule would
+    forbid naming an editor in a model prior. Shares the fidelity grader's
+    tokenizer, whose lookbehind already excludes word-internal digits."""
+    doc = SYNTH_DOC.replace(
+        "Long-read sequencing will probably be the next route around that floor *(model prior)*.",
+        "A Cas9 variant engineered on ABE8e scaffolds will probably solve this *(model prior)*.",
+    )
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.model_prior_claims == 1
+
+
+def test_idea_design_parameters_may_carry_numbers_under_the_marker():
+    """The numeric rule is synthesis-only, and the asymmetry is deliberate. An
+    idea page's Opportunities numbers are parameters the author is *choosing*
+    ("enumeration cap of 64", "be-window 4-8"), not results being asserted —
+    proposing them is what the section is for. Applying the synthesis rule here
+    flagged 12 units across 5 existing idea pages, every one a parameter."""
+    doc = IDEA_DOC.replace(
+        "Opportunities claim with enough words to count as a real claim *(model prior)*.",
+        "Use a tied-path enumeration cap of 64 with a deterministic tiebreaker *(model prior)*.",
+    )
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.model_prior_claims == 1
+    # IDEA_DOC's Background/Plans/Caveats claims are deliberately uncited, so
+    # assert about the parameter unit itself rather than the whole report.
+    param = next(u for u in _claims(rep) if "cap of 64" in u.text)
+    assert param.is_model_prior and param.flag_reason is None

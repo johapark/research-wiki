@@ -149,21 +149,27 @@ def collapse_spaced_thousands(text: str) -> str:
 # page where it does occur (10 in otero-2024), so the page's whole statistics
 # section becomes ungradable.
 #
-# Narrow by construction: a leading `0` is the only digit group this fires on,
-# because `0 NNN` is never a thousands group (nobody writes `0 065`) and is
-# never two real quantities in a row in the shapes seen here. `12 5` stays
-# untouched, which is the right call — `12 5` could be two table cells.
-_LOST_DECIMAL_RE = re.compile(r"(?<![\d.,])0[    ](\d{2,})(?!\d)(?![    ]\d)")
+# Gated on a *preceding comparison operator*, which is what makes the repair
+# safe. In every real occurrence the mangled decimal follows `p <`, `p =` or
+# `frequency <`, because the glyph shows up in statistics and threshold
+# notation. A bare `0 12` sitting between two table cells matches no operator
+# and is left alone: there it is two separate values, and reading it as 0.12
+# would manufacture evidence for a claim the paper never printed.
+_LOST_DECIMAL_RE = re.compile(
+    r"[<>=≤≥]\s?0[    ](\d{2,})(?!\d)(?![    ]\d)"
+)
 
 
 def restore_lost_decimals(text: str) -> str:
     """Append the repaired form of every space-separated `0 0065` as `0.0065`.
 
-    Appends rather than rewrites, so this is strictly additive: `0 12` in a
-    table might be the two cells `0` and `12`, and substituting `0.12` in place
-    would delete both of those tokens from the evidence and could fail a claim
-    that previously passed. Returning `text + " 0.12"` keeps all three readings
-    and can only make matching more permissive.
+    Two guards, because this runs on the *evidence* side of the numeric
+    fidelity check, where a wrong repair invents support for a claim:
+
+      1. Only after a comparison operator (above), so adjacent table cells
+         can never be fused into a value.
+      2. Appended rather than substituted, so the original tokens survive —
+         the repair can only ever make matching more permissive, never less.
     """
     if not text:
         return text

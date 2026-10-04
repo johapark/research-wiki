@@ -157,3 +157,22 @@ def test_finder_checks_only_synthesis_typed_pages_in_synthesis_dir():
           pages[2]: {"type": "synthesis"}}
     got = find_synthesis_contract_violations(pages, body, fm)
     assert [(v["page"], v["kind"]) for v in got] == [(pages[0], "synthesis_legacy_spine")]
+
+
+def test_duplicate_section_is_flagged():
+    """Review finding: duplicate headings were de-duplicated into `seen`, so a
+    second `## Outlook` passed. It matters because the grounding gate's
+    labelled range runs to the *next* H2 — labels in the second copy are
+    silently inert."""
+    body = _body().replace("## References", "## Outlook\n\nA second one.[^a]\n\n## References")
+    (v,) = [x for x in check_page(PATH, body) if x["kind"] == "synthesis_duplicate_section"]
+    assert "`## Outlook` appears 2 times" in v["detail"]
+
+
+def test_duplicate_references_is_flagged():
+    body = _body() + "\n## References\n\n[^b]: [[cgt/b-2024-y]]\n"
+    assert "synthesis_duplicate_section" in _kinds(check_page(PATH, body))
+
+
+def test_a_single_copy_of_each_section_is_not_flagged():
+    assert "synthesis_duplicate_section" not in _kinds(check_page(PATH, _body()))

@@ -95,3 +95,33 @@ def test_inference_whose_numbers_are_in_a_cited_paper_stays_unchecked(monkeypatc
     claim = fidelity._grade_claim(unit, fidelity._footnote_targets(PAGE),
                                   use_semantic=False, fulltext_cache={})
     assert claim.verdict == "inference"
+
+
+PAGE_NO_PDF = """---
+type: synthesis
+author_model: "claude-opus-5"
+---
+
+## Outlook
+
+Both families will converge on a shared floor near 0.17% indel frequency *(inference)*.[^syn]
+
+[^syn]: [[synthesis/variant-aware-crispr-off-target]] — a synthesis page, no PDF
+"""
+
+
+def test_inference_with_no_gradable_pdf_is_uncited_not_inference(tmp_path, monkeypatch):
+    """Review finding: the inference branch ran before the `not cited` check, so
+    a unit whose every citation resolves to a page without a PDF got the
+    `inference` verdict — reported as *deliberately* unchecked while its 0.17%
+    was in fact uncheckable, and `n_inference` implied a premise had been
+    verified. It must fall through to `uncited`, which is what the same unit
+    gets without the label."""
+    monkeypatch.setattr(fidelity, "resolve_pdf",
+                        lambda stem: (_ for _ in ()).throw(FileNotFoundError(stem)))
+    page = tmp_path / "x.md"
+    page.write_text(PAGE_NO_PDF, encoding="utf-8")
+    report = fidelity.grade_synthesis(page, semantic=False)
+    assert report.n_inference == 0
+    assert report.n_uncited == 1
+    assert [c.verdict for c in report.claims] == ["uncited"]

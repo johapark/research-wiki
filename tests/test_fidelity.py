@@ -189,3 +189,27 @@ def test_real_drift_still_fails_through_the_repair():
     from researchwiki.grade.primitives import check_numerics
     _, unmatched = check_numerics("p<0.9999", "", "(OR 4.5, p <0 0065)")
     assert unmatched == ["0.9999"]
+
+
+def test_adjacent_table_cells_are_not_fused_into_a_decimal():
+    """Review finding: the repair fired on any `0 NNN`, so a table row reading
+    `control 0 12 treated` became evidence for a claimed 0.12 — manufacturing
+    support from two numbers the paper never printed together. It is now gated
+    on a preceding comparison operator, which every real occurrence has."""
+    from researchwiki.grade.primitives import check_numerics, restore_lost_decimals
+    assert restore_lost_decimals("Table: control 0 12 treated") == "Table: control 0 12 treated"
+    tokens, unmatched = check_numerics("The rate was 0.12", "", "Table: control 0 12 treated")
+    assert tokens == ["0.12"] and unmatched == ["0.12"]
+
+
+def test_every_real_lost_decimal_shape_still_repairs():
+    """The shapes actually present in otero-2024, which is what the repair is
+    for: all follow `p <`, `p =` or a bare threshold `<`."""
+    from researchwiki.grade.primitives import restore_lost_decimals
+    for text, want in [
+        ("(OR 4.5, p <0 0065)", "0.0065"),
+        ("allele frequency < 0 01", "0.01"),
+        ("101 0.874 p =0 5099", "0.5099"),
+        ("(p <0 0001)", "0.0001"),
+    ]:
+        assert want in restore_lost_decimals(text), text

@@ -368,7 +368,14 @@ def _grade_claim(
     cited, unresolved = _resolve_cited_stems(unit.text, footnote_targets)
     claim_text = unit.text
 
-    if unit.is_inference:
+    # An inference is only gradable-as-an-inference when at least one cited
+    # paper has a PDF. With none — every citation resolving to a synthesis page,
+    # or to a paper the wiki has no PDF for — there is nothing to check its
+    # numbers against, and returning `inference` would report a unit as
+    # deliberately-unchecked when it is in fact uncheckable. Falling through to
+    # the `not cited` branch below gives it `uncited`, which is what an
+    # unlabelled unit in the same position gets and is counted in `n_uncited`.
+    if unit.is_inference and cited:
         # The conclusion is the author's, so retrieval and negation aren't
         # checked. Its *numbers* are premises, though, and must come from a
         # cited paper: otherwise the label would exempt any figure from the
@@ -381,7 +388,7 @@ def _grade_claim(
                 break
             _, um = check_numerics(cleaned, "", _full_text(stem, fulltext_cache))
             unmatched &= set(um)
-        numeric_unmatched = [t for t in tokens if t in unmatched] if cited else []
+        numeric_unmatched = [t for t in tokens if t in unmatched]
         return FidelityClaim(
             unit_index=unit.index, line_start=unit.line_start, text=claim_text,
             cited_stems=cited, unresolved_citations=unresolved, best_stem=None,

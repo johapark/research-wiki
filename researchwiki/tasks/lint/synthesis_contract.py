@@ -26,6 +26,12 @@ that sees a missing or misplaced section.
   synthesis_section_order
     All present required sections are there but out of order.
 
+  synthesis_duplicate_section
+    A required H2 appears more than once. Not cosmetic: the grounding gate's
+    labelled-source range runs from a heading to the *next* H2, so labels in a
+    second `## Outlook` are silently inert, and split `## References` blocks
+    scatter the footnote definitions.
+
   synthesis_unexpected_h2
     An H2 outside the structure. Extra material belongs in an H3 under
     `Findings`.
@@ -129,10 +135,28 @@ def check_page(path: Path, body: str) -> list[dict]:
 
     required = [k for k in REQUIRED_SECTIONS if k != "references" or refs or defs]
     seen: list[str] = []
+    counts: dict[str, int] = {}
     for _, name, _ in sections:
         key = _canonical(name)
-        if key and key not in seen:
+        if not key:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+        if key not in seen:
             seen.append(key)
+
+    # A repeated section is not a cosmetic slip. Two `## Outlook` blocks mean
+    # the labelled-source range the grounding gate computes covers only the
+    # first (its range ends at the next H2), so labels in the second are
+    # silently inert; two `## References` split the footnote definitions a
+    # reader has to find. De-duplicating into `seen` is what let this pass.
+    for key, n in counts.items():
+        if n > 1:
+            violations.append({
+                "page": path,
+                "kind": "synthesis_duplicate_section",
+                "detail": f"`## {key[0].upper() + key[1:]}` appears {n} times; "
+                          "merge them — only the first is treated as the section",
+            })
 
     for key in required:
         if key not in seen:
