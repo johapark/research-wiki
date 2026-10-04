@@ -101,6 +101,7 @@ def _emit_json(**kw) -> int:
         "idea_contract_violations": _contract_json(kw["idea_contract"]),
         "proposal_contract_violations": _contract_json(kw["proposal_contract"]),
         "synthesis_contract_violations": _contract_json(kw["synthesis_contract"]),
+        "crosslink_impossible_citations": _contract_json(kw["crosslink_direction"]),
         "dashboard_contract_violations": _contract_json(kw["dashboard_contract"]),
         "ungraded_papers": kw["ungraded_papers"],
         "venue_suspect": kw["venue_suspect"],
@@ -426,7 +427,7 @@ def _emit_metadata_sections(kw: dict) -> None:
 def _emit_page_contract_sections(kw: dict) -> None:
     """Render page-shape and durable-anchor contract findings."""
     from .report_synthesis import print_authored_contract_sections
-    print_authored_contract_sections(kw["proposal_contract"], kw["synthesis_contract"])
+    print_authored_contract_sections(kw)
 
     concept_contract = kw["concept_contract"]
     if concept_contract:

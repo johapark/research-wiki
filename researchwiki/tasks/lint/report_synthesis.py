@@ -34,8 +34,32 @@ def print_synthesis_contract_section(violations: list[dict]) -> None:
     print()
 
 
-def print_authored_contract_sections(proposal: list[dict], synthesis: list[dict]) -> None:
-    """Proposal then synthesis findings: the two page types whose shape is a
-    fixed Markdown contract. One entry point keeps report.py under its cap."""
-    print_proposal_contract_section(proposal)
-    print_synthesis_contract_section(synthesis)
+def print_authored_contract_sections(kw: dict) -> None:
+    """Proposal, synthesis and cross-link-direction findings. Takes the whole
+    lint keyword bundle so adding a section here costs report.py no lines —
+    it is pinned by `tests/test_module_size.py` and rendering is this
+    module's one job."""
+    print_proposal_contract_section(kw["proposal_contract"])
+    print_synthesis_contract_section(kw["synthesis_contract"])
+    print_crosslink_direction_section(kw["crosslink_direction"])
+
+
+def print_crosslink_direction_section(violations: list[dict]) -> None:
+    if not violations:
+        return
+    print(f"## Cross-link citation directions the years rule out ({len(violations)}, advisory)")
+    print("A `cites this paper` bullet needs the *target* to be the newer paper; "
+          "`cited by this paper` needs it to be older. These assert the opposite. "
+          "Most were written by `lint --fix` or `promote` from an inferred edge "
+          "direction, and no other check sees a bullet's claim. Remove both "
+          "directions of a false pair in one edit, or `lint --fix` re-inserts it.")
+    by_page: dict[str, list[str]] = {}
+    for violation in violations:
+        by_page.setdefault(page_key(violation["page"]), []).append(violation["detail"])
+    for key, details in sorted(by_page.items())[:20]:
+        print(f"- **{key}**")
+        for detail in details:
+            print(f"    - {detail}")
+    if len(by_page) > 20:
+        print(f"_... +{len(by_page) - 20} more pages_")
+    print()

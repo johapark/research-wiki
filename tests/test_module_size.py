@@ -146,7 +146,11 @@ _DEBT: dict[str, int] = {
     # splitting per check would scatter that job across modules to satisfy a
     # number. Raised 588 -> 595 to replace the 525-line prose renderer with five
     # bounded sections plus a coordinator; no finding-rendering logic was added.
-    "researchwiki/tasks/lint/report.py": 595,
+    # Raised 595 -> 596 for `crosslink_impossible_citations`: its `--json` key is
+    # one line and every check needs one here, so this cost is irreducible. Its
+    # text renderer went to report_synthesis.py, which now takes the whole
+    # keyword bundle so the next section costs this file nothing.
+    "researchwiki/tasks/lint/report.py": 596,
     # Benchmark fixtures: YAML loading, scoring, and the report. Raised 525 ->
     # 530 for parser/content-path extraction; the largest function fell from
     # 388 to 193 code lines and the module gained only the dispatch boundaries.
