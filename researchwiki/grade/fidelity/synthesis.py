@@ -46,7 +46,17 @@ Verdicts:
                         `[[stem#slug]]` but a numeric token in the sentence
                         is absent from that specific claim's text (though the
                         paper as a whole may contain it). Hard failure.
-  uncited               no cited paper has a gradable PDF. Skipped.
+  uncited               no cited paper has a gradable PDF. Skipped — the unit
+                        asserts no source, so there is nothing to be wrong
+                        about; `check-grounding` owns "has a citation".
+  inference_ungradable  labelled `*(inference)*` but no cited paper has a
+                        gradable PDF. Hard failure. The label is a *claim about
+                        provenance* — that the conclusion follows from the
+                        papers cited — so unlike plain uncited prose it asserts
+                        something, and with no gradable PDF that assertion can
+                        never be checked. Without this the label would be a way
+                        to put an unverifiable number on a page that passes
+                        both gates.
   inference             labelled `*(inference)*` in a page's labelled section
                         (synthesis Outlook). The citation names the papers the
                         conclusion is drawn from, but the conclusion itself is
@@ -147,7 +157,7 @@ class FidelityClaim:
     best_semantic: float | None
     numeric_unmatched: list[str]    # numbers in the claim found in NO cited paper
     negation_mismatch: bool
-    verdict: str                    # supported|weak|composite|misattributed|anchor_misattributed|uncited|inference
+    verdict: str                    # supported|weak|composite|misattributed|anchor_misattributed|uncited|inference|inference_ungradable
     # Fine-grained mode only:
     anchor_misattributions: list[dict] = field(default_factory=list)
     # each dict: {stem, slug, numeric_tokens_missing: [...]}
@@ -168,12 +178,23 @@ class SynthesisFidelityReport:
     semantic_available: bool
     n_anchor_misattributed: int = 0  # fine-grained mode only
     n_inference: int = 0            # cited, labelled *(inference)*, not graded
+    n_inference_ungradable: int = 0  # labelled *(inference)*, no gradable PDF
     claims: list[FidelityClaim] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        """True when no claim is misattributed (paper- or anchor-level)."""
-        return self.n_misattributed == 0 and self.n_anchor_misattributed == 0
+        """True when nothing is misattributed and every inference is checkable.
+
+        `n_inference_ungradable` fails the gate because the `*(inference)*`
+        label asserts the conclusion follows from the papers it cites. If none
+        of them has a PDF, that assertion is unverifiable rather than merely
+        unsourced — and the label suppresses the retrieval and negation checks,
+        so passing it would let an unverifiable number clear both gates. Plain
+        `uncited` prose stays advisory: it asserts no provenance, and
+        `check-grounding` is what owns "a citation must be present".
+        """
+        return (self.n_misattributed == 0 and self.n_anchor_misattributed == 0
+                and self.n_inference_ungradable == 0)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -368,14 +389,20 @@ def _grade_claim(
     cited, unresolved = _resolve_cited_stems(unit.text, footnote_targets)
     claim_text = unit.text
 
-    # An inference is only gradable-as-an-inference when at least one cited
-    # paper has a PDF. With none — every citation resolving to a synthesis page,
-    # or to a paper the wiki has no PDF for — there is nothing to check its
-    # numbers against, and returning `inference` would report a unit as
-    # deliberately-unchecked when it is in fact uncheckable. Falling through to
-    # the `not cited` branch below gives it `uncited`, which is what an
-    # unlabelled unit in the same position gets and is counted in `n_uncited`.
-    if unit.is_inference and cited:
+    if unit.is_inference and not cited:
+        # Labelled an inference, but every citation resolves to a page without
+        # a PDF (another synthesis page, or a paper the wiki holds no PDF for).
+        # Its own verdict rather than `uncited`: the label asserts the
+        # conclusion follows from the cited papers, so an unverifiable one is a
+        # defect, and `ok` fails on it.
+        return FidelityClaim(
+            unit_index=unit.index, line_start=unit.line_start, text=claim_text,
+            cited_stems=[], unresolved_citations=unresolved, best_stem=None,
+            best_bm25=0.0, best_semantic=None, numeric_unmatched=[],
+            negation_mismatch=False, verdict="inference_ungradable",
+        )
+
+    if unit.is_inference:
         # The conclusion is the author's, so retrieval and negation aren't
         # checked. Its *numbers* are premises, though, and must come from a
         # cited paper: otherwise the label would exempt any figure from the
@@ -543,9 +570,10 @@ def grade_synthesis(
 
     n_uncited = _count("uncited")
     n_inference = _count("inference")
+    n_inference_ungradable = _count("inference_ungradable")
     return SynthesisFidelityReport(
         page_path=str(path),
-        n_claims=len(claims) - n_uncited - n_inference,
+        n_claims=len(claims) - n_uncited - n_inference - n_inference_ungradable,
         n_supported=_count("supported"),
         n_weak=_count("weak"),
         n_composite=_count("composite"),
@@ -553,6 +581,7 @@ def grade_synthesis(
         n_anchor_misattributed=_count("anchor_misattributed"),
         n_uncited=n_uncited,
         n_inference=n_inference,
+        n_inference_ungradable=n_inference_ungradable,
         semantic_available=use_semantic,
         claims=claims,
     )

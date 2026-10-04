@@ -18,12 +18,14 @@ Usage:
   researchwiki grade synthesis <page> --no-semantic       # BM25 + numeric + negation only
   researchwiki grade synthesis <page> --weak              # also list weak/composite claims
 
-Verdicts: supported · weak · composite · misattributed · uncited · inference
-(see researchwiki/grade/fidelity/synthesis.py for definitions).
+Verdicts: supported · weak · composite · misattributed · uncited · inference ·
+inference_ungradable (see researchwiki/grade/fidelity/synthesis.py).
 
 Exit codes:
-  0  No misattributed claims (weak/composite/uncited are advisory).
-  1  ≥1 misattributed claim (a number cited to a paper that lacks it).
+  0  Nothing misattributed and every *(inference)* checkable (weak/composite/
+     uncited are advisory).
+  1  ≥1 misattributed claim (a number cited to a paper that lacks it), or an
+     *(inference)* whose cited pages have no PDF to check it against.
   2  Bad input / I/O error.
 """
 
@@ -44,12 +46,15 @@ def _format_text_report(report, show_advisory: bool) -> str:
     lines.append(f"  page          : {report.page_path}")
     n_inference = getattr(report, "n_inference", 0)
     inference_seg = f", {n_inference} labelled inference skipped" if n_inference else ""
+    n_inf_bad = getattr(report, "n_inference_ungradable", 0)
     lines.append(
         f"  claims        : {report.n_claims} graded "
         f"({report.n_uncited} uncited skipped{inference_seg})"
     )
     n_anchor = getattr(report, "n_anchor_misattributed", 0)
     anchor_seg = f", {n_anchor} ANCHOR-MISATTRIBUTED" if n_anchor else ""
+    if n_inf_bad:
+        anchor_seg += f", {n_inf_bad} INFERENCE-UNGRADABLE"
     lines.append(
         f"  verdicts      : {report.n_supported} supported, "
         f"{report.n_weak} weak, {report.n_composite} composite, "
@@ -67,6 +72,19 @@ def _format_text_report(report, show_advisory: bool) -> str:
             lines.append(f"    L{c.line_start} cites [{cited}]")
             lines.append(f"      missing numbers: {c.numeric_unmatched}")
             lines.append(f"      claim: {c.text[:160]}")
+        lines.append("")
+
+    inf_bad = [c for c in report.claims if c.verdict == "inference_ungradable"]
+    if inf_bad:
+        lines.append("  ✗ inference with nothing to check it against "
+                     "(*(inference)* asserts the conclusion follows from the cited "
+                     "papers; none of these has a PDF):")
+        for c in inf_bad:
+            unresolved = ", ".join(c.unresolved_citations) or "—"
+            lines.append(f"    L{c.line_start} cites [{unresolved}]")
+            lines.append(f"      claim: {c.text[:160]}")
+        lines.append("    → cite the paper the conclusion rests on, or drop the "
+                     "*(inference)* label and the premises with it.")
         lines.append("")
 
     anchor_mis = [c for c in report.claims if c.verdict == "anchor_misattributed"]
@@ -166,6 +184,9 @@ def main(argv: list[str]) -> int:
             n_anchor = getattr(report, "n_anchor_misattributed", 0)
             if n_anchor:
                 parts.append(f"{n_anchor} anchor-misattributed")
+            n_inf_bad = getattr(report, "n_inference_ungradable", 0)
+            if n_inf_bad:
+                parts.append(f"{n_inf_bad} ungradable inference")
             print(f"  → {' + '.join(parts)} claim(s) — "
                   f"verify against the cited PDFs / claim slugs", file=sys.stderr)
 

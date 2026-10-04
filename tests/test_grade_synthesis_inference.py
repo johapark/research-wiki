@@ -110,18 +110,41 @@ Both families will converge on a shared floor near 0.17% indel frequency *(infer
 """
 
 
-def test_inference_with_no_gradable_pdf_is_uncited_not_inference(tmp_path, monkeypatch):
-    """Review finding: the inference branch ran before the `not cited` check, so
-    a unit whose every citation resolves to a page without a PDF got the
-    `inference` verdict — reported as *deliberately* unchecked while its 0.17%
-    was in fact uncheckable, and `n_inference` implied a premise had been
-    verified. It must fall through to `uncited`, which is what the same unit
-    gets without the label."""
+def _graded_no_pdf(tmp_path, monkeypatch, text=PAGE_NO_PDF):
     monkeypatch.setattr(fidelity, "resolve_pdf",
                         lambda stem: (_ for _ in ()).throw(FileNotFoundError(stem)))
     page = tmp_path / "x.md"
-    page.write_text(PAGE_NO_PDF, encoding="utf-8")
-    report = fidelity.grade_synthesis(page, semantic=False)
+    page.write_text(text, encoding="utf-8")
+    return fidelity.grade_synthesis(page, semantic=False)
+
+
+def test_inference_with_no_gradable_pdf_fails_the_gate(tmp_path, monkeypatch):
+    """Review finding, second pass. Classifying this `uncited` made the verdict
+    honest but left the gate green, so a numeric inference citing only a
+    PDF-less page still cleared both required gates with its figure unchecked.
+
+    It gets its own verdict and fails. The distinction from plain `uncited`
+    prose is what the label asserts: `*(inference)*` says the conclusion
+    follows from the papers cited, so with no gradable paper that claim is
+    unverifiable rather than merely unsourced — and the label also suppresses
+    the retrieval and negation checks, so there is nothing left looking at it.
+    """
+    report = _graded_no_pdf(tmp_path, monkeypatch)
+    assert report.n_inference_ungradable == 1
     assert report.n_inference == 0
-    assert report.n_uncited == 1
+    assert [c.verdict for c in report.claims] == ["inference_ungradable"]
+    assert not report.ok                      # exit 1
+    assert report.n_claims == 0               # not counted as graded
+    assert report.to_dict()["n_inference_ungradable"] == 1
+
+
+def test_uncited_prose_without_the_label_stays_advisory(tmp_path, monkeypatch):
+    """The intentional skip the review asked to preserve: an unlabelled unit
+    citing only a PDF-less page asserts no provenance, so it stays `uncited`
+    and advisory. `check-grounding` is the gate that owns "a citation must be
+    present"; duplicating that here would fail every legitimate scope
+    paragraph that points at a sibling synthesis page."""
+    plain = PAGE_NO_PDF.replace(" *(inference)*", "")
+    report = _graded_no_pdf(tmp_path, monkeypatch, plain)
     assert [c.verdict for c in report.claims] == ["uncited"]
+    assert report.ok
