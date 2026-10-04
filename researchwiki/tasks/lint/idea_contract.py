@@ -9,7 +9,7 @@ policy that wasn't written for it.
 
 Nothing else in the toolchain checks this. Both mandatory page gates
 (`check-grounding`, `grade synthesis`) parse *units* — paragraphs and bullets —
-so they never read a heading. `grounding.py`'s `_PERMISSIVE_IDEA_SECTION_RE`
+so they never read a heading. `grounding.py`'s `_LABELLED_SECTION_RES["idea"]`
 matches only `^(opportunities|plans)\\b`, and it exists to locate the
 model-prior-eligible ranges, not to validate the contract. An idea page whose
 Verdict prose sits above the first H2 with no `## Verdict` heading passes both

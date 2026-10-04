@@ -108,9 +108,12 @@ PAGE_RELEVANCE_TOP = 3
 PER_TRIGGER_CAP = 2
 MAX_TRIGGERS_SHOWN = 3
 DECLINES_FILENAME = ".recent-declines.json"
+# `outlook` is where a synthesis page written to the fixed structure states
+# what would move it; legacy synthesis pages use the first heading.
 TRIGGER_HEADINGS = frozenset({
     "what would update this page",
     "what would change the conclusion",
+    "outlook",
 })
 #: Proposal statuses whose decisive uncertainty is still an open question.
 OPEN_PROPOSAL_STATUSES = frozenset({"proposed", "shortlisted", "deferred", "drafted"})

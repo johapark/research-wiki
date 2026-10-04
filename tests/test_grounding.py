@@ -304,3 +304,108 @@ def test_quoted_type_idea_still_detected():
         doc = IDEA_DOC.replace("type: idea", variant)
         rep = grounding.check(doc, permissive=True)
         assert rep.model_prior_claims == 1, variant
+
+
+# ---------- labelled Outlook on synthesis pages ----------
+
+# One claim per section. Background stays strict; Outlook holds a cited
+# inference, a model prior, and an uncited inference (which must fail).
+SYNTH_DOC = """---
+type: synthesis
+---
+
+## Background
+
+Background claim with enough words to count as a real claim [[compbio/foo-2024-bar]].
+
+## Outlook
+
+Combining both assays implies a shared detection floor across the field *(inference)*.[^foo][^baz]
+
+Long-read sequencing will probably be the next route around that floor *(model prior)*.
+
+Another conclusion with enough words to count but no cited papers at all *(inference)*.
+
+[^foo]: [[compbio/foo-2024-bar]]
+[^baz]: [[compbio/baz-2025-qux]]
+"""
+
+
+def _claims(rep):
+    return [u for u in rep.units if u.is_claim]
+
+
+def test_synthesis_outlook_accepts_both_labels():
+    """Outlook is the synthesis page's labelled section: a cited inference is
+    grounded and flagged, a model prior is reported as a warning, and an
+    inference with nothing cited stays ungrounded."""
+    rep = grounding.check(SYNTH_DOC, permissive=True, valid_anchors=set())
+    assert rep.total_claims == 4
+    assert rep.inference_claims == 1
+    assert rep.model_prior_claims == 1
+    assert rep.grounded_claims == 2          # Background + the cited inference
+    (bad,) = rep.ungrounded_units
+    assert "no cited papers" in bad.text
+    assert bad.flag_reason == "*(inference)* without the papers it is drawn from"
+
+
+def test_inference_label_does_not_ground_without_a_citation():
+    """The label relabels a grounded unit; it is never a citation by itself.
+    Otherwise an author could exempt any Outlook sentence from both gates."""
+    rep = grounding.check(SYNTH_DOC, permissive=True, valid_anchors=set())
+    uncited = [u for u in _claims(rep) if "no cited papers" in u.text]
+    assert uncited and not uncited[0].has_citation
+    assert not uncited[0].is_inference
+
+
+def test_labels_outside_outlook_have_no_effect_on_synthesis():
+    """Background stays strictly grounded: a label there neither grounds the
+    unit nor marks it as an inference."""
+    doc = SYNTH_DOC.replace(
+        "Background claim with enough words to count as a real claim [[compbio/foo-2024-bar]].",
+        "Background claim with enough words to count as a real claim *(model prior)*.",
+    )
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    background = next(u for u in _claims(rep) if u.text.startswith("Background"))
+    assert not background.has_citation
+    assert rep.model_prior_claims == 1      # only the Outlook one
+
+
+def test_cited_inference_outside_outlook_is_an_ordinary_claim():
+    """Outside a labelled section the label is prose: the unit is graded as a
+    normal cited claim, so the fidelity gate still checks it."""
+    doc = SYNTH_DOC.replace("## Outlook", "## Findings")
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.inference_claims == 0
+    assert rep.model_prior_claims == 0
+
+
+def test_strict_ignores_both_labels_on_synthesis():
+    """`--strict`: the model prior and the uncited inference both fail, and
+    the cited inference is an ordinary cited claim."""
+    rep = grounding.check(SYNTH_DOC, permissive=False, valid_anchors=set())
+    assert rep.inference_claims == 0
+    assert rep.model_prior_claims == 0
+    assert len(rep.ungrounded_units) == 2
+    assert rep.grounded_claims == 2
+
+
+def test_outlook_is_not_labelled_on_idea_pages():
+    """Each page type labels only its own sections: an idea page's Outlook
+    heading (not part of the idea contract) stays strict."""
+    doc = SYNTH_DOC.replace("type: synthesis", "type: idea")
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.model_prior_claims == 0
+    assert rep.inference_claims == 0
+
+
+def test_idea_pages_accept_the_inference_label():
+    """Opportunities/Plans take `*(inference)*` too, so the two labels mean
+    the same thing on both page types."""
+    doc = IDEA_DOC.replace(
+        "Plans claim with enough words to count as a real claim with no citation.",
+        "Plans claim with enough words to count as a real claim [[ai/foo-2025-bar]] *(inference)*.",
+    )
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.inference_claims == 1
+    assert rep.model_prior_claims == 1

@@ -111,6 +111,7 @@ def _do_check_grounding(page_path: str, strict: bool) -> dict:
         "total_claims": report.total_claims,
         "grounded_claims": report.grounded_claims,
         "model_prior_claims": report.model_prior_claims,
+        "inference_claims": report.inference_claims,
         "ungrounded_claims": len(report.ungrounded_units),
         "coverage": round(report.coverage, 3),
         "permissive": permissive,
@@ -122,6 +123,7 @@ def _do_check_grounding(page_path: str, strict: bool) -> dict:
                 "is_claim": u.is_claim,
                 "has_citation": u.has_citation,
                 "is_model_prior": u.is_model_prior,
+                "is_inference": u.is_inference,
                 "citations": u.citations,
                 "flag_reason": u.flag_reason,
                 "preview": (u.text[:160].replace("\n", " ")

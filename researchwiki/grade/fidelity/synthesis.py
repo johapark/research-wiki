@@ -47,6 +47,11 @@ Verdicts:
                         is absent from that specific claim's text (though the
                         paper as a whole may contain it). Hard failure.
   uncited               no cited paper has a gradable PDF. Skipped.
+  inference             labelled `*(inference)*` in a page's labelled section
+                        (synthesis Outlook). The citation names the papers the
+                        conclusion is drawn from, but the conclusion itself is
+                        the author's, so no cited PDF is expected to state it.
+                        Skipped, and counted so the unchecked share is visible.
 
 Only `misattributed` and `anchor_misattributed` are hard failures. Retrieval
 (BM25/semantic) is uncalibrated — `paper.py` is explicit about that — so it
@@ -139,7 +144,7 @@ class FidelityClaim:
     best_semantic: float | None
     numeric_unmatched: list[str]    # numbers in the claim found in NO cited paper
     negation_mismatch: bool
-    verdict: str                    # supported|weak|composite|misattributed|anchor_misattributed|uncited
+    verdict: str                    # supported|weak|composite|misattributed|anchor_misattributed|uncited|inference
     # Fine-grained mode only:
     anchor_misattributions: list[dict] = field(default_factory=list)
     # each dict: {stem, slug, numeric_tokens_missing: [...]}
@@ -159,6 +164,7 @@ class SynthesisFidelityReport:
     n_uncited: int                  # claim-shaped units with no gradable cited PDF
     semantic_available: bool
     n_anchor_misattributed: int = 0  # fine-grained mode only
+    n_inference: int = 0            # cited, labelled *(inference)*, not graded
     claims: list[FidelityClaim] = field(default_factory=list)
 
     @property
@@ -359,6 +365,16 @@ def _grade_claim(
     cited, unresolved = _resolve_cited_stems(unit.text, footnote_targets)
     claim_text = unit.text
 
+    if unit.is_inference:
+        # Checked before retrieval: the PDFs would be read only to grade a
+        # conclusion none of them is expected to contain.
+        return FidelityClaim(
+            unit_index=unit.index, line_start=unit.line_start, text=claim_text,
+            cited_stems=cited, unresolved_citations=unresolved, best_stem=None,
+            best_bm25=0.0, best_semantic=None, numeric_unmatched=[],
+            negation_mismatch=False, verdict="inference",
+        )
+
     if not cited:
         return FidelityClaim(
             unit_index=unit.index, line_start=unit.line_start, text=claim_text,
@@ -486,7 +502,8 @@ def grade_synthesis(
     path = Path(page_path)
     text = path.read_text(encoding="utf-8")
 
-    permissive = grounding._is_idea_page(text)  # idea pages: model-prior units OK
+    # Idea Opportunities/Plans and synthesis Outlook: source labels apply.
+    permissive = grounding.has_labelled_sections(text)
     units = grounding.parse_units(text, permissive=permissive)
     footnote_targets = _footnote_targets(text)
     use_semantic = semantic and semantic_mod.is_available()
@@ -503,15 +520,17 @@ def grade_synthesis(
         return sum(1 for c in claims if c.verdict == v)
 
     n_uncited = _count("uncited")
+    n_inference = _count("inference")
     return SynthesisFidelityReport(
         page_path=str(path),
-        n_claims=len(claims) - n_uncited,
+        n_claims=len(claims) - n_uncited - n_inference,
         n_supported=_count("supported"),
         n_weak=_count("weak"),
         n_composite=_count("composite"),
         n_misattributed=_count("misattributed"),
         n_anchor_misattributed=_count("anchor_misattributed"),
         n_uncited=n_uncited,
+        n_inference=n_inference,
         semantic_available=use_semantic,
         claims=claims,
     )

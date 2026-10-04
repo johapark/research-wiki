@@ -18,7 +18,7 @@ Usage:
   researchwiki grade synthesis <page> --no-semantic       # BM25 + numeric + negation only
   researchwiki grade synthesis <page> --weak              # also list weak/composite claims
 
-Verdicts: supported · weak · composite · misattributed · uncited
+Verdicts: supported · weak · composite · misattributed · uncited · inference
 (see researchwiki/grade/fidelity/synthesis.py for definitions).
 
 Exit codes:
@@ -42,9 +42,11 @@ from ..provenance import completion_gate_blocker
 def _format_text_report(report, show_advisory: bool) -> str:
     lines = []
     lines.append(f"  page          : {report.page_path}")
+    n_inference = getattr(report, "n_inference", 0)
+    inference_seg = f", {n_inference} labelled inference skipped" if n_inference else ""
     lines.append(
         f"  claims        : {report.n_claims} graded "
-        f"({report.n_uncited} uncited skipped)"
+        f"({report.n_uncited} uncited skipped{inference_seg})"
     )
     n_anchor = getattr(report, "n_anchor_misattributed", 0)
     anchor_seg = f", {n_anchor} ANCHOR-MISATTRIBUTED" if n_anchor else ""
