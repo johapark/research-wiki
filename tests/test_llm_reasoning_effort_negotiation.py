@@ -188,6 +188,48 @@ def test_renegotiation_does_not_consume_transient_retry_budget(monkeypatch):
     assert resp.text == "hi"
 
 
+@pytest.mark.parametrize("model,effort,expected_temperature", [
+    ("gpt-6-luna", "none", 0.1),
+    ("gpt-6-sol", "none", 0.1),
+    ("openai/gpt-6-sol", "none", 0.1),
+    ("gpt-6-sol", "low", None),
+    ("gpt-6-sol", "medium", None),
+    ("gpt-6-sol", None, None),
+    ("gpt-5", "none", None),
+    ("o1", "none", None),
+    ("gpt-4o", None, 0.1),
+])
+def test_temperature_matches_model_and_effective_effort(
+    monkeypatch, model, effort, expected_temperature,
+):
+    fake = _FakeUrlopen([])
+    _call(monkeypatch, fake, model=model, reasoning_effort=effort,
+          temperature=0.1, max_tokens=800)
+    body = fake.bodies[0]
+    assert body.get("temperature") == expected_temperature
+    limit = "max_tokens" if model == "gpt-4o" else "max_completion_tokens"
+    assert body[limit] == 800
+
+
+def test_temperature_added_when_negotiation_disables_reasoning(monkeypatch):
+    fake = _FakeUrlopen([_http_error(_LUNA_400)])
+    _call(monkeypatch, fake, model="gpt-6-luna", reasoning_effort="minimal",
+          temperature=0.0)
+    assert "temperature" not in fake.bodies[0]
+    assert fake.bodies[1]["reasoning_effort"] == "none"
+    assert fake.bodies[1]["temperature"] == 0.0
+
+
+def test_temperature_removed_when_negotiation_enables_reasoning(monkeypatch):
+    error = "reasoning_effort 'none' unsupported. Supported values are: 'low', 'medium'."
+    fake = _FakeUrlopen([_http_error(error)])
+    _call(monkeypatch, fake, model="gpt-6-sol", reasoning_effort="none",
+          temperature=0.2)
+    assert fake.bodies[0]["temperature"] == 0.2
+    assert fake.bodies[1]["reasoning_effort"] == "low"
+    assert "temperature" not in fake.bodies[1]
+
+
 def test_no_reasoning_effort_means_no_field(monkeypatch):
     fake = _FakeUrlopen([])
     _call(monkeypatch, fake)

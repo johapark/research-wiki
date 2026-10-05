@@ -6,6 +6,8 @@
 # Select this config with RW_MODELS_CONFIG=models.chatgpt.yaml.
 # gpt-6-sol drives the quality-sensitive roles (author/critic/judge);
 # every other role runs on gpt-6-luna.
+# Sol uses explicit reasoning effort; completion caps include both reasoning
+# and visible output. Temperatures apply only with reasoning_effort: none.
 #
 # gpt-5.4-mini is deliberately absent. It used to hold classifier/extractor as
 # "the cheap one", which it is not: per config/pricing.yaml mini is $0.75/$4.50
@@ -27,22 +29,25 @@ roles:
   author:
     provider: openai-compatible
     model: gpt-6-sol
+    reasoning_effort: medium
     temperature: 0.5
-    max_tokens: 6000
+    max_tokens: 12000
 
   # Critic — turns grader flags into revision notes.
   critic:
     provider: openai-compatible
     model: gpt-6-sol
+    reasoning_effort: low
     temperature: 0.3
-    max_tokens: 2500
+    max_tokens: 6000
 
   # Judge — structural decisions (cross-link selection, memory evolution).
   judge:
     provider: openai-compatible
     model: gpt-6-sol
+    reasoning_effort: low
     temperature: 0.2
-    max_tokens: 1500
+    max_tokens: 6000
 
   # Classifier — single JSON verdict, deterministic.
   classifier:
@@ -76,13 +81,17 @@ phases:
   classifier:       {role: classifier}
   short_name:       {role: proposer, max_tokens: 220}
   keywords:         {role: proposer}
-  link_generation:  {role: judge, max_tokens: 1200}
-  memory_evolution: {role: judge, max_tokens: 3000}
+  link_generation:  {role: judge, max_tokens: 4000}
+  memory_evolution: {role: judge, max_tokens: 6000}
   synthesis_judge:  {role: judge}
   eval_judge:       {role: judge}
+  # Override the built-in 400-token caps, which are too tight for reasoning.
+  cross_paper_judge: {role: judge, temperature: 0.0, max_tokens: 4000}
+  claim_overlap_judge: {role: judge, temperature: 0.0, max_tokens: 4000}
+  proposal_generation: {role: author, temperature: 0.6, max_tokens: 12000}
   reconcile:        {role: extractor}
   # Paper-wide coverage extraction is quality-sensitive: use the Sol judge
-  # while keeping routine first-page metadata extraction on Luna. 4000 output
-  # tokens gives headroom for the observed ~1300-token claims lists.
-  target_claims:    {role: judge, temperature: 0.0, max_tokens: 4000}
+  # while keeping routine first-page metadata extraction on Luna. The cap
+  # reserves space for low-effort reasoning as well as the claims list.
+  target_claims:    {role: judge, temperature: 0.0, max_tokens: 8000}
   claim_support:    {role: judge}

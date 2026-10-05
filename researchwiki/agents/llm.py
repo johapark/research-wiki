@@ -404,6 +404,13 @@ def _needs_max_completion_tokens(model: str) -> bool:
     return bool(_MAX_COMPLETION_TOKENS_RE.search(model or ""))
 
 
+# GPT-5.1+ supports sampling parameters when reasoning is explicitly disabled.
+# Original GPT-5 and o-series retain their temperature restriction.
+_TEMPERATURE_WITHOUT_REASONING_RE = re.compile(
+    r"(?:^|/)gpt-(?:5\.[1-9]\d*|[6-9]|\d{2,})\b", re.IGNORECASE
+)
+
+
 # --- reasoning_effort negotiation ----------------------------------------
 # Models disagree about this field's vocabulary and the disagreement is a hard
 # 400, not a warning. OpenAI o-series/GPT-5 take "minimal"; some newer models
@@ -593,14 +600,12 @@ def call_openai_compatible(
         "model": model,
         "messages": messages,
     }
-    # GPT-5+/o-series also reject any non-default `temperature` (only 1 is
-    # allowed), so omit the field for them and let the server default apply;
-    # every other model on this path honors the configured value.
+    # Completion limits include reasoning on GPT-5+/o-series. Temperature is
+    # encoded below, after resolving the effective reasoning effort.
     if _needs_max_completion_tokens(model):
         payload["max_completion_tokens"] = max_tokens
     else:
         payload["max_tokens"] = max_tokens
-        payload["temperature"] = temperature
 
     api_key = os.environ.get("OPENAI_API_KEY", "lm-studio")
     url = f"{base_url.rstrip('/')}/chat/completions"
@@ -615,6 +620,14 @@ def call_openai_compatible(
             payload["reasoning_effort"] = effort
         else:
             payload.pop("reasoning_effort", None)
+        # Recompute on every negotiation: a retry may enable or disable
+        # reasoning, changing whether temperature is accepted.
+        if not _needs_max_completion_tokens(model) or (
+            effort == "none" and _TEMPERATURE_WITHOUT_REASONING_RE.search(model)
+        ):
+            payload["temperature"] = temperature
+        else:
+            payload.pop("temperature", None)
         return json.dumps(payload).encode("utf-8")
 
     body = _encode_body()

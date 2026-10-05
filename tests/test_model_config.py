@@ -116,6 +116,23 @@ def test_fallback_covers_every_phase_in_anthropic_template(tmp_path, monkeypatch
 
 # ---------- YAML parsing of reasoning_effort ----------
 
+def test_chatgpt_profile_has_explicit_reasoning_and_headroom(monkeypatch):
+    profile = Path(__file__).resolve().parent.parent / "config/models.chatgpt.yaml"
+    monkeypatch.setenv("RW_MODELS_CONFIG", str(profile))
+    model_config.clear_caches()
+    model_config.validate_config()
+    for phase in model_config.list_phases():
+        cfg = model_config.for_phase(phase)
+        if cfg.model == "gpt-6-sol":
+            assert cfg.reasoning_effort in {"low", "medium"}, phase
+            assert cfg.max_tokens >= 4000, phase
+        else:
+            assert cfg.model == "gpt-6-luna", phase
+            assert cfg.reasoning_effort == "none", phase
+    assert model_config.for_phase("author").max_tokens >= 12000
+    assert model_config.for_phase("target_claims").max_tokens >= 8000
+
+
 def test_yaml_role_with_reasoning_effort(tmp_path, monkeypatch):
     root = _write_yaml(tmp_path, """
 roles:

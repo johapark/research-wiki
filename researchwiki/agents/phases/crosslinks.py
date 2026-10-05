@@ -24,6 +24,7 @@ from pathlib import Path
 
 from ...paths import wiki_dir
 from ...pdf.text import extract_ref_dois
+from ...providers._http import StructuredProviderUnavailable
 from ...providers.semantic_scholar import SemanticScholarProvider
 from ...index import pages_semantic as semantic_pages
 from ...wiki import read_page, read_wiki_dois
@@ -33,6 +34,16 @@ from ...log import log
 
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+
+
+def _optional_graph_lookup(lookup, source: str, fallback):
+    """Allow the PDF reference scan to run when a citation API is offline."""
+    try:
+        return lookup()
+    except StructuredProviderUnavailable as exc:
+        log(f"{source} unavailable; using PDF reference scan: {exc}",
+            tag="propose_crosslinks")
+        return fallback
 
 
 @dataclass
@@ -110,10 +121,11 @@ def crosslink_candidates(
 
     if doi:
         provider = SemanticScholarProvider()
-        article = provider.get_by_doi(doi)
+        article = _optional_graph_lookup(lambda: provider.get_by_doi(doi), "S2", None)
 
         if article is not None:
-            refs = provider.get_references(article)
+            refs = _optional_graph_lookup(lambda: provider.get_references(article),
+                                          "S2 references", [])
             if not refs and (getattr(article, "reference_count", 0) or 0) > 0:
                 if stats is not None:
                     stats["citation_graph_unresolved"] = True
@@ -135,7 +147,8 @@ def crosslink_candidates(
                         year=ref.year,
                         verified=True,
                     ))
-            for cit in provider.get_citations(article):
+            for cit in _optional_graph_lookup(lambda: provider.get_citations(article),
+                                              "S2 citations", []):
                 cit_doi = (cit.doi or "").lower()
                 if cit_doi and cit_doi in wiki_dois and cit_doi not in seen_dois:
                     seen_dois.add(cit_doi)
@@ -153,7 +166,8 @@ def crosslink_candidates(
     # deposited reference DOIs even when S2 doesn't have the paper.
     if doi and (not candidates or len(candidates) < 5):
         from ...providers.crossref import fetch_crossref_refs
-        cr_dois = fetch_crossref_refs(doi)
+        cr_dois = _optional_graph_lookup(lambda: fetch_crossref_refs(doi),
+                                         "Crossref references", [])
         for ref_doi in cr_dois:
             ref_doi_l = ref_doi.lower()
             if ref_doi_l in wiki_dois and ref_doi_l not in seen_dois:

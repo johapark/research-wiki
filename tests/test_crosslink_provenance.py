@@ -401,21 +401,25 @@ def test_populated_reference_list_is_not_flagged(monkeypatch):
     assert stats["citation_graph_unresolved"] is False
 
 
-def test_crosslink_candidates_propagates_semantic_scholar_outage(monkeypatch):
+def test_crosslink_candidates_scans_pdf_after_semantic_scholar_outage(monkeypatch):
     class _Provider:
         def get_by_doi(self, doi):
             raise StructuredProviderUnavailable("S2 unavailable")
 
     monkeypatch.setattr(crosslinks, "read_wiki_dois", lambda: {"10.1/x": "c/x"})
     monkeypatch.setattr(crosslinks, "SemanticScholarProvider", _Provider)
+    monkeypatch.setattr(crosslinks, "extract_ref_dois", lambda *a, **k: ["10.1/x"])
+    monkeypatch.setattr(
+        "researchwiki.providers.crossref.fetch_crossref_refs", lambda d: []
+    )
 
-    with pytest.raises(StructuredProviderUnavailable, match="S2 unavailable"):
-        crosslinks.crosslink_candidates(
-            Path("/nonexistent.pdf"), {"doi": "10.1/source"}
-        )
+    candidates = crosslinks.crosslink_candidates(
+        Path("/nonexistent.pdf"), {"doi": "10.1/source"}
+    )
+    assert [(c.wikilink, c.kind) for c in candidates] == [("c/x", "cited_by_source")]
 
 
-def test_crosslink_candidates_propagates_crossref_outage(monkeypatch):
+def test_crosslink_candidates_scans_pdf_after_crossref_outage(monkeypatch):
     class _Provider:
         def get_by_doi(self, doi):
             return None
@@ -425,14 +429,15 @@ def test_crosslink_candidates_propagates_crossref_outage(monkeypatch):
 
     monkeypatch.setattr(crosslinks, "read_wiki_dois", lambda: {"10.1/x": "c/x"})
     monkeypatch.setattr(crosslinks, "SemanticScholarProvider", _Provider)
+    monkeypatch.setattr(crosslinks, "extract_ref_dois", lambda *a, **k: ["10.1/x"])
     monkeypatch.setattr(
         "researchwiki.providers.crossref.fetch_crossref_refs", unavailable
     )
 
-    with pytest.raises(StructuredProviderUnavailable, match="Crossref unavailable"):
-        crosslinks.crosslink_candidates(
-            Path("/nonexistent.pdf"), {"doi": "10.1/source"}
-        )
+    candidates = crosslinks.crosslink_candidates(
+        Path("/nonexistent.pdf"), {"doi": "10.1/source"}
+    )
+    assert [(c.wikilink, c.kind) for c in candidates] == [("c/x", "cited_by_source")]
 
 
 def test_topical_candidates_skip_stale_semantic_rows(monkeypatch, tmp_path):

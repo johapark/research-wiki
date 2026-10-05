@@ -14,6 +14,7 @@ from pathlib import Path
 
 from ... import errors, metadata_sanity
 from ...pdf.text import detect_doi, extract_pdf, find_url_doi_candidates, pdf_shape
+from ...providers._http import StructuredProviderUnavailable
 from ...providers.crossref import crossref_structural_signals, verify_doi_via_crossref
 from ...providers.semantic_scholar import SemanticScholarProvider
 from ...stems import derive_stem
@@ -40,6 +41,16 @@ _RECONCILE_SCHEMA = {
         "abstract":            {"type": "string"},
     },
 }
+
+
+def _optional_crossref_metadata(doi: str) -> dict:
+    """Enrich PDF metadata when Crossref is reachable; preserve PDF fallback."""
+    try:
+        return verify_doi_via_crossref(doi) or {}
+    except StructuredProviderUnavailable as exc:
+        log(f"reconcile ⚠ optional Crossref metadata unavailable for {doi}: {exc}",
+            tag="agent")
+        return {}
 
 
 _LLM_RECONCILE_SYSTEM = """\
@@ -472,7 +483,7 @@ def reconcile_metadata(
     # path adds no request, and responses are cached under `.crossref-cache/`.
     # Fail-safe: no Crossref answer leaves S2's year standing, exactly as before.
     if s2_year and doi and llm_meta["year"] and llm_meta["year"] != s2_year:
-        cr_year = (verify_doi_via_crossref(doi) or {}).get("year")
+        cr_year = _optional_crossref_metadata(doi).get("year")
         if cr_year and cr_year != s2_year:
             log(f"year ✗ S2 says {s2_year} but the PDF says {llm_meta['year']} — "
                 f"Crossref says {cr_year} for {doi}; S2's record carries the "
@@ -496,7 +507,7 @@ def reconcile_metadata(
     # Crossref here (responses are cached under .crossref-cache/).
     venue = _trusted_s2_venue(s2_meta.get("venue"), doi) or cr_meta_from_hunt.get("venue")
     if doi and (not venue or _is_preprint_venue(venue)):
-        cr_venue = cr_meta_from_hunt.get("venue") or (verify_doi_via_crossref(doi) or {}).get("venue")
+        cr_venue = cr_meta_from_hunt.get("venue") or _optional_crossref_metadata(doi).get("venue")
         if cr_venue and not _is_preprint_venue(cr_venue):
             venue = cr_venue
     if not venue and llm_meta["venue_hint"]:
