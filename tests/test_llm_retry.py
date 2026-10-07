@@ -14,6 +14,7 @@ from __future__ import annotations
 import email.message
 import io
 import json
+import socket
 import urllib.error
 
 import pytest
@@ -125,3 +126,72 @@ def test_openai_exhausted_rate_limit_is_actionable(monkeypatch):
             model="gpt-5.6-luna", prompt="p",
             base_url="https://api.openai.com/v1", max_tokens=10,
         )
+
+
+def test_temporary_dns_failure_is_retried_then_succeeds(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(llm.time, "sleep", sleeps.append)
+    monkeypatch.setattr(llm.random, "uniform", lambda *_: 0)
+    calls = []
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req)
+        if len(calls) == 1:
+            raise urllib.error.URLError(socket.gaierror(socket.EAI_AGAIN, "temporary"))
+        return _FakeResp(_OK_PAYLOAD)
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", fake_urlopen)
+    response = llm.call_openai_compatible(
+        model="gpt-5.6-luna", prompt="p",
+        base_url="https://api.openai.com/v1", max_tokens=10,
+    )
+    assert response.text == "hello"
+    assert len(calls) == 2
+    assert sleeps == [llm._RETRY_BASE_DELAY]
+
+
+def test_temporary_dns_failure_stops_at_retry_limit(monkeypatch):
+    sleeps = []
+    calls = []
+    failure = urllib.error.URLError(socket.gaierror(socket.EAI_AGAIN, "temporary"))
+    monkeypatch.setattr(llm.time, "sleep", sleeps.append)
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req)
+        raise failure
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(llm.ProviderUnavailable) as caught:
+        llm.call_openai_compatible(
+            model="gpt-5.6-luna", prompt="p",
+            base_url="https://api.openai.com/v1", max_tokens=10,
+        )
+    assert len(calls) == llm._RETRY_MAX_ATTEMPTS
+    assert len(sleeps) == llm._RETRY_MAX_ATTEMPTS - 1
+    assert caught.value.__cause__ is failure
+
+
+@pytest.mark.parametrize("reason", [
+    socket.gaierror(socket.EAI_NONAME, "unknown hostname or missing resolver"),
+    socket.gaierror(socket.EAI_FAIL, "nonrecoverable resolver failure"),
+    ConnectionRefusedError("connection refused"),
+])
+def test_permanent_dns_and_other_url_errors_fail_without_retry(monkeypatch, reason):
+    sleeps = []
+    calls = []
+    failure = urllib.error.URLError(reason)
+    monkeypatch.setattr(llm.time, "sleep", sleeps.append)
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req)
+        raise failure
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(llm.ProviderUnavailable) as caught:
+        llm.call_openai_compatible(
+            model="gpt-5.6-luna", prompt="p",
+            base_url="https://api.openai.com/v1", max_tokens=10,
+        )
+    assert len(calls) == 1
+    assert sleeps == []
+    assert caught.value.__cause__ is failure

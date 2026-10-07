@@ -43,6 +43,7 @@ import json
 import os
 import random
 import re
+import socket
 import sys
 import threading
 import time
@@ -703,6 +704,27 @@ def call_openai_compatible(
                 f"{body_text}"
             ) from e
         except urllib.error.URLError as e:
+            # EAI_AGAIN denotes a temporary resolver failure. Other DNS
+            # errors (including EAI_NONAME from a missing resolver or an
+            # unknown hostname) require diagnosis rather than repeated waits.
+            if (
+                isinstance(e.reason, socket.gaierror)
+                and e.reason.errno == socket.EAI_AGAIN
+                and attempt < _RETRY_MAX_ATTEMPTS
+            ):
+                delay = min(
+                    _RETRY_BASE_DELAY * (2 ** (attempt - 1)),
+                    _RETRY_MAX_DELAY,
+                ) + random.uniform(0, 1)
+                print(
+                    f"[llm] Temporary DNS resolution failure for the OpenAI-compatible "
+                    f"endpoint (attempt {attempt}/{_RETRY_MAX_ATTEMPTS}); "
+                    f"retrying in {delay:.1f}s",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+                attempt += 1
+                continue
             raise ProviderUnavailable(
                 f"OpenAI-compatible server unreachable at {url}: {e}. "
                 f"Is LM Studio (or your local server) running? "
