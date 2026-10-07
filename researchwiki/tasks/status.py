@@ -725,6 +725,12 @@ def _render_model_and_index_health(ctx: dict) -> None:
 
     # --- structured DB drift (cheap; runs `db verify` over current wiki/)
     try:
+        from ..db.connection import db_path as _db_path
+        print(f"  State DB path:       {_db_path(prepare=False)}")
+    except Exception as e:
+        print(f"  State DB path:       unavailable ({e})")
+
+    try:
         from ..db.verify import verify as _db_verify
         report = _db_verify()
         drift = len(report.missing) + len(report.extra) + len(report.stale) + len(report.moved)

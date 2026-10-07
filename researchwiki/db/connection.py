@@ -82,20 +82,22 @@ def _repo_key() -> str:
     return f"{root.name}-{digest}"
 
 
-def db_path() -> Path:
+def db_path(*, prepare: bool = True) -> Path:
     """Return the resolved DB path, creating the parent dir if needed.
 
     `$RESEARCHWIKI_DB_PATH` overrides everything (single explicit DB). Otherwise
     the path is scoped to the current wiki repo, migrating the legacy global DB
-    on first use for an established repo."""
+    on first use for an established repo. With `prepare=False`, only resolve
+    the location, without creating directories or migrating a legacy DB."""
     override = os.environ.get("RESEARCHWIKI_DB_PATH")
     if override:
         path = Path(override).expanduser()
+    else:
+        path = _XDG_BASE / "repos" / _repo_key() / "state.db"
+    if prepare:
         path.parent.mkdir(parents=True, exist_ok=True)
-        return path
-    path = _XDG_BASE / "repos" / _repo_key() / "state.db"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _maybe_migrate_legacy(path)
+        if not override:
+            _maybe_migrate_legacy(path)
     return path
 
 
