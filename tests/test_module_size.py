@@ -126,7 +126,8 @@ _DEBT: dict[str, int] = {
     # +2: house rule 1 (errors.py) — the reconcile phase wrapper must re-raise
     # EnvironmentFailure so a relay timeout cannot be absorbed into an
     # empty-metadata return that then files the paper on provider metadata alone.
-    "researchwiki/agents/phases/reconcile.py": 663,
+    # Raised to 800 at the user's request to allow growth up to the module ceiling.
+    "researchwiki/agents/phases/reconcile.py": 800,
     # Concept candidates: term mining, scoring, triage labelling. Mining and
     # labelling do not need to share a module. Raised 653 -> 656 to count hub
     # membership over contribution sections only, which is what the scaffolder
@@ -629,10 +630,10 @@ def test_a_pinned_module_far_under_the_ceiling_still_cannot_grow(tmp_path):
 
 def test_raising_the_ceiling_does_not_retire_a_pin():
     """The regression itself: at a ceiling of 800 every pin except runner.py sits
-    underneath, and all of them must still be live."""
-    below = {rel: pin for rel, pin in _DEBT.items() if pin < MAX_CODE_LINES}
-    assert len(below) == len(_DEBT) - 1, "expected only runner.py above the ceiling"
-    assert all(pin >= RATCHET_RELEASE for pin in below.values())
+    at or below it, and all of them must still be live."""
+    within = {rel: pin for rel, pin in _DEBT.items() if pin <= MAX_CODE_LINES}
+    assert len(within) == len(_DEBT) - 1, "expected only runner.py above the ceiling"
+    assert all(pin >= RATCHET_RELEASE for pin in within.values())
 
 
 def test_an_entry_is_dead_only_below_the_release_point():
