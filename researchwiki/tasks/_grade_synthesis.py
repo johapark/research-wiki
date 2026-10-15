@@ -60,6 +60,7 @@ def _format_text_report(report, show_advisory: bool) -> str:
         f"{report.n_weak} weak, {report.n_composite} composite, "
         f"{report.n_misattributed} MISATTRIBUTED{anchor_seg}"
     )
+    lines.append("  entailment    : not checked; supported is a retrieval/numeric verdict")
     if not report.semantic_available:
         lines.append("  semantic      : not available (--no-semantic or model unavailable)")
     lines.append("")

@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS claims (
     numeric_tokens       TEXT,         -- JSON array of strings
     numeric_unmatched    TEXT,         -- JSON array; subset of numeric_tokens not found in PDF
     last_graded_at       INTEGER,
+    source_pdf_sha256    TEXT,
     UNIQUE(paper_stem, section, position),
     UNIQUE(paper_stem, claim_slug)
 );

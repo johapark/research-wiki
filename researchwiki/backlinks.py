@@ -165,6 +165,7 @@ def remove_related_paper(target_path: Path, stem: str) -> int:
 def append_related_paper(
     target_path: Path, source_key: str,
     note: str = TOPICAL_NOTE,
+    *, sync_db: bool = True,
 ) -> bool:
     """Append a back-link bullet to `target_path`'s Related Papers section.
 
@@ -216,6 +217,6 @@ def append_related_paper(
         return text[:section_start] + "\n" + new_body + text[section_end:]
 
     changed = update_locked(target_path, _splice, missing_ok=False)
-    if changed:
+    if changed and sync_db:
         commit_page(target_path)
     return changed

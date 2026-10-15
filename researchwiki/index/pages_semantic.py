@@ -8,23 +8,17 @@ Indexed text per page mirrors A-Mem's `concat(c, K, G, X)` — title, summary,
 key contributions, tags, keywords. The model is shared with the claim-grading
 bi-encoder (`index.embeddings`) so we don't pay a second 133 MB load.
 
-Storage layout under `.semantic-cache/`:
-  pages.npy         float32, shape (N, dim), L2-normalized rows
-  pages_meta.json   {model, dim, built_at, rows: [{key, stem, category,
-                    page_type, title, content_hash}, ...]}
+Storage under `.semantic-cache/`: `pages.npz` contains the vector matrix and
+row-aligned JSON metadata (model, dimension, content hashes). Publication is one
+atomic replacement. Legacy matrix/JSON pairs are cache misses. `pages.stale`
+makes skipped embeddings unavailable until a successful refresh.
 
-Row order in `pages.npy` matches `rows` in `pages_meta.json`. `content_hash`
-lets a future incremental builder skip re-embedding unchanged pages — for now
-we always rebuild from scratch (matches the Tantivy contract).
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
-import json
-import os
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,9 +29,12 @@ from . import embeddings as semantic
 from ..paths import semantic_cache_dir
 from ..wiki import Page, extract_section, read_pages, strip_non_prose
 from ..log import log
-from ..fsatomic import write_json_atomic
+from ..fsatomic import exclusive_lock, write_text_atomic
+from .bundle import load_bundle, save_bundle
 
-PAGES_NPY = "pages.npy"
+PAGES_BUNDLE = "pages.npz"
+PAGES_STALE = "pages.stale"
+PAGES_NPY = "pages.npy"  # Legacy files are not trusted.
 PAGES_META = "pages_meta.json"
 
 
@@ -239,6 +236,16 @@ def _content_hash(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
 
 
+def _locked(function):
+    from functools import wraps
+    @wraps(function)
+    def call(*args, **kwargs):
+        with exclusive_lock(semantic_cache_dir() / PAGES_BUNDLE):
+            return function(*args, **kwargs)
+    return call
+
+
+@_locked
 def build_index(pages: list[Page] | None = None) -> dict | None:
     """Rebuild the page-level semantic index from `wiki/`.
 
@@ -288,18 +295,19 @@ def build_index(pages: list[Page] | None = None) -> dict | None:
         log("embedding pass failed", tag="semantic-pages")
         return None
 
-    np.save(out_dir / PAGES_NPY, embeddings)
     meta = {
         "model": semantic.DEFAULT_MODEL,
         "dim": int(embeddings.shape[1]),
         "built_at": int(time.time()),
         "rows": rows,
     }
-    (out_dir / PAGES_META).write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    save_bundle(out_dir / PAGES_BUNDLE, embeddings, meta)
+    (out_dir / PAGES_STALE).unlink(missing_ok=True)
     return {"n_pages": len(rows), "model": meta["model"], "dim": meta["dim"],
             "thin": thin}
 
 
+@_locked
 def upsert_pages(pages: list[Page]) -> dict | None:
     """Embed and upsert only changed pages in the existing semantic index.
 
@@ -310,7 +318,8 @@ def upsert_pages(pages: list[Page]) -> dict | None:
     if not semantic.is_available():
         log("embedding model unavailable; skipping", tag="semantic-pages")
         return None
-    loaded = _load()
+    stale = (semantic_cache_dir() / PAGES_STALE).exists()
+    loaded = _load(allow_stale=True)
     if loaded is None:
         result = build_index()
         if result is not None:
@@ -318,8 +327,16 @@ def upsert_pages(pages: list[Page]) -> dict | None:
         return result
 
     arr, old_rows = loaded
+    if stale:
+        # A skipped full maintenance may have changed pages beyond this batch.
+        # Reconcile the whole current row set, reusing unchanged vectors.
+        pages = read_pages()
     by_stem = {p.stem: p for p in pages}
     if not by_stem:
+        if stale:
+            _write_empty(semantic_cache_dir())
+            return {"n_pages": 0, "n_updated": len(old_rows), "n_embedded": 0,
+                    "model": semantic.DEFAULT_MODEL, "dim": 0, "mode": "incremental", "thin": []}
         return {"n_pages": len(old_rows), "n_updated": 0, "n_embedded": 0,
                 "model": semantic.DEFAULT_MODEL, "dim": int(arr.shape[1] if arr.ndim == 2 else 0),
                 "mode": "incremental", "thin": []}
@@ -327,7 +344,7 @@ def upsert_pages(pages: list[Page]) -> dict | None:
     old_by_stem = {row["stem"]: (i, row) for i, row in enumerate(old_rows)}
     pending: list[tuple[Page, str, dict]] = []
     thin: list[dict] = []
-    removed_stems: set[str] = set()
+    removed_stems: set[str] = set(old_by_stem) - set(by_stem) if stale else set()
     for stem, page in by_stem.items():
         text = page_index_text(page)
         reason = thin_index_reason(page, text)
@@ -375,68 +392,46 @@ def upsert_pages(pages: list[Page]) -> dict | None:
         embeddings = kept
 
     if not replaced:
+        (semantic_cache_dir() / PAGES_STALE).unlink(missing_ok=True)
         return {"n_pages": len(rows), "n_updated": 0, "n_embedded": 0,
                 "model": semantic.DEFAULT_MODEL, "dim": int(embeddings.shape[1] if embeddings.ndim == 2 else 0),
                 "mode": "incremental", "thin": thin}
 
     out_dir = semantic_cache_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
-    _save_npy_atomic(out_dir / PAGES_NPY, embeddings)
     meta = {
         "model": semantic.DEFAULT_MODEL,
         "dim": int(embeddings.shape[1] if embeddings.ndim == 2 else 0),
         "built_at": int(time.time()),
         "rows": rows,
     }
-    write_json_atomic(out_dir / PAGES_META, meta)
+    save_bundle(out_dir / PAGES_BUNDLE, embeddings, meta)
+    (out_dir / PAGES_STALE).unlink(missing_ok=True)
     return {"n_pages": len(rows), "n_updated": len(replaced),
             "n_embedded": len(pending), "model": meta["model"],
             "dim": meta["dim"], "mode": "incremental", "thin": thin}
 
 
-def _save_npy_atomic(path: Path, array: np.ndarray) -> None:
-    """Write a NumPy array by atomic replace in the destination directory."""
-    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            np.save(fh, array)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp_name, path)
-    finally:
-        try:
-            os.unlink(tmp_name)
-        except FileNotFoundError:
-            pass
-
-
 def _write_empty(out_dir: Path) -> None:
-    np.save(out_dir / PAGES_NPY, np.zeros((0, 0), dtype=np.float32))
-    (out_dir / PAGES_META).write_text(json.dumps({
-        "model": semantic.DEFAULT_MODEL,
-        "dim": 0,
-        "built_at": int(time.time()),
-        "rows": [],
-    }, indent=2), encoding="utf-8")
+    save_bundle(out_dir / PAGES_BUNDLE, np.zeros((0, 0), dtype=np.float32), {
+        "model": semantic.DEFAULT_MODEL, "dim": 0,
+        "built_at": int(time.time()), "rows": [],
+    })
+    (out_dir / PAGES_STALE).unlink(missing_ok=True)
 
 
-def _load() -> tuple[np.ndarray, list[dict]] | None:
-    out_dir = semantic_cache_dir()
-    npy = out_dir / PAGES_NPY
-    meta = out_dir / PAGES_META
-    if not npy.exists() or not meta.exists():
+@_locked
+def mark_stale() -> None:
+    """Make skipped embeddings unavailable while retaining vectors for refresh."""
+    write_text_atomic(semantic_cache_dir() / PAGES_STALE, "Run researchwiki reindex.\n")
+
+
+def _load(*, allow_stale=False) -> tuple[np.ndarray, list[dict]] | None:
+    if not allow_stale and (semantic_cache_dir() / PAGES_STALE).exists():
         return None
-    try:
-        rows = json.loads(meta.read_text(encoding="utf-8")).get("rows", [])
-        arr = np.load(npy)
-    except (json.JSONDecodeError, OSError, ValueError, TypeError):
-        return None
-    if not isinstance(rows, list) or not isinstance(arr, np.ndarray):
-        return None
-    if arr.shape[0] != len(rows):
-        # Index is corrupt or partially written — caller should rebuild.
-        return None
-    return arr, rows
+    loaded = load_bundle(semantic_cache_dir() / PAGES_BUNDLE, semantic.DEFAULT_MODEL,
+                         row_fields=("key", "stem", "category", "page_type", "title", "content_hash"))
+    return (loaded[0], loaded[1]["rows"]) if loaded is not None else None
 
 
 def load_index() -> tuple[np.ndarray, list[dict]] | None:

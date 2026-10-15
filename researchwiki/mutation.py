@@ -20,7 +20,7 @@ Four properties carry the weight:
    a tidy-up error undo landed work.
 3. **Recovery happens on the next run, not through a repair command.**
    `recover_pending()` drains whatever journals it finds: `active` rolls back,
-   `committed` is cleaned up.
+   `committed` repairs affected projections before cleanup.
 4. **Rollback attempts are capped.** A rollback failing deterministically —
    ENOSPC, a permission problem — must eventually surface to a human instead of
    being re-attempted on every subsequent run forever.
@@ -32,14 +32,13 @@ EXDEV and "this filesystem refuses hardlinks" handling with it, and `wiki/` and
 environment where that breaks. A promote touches a handful of files, so copying
 them is cheap and has no edge cases.
 
-**The transaction spans two storage systems.** File state is journalled and
-survives a crash; the `state.db` row written by `wiki.commit_page` is not. Callers
-register an in-process undo with `also_undo()`, which runs on an in-process
-rollback but *cannot* run during crash recovery, because nothing about it is
-persisted to replay. That is a decision rather than an oversight: the markdown
-page is canonical and the DB is a derived index, so a crash-recovered rollback
-removes the page and the next `db rebuild` reconciles the orphaned row. `db
-verify` reports the drift meanwhile.
+**Markdown and PDFs are canonical; databases and indexes are projections.**
+Promotion and removal defer their derived writes until file commit. Their
+committed journals stay until reconciliation finishes. A maintenance failure
+keeps the published files and a retryable receipt; recovery reads current files,
+not old backups. Recovery updates keyword search without loading an embedding
+model and marks semantic search unavailable until normal indexing refreshes it.
+Generic non-file undo hooks remain available for in-process rollback.
 
 Set `RW_MUTATION_JOURNAL=0` to bypass journalling entirely — mutations then run
 unwrapped, exactly as they did before this module existed. An escape hatch for one
@@ -224,8 +223,16 @@ class Snapshot:
 
     def mark_committed(self) -> None:
         """The commit point. Past here, recovery cleans up instead of undoing."""
-        self.committed = True
         self._persist(_COMMITTED)
+        self.committed = True
+
+    def reconcile(self) -> None:
+        """Repair derived views after commit; failure keeps the receipt for retry."""
+        if not self.committed:
+            raise RuntimeError("projection repair requires a committed mutation")
+        from .projections import reconcile
+        reconcile(self.entries, self.operation, self.details)
+        self.discard()
 
     # ---------- outcomes ----------
 
@@ -355,6 +362,7 @@ def mutation(
             backup_dir=Path(os.devnull),
             details=dict(details or {}),
             enabled=False,
+            entries=[BackedUpPath(Path(p).resolve(), None) for p in paths if p is not None],
         )
         return
 
@@ -370,16 +378,18 @@ def mutation(
         try:
             yield snap
         except BaseException:
-            try:
-                snap.rollback()
-            except Exception as exc:
-                log(f"ERROR: rollback failed for {operation}; journal retained at "
-                    f"{snap.journal_path} — the next ingest will retry it: {exc}",
-                    tag="mutation")
+            if not snap.committed:
+                try:
+                    snap.rollback()
+                except Exception as exc:
+                    log(f"ERROR: rollback failed for {operation}; journal retained at "
+                        f"{snap.journal_path} — the next ingest will retry it: {exc}",
+                        tag="mutation")
             raise
         else:
             if snap.committed:
-                snap.discard()
+                if not snap.details.get("repair_projections"):
+                    snap.discard()
             else:
                 snap.rollback()
 
@@ -441,10 +451,16 @@ def _transaction_lock_resource() -> Path:
     return mutation_dir() / "transaction"
 
 
+def corpus_lock():
+    """Shared, reentrant guard for canonical mutations and rebuild snapshots."""
+    return exclusive_lock(_transaction_lock_resource())
+
+
 def recover_pending() -> list[str]:
     """Drain stale journals. Returns one human-readable line per journal handled.
 
-    `active` is rolled back and `committed` is cleaned up. A journal whose
+    `active` is restored then reconciled; `committed` is reconciled then cleaned
+    up. Projection failures retain the receipt. A journal whose
     rollback has already failed `MAX_ROLLBACK_ATTEMPTS` times is left untouched
     and reported, so a standing failure reaches a human instead of being retried
     forever. A journal from a *newer* schema than this release understands is
@@ -482,8 +498,15 @@ def _recover_pending_locked() -> list[str]:
             continue
 
         if document.get("status") == _COMMITTED:
-            _clean_up(journal_path, backup_dir)
-            notes.append(f"discarded committed journal for {operation}")
+            try:
+                from .projections import reconcile
+                entries = [BackedUpPath.from_journal_record(r)
+                           for r in document.get("entries", [])]
+                reconcile(entries, operation, document.get("details", {}))
+                _clean_up(journal_path, backup_dir)
+                notes.append(f"discarded committed journal for {operation}")
+            except Exception as exc:
+                notes.append(f"projection repair of {operation} failed; journal retained: {exc}")
             continue
 
         already_tried = int(document.get("attempts", 0))
@@ -508,6 +531,17 @@ def _recover_pending_locked() -> list[str]:
             _undo_each(entries)
         except Exception as exc:
             notes.append(f"rollback of {operation} failed (attempt {this_attempt}): {exc}")
+            continue
+        # Restored files are now canonical. Never replay their backups after a
+        # maintenance failure: a later mutation may publish newer content.
+        document["status"] = _COMMITTED
+        write_json_atomic(journal_path,
+                          {k: v for k, v in document.items() if k != "journal_path"})
+        try:
+            from .projections import reconcile
+            reconcile(entries, operation, document.get("details", {}))
+        except Exception as exc:
+            notes.append(f"projection repair of {operation} failed; journal retained: {exc}")
             continue
         _clean_up(journal_path, backup_dir)
         notes.append(

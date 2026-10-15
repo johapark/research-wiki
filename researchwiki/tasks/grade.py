@@ -68,6 +68,7 @@ def _format_paper_report(report) -> str:
         lines.append("  semantic      : not available (--no-semantic or model unavailable)")
     lines.append(f"  negation flag : {report.n_negation_mismatches} claims with negation mismatch")
     lines.append(f"  numeric drift : {report.n_with_numeric_drift} claims have unmatched numbers")
+    lines.append("  entailment    : not checked (retrieval similarity is advisory)")
     if report.weakest_claim is not None:
         lines.append("")
         lines.append(f"  weakest claim ({report.weakest_score:.3f}):")

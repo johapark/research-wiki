@@ -287,7 +287,7 @@ class RemovalResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def apply(plan: RemovalPlan, *, keep_pdf: bool = False) -> RemovalResult:
+def apply(plan: RemovalPlan, *, keep_pdf: bool = False, sync_db: bool = True) -> RemovalResult:
     """Execute `plan`. Wrapped in a mutation journal by the caller."""
     res = RemovalResult()
 
@@ -315,8 +315,9 @@ def apply(plan: RemovalPlan, *, keep_pdf: bool = False) -> RemovalResult:
         if _strip_concept_spoke(hub, plan.stem):
             res.concept_hubs_updated.append(hub)
 
-    res.db_rows_deleted = _delete_db_rows(plan.stem)
-    res.edges_deleted = _delete_edges(plan.stem)
+    if sync_db:
+        res.db_rows_deleted = _delete_db_rows(plan.stem)
+        res.edges_deleted = _delete_edges(plan.stem)
     return res
 
 
@@ -356,8 +357,8 @@ def _strip_concept_spoke(hub: Path, stem: str) -> bool:
         ]
         return "referenced_papers: [" + ", ".join(f'"{i}"' for i in items) + "]"
 
-    text = re.sub(r"^referenced_papers:\s*\[(.*?)\]", _drop_inline, text,
-                  flags=re.MULTILINE | re.DOTALL)
+    text = re.sub(r"^referenced_papers:[ \t]*\[(.*)\][ \t]*$", _drop_inline, text,
+                  flags=re.MULTILINE)
     # `_link_re` anchors the stem inside the wikilink; the earlier substring
     # match (`[^\]]*stem[^\]]*`) also stripped spokes for any stem that merely
     # *contained* this one.
@@ -406,8 +407,10 @@ def _delete_db_rows(stem: str) -> dict[str, int]:
                     cur = conn.execute(
                         f"DELETE FROM {table} WHERE {column} = ?", (stem,)
                     )
-                except sqlite3.Error:
-                    continue
+                except sqlite3.OperationalError as exc:
+                    if "no such table" in str(exc).lower():
+                        continue  # Older derived databases may lack telemetry.
+                    raise
                 if cur.rowcount > 0:
                     deleted[table] = cur.rowcount
     finally:
@@ -427,7 +430,5 @@ def _delete_edges(stem: str) -> int:
                 "DELETE FROM edges WHERE src_stem = ? OR tgt_stem = ?", (stem, stem)
             )
             return cur.rowcount or 0
-    except sqlite3.Error:
-        return 0
     finally:
         conn.close()

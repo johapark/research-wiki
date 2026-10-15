@@ -326,6 +326,8 @@ def run_entailment_check(ctx, conn, cleaned_text: str) -> None:
         ctx.winner.scores["n_unsupported"] = n_unsupported
         ctx.winner.scores["n_support_checked"] = n_checked
         ctx.winner.scores["unsupported_claims"] = unsupported
+        from ..grade.checks import entailment_check
+        ctx.winner.scores.setdefault("checks", {})["entailment"] = entailment_check(ctx.winner.scores)
         log(f"support  → {n_unsupported} unsupported / {n_checked} checked", tag="agent")
         for claim in unsupported:
             log(f"           ✗ [{claim['section']}] {claim['text'][:80]}", tag="agent")
@@ -364,6 +366,8 @@ def run_entailment_check(ctx, conn, cleaned_text: str) -> None:
         ctx.winner.scores["support_check_failed"] = True
         ctx.winner.scores["support_check_error"] = message
         ctx.winner.scores["support_check_complete"] = False
+        from ..grade.checks import entailment_check
+        ctx.winner.scores.setdefault("checks", {})["entailment"] = entailment_check(ctx.winner.scores)
         log(f"support  → check failed; promotion vetoed: {message}", tag="agent")
         ctx.next_iter()
         try:

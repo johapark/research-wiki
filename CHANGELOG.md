@@ -22,6 +22,8 @@ the reasoning behind any line below.
 
 ### Added
 
+- Grading and claim JSON include `checks` distinguishing source freshness, retrieval/numeric checks, and requested/completed entailment verification. Existing verdicts and opt-in model-call defaults remain unchanged.
+
 - Fixed H2 structure for synthesis pages — `Question` → `Short answer` → `Background` → `Organizing framework` → `Findings` → `Cross-cutting insights` → `Tensions / open questions` → `Outlook` → `References`. `synthesize` scaffolds it, and `lint --json` gains `synthesis_contract_violations` (advisory) to check it: missing or misordered sections, unexpected H2s, a `Findings` with no themes, source labels outside `Outlook`, undefined footnotes. A page in the old shape reports one `synthesis_legacy_spine` finding rather than one per section. Procedure in `prompts/synthesis-page-author.md`, which absorbs the old citation-format file and is also what the `synthesis-page` Claude Code skill reads.
 - `lint --json` key `undefined_footnote_refs`: pages citing a `[^id]` with no definition line. Both page gates under-report this — `check-grounding` fails a unit only when the undefined footnote is its *sole* citation, so a paragraph citing `[^a][^b]` with `b` undefined passes, and `grade synthesis` then grades it against `a` alone and reports no unresolved citation. Both gates go green while a paper's worth of claims was never checked. Advisory.
 - `lint --json` key `crosslink_impossible_citations`: *Related Papers* bullets whose citation direction the two pages' `year:` fields rule out — a `cites this paper` bullet whose target is the older paper, or `cited by this paper` whose target is newer. This is the one part of the cross-link corollary checkable without opening a PDF, and no other check sees a bullet's claim: `missing_backlinks` is satisfied by its presence and both gates parse paragraphs. 177 findings on the current corpus; three spot-checks confirmed the older paper's PDF never mentions the newer one. Advisory.
@@ -35,6 +37,11 @@ the reasoning behind any line below.
 - `claim-graph promote` files corroborating edges under `## Cross-cutting insights` first.
 
 ### Fixed
+
+- Promotion validates the previous DOI before replacing a page, preserves its canonical category, and defers database/backlink projections until file commit. Removal also defers derived deletions; failed file writes preserve previous rows and grades.
+- Rebuild preserves records for present but malformed pages and reports them as invalid. Claim retrieval withholds malformed, removed, or edited claims and stale PDF evidence.
+- PDF chunk caches and grades record source hashes; same-stem PDF replacement invalidates old evidence. Embedding caches validate model identity and publish matrices with metadata in atomic NumPy bundles. Legacy cache pairs rebuild on demand.
+- Reindex and database rebuild share the corpus mutation guard. Empty rebuilds clear search hits, and skipped semantic maintenance marks the view unavailable. Existing committed journals survive failed projection repair and reconcile current files on retry without model calls.
 
 - `grade synthesis` ignores links to the wiki's own authored pages (`synthesis/`, `ideas/`, `proposals/`, `concepts/`) when resolving a unit's sources: those are cross-references, not premises. `references/` documents still count, since each has a real PDF. Without this a see-also link to a sibling synthesis page made an inference `inference_ungradable` even with three cited papers behind it.
 - `grade synthesis` fails an `*(inference)*` unit if any cited premise lacks readable PDF text (`inference_ungradable` verdict, exit 1). The label asserts the conclusion follows from every paper cited *and* suppresses the retrieval and negation checks, so one missing or unreadable source previously left the inference uncheckable while both required gates passed. Plain `uncited` prose stays advisory — it asserts no provenance, and a scope sentence pointing at a sibling synthesis page is legitimate.

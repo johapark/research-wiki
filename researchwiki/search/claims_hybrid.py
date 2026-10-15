@@ -15,6 +15,7 @@ from ..db import get_connection
 from ..index import claim_embeddings
 from ..index.embeddings import embed_texts
 from .tools import claim_lookup
+from .freshness import current_rows
 
 
 RRF_K = 60
@@ -29,12 +30,13 @@ def _rows(*, include_context: bool) -> list[dict]:
             """
             SELECT paper_stem, section, position, text, claim_slug,
                    semantic_score, bm25_top1, bm25_top1_chunk_id,
-                   supporting_text, supporting_provenance, last_graded_at
+                   supporting_text, supporting_provenance, last_graded_at, source_pdf_sha256, numeric_unmatched
             FROM claims
             WHERE is_cross_ref = 0
             ORDER BY paper_stem, section, position
             """
         ).fetchall()
+        db_rows = current_rows(conn, db_rows)
     finally:
         conn.close()
     out: list[dict] = []
@@ -45,6 +47,7 @@ def _rows(*, include_context: bool) -> list[dict]:
             "section": row["section"],
             "position": row["position"],
             "text": row["text"],
+            "checks": row["checks"],
             # Claim-to-PDF support; query similarity is stored separately.
             "semantic_score": row["semantic_score"],
             "bm25_top1": row["bm25_top1"],

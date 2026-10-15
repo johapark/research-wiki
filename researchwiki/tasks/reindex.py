@@ -21,13 +21,9 @@ Exit code: 0 on success; 2 if either index directory can't be written.
 from __future__ import annotations
 
 import argparse
-import time
 from collections import Counter
 
-from ..log import log
-from ..index import pages_semantic as semantic_pages
-from ..search import build_documents_from_wiki, get_default_backend
-from ..wiki import read_pages
+from ..index.incremental import rebuild_page_indexes
 
 
 def main(argv: list[str]) -> int:
@@ -42,15 +38,9 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    t0 = time.time()
-    docs = build_documents_from_wiki()
-    if not docs:
-        log("no wiki pages found; nothing to index", tag="reindex")
-        return 0
-
-    backend = get_default_backend()
-    backend.build(docs)
-    tantivy_dt = time.time() - t0
+    result = rebuild_page_indexes(semantic=not args.no_semantic)
+    docs = result["documents"]
+    tantivy_dt = result["bm25_seconds"]
 
     counts = Counter(d.page_type for d in docs)
     breakdown = ", ".join(f"{n} {t}" for t, n in sorted(counts.items()))
@@ -59,12 +49,8 @@ def main(argv: list[str]) -> int:
 
     semantic_summary = ""
     if not args.no_semantic:
-        t1 = time.time()
-        # Re-read to get Page objects with frontmatter — Document objects
-        # drop fields we want for the embedding text (tags, keywords).
-        pages = read_pages()
-        result = semantic_pages.build_index(pages)
-        sem_dt = time.time() - t1
+        sem_dt = result["semantic_seconds"]
+        result = result["semantic"]
         if result is None:
             semantic_summary = (
                 "Semantic index skipped (model unavailable; install "

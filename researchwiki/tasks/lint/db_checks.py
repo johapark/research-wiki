@@ -296,6 +296,7 @@ def db_drift_check_and_fix(
 
     drift = {
         "missing": list(report.missing),
+        "invalid": list(report.invalid),
         "extra": list(report.extra),
         "stale": [
             {"stem": s, "page_mtime": pm, "indexed_at": ia}

@@ -1041,7 +1041,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # Failures on individual files are surfaced as warnings but
         # don't abort the run — the primary page is already committed.
         if ctx.supplementary:
-            from .. tasks.attach import stage_supplementary, insert_supplementary_entry
+            from ..supplementary import stage_supplementary, insert_supplementary_entry
             for sp in ctx.supplementary:
                 try:
                     staged = stage_supplementary(ctx.paper_stem, sp)

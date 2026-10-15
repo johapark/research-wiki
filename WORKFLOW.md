@@ -1151,10 +1151,19 @@ up. Not everything outside `wiki/` is disposable.
   ([below](#pinning-the-state-db-researchwiki_db_path)). Rebuild restores page
   and claim structure, not every operational record: missing grades need regrading,
   while attempt telemetry and review/judgment state may need a database backup
-  or another review pass. Existing unchanged claims retain their grades on
-  rebuild.
+  or another review pass. Unchanged claims retain grades only when the source
+  PDF hash also matches. Present but malformed pages retain their last valid
+  rows for repair; claim retrieval withholds them as grounding evidence.
+  Grade/claim JSON `checks` reports freshness, retrieval/numeric checks, and
+  whether entailment was requested and completed. A retrieval `supported`
+  verdict does not certify qualitative entailment; the ingest flag
+  `--verify-claim-entailment` remains opt-in.
 - **`.tantivy-index/` and `.semantic-cache/`** are search indexes built
-  from `wiki/` by `researchwiki reindex`. Both gitignored.
+  from `wiki/` by `researchwiki reindex`. Embedding matrices and metadata live
+  in atomic `pages.npz` / `claims.npz` bundles; legacy pairs are cache misses.
+  Rebuilds and incremental updates share the corpus guard. An empty rebuild
+  clears previous hits; `--no-semantic` marks page embeddings unavailable
+  until refreshed. Both directories are gitignored.
 - **`.grade-cache/{stem}/`** is per-paper PDF chunk index + embeddings.
   Gitignored. Built lazily on first grade call per paper.
 - **`.s2-cache/`, `.crossref-cache/`, `.web-cache/`** are external-API
@@ -1175,8 +1184,11 @@ up. Not everything outside `wiki/` is disposable.
   live mailbox, not a permanent cache of completed phases. Do not clear it while
   workers or responders are active.
 - **`.mutation/`** holds write-ahead recovery journals. An unfinished journal
-  may be needed to roll back a partial write; follow the recovery procedure
-  rather than deleting it as a cache.
+  may be needed to restore a partial write. Committed receipts remain until
+  affected database and keyword-index repairs succeed, and never roll back
+  published content. Recovery reads current canonical files, performs no model
+  calls, and leaves semantic search unavailable until normal indexing refreshes
+  it. Follow the recovery procedure rather than deleting journals as a cache.
 
 With source PDFs, wiki pages, and the framework you can regenerate local search
 indexes and grades. External metadata may need refetching; judgments may require

@@ -101,6 +101,18 @@ def _isolate_claim_embedding_cache(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_page_and_pdf_indexes(tmp_path, monkeypatch):
+    """Maintenance tests cannot publish into the developer's disposable caches."""
+    from researchwiki.index import incremental, pages_bm25, pages_semantic, pdf_chunks
+    search = tmp_path / "_search-index"
+    semantic = tmp_path / "_page-vectors"
+    monkeypatch.setattr(incremental, "search_index_dir", lambda: search)
+    monkeypatch.setattr(pages_bm25, "search_index_dir", lambda: search)
+    monkeypatch.setattr(pages_semantic, "semantic_cache_dir", lambda: semantic)
+    monkeypatch.setattr(pdf_chunks, "grade_cache_dir", lambda: tmp_path / "_pdf-chunks")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_edges_db(tmp_path, monkeypatch):
     """Point the claim-graph edge cache at a per-test temp dir.
 

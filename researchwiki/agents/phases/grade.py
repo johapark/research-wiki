@@ -208,6 +208,9 @@ def grade_draft(
             for s in unsupported
         ]
 
+    from ...grade.checks import entailment_check
+    aggregate["checks"] = report.to_dict()["checks"]
+    aggregate["checks"]["entailment"] = entailment_check(aggregate)
     return aggregate, details
 
 

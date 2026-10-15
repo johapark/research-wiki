@@ -171,6 +171,18 @@ def test_empty_hook_is_omitted_entirely():
     assert "hook:" not in page.split("---", 2)[1]
 
 
+def test_author_order_does_not_assign_senior_author():
+    """Cerberus has four authors, but its senior contributor is listed first."""
+    authors = "David R. Kelley, Han Yuan, Xingfan Huang, Johannes Linder"
+    page = _build_frontmatter(
+        {"title": "Cerberus", "authors": authors, "year": 2026},
+        "kelley-2026-cerberus", "compbio", BODY,
+    )
+    parsed = yaml.safe_load(page.split("---", 2)[1])
+    assert parsed["authors"] == authors
+    assert "senior_authors" not in parsed
+
+
 # ---------- lint checks ----------
 
 @pytest.fixture

@@ -296,6 +296,7 @@ def _two_pages(tmp_path, monkeypatch, verdict):
     pages = [_Page(new_p, "compbio/new-2026-a", "new-2026-a"),
              _Page(old_p, "compbio/old-2020-b", "old-2020-b")]
     monkeypatch.setattr(co, "read_pages", lambda: pages)
+    monkeypatch.setattr(co, "_pair_has_explicit_citation", lambda _a, _b: True)
     monkeypatch.setattr("researchwiki.grade.claim_overlap.find_claim_overlaps",
                         lambda *a, **k: [_Cand("old-2020-b")])
     edges = []

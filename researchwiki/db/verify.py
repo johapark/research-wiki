@@ -18,7 +18,7 @@ from pathlib import Path
 
 from ..paths import wiki_dir
 from .connection import get_connection
-from .rebuild import _is_meta_page
+from .rebuild import _is_meta_page, _parse_frontmatter
 
 
 @dataclass
@@ -30,9 +30,11 @@ class VerifyReport:
     stale: list[tuple[str, int, int]] = field(default_factory=list)   # (stem, page_mtime, indexed_at)
     moved: list[tuple[str, str, str]] = field(default_factory=list)   # (stem, db_category, fs_category)
 
+    invalid: list[str] = field(default_factory=list)
+
     @property
     def is_clean(self) -> bool:
-        return not (self.missing or self.extra or self.stale or self.moved)
+        return not (self.missing or self.extra or self.stale or self.moved or self.invalid)
 
 
 def _has_frontmatter(md: Path) -> bool:
@@ -73,12 +75,15 @@ def verify() -> VerifyReport:
                 continue
             # Other files without YAML frontmatter (scratch notes) are
             # likewise not indexed — skip rather than report as drift.
-            if not _has_frontmatter(md):
+            if not _has_frontmatter(md) and md.stem not in db_rows:
                 continue
             stem = md.stem
             fs_stems.add(stem)
             report.pages_scanned += 1
             row = db_rows.get(stem)
+            if _parse_frontmatter(md) is None:
+                report.invalid.append(stem)
+                continue
             if row is None:
                 report.missing.append(stem)
                 continue

@@ -31,6 +31,7 @@ import stat
 import tempfile
 import time
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
@@ -186,6 +187,7 @@ def _lock_path_for(path: Path) -> Path:
     return lock_dir / f"{digest}.lock"
 
 
+@lru_cache(maxsize=None)
 def _file_lock(lock_path: Path):
     """Construct lazily so metadata-only CLI commands need no runtime extras."""
     from filelock import FileLock

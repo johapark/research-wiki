@@ -293,8 +293,8 @@ def figures_cache_dir() -> Path:
 def semantic_cache_dir() -> Path:
     """Page-level semantic embedding store.
 
-    Holds `pages.npy` (L2-normalized float32 row per page) and `pages_meta.json`
-    (row-aligned list of {key, stem, category, page_type, title, content_hash}).
+    Holds atomic `pages.npz` and `claims.npz` vector/metadata bundles.
+    `pages.stale` marks skipped page embeddings unavailable until refreshed.
     Rebuilt by `researchwiki reindex` alongside the Tantivy index.
     """
     return wiki_root() / ".semantic-cache"

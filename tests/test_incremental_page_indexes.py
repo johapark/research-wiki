@@ -115,3 +115,27 @@ def test_corrupt_semantic_metadata_is_treated_as_rebuildable_cache_miss(
 
     assert pages_semantic.load_index() is None
     assert pages_semantic.index_exists() is False
+
+
+def test_skipped_maintenance_refresh_reuses_unchanged_vectors_and_prunes_deleted(tmp_path, monkeypatch):
+    monkeypatch.setattr(pages_semantic.semantic, "is_available", lambda: True)
+    calls = []
+    def embed(texts):
+        calls.append(list(texts))
+        return np.ones((len(texts), 2), dtype=np.float32)
+    monkeypatch.setattr(pages_semantic.semantic, "embed_texts", embed)
+    stable = _page(tmp_path, "stable", "stable content")
+    changed = _page(tmp_path, "changed", "old content")
+    removed = _page(tmp_path, "removed", "deleted content")
+    pages_semantic.build_index([stable, changed, removed])
+    pages_semantic.mark_stale()
+    assert pages_semantic.load_index() is None
+    current = _page(tmp_path, "changed", "new content")
+    monkeypatch.setattr(pages_semantic, "read_pages", lambda: [stable, current])
+    calls.clear()
+    result = pages_semantic.upsert_pages([current])
+    assert result["n_embedded"] == 1
+    assert len(calls) == 1 and len(calls[0]) == 1
+    assert "new content" in calls[0][0]
+    _, rows = pages_semantic.load_index()
+    assert {row["stem"] for row in rows} == {"stable", "changed"}

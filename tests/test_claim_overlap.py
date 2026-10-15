@@ -12,6 +12,7 @@ from researchwiki.db.connection import get_connection
 from researchwiki.grade import claim_overlap as core
 from researchwiki.index import claim_embeddings as cache
 from researchwiki.tasks import claim_overlap as cmd
+from researchwiki.wiki import read_page
 
 
 # --- deterministic fake embedder: text → axis by keyword -------------------
@@ -130,6 +131,7 @@ def wiki_and_db(embed, tmp_path, monkeypatch):
     _seed_claims(conn, [("new-2026-x", 0, "SHARED finding"), ("old-2020-y", 0, "SHARED finding")])
     _write_page(tmp_path, "ai", "new-2026-x")
     _write_page(tmp_path, "ai", "old-2020-y")
+    monkeypatch.setattr(cmd, "_pair_has_explicit_citation", lambda _a, _b: True)
     return tmp_path, conn
 
 
@@ -142,6 +144,63 @@ def test_cross_link_applies_reciprocal(wiki_and_db):
     assert "[[ai/old-2020-y]]" in new_body          # forward
     assert "[[ai/new-2026-x]]" in old_body          # reciprocal
     assert "auto-added; claim-overlap" in new_body
+
+
+def test_judged_relation_without_pdf_citation_remains_edge_only(wiki_and_db, monkeypatch):
+    tmp_path, conn = wiki_and_db
+    monkeypatch.setattr(cmd, "_pair_has_explicit_citation", lambda _a, _b: False)
+    res = cmd.run(
+        "new-2026-x", sim_threshold=0.9,
+        judge_fn=lambda _p: {"verdict": "builds_on", "rationale": "same method"},
+        conn=conn,
+    )
+    assert not res["applied"]
+    assert len(res["edge_only"]) == 1
+    assert res["edge_only"][0]["reason"] == "no explicit citation verified in either PDF"
+    assert "[[ai/old-2020-y]]" not in (tmp_path / "wiki/ai/new-2026-x.md").read_text()
+
+
+def test_pdf_citation_gate_accepts_exact_doi(tmp_path, monkeypatch):
+    source_pdf = tmp_path / "source-2026-a.pdf"
+    source_pdf.write_bytes(b"pdf stub")
+    monkeypatch.setattr(cmd, "papers_dir", lambda: tmp_path)
+    monkeypatch.setattr("researchwiki.pdf.text.extract_ref_dois",
+                        lambda _path, own_doi="": ["10.1000/target"])
+    _write_page(tmp_path, "ai", "source-2026-a")
+    target_path = tmp_path / "wiki/ai/target-2020-b.md"
+    target_path.write_text("---\ntype: paper\ncategory: [ai]\nyear: 2020\ndoi: 10.1000/target\n---\n")
+    assert cmd._source_cites_target(
+        read_page(tmp_path / "wiki/ai/source-2026-a.md"), read_page(target_path))
+
+
+def test_pdf_citation_gate_checks_reference_year_when_doi_absent(tmp_path, monkeypatch):
+    (tmp_path / "source-2026-a.pdf").write_bytes(b"pdf stub")
+    monkeypatch.setattr(cmd, "papers_dir", lambda: tmp_path)
+    monkeypatch.setattr("researchwiki.pdf.text.extract_ref_dois", lambda *_a, **_k: [])
+    seen = []
+    def cites(_path, surname, year):
+        seen.append((surname, str(year)))
+        return surname == "target" and str(year) == "2025"
+    monkeypatch.setattr("researchwiki.pdf.text.cites_reference", cites)
+    _write_page(tmp_path, "ai", "source-2026-a")
+    target_path = tmp_path / "wiki/ai/target-2023-b.md"
+    target_path.write_text("---\ntype: paper\ncategory: [ai]\nyear: 2025\n---\n")
+    assert cmd._source_cites_target(
+        read_page(tmp_path / "wiki/ai/source-2026-a.md"), read_page(target_path))
+    assert ("target", "2025") in seen
+
+
+def test_pdf_citation_gate_rejects_missing_or_unverified_source(tmp_path, monkeypatch):
+    monkeypatch.setattr(cmd, "papers_dir", lambda: tmp_path)
+    _write_page(tmp_path, "ai", "source-2026-a")
+    _write_page(tmp_path, "ai", "target-2020-b")
+    source = read_page(tmp_path / "wiki/ai/source-2026-a.md")
+    target = read_page(tmp_path / "wiki/ai/target-2020-b.md")
+    assert not cmd._source_cites_target(source, target)
+    (tmp_path / "source-2026-a.pdf").write_bytes(b"pdf stub")
+    monkeypatch.setattr("researchwiki.pdf.text.extract_ref_dois", lambda *_a, **_k: [])
+    monkeypatch.setattr("researchwiki.pdf.text.cites_reference", lambda *_a, **_k: False)
+    assert not cmd._source_cites_target(source, target)
 
 
 def test_coincidence_writes_nothing(wiki_and_db):
@@ -190,6 +249,7 @@ def test_supplied_new_claims_bypass_db(embed, tmp_path, monkeypatch):
     _write_page(tmp_path, "ai", "old-2020-y")
 
     supplied = [{"paper_stem": "new-2026-x", "section": "results", "position": 0, "text": "SHARED finding"}]
+    monkeypatch.setattr(cmd, "_pair_has_explicit_citation", lambda _a, _b: True)
     res = cmd.run("new-2026-x", new_claims=supplied, sim_threshold=0.9,
                   judge_fn=lambda _p: {"verdict": "cross_link", "rationale": "match"}, conn=conn)
     assert len(res["applied"]) == 1
