@@ -12,6 +12,7 @@ def reconcile(entries, operation: str, details: dict) -> None:
     ):
         return
     from .db.rebuild import upsert_page, delete_page
+    from .db.verify import complete_markdown_scan
     from .index.incremental import update_page_indexes
     from .mutation import corpus_lock
 
@@ -22,8 +23,11 @@ def reconcile(entries, operation: str, details: dict) -> None:
     if not paths:
         return
     with corpus_lock():
-        from .index.pages_semantic import mark_stale
-        mark_stale()
+        # A complete scan, or none: a page hidden by an unreadable folder must
+        # not read as deleted. Scan failure keeps the receipt for retry.
+        by_stem: dict[str, Path] = {}
+        for md in complete_markdown_scan(root):
+            by_stem.setdefault(md.stem, md)
         for path in paths:
             if path.exists():
                 page, _ = upsert_page(path)
@@ -31,18 +35,24 @@ def reconcile(entries, operation: str, details: dict) -> None:
                     raise ValueError(f"cannot repair malformed page: {path}")
             else:
                 # A stale receipt must not delete a page since moved elsewhere.
-                matches = list(root.rglob(f"{path.stem}.md"))
-                if matches:
-                    page, _ = upsert_page(matches[0])
+                moved = by_stem.get(path.stem)
+                if moved is not None:
+                    page, _ = upsert_page(moved)
                     if page is None:
-                        raise ValueError(f"cannot repair malformed page: {matches[0]}")
+                        raise ValueError(f"cannot repair malformed page: {moved}")
                 else:
                     delete_page(path.stem)
         stem = details.get("stem")
-        if operation == "remove" and stem and not list(root.rglob(f"{stem}.md")):
+        if operation == "remove" and stem and str(stem) not in by_stem:
             from .removal import _delete_db_rows, _delete_edges
             _delete_db_rows(str(stem))
             _delete_edges(str(stem))
-        # Recovery refreshes keyword search and explicitly marks the semantic
-        # view unavailable. The regular reindex/ingest path refreshes embeddings.
-        update_page_indexes([Path(p) for p in paths], semantic=False)
+        # Keyword search is refreshed here without a model. The semantic view
+        # drops outdated rows instead of going dark: marking it stale on every
+        # promote/remove switched page KNN off for the rest of a batch.
+        from .index.pages_semantic import drop_outdated
+        from .wiki import read_page
+        present = [page for path in paths if (page := read_page(by_stem.get(path.stem, path)))]
+        absent = {path.stem for path in paths if path.stem not in by_stem}
+        drop_outdated(present, absent)
+        update_page_indexes([Path(p) for p in paths], semantic=False, mark_semantic_stale=False)

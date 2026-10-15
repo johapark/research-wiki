@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 
 from ..grade.parser import parse_claims
-from ..fsatomic import file_sha256
+from ..db.pdf_hashes import PdfHashCache
 from ..paths import papers_dir
 from ..wiki import read_page
 from ..grade.checks import entailment_check
@@ -12,6 +12,14 @@ from ..grade.checks import entailment_check
 
 def current_rows(conn, rows):
     """Keep claims whose source page still contains the indexed claim text."""
+    hashes = PdfHashCache(conn)
+    try:
+        return _current_rows(conn, rows, hashes)
+    finally:
+        hashes.flush()
+
+
+def _current_rows(conn, rows, hashes):
     sources = {}
     kept = []
     for row in rows:
@@ -23,7 +31,7 @@ def current_rows(conn, rows):
             sources[stem] = ({
                 (c.section, c.position): c.text for c in parse_claims(page)
             } if page and page.fm and page.page_type == "paper" else {},
-                file_sha256(pdf) if pdf.is_file() else None)
+                hashes.sha256(pdf) if pdf.is_file() else None)
         claims, digest = sources[stem]
         if claims.get((row["section"], row["position"])) == row["text"]:
             item = dict(row)

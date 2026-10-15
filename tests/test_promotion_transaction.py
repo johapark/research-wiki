@@ -103,6 +103,18 @@ def test_invalid_page_rebuild_preserves_but_does_not_ground(library):
     finally:
         conn.close()
     assert claims_by_stem(STEM) == []
+    # Neither page gate may treat the retained row as a citable anchor.
+    from researchwiki.grade.grounding import _resolve_claim_anchors
+    from researchwiki.grade.fidelity.synthesis import _load_claim_texts_by_slug
+    conn = get_connection()
+    try:
+        slug = conn.execute("SELECT claim_slug FROM claims").fetchone()[0]
+    finally:
+        conn.close()
+    assert _resolve_claim_anchors({(STEM, slug)}) == set()
+    assert _load_claim_texts_by_slug([(STEM, slug)]) == {}
     library.page.write_text(library.original)
     rebuild()
     assert claims_by_stem(STEM)
+    assert _resolve_claim_anchors({(STEM, slug)}) == {(STEM, slug)}
+    assert _load_claim_texts_by_slug([(STEM, slug)])

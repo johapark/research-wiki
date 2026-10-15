@@ -236,6 +236,18 @@ def _content_hash(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
 
 
+def _index_row(p: Page, text: str) -> dict:
+    """Row-aligned metadata for one embedded page; equality means "vector current"."""
+    return {
+        "key": p.key,
+        "stem": p.stem,
+        "category": p.category,
+        "page_type": p.page_type,
+        "title": p.fm.get("title", ""),
+        "content_hash": _content_hash(text),
+    }
+
+
 def _locked(function):
     from functools import wraps
     @wraps(function)
@@ -271,14 +283,7 @@ def build_index(pages: list[Page] | None = None) -> dict | None:
             # Skip pages with nothing indexable. Sparse stubs would otherwise
             # cluster around (0, ...) and pollute KNN.
             continue
-        rows.append({
-            "key": p.key,
-            "stem": p.stem,
-            "category": p.category,
-            "page_type": p.page_type,
-            "title": p.fm.get("title", ""),
-            "content_hash": _content_hash(text),
-        })
+        rows.append(_index_row(p, text))
         texts.append(text)
 
     out_dir = semantic_cache_dir()
@@ -354,14 +359,7 @@ def upsert_pages(pages: list[Page]) -> dict | None:
             if stem in old_by_stem:
                 removed_stems.add(stem)
             continue
-        row = {
-            "key": page.key,
-            "stem": page.stem,
-            "category": page.category,
-            "page_type": page.page_type,
-            "title": page.fm.get("title", ""),
-            "content_hash": _content_hash(text),
-        }
+        row = _index_row(page, text)
         prior = old_by_stem.get(stem)
         if prior is not None and prior[1] == row:
             continue
@@ -424,6 +422,50 @@ def _write_empty(out_dir: Path) -> None:
 def mark_stale() -> None:
     """Make skipped embeddings unavailable while retaining vectors for refresh."""
     write_text_atomic(semantic_cache_dir() / PAGES_STALE, "Run researchwiki reindex.\n")
+
+
+@_locked
+def drop_outdated(pages: list[Page], absent_stems: set[str]) -> None:
+    """Keep the page index truthful after a page mutation, without a model.
+
+    Rows for deleted pages and rows whose indexed text changed are dropped: an
+    incomplete index is still correct, an outdated vector is not. Only a page
+    that still has indexable text but lost its vector marks the index stale, so
+    the next upsert reconciles it in full. A page that was never indexed — a
+    fresh promote, which the ingest runner embeds next — leaves it available,
+    and so does a back-link splice, which edits no indexed section.
+    """
+    out_dir = semantic_cache_dir()
+    if (out_dir / PAGES_STALE).exists():
+        return
+    loaded = _load()
+    if loaded is None:
+        return
+    arr, rows = loaded
+    current = {}
+    for page in pages:
+        text = page_index_text(page)
+        current[page.stem] = _index_row(page, text) if text.strip() else None
+    drop = set(absent_stems)
+    lost = False
+    for row in rows:
+        stem = row["stem"]
+        if stem in current and current[stem] != row:
+            drop.add(stem)
+            lost = lost or current[stem] is not None
+    keep = [i for i, row in enumerate(rows) if row["stem"] not in drop]
+    if len(keep) != len(rows):
+        kept = arr[keep] if keep else np.zeros((0, arr.shape[1] if arr.ndim == 2 else 0),
+                                               dtype=np.float32)
+        save_bundle(out_dir / PAGES_BUNDLE, kept, {
+            "model": semantic.DEFAULT_MODEL,
+            "dim": int(kept.shape[1]) if kept.ndim == 2 else 0,
+            "built_at": int(time.time()),
+            "rows": [rows[i] for i in keep],
+        })
+    if lost:
+        # Written directly: this function already holds the bundle lock.
+        write_text_atomic(out_dir / PAGES_STALE, "Run researchwiki reindex.\n")
 
 
 def _load(*, allow_stale=False) -> tuple[np.ndarray, list[dict]] | None:

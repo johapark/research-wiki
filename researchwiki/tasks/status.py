@@ -633,8 +633,8 @@ def _render_overview(ctx: dict) -> None:
         for row in web_invalid[:5]:
             print(f"    - {row['run_id']}: {row['error']}")
 
-    # Interrupted multi-file mutations. Reported, never drained — `status` is
-    # read-only, and the next ingest rolls these back on its own.
+    # Interrupted multi-file mutations and committed receipts awaiting repair.
+    # Reported, never drained — `status` is read-only; the next ingest drains them.
     try:
         from ..mutation import pending_journals
         journals = pending_journals()
@@ -646,7 +646,8 @@ def _render_overview(ctx: dict) -> None:
             print(f"    - {j.get('operation', '?')} "
                   f"({j.get('status', '?')}, attempts={j.get('attempts', 0)}) "
                   f"{(j.get('details') or {}).get('stem', '')}")
-        print("    → the next `agent ingest` rolls these back automatically")
+        print("    → the next `agent ingest` drains these: `active` rolls back, "
+              "`committed` retries database/index repair")
     if orphan_pdfs:
         print(f"  papers/ PDFs with no page:      {len(orphan_pdfs)}")
         for stem in orphan_pdfs[:5]:

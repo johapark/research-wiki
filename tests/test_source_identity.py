@@ -60,6 +60,41 @@ def test_pdf_replacement_invalidates_unchanged_claim_grade(tmp_path, monkeypatch
         conn.close()
 
 
+@pytest.mark.parametrize("pdf_state", ["legacy-unhashed", "pdf-absent"])
+def test_rebuild_keeps_grades_without_proof_of_a_different_source(tmp_path, monkeypatch, pdf_state):
+    """Only a recorded hash that differs from a present PDF clears a grade.
+
+    A grade written before hashes existed, or one whose PDF is momentarily
+    missing (a synced `papers/` offline), stays for retrieval to withhold.
+    """
+    from researchwiki.fsatomic import file_sha256
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RESEARCHWIKI_DB_PATH", str(tmp_path / "state.db"))
+    (tmp_path / "wiki/other").mkdir(parents=True)
+    (tmp_path / "papers").mkdir()
+    (tmp_path / "wiki/other/example.md").write_text(
+        "---\ntitle: Test\ntype: paper\n---\n## Key Contributions\n- Alpha improves speed.\n"
+    )
+    source = tmp_path / "papers/example.pdf"
+    source.write_text("input")
+    rebuild()
+    recorded = None if pdf_state == "legacy-unhashed" else file_sha256(source)
+    conn = get_connection()
+    with conn:
+        conn.execute("UPDATE claims SET last_graded_at=123, semantic_score=0.9, "
+                     "source_pdf_sha256=?", (recorded,))
+    conn.close()
+    if pdf_state == "pdf-absent":
+        source.unlink()
+    rebuild()
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT last_graded_at, semantic_score, source_pdf_sha256 FROM claims").fetchone()
+        assert tuple(row) == (123, 0.9, recorded)
+    finally:
+        conn.close()
+
+
 @pytest.mark.parametrize("edit", ["page", "pdf"])
 def test_concurrent_source_edit_cannot_receive_old_grades(tmp_path, monkeypatch, edit):
     from researchwiki.grade.fidelity import paper

@@ -399,10 +399,15 @@ def _load_claim_texts_by_slug(
         for s, slug in pairs:
             params.extend([s, slug])
         rows = conn.execute(
-            f"SELECT paper_stem, claim_slug, text FROM claims "
+            f"SELECT * FROM claims "
             f" WHERE (paper_stem, claim_slug) IN (VALUES {placeholders})",
             params,
         ).fetchall()
+        if rows and "section" in rows[0].keys():
+            # Withhold rows retained for a malformed or edited page, as claim
+            # retrieval and `check-grounding` do.
+            from ...search.freshness import current_rows
+            rows = current_rows(conn, rows)
     except Exception:
         return {}
     finally:

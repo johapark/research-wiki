@@ -372,10 +372,18 @@ def _resolve_claim_anchors(
         for s, slug in bare_pairs:
             params.extend([s, slug])
         rows = conn.execute(
-            f"SELECT paper_stem, claim_slug FROM claims "
+            f"SELECT paper_stem, claim_slug, section, position, text, "
+            f"       last_graded_at, source_pdf_sha256, numeric_unmatched, "
+            f"       bm25_top1_chunk_id FROM claims "
             f" WHERE (paper_stem, claim_slug) IN (VALUES {placeholders})",
             params,
         ).fetchall()
+        # A row kept for a page whose YAML is broken, or whose claim text has
+        # since been edited, is retained for repair — not current evidence.
+        # Same filter claim retrieval applies, so the gate cannot accept an
+        # anchor that `claims` itself would withhold.
+        from ..search.freshness import current_rows
+        rows = current_rows(conn, rows)
     except Exception as e:
         raise ClaimDBUnavailable(f"claims query failed: {e}") from e
     finally:

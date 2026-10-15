@@ -298,17 +298,22 @@ def _upsert_claims(conn: sqlite3.Connection, page: Page) -> int:
     fresh = list(_parse_claims(page))
     fresh_keys = {(c.section, c.position) for c in fresh}
 
+    # Clear grades only on positive proof of a different source. A legacy grade
+    # with no recorded hash, or a PDF that is momentarily absent (a synced
+    # `papers/` offline), stays in place; claim retrieval already withholds it
+    # as unverified, and `grade regression` still needs it as the baseline.
     pdf = papers_dir() / f"{page.stem}.pdf"
     digest = file_sha256(pdf) if pdf.is_file() else None
-    conn.execute(
-        "UPDATE claims SET last_graded_at=NULL, bm25_top1=NULL, bm25_top3_mean=NULL, "
-        "bm25_top1_chunk_id=NULL, supporting_text=NULL, supporting_provenance=NULL, "
-        "semantic_score=NULL, embed_model=NULL, negation_mismatch=NULL, "
-        "numeric_tokens=NULL, numeric_unmatched=NULL, source_pdf_sha256=NULL "
-        "WHERE paper_stem=? AND last_graded_at IS NOT NULL "
-        "AND (source_pdf_sha256 IS NULL OR source_pdf_sha256 IS NOT ?)",
-        (page.stem, digest),
-    )
+    if digest is not None:
+        conn.execute(
+            "UPDATE claims SET last_graded_at=NULL, bm25_top1=NULL, bm25_top3_mean=NULL, "
+            "bm25_top1_chunk_id=NULL, supporting_text=NULL, supporting_provenance=NULL, "
+            "semantic_score=NULL, embed_model=NULL, negation_mismatch=NULL, "
+            "numeric_tokens=NULL, numeric_unmatched=NULL, source_pdf_sha256=NULL "
+            "WHERE paper_stem=? AND last_graded_at IS NOT NULL "
+            "AND source_pdf_sha256 IS NOT NULL AND source_pdf_sha256 != ?",
+            (page.stem, digest),
+        )
     existing = {
         (r["section"], r["position"]): r["text"]
         for r in conn.execute(

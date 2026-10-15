@@ -15,9 +15,14 @@ from ..wiki import read_page, read_pages
 from . import pages_semantic
 
 
-def update_page_indexes(paths: list[Path | str], *, semantic: bool = True) -> dict:
-    """Upsert current pages; absent paths require a full deletion reconciliation."""
-    return _maintain(paths, semantic=semantic)
+def update_page_indexes(paths: list[Path | str], *, semantic: bool = True,
+                        mark_semantic_stale: bool = True) -> dict:
+    """Upsert current pages; absent paths require a full deletion reconciliation.
+
+    With `semantic=False`, the page vectors are marked stale unless the caller
+    has already reconciled them itself (`mark_semantic_stale=False`).
+    """
+    return _maintain(paths, semantic=semantic, mark_semantic_stale=mark_semantic_stale)
 
 
 def rebuild_page_indexes(*, semantic: bool = True) -> dict:
@@ -25,7 +30,7 @@ def rebuild_page_indexes(*, semantic: bool = True) -> dict:
     return _maintain(None, semantic=semantic)
 
 
-def _maintain(paths, *, semantic):
+def _maintain(paths, *, semantic, mark_semantic_stale=True):
     with corpus_lock(), exclusive_lock(search_index_dir()):
         full = paths is None
         if full:
@@ -64,7 +69,8 @@ def _maintain(paths, *, semantic):
             if sem is None:
                 pages_semantic.mark_stale()
         else:
-            pages_semantic.mark_stale()
+            if mark_semantic_stale:
+                pages_semantic.mark_stale()
             sem = None
         return {
             "n_pages": len(pages), "documents": docs,
