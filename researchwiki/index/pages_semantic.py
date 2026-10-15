@@ -118,7 +118,7 @@ def page_index_text(p: Page) -> str:
     parts: list[str] = []
     page_type = str(p.fm.get("type") or "paper").strip().strip("\"'")
 
-    title = p.fm.get("title", "").strip()
+    title = _frontmatter_text(p.fm.get("title"))
     if title:
         parts.append(title)
 
@@ -236,14 +236,28 @@ def _content_hash(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
 
 
+def _frontmatter_text(value) -> str:
+    """A frontmatter scalar as display text: `None` → "", `2021` → "2021"."""
+    return "" if value is None else str(value).strip()
+
+
 def _index_row(p: Page, text: str) -> dict:
-    """Row-aligned metadata for one embedded page; equality means "vector current"."""
+    """Row-aligned metadata for one embedded page; equality means "vector current".
+
+    Every field is written as a string because `load_bundle` rejects the whole
+    bundle when any row field is not one. Frontmatter is hand-edited: a blank
+    `type:` loads as `None` and an unquoted `title: 2021` as an int, and either
+    used to make the index unreadable — `index_exists()` false for every
+    caller, and each later upsert re-embedding the entire corpus. A blank type
+    is recorded as `paper`, the same default `page_index_text` embeds it under;
+    `lint` reports it as `missing_type`.
+    """
     return {
         "key": p.key,
         "stem": p.stem,
         "category": p.category,
-        "page_type": p.page_type,
-        "title": p.fm.get("title", ""),
+        "page_type": _frontmatter_text(p.fm.get("type")) or "paper",
+        "title": _frontmatter_text(p.fm.get("title")),
         "content_hash": _content_hash(text),
     }
 

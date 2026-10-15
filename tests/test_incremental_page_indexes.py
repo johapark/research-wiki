@@ -166,3 +166,36 @@ def test_mutation_reconcile_keeps_page_vectors_available(tmp_path, monkeypatch):
     edited = _page(tmp_path, "stable", "rewritten summary")
     pages_semantic.drop_outdated([edited], set())
     assert pages_semantic.load_index() is None, "an outdated vector must not be served"
+
+
+def test_hand_edited_frontmatter_scalars_keep_the_index_loadable(tmp_path, monkeypatch):
+    """A blank `type:` (None) or an unquoted `title: 2021` (int) is one page's
+    typo, not a reason to discard every page's vector.
+
+    `load_bundle` rejects the whole bundle when any row field is not a string,
+    so one such page used to disable page KNN for the wiki and make every later
+    upsert re-embed the corpus.
+    """
+    monkeypatch.setattr(pages_semantic.semantic, "is_available", lambda: True)
+    batches = []
+
+    def embed(texts):
+        batches.append(len(texts))
+        return np.ones((len(texts), 2), dtype=np.float32)
+
+    monkeypatch.setattr(pages_semantic.semantic, "embed_texts", embed)
+    normal = _page(tmp_path, "normal", "ordinary content")
+    blank_type = _page(tmp_path, "blank-type", "content with a blank type")
+    blank_type.fm["type"] = None
+    numeric_title = _page(tmp_path, "numeric-title", "content titled by a year")
+    numeric_title.fm["title"] = 2021
+    pages_semantic.build_index([normal, blank_type, numeric_title])
+
+    _, rows = pages_semantic.load_index()
+    by_stem = {row["stem"]: row for row in rows}
+    assert by_stem["blank-type"]["page_type"] == "paper"
+    assert by_stem["numeric-title"]["title"] == "2021"
+
+    batches.clear()
+    result = pages_semantic.upsert_pages([normal, blank_type, numeric_title])
+    assert result["mode"] == "incremental" and batches == []
