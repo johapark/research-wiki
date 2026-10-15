@@ -114,7 +114,8 @@ class PaperFidelityReport:
         return d
 
 
-def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool) -> ClaimScore:
+def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool,
+                 pdf_path: Path | None = None) -> ClaimScore:
     if claim.is_cross_ref:
         return ClaimScore(
             section=claim.section,
@@ -133,7 +134,7 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
             graded=False,
         )
 
-    hits = query_pdf(stem, claim.text, topk=5)
+    hits = query_pdf(stem, claim.text, topk=5, pdf_path=pdf_path)
     if not hits:
         return ClaimScore(
             section=claim.section,
@@ -169,14 +170,14 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
         # the prior NLI path: multi-aspect claims have evidence spread across
         # multiple chunks). The bi-encoder's max-over-chunks aggregation makes
         # this safe; irrelevant chunks just don't move the max.
-        sem_hits = query_pdf(stem, claim.text, topk=10)
+        sem_hits = query_pdf(stem, claim.text, topk=10, pdf_path=pdf_path)
         if sem_hits:
             chunk_texts = [h.text for h in sem_hits]
             # If the per-PDF embedding cache is populated and the chunk_id ↔
             # text mapping matches, reuse the cached embeddings for the
             # retrieved chunks. Otherwise fall back to embedding the chunks
             # ad-hoc inside score_claim — slower but correct.
-            cached = get_chunk_embeddings(stem)
+            cached = get_chunk_embeddings(stem, pdf_path=pdf_path)
             chunk_embs = None
             if cached is not None:
                 cache_embs, cache_texts = cached
@@ -346,7 +347,8 @@ def grade_page(
 
     semantic_available = semantic and semantic_mod.is_available()
     scored: list[ClaimScore] = [
-        _score_claim(stem, c, full_pdf_text, use_semantic=semantic_available) for c in claims
+        _score_claim(stem, c, full_pdf_text, use_semantic=semantic_available,
+                     pdf_path=resolved_pdf) for c in claims
     ]
 
     graded = [s for s in scored if s.graded]

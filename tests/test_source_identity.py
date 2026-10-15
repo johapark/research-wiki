@@ -142,3 +142,38 @@ def test_legacy_grade_provenance_migration_is_idempotent(tmp_path):
             assert columns.count("source_pdf_sha256") == 1
         finally:
             conn.close()
+
+
+def test_draft_grade_scores_the_override_pdf_not_the_canonical_one(tmp_path, monkeypatch):
+    """Re-ingest/journal-upgrade: the old PDF sits in papers/, the new one in inbox/.
+
+    Every per-claim query revalidates the chunk index by source hash, so the
+    override has to reach each one — otherwise the draft is re-indexed from the
+    canonical PDF and graded against text it was never written from.
+    """
+    from pathlib import Path
+    from researchwiki.grade.fidelity import paper
+    monkeypatch.chdir(tmp_path)
+    built_from = []
+
+    def extract(path, **kwargs):
+        built_from.append(Path(path).parent.name)
+        return [Path(path).read_text()]
+
+    monkeypatch.setattr(pdf_chunks, "extract_pdf_page_texts", extract)
+    monkeypatch.setattr(pdf_chunks, "_build_embeddings_cache", lambda *a: None)
+    monkeypatch.setattr(paper, "extract_pdf", lambda p, **kw: (Path(p).read_text(), 1))
+    for folder in ("papers", "inbox", ".agent-output"):
+        (tmp_path / folder).mkdir()
+    (tmp_path / "papers/example.pdf").write_text("Preprint reports seventy percent accuracy.")
+    incoming = tmp_path / "inbox/journal.pdf"
+    incoming.write_text("Journal version reports zebrafish regeneration benchmark results.")
+    draft = tmp_path / ".agent-output/draft.md"
+    draft.write_text("---\ntype: paper\n---\n## Key Contributions\n"
+                     "- Zebrafish regeneration benchmark results reported.\n")
+
+    report = paper.grade_page("example", page_path=draft, pdf_path=incoming,
+                              semantic=False, persist=False, include_salience=False)
+
+    assert "zebrafish" in report.claims[0].supporting_text.lower()
+    assert built_from == ["inbox"]

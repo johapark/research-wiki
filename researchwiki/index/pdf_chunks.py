@@ -318,14 +318,18 @@ def _build_embeddings_cache(idx_dir: Path, chunk_texts: list[str]) -> None:
 
 
 @_locked
-def get_chunk_embeddings(stem: str) -> tuple[np.ndarray, list[str]] | None:
+def get_chunk_embeddings(
+    stem: str, pdf_path: Path | str | None = None,
+) -> tuple[np.ndarray, list[str]] | None:
     """Return (embeddings, chunk_texts) for a paper. Builds on demand if
     the cache is missing. Returns None if the index can't be built or the
     embedding model is unavailable.
+
+    `pdf_path` must match the one the index was built from (see `query_pdf`).
     """
     from . import embeddings as semantic
     try:
-        idx_dir = build_pdf_index(stem)
+        idx_dir = build_pdf_index(stem, pdf_path=pdf_path)
         loaded = load_bundle(idx_dir / "embeddings.npz", semantic.DEFAULT_MODEL, row_fields=("text",))
         if loaded is None:
             texts = _read_cached_chunk_texts(idx_dir)
@@ -383,10 +387,18 @@ def _neutralize_operators(query: str) -> str:
 
 
 @_locked
-def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT) -> list[RetrievedChunk]:
-    """Run a BM25 query against the paper's chunk index. Returns top-k chunks."""
+def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT,
+              pdf_path: Path | str | None = None) -> list[RetrievedChunk]:
+    """Run a BM25 query against the paper's chunk index. Returns top-k chunks.
+
+    `pdf_path` names the PDF the index must reflect. Pass the same override
+    given to `build_pdf_index`: the index is revalidated by source hash on
+    every query, and without it the canonical `papers/{stem}.pdf` is assumed —
+    so a draft graded against an incoming PDF would be silently re-indexed
+    from the old canonical one and retrieve from the wrong text.
+    """
     query = _neutralize_operators(query)
-    idx_dir = build_pdf_index(stem)
+    idx_dir = build_pdf_index(stem, pdf_path=pdf_path)
     index = tantivy.Index.open(str(idx_dir))
     index.reload()
     searcher = index.searcher()
