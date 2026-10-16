@@ -177,3 +177,76 @@ def test_draft_grade_scores_the_override_pdf_not_the_canonical_one(tmp_path, mon
 
     assert "zebrafish" in report.claims[0].supporting_text.lower()
     assert built_from == ["inbox"]
+
+
+def _counting_index(tmp_path, monkeypatch):
+    from pathlib import Path
+    monkeypatch.chdir(tmp_path)
+    builds = []
+
+    def extract(path, **kwargs):
+        builds.append(1)
+        return [Path(path).read_text()]
+
+    monkeypatch.setattr(pdf_chunks, "extract_pdf_page_texts", extract)
+    monkeypatch.setattr(pdf_chunks, "_build_embeddings_cache", lambda *a: None)
+    (tmp_path / "papers").mkdir()
+    (tmp_path / "papers/example.pdf").write_text("Alpha improves speed. " * 50)
+    return builds
+
+
+def test_index_missing_its_segments_is_rebuilt_not_reused(tmp_path, monkeypatch):
+    """Readiness markers alone do not prove the index is readable.
+
+    A crash during the old in-place `rmtree` could keep `index_meta.json` and
+    `.managed.json` while deleting the segment files; the stem then failed every
+    query with `FileDoesNotExist` until someone forced a rebuild.
+    """
+    builds = _counting_index(tmp_path, monkeypatch)
+    target = pdf_chunks.build_pdf_index("example")
+    for path in target.iterdir():
+        if path.name not in {"index_meta.json", ".managed.json", "meta.json"}:
+            path.unlink()
+
+    hits = pdf_chunks.query_pdf("example", "alpha")
+
+    assert hits and "Alpha" in hits[0].text
+    assert len(builds) == 2
+    pdf_chunks.query_pdf("example", "alpha")
+    assert len(builds) == 2, "a healthy index must still be reused"
+
+
+def test_crash_while_removing_the_old_index_leaves_a_clean_miss(tmp_path, monkeypatch):
+    """The failure the in-place `rmtree(target)` allowed: dying part-way through
+    deleting the old index, after its segments went but before its markers did.
+
+    Dangerous on a forced rebuild of an unchanged PDF (`grade --rebuild-index`):
+    the surviving markers still name the current hash, so the old code reused
+    the gutted directory and every query failed. The old index is now renamed
+    aside before anything is deleted, so `target` is whole or absent.
+    """
+    import shutil
+    from pathlib import Path
+    builds = _counting_index(tmp_path, monkeypatch)
+    pdf_chunks.build_pdf_index("example")
+    real_rmtree = shutil.rmtree
+
+    def die_mid_delete(path, *args, **kwargs):
+        doomed = Path(path)
+        if doomed.name.startswith(".example-") and "-retired-" not in doomed.name:
+            return real_rmtree(path, *args, **kwargs)   # the staging dir's cleanup
+        for entry in doomed.iterdir():                   # segments go, markers stay
+            if entry.name not in {"index_meta.json", ".managed.json", "meta.json"}:
+                entry.unlink()
+        raise OSError("simulated crash part-way through deleting the old index")
+
+    monkeypatch.setattr(pdf_chunks.shutil, "rmtree", die_mid_delete)
+    try:
+        pdf_chunks.build_pdf_index("example", force=True)
+    except OSError:
+        pass
+    monkeypatch.setattr(pdf_chunks.shutil, "rmtree", real_rmtree)
+
+    hits = pdf_chunks.query_pdf("example", "alpha")
+    assert hits and "Alpha" in hits[0].text
+    assert len(builds) >= 2

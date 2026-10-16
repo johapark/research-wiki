@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -250,7 +251,8 @@ def build_pdf_index(
     meta = _index_metadata(target)
     if (not force and meta.get("cache_version") == CACHE_VERSION
             and meta.get("source_pdf_sha256") == digest
-            and (target / ".managed.json").exists()):
+            and (target / ".managed.json").exists()
+            and _opens(target)):
         return target
     pdf_path = src
     pages = extract_pdf_page_texts(pdf_path, max_pages=MAX_PDF_PAGES)
@@ -292,12 +294,47 @@ def build_pdf_index(
             shutil.rmtree(idx_dir, ignore_errors=True)
             raise RuntimeError(f"PDF changed while indexing: {src}")
         _write_index_meta(idx_dir, src, digest)
-        if target.exists():
-            shutil.rmtree(target)
-        idx_dir.replace(target)
+        _swap_in(idx_dir, target)
         return target
     finally:
         shutil.rmtree(idx_dir, ignore_errors=True)
+
+
+def _opens(idx_dir: Path) -> bool:
+    """Can Tantivy open every segment the index lists? A missing one is a miss.
+
+    The markers say a build *finished*, not that its files are still there —
+    an index damaged by an earlier crash (or a hand-pruned cache) keeps them.
+    Opening a searcher reads each segment's files, so this is the cheapest check
+    that catches what would otherwise surface as a `FileDoesNotExist` on the
+    first query, with the stem broken until `--rebuild-index`.
+    """
+    try:
+        index = tantivy.Index.open(str(idx_dir))
+        index.reload()
+        index.searcher()
+        return True
+    except Exception:
+        return False
+
+
+def _swap_in(staged: Path, target: Path) -> None:
+    """Publish `staged` at `target` so a crash leaves old, new, or nothing.
+
+    `shutil.rmtree(target)` deletes entries in directory-listing order, so a
+    crash part-way could keep `index_meta.json` and `.managed.json` while the
+    segment files were gone — a directory that passed the reuse check and then
+    failed every query. The old index is first *renamed* aside (one atomic
+    step), so `target` is either the old complete index or absent, never a
+    partial one; only then is the retired copy deleted.
+    """
+    retired = None
+    if target.exists():
+        retired = target.with_name(f".{target.name}-retired-{secrets.token_hex(6)}")
+        target.replace(retired)
+    staged.replace(target)
+    if retired is not None:
+        shutil.rmtree(retired, ignore_errors=True)
 
 
 def _build_embeddings_cache(idx_dir: Path, chunk_texts: list[str]) -> None:
