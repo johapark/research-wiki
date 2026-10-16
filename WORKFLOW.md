@@ -282,7 +282,6 @@ index warnings or review queues.
 ---
 title: "Structural motif search across the protein universe with Folddisco"
 authors: Hyunbin Kim, Rachel Seongeun Kim, Milot Mirdita, Jaewon Yoon, Martin Steinegger
-senior_authors: Martin Steinegger
 year: 2026
 doi: 10.1038/s41587-026-03162-9
 venue: Nature Biotechnology
