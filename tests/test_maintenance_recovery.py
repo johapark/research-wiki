@@ -168,3 +168,79 @@ def test_status_recognizes_atomic_bundle_and_stale_marker(corpus, tmp_path, monk
     (cache / pages_semantic.PAGES_STALE).write_text("stale")
     _, semantic = status._index_status()
     assert semantic["stale"] and not semantic["exists"]
+
+
+def _embedding_model(monkeypatch, *, started=None, release=None):
+    """A stub model; with `started`/`release`, the first call blocks."""
+    import numpy as np
+    calls = []
+
+    def embed(texts):
+        calls.append(list(texts))
+        if started is not None and len(calls) == 1:
+            started.set()
+            assert release.wait(5)
+        return np.ones((len(texts), 2), dtype=np.float32)
+
+    monkeypatch.setattr(pages_semantic.semantic, "is_available", lambda: True)
+    monkeypatch.setattr(pages_semantic.semantic, "embed_texts", embed)
+    return calls
+
+
+def test_embedding_runs_outside_the_corpus_guard(corpus, monkeypatch):
+    """A long `reindex` must not block promotes and grade persistence.
+
+    While the model encodes, another writer takes the corpus guard and commits.
+    Before, embedding ran inside the guard, so that writer waited out the whole
+    embedding pass (minutes on a full rebuild).
+    """
+    started, release, committed = threading.Event(), threading.Event(), threading.Event()
+    _embedding_model(monkeypatch, started=started, release=release)
+
+    def writer():
+        with mut.corpus_lock():
+            committed.set()
+
+    with ThreadPoolExecutor(2) as pool:
+        indexing = pool.submit(incremental.rebuild_page_indexes, semantic=True)
+        assert started.wait(5)
+        pool.submit(writer)
+        assert committed.wait(2), "the corpus guard was held through embedding"
+        release.set()
+        indexing.result(timeout=10)
+    assert pages_semantic.load_index() is not None
+
+
+def test_page_edited_during_embedding_publishes_its_current_text(corpus, monkeypatch):
+    """Vectors embedded outside the guard are matched to the text they encode.
+
+    A page rewritten while the model runs is re-embedded under the guard, so
+    the published row never pairs new metadata with a vector for old text.
+    """
+    started, release = threading.Event(), threading.Event()
+    calls = _embedding_model(monkeypatch, started=started, release=release)
+
+    with ThreadPoolExecutor(1) as pool:
+        indexing = pool.submit(incremental.rebuild_page_indexes, semantic=True)
+        assert started.wait(5)
+        with mut.corpus_lock():
+            corpus.write_text(corpus.read_text().replace("Original", "Rewritten"))
+        release.set()
+        indexing.result(timeout=10)
+
+    assert len(calls) == 2, "the edited page must be embedded again"
+    assert "Rewritten" in calls[1][0] and "Original" not in calls[1][0]
+    from researchwiki.wiki import read_page
+    _, rows = pages_semantic.load_index()
+    current = pages_semantic._index_row(read_page(corpus), pages_semantic.page_index_text(read_page(corpus)))
+    assert rows == [current]
+
+
+def test_prepared_vectors_make_an_unchanged_upsert_embed_nothing_under_the_guard(corpus, monkeypatch):
+    """The common ingest path: changed pages are embedded once, outside the guard."""
+    calls = _embedding_model(monkeypatch)
+    incremental.rebuild_page_indexes(semantic=True)
+    calls.clear()
+    corpus.write_text(corpus.read_text().replace("Original", "Updated"))
+    incremental.update_page_indexes([corpus])
+    assert len(calls) == 1 and "Updated" in calls[0][0]

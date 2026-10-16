@@ -262,6 +262,59 @@ def _index_row(p: Page, text: str) -> dict:
     }
 
 
+def prepare_vectors(pages: list[Page], *, full: bool) -> dict[str, np.ndarray]:
+    """Embed, holding no lock, the page texts the next build or upsert needs.
+
+    Embedding is the slow part of page maintenance — a model load, then seconds
+    to minutes of encoding on a full rebuild — so callers run this before taking
+    the corpus guard and pass the result to `build_index`/`upsert_pages` as
+    `prepared`. Vectors are keyed by the content hash of the exact text they
+    encode, so one can only be used for that text: a page edited in between
+    misses and is embedded inside the lock instead, and no vector is published
+    for text that is no longer on disk.
+
+    A full build needs every page. An upsert needs only rows the current
+    bundle lacks — or every page when the bundle is unusable or stale, since
+    that upsert then reconciles the whole wiki. Returns {} when the model is
+    unavailable; the locked step reports that.
+    """
+    if not semantic.is_available():
+        return {}
+    have: dict[str, dict] = {}
+    if not full:
+        loaded = _load(allow_stale=True)
+        if loaded is None or (semantic_cache_dir() / PAGES_STALE).exists():
+            pages = read_pages()
+        if loaded is not None:
+            have = {row["stem"]: row for row in loaded[1]}
+    need: dict[str, str] = {}
+    for page in pages:
+        text = page_index_text(page)
+        if text.strip() and (full or have.get(page.stem) != _index_row(page, text)):
+            need.setdefault(_content_hash(text), text)
+    if not need:
+        return {}
+    vectors = semantic.embed_texts(list(need.values()))
+    if vectors is None or vectors.ndim != 2 or vectors.shape[0] != len(need):
+        return {}
+    return dict(zip(need, vectors))
+
+
+def _embed(texts: list[str], prepared: dict[str, np.ndarray] | None) -> np.ndarray | None:
+    """Vectors for `texts`, taking any `prepare_vectors` already computed."""
+    if not prepared:
+        return semantic.embed_texts(texts)
+    hashes = [_content_hash(text) for text in texts]
+    missing = {h: text for h, text in zip(hashes, texts) if h not in prepared}
+    fresh: dict[str, np.ndarray] = {}
+    if missing:
+        vectors = semantic.embed_texts(list(missing.values()))
+        if vectors is None or vectors.ndim != 2 or vectors.shape[0] != len(missing):
+            return None
+        fresh = dict(zip(missing, vectors))
+    return np.vstack([prepared.get(h, fresh.get(h)) for h in hashes]).astype(np.float32, copy=False)
+
+
 def _locked(function):
     from functools import wraps
     @wraps(function)
@@ -272,11 +325,13 @@ def _locked(function):
 
 
 @_locked
-def build_index(pages: list[Page] | None = None) -> dict | None:
+def build_index(pages: list[Page] | None = None, *,
+                prepared: dict[str, np.ndarray] | None = None) -> dict | None:
     """Rebuild the page-level semantic index from `wiki/`.
 
     Returns a small summary dict on success, or None if the embedding model
     is unavailable. Empty wiki returns a summary with `n_pages: 0`.
+    `prepared` holds vectors from `prepare_vectors`, used for matching text.
     """
     if not semantic.is_available():
         log("embedding model unavailable; skipping", tag="semantic-pages")
@@ -309,7 +364,7 @@ def build_index(pages: list[Page] | None = None) -> dict | None:
         _write_empty(out_dir)
         return {"n_pages": 0, "model": semantic.DEFAULT_MODEL, "dim": 0, "thin": thin}
 
-    embeddings = semantic.embed_texts(texts)
+    embeddings = _embed(texts, prepared)
     if embeddings is None or embeddings.shape[0] != len(texts):
         log("embedding pass failed", tag="semantic-pages")
         return None
@@ -327,7 +382,8 @@ def build_index(pages: list[Page] | None = None) -> dict | None:
 
 
 @_locked
-def upsert_pages(pages: list[Page]) -> dict | None:
+def upsert_pages(pages: list[Page], *,
+                 prepared: dict[str, np.ndarray] | None = None) -> dict | None:
     """Embed and upsert only changed pages in the existing semantic index.
 
     Rows are keyed by stem so a category move replaces the old key. Unchanged
@@ -340,7 +396,7 @@ def upsert_pages(pages: list[Page]) -> dict | None:
     stale = (semantic_cache_dir() / PAGES_STALE).exists()
     loaded = _load(allow_stale=True)
     if loaded is None:
-        result = build_index()
+        result = build_index(prepared=prepared)
         if result is not None:
             result["mode"] = "rebuilt"
         return result
@@ -381,14 +437,14 @@ def upsert_pages(pages: list[Page]) -> dict | None:
 
     new_vectors = None
     if pending:
-        new_vectors = semantic.embed_texts([text for _, text, _ in pending])
+        new_vectors = _embed([text for _, text, _ in pending], prepared)
         if new_vectors is None or new_vectors.shape[0] != len(pending):
             log("incremental embedding pass failed", tag="semantic-pages")
             return None
         if arr.ndim != 2 or new_vectors.ndim != 2 or new_vectors.shape[1] != arr.shape[1]:
             # A cache produced by another embedding model/build cannot be
             # safely row-spliced. Rebuild every row under the active model.
-            result = build_index()
+            result = build_index(prepared=prepared)
             if result is not None:
                 result["mode"] = "rebuilt"
             return result
