@@ -132,6 +132,11 @@ def inbox_dir() -> Path:
     return wiki_root() / "inbox"
 
 
+def duplicate_archive_dir() -> Path:
+    """Hidden storage for duplicate inbox PDFs, outside the content trees."""
+    return wiki_root() / ".duplicate-pdfs"
+
+
 def ensure_scaffold() -> list[Path]:
     """Create the content dirs a working wiki needs; return the ones created.
 

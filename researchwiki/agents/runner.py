@@ -35,6 +35,7 @@ from .runner_support import (
     phase_reconcile as _phase_reconcile,
     phase_target_claims as _phase_target_claims,
     find_exact_duplicate as _find_exact_duplicate,
+    finish_exact_duplicate,
     prepare_keywords,
     record_revision_decision,
     run_entailment_check,
@@ -84,7 +85,8 @@ def run_ingest(
     committed_path. Failure is signaled by raising; the partial trace is still
     in ingest_iterations under the attempt_id.
     """
-    pdf_path = Path(pdf_path).resolve()
+    input_path = Path(pdf_path)
+    pdf_path = input_path.resolve()
     ctx = Context(
         attempt_id=str(uuid.uuid4()),
         pdf_path=pdf_path,
@@ -192,22 +194,7 @@ def run_ingest(
         # and is left to promotion's existing classifier.
         duplicate = _find_exact_duplicate(ctx, prior_stem)
         if duplicate:
-            existing_stem, existing_page = duplicate
-            ctx.outcome = "already_present"
-            ctx.paper_stem = existing_stem
-            ctx.committed_path = existing_page
-            ctx.next_iter()
-            write_iteration(
-                attempt_id=ctx.attempt_id,
-                paper_stem=ctx.paper_stem,
-                pdf_filename=ctx.pdf_filename,
-                iteration=ctx.iteration,
-                role="duplicate",
-                decision="already-present",
-                decision_reason=f"incoming PDF is byte-identical to papers/{existing_stem}.pdf",
-                conn=conn,
-            )
-            log(f"duplicate → papers/{existing_stem}.pdf is byte-identical; stopping", tag="agent")
+            finish_exact_duplicate(ctx, duplicate, input_path, conn)
             return ctx
 
         # Phase 2: extract
