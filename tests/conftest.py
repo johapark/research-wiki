@@ -69,6 +69,23 @@ def _isolate_state_db(tmp_path, monkeypatch):
     monkeypatch.setenv("RESEARCHWIKI_DB_PATH", str(tmp_path / "_state" / "state.db"))
 
 
+def _index_module(name: str):
+    """`researchwiki.index.<name>`, or None when its runtime stack is absent.
+
+    These autouse fixtures run before *every* test, so a hard import makes the
+    whole suite depend on numpy/tantivy. CI's `windows-concurrency` job installs
+    only pytest, filelock and pyyaml on purpose — it exercises the locking path
+    without the multi-gigabyte ML stack — and a hard import errored all 42 of
+    its tests at setup. A module that cannot be imported has no cache to write,
+    so there is nothing to isolate.
+    """
+    import importlib
+    try:
+        return importlib.import_module(f"researchwiki.index.{name}")
+    except ImportError:
+        return None
+
+
 @pytest.fixture(autouse=True)
 def _isolate_claim_embedding_cache(tmp_path, monkeypatch):
     """Point the claim-embedding cache at a per-test temp dir.
@@ -95,7 +112,9 @@ def _isolate_claim_embedding_cache(tmp_path, monkeypatch):
     tests legitimately read `prompts/`, `config/` and fixtures relative to the
     repo root.
     """
-    from researchwiki.index import claim_embeddings
+    claim_embeddings = _index_module("claim_embeddings")
+    if claim_embeddings is None:
+        return
     cache = tmp_path / "_semantic-cache"
     monkeypatch.setattr(claim_embeddings, "semantic_cache_dir", lambda: cache)
 
@@ -103,13 +122,17 @@ def _isolate_claim_embedding_cache(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_page_and_pdf_indexes(tmp_path, monkeypatch):
     """Maintenance tests cannot publish into the developer's disposable caches."""
-    from researchwiki.index import incremental, pages_bm25, pages_semantic, pdf_chunks
     search = tmp_path / "_search-index"
     semantic = tmp_path / "_page-vectors"
-    monkeypatch.setattr(incremental, "search_index_dir", lambda: search)
-    monkeypatch.setattr(pages_bm25, "search_index_dir", lambda: search)
-    monkeypatch.setattr(pages_semantic, "semantic_cache_dir", lambda: semantic)
-    monkeypatch.setattr(pdf_chunks, "grade_cache_dir", lambda: tmp_path / "_pdf-chunks")
+    for name, attr, value in (
+        ("incremental", "search_index_dir", search),
+        ("pages_bm25", "search_index_dir", search),
+        ("pages_semantic", "semantic_cache_dir", semantic),
+        ("pdf_chunks", "grade_cache_dir", tmp_path / "_pdf-chunks"),
+    ):
+        module = _index_module(name)
+        if module is not None:
+            monkeypatch.setattr(module, attr, lambda value=value: value)
 
 
 @pytest.fixture(autouse=True)
