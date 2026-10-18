@@ -231,6 +231,8 @@ def _safe_add_column(conn: sqlite3.Connection, ddl: str) -> None:
 def _migrate(conn: sqlite3.Connection) -> None:
     """Idempotent column adds for tables created in earlier schema versions."""
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(claims)")}
+    if "source_pdf_sha256" not in cols:
+        _safe_add_column(conn, "ALTER TABLE claims ADD COLUMN source_pdf_sha256 TEXT")
     if "embed_model" not in cols:
         _safe_add_column(conn, "ALTER TABLE claims ADD COLUMN embed_model TEXT")
     if "supporting_text" not in cols:

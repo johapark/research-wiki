@@ -160,3 +160,43 @@ class TestEtAlBylines:
     def test_a_byline_that_is_only_et_al_is_unknown(self):
         from researchwiki.stems import first_author_surname
         assert first_author_surname(["et al."]) == "unknown"
+
+
+class TestSurnameMatchesWholeWords:
+    """A surname is a word, not a substring. Hermetic: the PDF reader is stubbed.
+
+    Short surnames are common in this corpus (127 of 634 stems are three
+    letters or fewer). With substring matching, `li` was "cited" by any list
+    containing Williams, Kline or "public" near the year.
+    """
+
+    REFS = (
+        "Abstract text.\n\nReferences\n"
+        "1. Williams, R. & Kline, J. A public resource for cell maps. Nature (2018).\n"
+        "2. Garcia Lopez, M. et al. Spaced compound surname. Cell (2020).\n"
+        "3. Ma, Y. & He, Z. Short surnames both cited. Science (2021).\n"
+        "4. Smith-Jones, P. Hyphen printed. Genome Res. (2019).\n"
+    )
+
+    @pytest.fixture(autouse=True)
+    def _stub_pdf(self, monkeypatch):
+        from researchwiki.pdf import text
+        monkeypatch.setattr(text.pypdfium2, "PdfDocument", lambda path: type(
+            "Doc", (), {"close": lambda self: None})())
+        monkeypatch.setattr(text, "_extract_all_pages", lambda pdf, max_pages: [self.REFS])
+
+    @pytest.mark.parametrize("surname,year,expected", [
+        ("li", "2018", False),           # inside Williams, Kline, public
+        ("ma", "2018", False),           # inside "maps"
+        ("williams", "2018", True),
+        ("ma", "2021", True),            # a real two-letter surname still matches
+        ("he", "2021", True),
+        ("garcia-lopez", "2020", True),  # slug hyphen, PDF space
+        ("smith-jones", "2019", True),   # slug hyphen, PDF hyphen
+        ("smith", "2019", True),         # first part of a hyphenated name
+        ("lopez", "2020", True),
+    ])
+    def test_whole_word(self, surname, year, expected):
+        from pathlib import Path
+        from researchwiki.pdf.text import cites_reference
+        assert cites_reference(Path("stub.pdf"), surname, year) is expected

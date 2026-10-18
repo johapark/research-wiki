@@ -34,7 +34,11 @@ def index(tmp_path, monkeypatch):
         writer.add_document(doc)
     writer.commit()
     writer.wait_merging_threads()
-    pc._write_index_meta(idx_dir)
+    from researchwiki.fsatomic import file_sha256
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"synthetic PDF source")
+    pc._write_index_meta(idx_dir, source, file_sha256(source))
+    monkeypatch.setattr(pc, "resolve_pdf", lambda s: source)
     monkeypatch.setattr(pc, "_index_path_for", lambda s: tmp_path / s)
     return stem
 

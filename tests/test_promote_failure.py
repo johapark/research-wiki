@@ -62,6 +62,7 @@ def commit_env(monkeypatch, tmp_path):
                         lambda **kw: promote_mod.GateResult(promoted=True))
     monkeypatch.setattr(runner.phases, "propose_keywords",
                         lambda *a, **k: _Keywords())
+    monkeypatch.setattr(runner, "update_indexes_after_promotion", lambda result: None)
     return rows
 
 

@@ -32,43 +32,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 from datetime import date
 
-from ..categories import PAGE_TYPE_DIRS
 from ..fsatomic import write_text_atomic
 from ..log import append_log_md, log
 from ..paths import ingest_dir, wiki_dir
-from ..stems import slugify_phrase
+from ..page_naming import dominant_category as _dominant_category, page_slug as _slugify
 from ..wiki import commit_page, find_stem_collision, read_pages
-
-
-def _dominant_category(referenced: list[str]) -> str:
-    """Content category for a synthesis page: the most common category prefix
-    among its referenced papers (page-type dirs excluded).
-
-    A synthesis lives in `wiki/synthesis/` (its page *type*, carried by
-    `type:` and the directory), so its YAML `category:` should name the
-    *content* field it surveys — classified the same way a paper page is,
-    which for a cross-paper page is just the field its papers belong to.
-    Falls back to `TODO` when no referenced paper carries a content-category
-    prefix (the author fills it), mirroring the paper-page auto-suggest
-    fallback. Ties break toward the first-referenced category (Counter keeps
-    insertion order)."""
-    cats: Counter[str] = Counter()
-    for r in referenced:
-        prefix = r.split("/", 1)[0] if "/" in r else ""
-        if prefix and prefix not in PAGE_TYPE_DIRS:
-            cats[prefix] += 1
-    return cats.most_common(1)[0][0] if cats else "TODO"
-
-
-def _slugify(title: str) -> str:
-    """Page slug for a synthesis title. Thin alias over the shared helper —
-    `concepts.candidates._term_slug` must produce byte-identical output for the
-    same input, or a scaffolded hub's filename stops matching the edge that
-    points at it. Sharing one implementation is what enforces that."""
-    return slugify_phrase(title)
 
 
 def _resolve_paper(stem_or_link: str, known: dict[str, str]) -> str | None:

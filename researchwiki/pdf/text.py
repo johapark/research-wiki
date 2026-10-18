@@ -365,8 +365,8 @@ def cites_reference(path: Path, surname: str, year: int | str, *, window: int = 
     checked (13 such bullets were found wrong and corrected on 2026-08-05 —
     including three claiming a 2019 paper cited work from 2023).
 
-    Match rule: the normalised surname appears in the reference section with the
-    year within `window` characters after it. That co-occurrence window is what
+    Match rule: the normalised surname appears *as a whole word* in the
+    reference section with the year within `window` characters after it. That co-occurrence window is what
     keeps "Doench 2016 (rule set 2)" in the body from satisfying a query for
     Doench 2014 — reference entries put author and year close together, prose
     discussion generally does not.
@@ -397,14 +397,33 @@ def cites_reference(path: Path, surname: str, year: int | str, *, window: int = 
     section = text[m.end():] if m else text[3000:]
     section = _fold_ascii(re.sub(r"\s+", " ", section)).lower()
 
-    needle = _fold_ascii(surname).lower()
-    if not needle:
+    pattern = _surname_pattern(surname)
+    if pattern is None:
         return False
     y = str(year)
-    for mm in re.finditer(re.escape(needle), section):
+    for mm in pattern.finditer(section):
         if y in section[mm.start():mm.start() + window]:
             return True
     return False
+
+
+def _surname_pattern(surname: str) -> re.Pattern | None:
+    """Match `surname` as a whole word in folded, lowercased reference text.
+
+    A bare substring search made short surnames match almost anything: `li`
+    is inside `Williams`, `Kline` and `public`, `wu`/`xu`/`ma`/`he` inside
+    countless words. Sampled over this corpus's reference lists, substring
+    matching produced about twice as many hits as whole-word matching, every
+    extra one a citation the list doesn't contain.
+
+    The stem slug spells a hyphenated surname with `-` (`garcia-lopez`); the
+    PDF may print it with a hyphen, a space, or (after line-break joins)
+    nothing, so each slug hyphen accepts any of the three.
+    """
+    parts = [re.escape(p) for p in _fold_ascii(surname).lower().split("-") if p]
+    if not parts:
+        return None
+    return re.compile(r"(?<![a-z])" + r"[-\s]?".join(parts) + r"(?![a-z])")
 
 
 def _fold_ascii(s: str) -> str:

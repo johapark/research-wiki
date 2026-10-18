@@ -170,7 +170,18 @@ class FidelityClaim:
     # each dict: {stem, slug, numeric_tokens_missing: [...]}
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        from ..checks import entailment_check
+        result = asdict(self)
+        checked = self.verdict not in {"uncited", "inference", "inference_ungradable"}
+        result["checks"] = {
+            "source_freshness": ("unavailable" if self.unresolved_citations else
+                                 "checked_on_read" if self.cited_stems else "not_checked"),
+            "retrieval": "completed" if checked else "not_checked",
+            "numeric": "failed" if self.numeric_unmatched else (
+                "passed" if self.cited_stems and self.verdict != "inference_ungradable" else "not_checked"),
+            "entailment": entailment_check({}),
+        }
+        return result
 
 
 @dataclass
@@ -207,6 +218,14 @@ class SynthesisFidelityReport:
         d = asdict(self)
         d["claims"] = [c.to_dict() for c in self.claims]
         d["ok"] = self.ok
+        from ..checks import entailment_check
+        d["checks"] = {
+            "source_freshness": "unavailable" if any(c.unresolved_citations for c in self.claims) else "checked_on_read",
+            "retrieval": "completed",
+            "numeric": "failed" if any(c.numeric_unmatched or c.anchor_misattributions for c in self.claims)
+                       else "passed" if any(c.cited_stems for c in self.claims) else "not_checked",
+            "entailment": entailment_check({}),
+        }
         return d
 
 
@@ -380,10 +399,15 @@ def _load_claim_texts_by_slug(
         for s, slug in pairs:
             params.extend([s, slug])
         rows = conn.execute(
-            f"SELECT paper_stem, claim_slug, text FROM claims "
+            f"SELECT * FROM claims "
             f" WHERE (paper_stem, claim_slug) IN (VALUES {placeholders})",
             params,
         ).fetchall()
+        if rows and "section" in rows[0].keys():
+            # Withhold rows retained for a malformed or edited page, as claim
+            # retrieval and `check-grounding` do.
+            from ...search.freshness import current_rows
+            rows = current_rows(conn, rows)
     except Exception:
         return {}
     finally:

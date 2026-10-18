@@ -68,6 +68,13 @@ def test_supporting_text_resets_when_claim_text_changes(tmp_path):
 
 def test_claims_by_stem_includes_context_only_when_requested(tmp_path, monkeypatch):
     """Default off; opt-in via include_context=True."""
+    from researchwiki.fsatomic import file_sha256
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "papers").mkdir()
+    pdf = tmp_path / "papers/p1.pdf"
+    pdf.write_bytes(b"source PDF")
+    page = tmp_path / "p1.md"
+    page.write_text("---\ntitle: Test\ntype: paper\n---\n## Key Contributions\n- a supported claim\n")
     db = tmp_path / "lookup.db"
     conn = _open(db)
     conn.execute(
@@ -78,8 +85,10 @@ def test_claims_by_stem_includes_context_only_when_requested(tmp_path, monkeypat
     conn.execute(
         """INSERT INTO claims (paper_stem, section, position, text, is_cross_ref,
                                 supporting_text, last_graded_at)
-           VALUES ('p1','key_contributions',0,'a claim',0,'source paragraph',1)"""
+           VALUES ('p1','key_contributions',0,'a supported claim',0,'source paragraph',1)"""
     )
+    conn.execute("UPDATE papers SET page_path=?", (str(page),))
+    conn.execute("UPDATE claims SET source_pdf_sha256=?", (file_sha256(pdf),))
     conn.commit()
     conn.close()
 

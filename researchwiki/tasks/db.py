@@ -91,6 +91,8 @@ def _cmd_verify(args) -> int:
     log(f"extra         = {len(report.extra)}", tag="db")
     log(f"stale         = {len(report.stale)}", tag="db")
     log(f"moved         = {len(report.moved)}", tag="db")
+    if report.invalid:
+        log(f"invalid       = {len(report.invalid)} — fix frontmatter before rebuilding", tag="db")
     if report.missing:
         print()
         print("missing (in wiki/, not in db — run `db rebuild`):")

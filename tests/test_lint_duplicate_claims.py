@@ -188,11 +188,11 @@ def test_cache_loader_covers_only_cached_rows(tmp_path, monkeypatch):
     monkeypatch.setattr(ce, "semantic_cache_dir", lambda: tmp_path)
     rows = _rows(("a", "results", 0, "one"), ("a", "results", 1, "two"))
     vecs = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
-    np.save(tmp_path / "claims.npy", vecs)
-    (tmp_path / "claims_meta.json").write_text(json.dumps([
+    from researchwiki.index.bundle import save_bundle
+    save_bundle(tmp_path / "claims.npz", vecs, {"model": ce.embeddings.DEFAULT_MODEL, "dim": 2, "rows": [
         {"id": "a·results·0", "hash": ce._text_hash("one")},
         {"id": "a·results·1", "hash": ce._text_hash("EDITED")},   # stale hash
-    ]), encoding="utf-8")
+    ]})
 
     loaded = ce.load_cached_claim_embeddings(rows + _rows(("b", "results", 0, "new")))
     assert loaded is not None
@@ -221,9 +221,11 @@ def test_cache_loader_never_rewrites_the_cache(tmp_path, monkeypatch):
 def test_cache_loader_does_not_load_the_bi_encoder(tmp_path, monkeypatch):
     """A model construction inside `lint` would cost ~3s on every run."""
     monkeypatch.setattr(ce, "semantic_cache_dir", lambda: tmp_path)
-    np.save(tmp_path / "claims.npy", np.array([[1.0, 0.0]], dtype=np.float32))
-    (tmp_path / "claims_meta.json").write_text(
-        json.dumps([{"id": "a·results·0", "hash": ce._text_hash("one")}]), encoding="utf-8")
+    from researchwiki.index.bundle import save_bundle
+    save_bundle(tmp_path / "claims.npz", np.array([[1.0, 0.0]], dtype=np.float32), {
+        "model": ce.embeddings.DEFAULT_MODEL, "dim": 2,
+        "rows": [{"id": "a·results·0", "hash": ce._text_hash("one")}],
+    })
 
     def boom(*a, **kw):
         raise AssertionError("bi-encoder must not be constructed")

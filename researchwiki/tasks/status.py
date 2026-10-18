@@ -124,8 +124,9 @@ def _index_status() -> tuple[dict, dict]:
     stats (n_pages / dim / model). Missing indexes get exists=False and the
     rest of the keys absent — caller renders a "run reindex" hint.
     """
-    import json
     import time
+    from ..index.bundle import load_bundle
+    from ..index import pages_semantic
 
     tantivy: dict = {"exists": False}
     tdir = search_index_dir()
@@ -136,17 +137,13 @@ def _index_status() -> tuple[dict, dict]:
 
     semantic: dict = {"exists": False}
     sdir = semantic_cache_dir()
-    meta = sdir / "pages_meta.json"
-    if meta.exists():
-        try:
-            obj = json.loads(meta.read_text(encoding="utf-8"))
-            semantic["exists"] = True
-            semantic["n_pages"] = len(obj.get("rows", []))
-            semantic["dim"] = obj.get("dim", 0)
-            semantic["model"] = obj.get("model", "?")
-            semantic["age_seconds"] = time.time() - meta.stat().st_mtime
-        except (OSError, ValueError):
-            pass
+    meta = sdir / pages_semantic.PAGES_BUNDLE
+    semantic["stale"] = (sdir / pages_semantic.PAGES_STALE).exists()
+    loaded = None if semantic["stale"] else load_bundle(meta, pages_semantic.semantic.DEFAULT_MODEL)
+    if loaded is not None:
+        obj = loaded[1]
+        semantic.update(exists=True, n_pages=len(obj["rows"]), dim=obj["dim"],
+                        model=obj["model"], age_seconds=time.time() - meta.stat().st_mtime)
     return tantivy, semantic
 
 
@@ -636,8 +633,8 @@ def _render_overview(ctx: dict) -> None:
         for row in web_invalid[:5]:
             print(f"    - {row['run_id']}: {row['error']}")
 
-    # Interrupted multi-file mutations. Reported, never drained — `status` is
-    # read-only, and the next ingest rolls these back on its own.
+    # Interrupted multi-file mutations and committed receipts awaiting repair.
+    # Reported, never drained — `status` is read-only; the next ingest drains them.
     try:
         from ..mutation import pending_journals
         journals = pending_journals()
@@ -649,7 +646,8 @@ def _render_overview(ctx: dict) -> None:
             print(f"    - {j.get('operation', '?')} "
                   f"({j.get('status', '?')}, attempts={j.get('attempts', 0)}) "
                   f"{(j.get('details') or {}).get('stem', '')}")
-        print("    → the next `agent ingest` rolls these back automatically")
+        print("    → the next `agent ingest` drains these: `active` rolls back, "
+              "`committed` retries database/index repair")
     if orphan_pdfs:
         print(f"  papers/ PDFs with no page:      {len(orphan_pdfs)}")
         for stem in orphan_pdfs[:5]:
@@ -733,7 +731,8 @@ def _render_model_and_index_health(ctx: dict) -> None:
     try:
         from ..db.verify import verify as _db_verify
         report = _db_verify()
-        drift = len(report.missing) + len(report.extra) + len(report.stale) + len(report.moved)
+        drift = (len(report.missing) + len(report.extra) + len(report.stale)
+                 + len(report.moved) + len(report.invalid))
         if drift == 0:
             print(f"  Structured DB:       in sync ({report.papers_in_db} rows)")
         else:
@@ -742,6 +741,7 @@ def _render_model_and_index_health(ctx: dict) -> None:
             if report.extra:   parts.append(f"{len(report.extra)} extra")
             if report.stale:   parts.append(f"{len(report.stale)} stale")
             if report.moved:   parts.append(f"{len(report.moved)} moved")
+            if report.invalid: parts.append(f"{len(report.invalid)} invalid (repair YAML)")
             print(f"  Structured DB:       drift — {', '.join(parts)} "
                   f"(run `researchwiki lint --fix` or `db rebuild`)")
     except Exception as e:

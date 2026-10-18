@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS claims (
     numeric_tokens       TEXT,         -- JSON array of strings
     numeric_unmatched    TEXT,         -- JSON array; subset of numeric_tokens not found in PDF
     last_graded_at       INTEGER,
+    source_pdf_sha256    TEXT,
     UNIQUE(paper_stem, section, position),
     UNIQUE(paper_stem, claim_slug)
 );
@@ -255,3 +256,21 @@ CREATE TABLE IF NOT EXISTS cross_paper_judgements (
 CREATE INDEX IF NOT EXISTS idx_cpj_judged_at ON cross_paper_judgements(judged_at);
 CREATE INDEX IF NOT EXISTS idx_cpj_src_stem  ON cross_paper_judgements(src_stem);
 CREATE INDEX IF NOT EXISTS idx_cpj_tgt_stem  ON cross_paper_judgements(tgt_stem);
+
+-- SHA-256 of each PDF, keyed by resolved path and validated against the file's
+-- size, mtime and inode. Claim freshness compares every claim's recorded source
+-- hash with its PDF on every query; re-reading `papers/` each time is gigabytes,
+-- and on a synced folder with cloud-only files it forces each PDF to download.
+--
+-- Freshness checks on read paths only. A stat mismatch is a miss, so a replaced
+-- PDF is re-hashed; writers that must be certain (grade persistence, PDF index
+-- builds, rebuild's grade invalidation) still hash the bytes. Disposable: a
+-- deleted row is just one re-hash.
+CREATE TABLE IF NOT EXISTS pdf_hashes (
+    path      TEXT PRIMARY KEY,
+    size      INTEGER NOT NULL,
+    mtime_ns  INTEGER NOT NULL,
+    inode     INTEGER NOT NULL,
+    sha256    TEXT NOT NULL,
+    hashed_at INTEGER NOT NULL        -- epoch seconds
+);

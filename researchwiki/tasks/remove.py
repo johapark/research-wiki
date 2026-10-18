@@ -44,7 +44,7 @@ import json
 import sys
 
 from ..log import append_log_md
-from ..mutation import mutation
+from ..mutation import mutation, corpus_lock, recover_pending
 from ..removal import apply as apply_removal, scan
 
 
@@ -156,12 +156,21 @@ def main(argv: list[str]) -> int:
         return 0
 
     try:
-        with mutation(
-            plan.touched_paths, operation="remove",
-            details={"stem": plan.stem},
-        ) as snap:
-            res = apply_removal(plan, keep_pdf=args.keep_pdf)
-            snap.mark_committed()
+        with corpus_lock():
+            recover_pending()
+            plan = scan(args.stem)
+            with mutation(
+                plan.touched_paths, operation="remove",
+                details={"stem": plan.stem, "repair_projections": True},
+            ) as snap:
+                res = apply_removal(plan, keep_pdf=args.keep_pdf, sync_db=False)
+                snap.mark_committed()
+                try:
+                    snap.reconcile()
+                    res.db_rows_deleted = plan.db_rows
+                    res.edges_deleted = plan.edge_count
+                except Exception as exc:
+                    res.warnings.append(f"projection repair pending; journal retained: {exc}")
     except Exception as e:
         print(f"researchwiki remove: failed, rolled back: {e}", file=sys.stderr)
         return 2

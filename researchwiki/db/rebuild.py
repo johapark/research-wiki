@@ -23,6 +23,7 @@ edits made outside the package (hand edits, git operations).
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ from pathlib import Path
 import yaml
 
 from ..paths import papers_dir, wiki_dir
+from ..fsatomic import file_sha256
 from ..claim_graph.slug import (
     SLUG_SCHEME_VERSION,
     compute_claim_slug,
@@ -296,6 +298,22 @@ def _upsert_claims(conn: sqlite3.Connection, page: Page) -> int:
     fresh = list(_parse_claims(page))
     fresh_keys = {(c.section, c.position) for c in fresh}
 
+    # Clear grades only on positive proof of a different source. A legacy grade
+    # with no recorded hash, or a PDF that is momentarily absent (a synced
+    # `papers/` offline), stays in place; claim retrieval already withholds it
+    # as unverified, and `grade regression` still needs it as the baseline.
+    pdf = papers_dir() / f"{page.stem}.pdf"
+    digest = file_sha256(pdf) if pdf.is_file() else None
+    if digest is not None:
+        conn.execute(
+            "UPDATE claims SET last_graded_at=NULL, bm25_top1=NULL, bm25_top3_mean=NULL, "
+            "bm25_top1_chunk_id=NULL, supporting_text=NULL, supporting_provenance=NULL, "
+            "semantic_score=NULL, embed_model=NULL, negation_mismatch=NULL, "
+            "numeric_tokens=NULL, numeric_unmatched=NULL, source_pdf_sha256=NULL "
+            "WHERE paper_stem=? AND last_graded_at IS NOT NULL "
+            "AND source_pdf_sha256 IS NOT NULL AND source_pdf_sha256 != ?",
+            (page.stem, digest),
+        )
     existing = {
         (r["section"], r["position"]): r["text"]
         for r in conn.execute(
@@ -352,6 +370,8 @@ def _upsert_claims(conn: sqlite3.Connection, page: Page) -> int:
                        bm25_top3_mean = NULL,
                        bm25_top1_chunk_id = NULL,
                        supporting_text = NULL,
+                       supporting_provenance = NULL,
+                       source_pdf_sha256 = NULL,
                        semantic_score = NULL,
                        embed_model = NULL,
                        negation_mismatch = NULL,
@@ -480,54 +500,69 @@ def delete_page(stem: str) -> bool:
         conn.close()
 
 
-def rebuild(verbose: bool = False) -> RebuildStats:
+def _rebuild_locked(verbose: bool = False) -> RebuildStats:
     """Walk wiki/ + papers/ and rewrite the DB index. Returns stats."""
     stats = RebuildStats()
     now_ts = int(time.time())
     seen: set[str] = set()
 
-    conn = get_connection()
     root = wiki_dir()
     if not root.exists():
         return stats
+    conn = get_connection()
 
-    with conn:
-        # Persist the slug scheme version. Rebuild is the right place: it's
-        # the atomic point at which every claim's slug is recomputed under
-        # the current scheme. `claim-graph reconcile` reads this to decide
-        # whether cached edges should be marked stale.
-        conn.execute(
-            "INSERT INTO schema_meta (key, value) VALUES (?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            ("slug_scheme_version", str(SLUG_SCHEME_VERSION)),
-        )
+    try:
+        with conn:
+            # Persist the slug scheme version. Rebuild is the right place: it's
+            # the atomic point at which every claim's slug is recomputed under
+            # the current scheme. `claim-graph reconcile` reads this to decide
+            # whether cached edges should be marked stale.
+            conn.execute(
+                "INSERT INTO schema_meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                ("slug_scheme_version", str(SLUG_SCHEME_VERSION)),
+            )
 
-        for md in sorted(root.rglob("*.md")):
-            if _is_meta_page(md, root):
-                continue
-            stats.pages_scanned += 1
-            page, n_claims = _upsert_one(conn, md, now_ts)
-            if page is None:
-                stats.parse_errors.append(str(md))
-                continue
-            seen.add(page.stem)
-            stats.papers_upserted += 1
-            stats.claims_upserted += n_claims
-            if verbose:
-                page_type = page.fm.get("type", "paper") if isinstance(page.fm, dict) else "paper"
-                tail = f"({n_claims} claims)" if page_type == "paper" else f"(page_type={page_type})"
-                print(f"  + {page.category}/{page.stem}  {tail}")
+            def scan_error(error):
+                raise error
+            markdown = [Path(folder) / name
+                        for folder, dirs, names in os.walk(root, onerror=scan_error)
+                        for name in names if name.endswith(".md")]
+            for md in sorted(markdown):
+                if _is_meta_page(md, root):
+                    continue
+                stats.pages_scanned += 1
+                seen.add(md.stem)  # Presence, not successful parsing, controls deletion.
+                page, n_claims = _upsert_one(conn, md, now_ts)
+                if page is None:
+                    stats.parse_errors.append(str(md))
+                    continue
+                seen.add(page.stem)
+                stats.papers_upserted += 1
+                stats.claims_upserted += n_claims
+                if verbose:
+                    page_type = page.fm.get("type", "paper") if isinstance(page.fm, dict) else "paper"
+                    tail = f"({n_claims} claims)" if page_type == "paper" else f"(page_type={page_type})"
+                    print(f"  + {page.category}/{page.stem}  {tail}")
 
-        # Deletion detection: drop papers (and their claims via CASCADE) that
-        # exist in the DB but not in the current walk.
-        existing = {r["stem"] for r in conn.execute("SELECT stem FROM papers")}
-        gone = existing - seen
-        if gone:
-            conn.executemany("DELETE FROM papers WHERE stem = ?", [(s,) for s in gone])
-            stats.papers_deleted = len(gone)
-            if verbose:
-                for s in sorted(gone):
-                    print(f"  - {s}")
+            # Deletion detection: drop papers (and their claims via CASCADE) that
+            # exist in the DB but not in the current walk.
+            existing = {r["stem"] for r in conn.execute("SELECT stem FROM papers")}
+            gone = existing - seen
+            if gone:
+                conn.executemany("DELETE FROM papers WHERE stem = ?", [(s,) for s in gone])
+                stats.papers_deleted = len(gone)
+                if verbose:
+                    for s in sorted(gone):
+                        print(f"  - {s}")
 
-    conn.close()
+    finally:
+        conn.close()
     return stats
+
+
+def rebuild(verbose: bool = False) -> RebuildStats:
+    """Reconcile a committed corpus snapshot; never scan half-landed files."""
+    from ..mutation import corpus_lock
+    with corpus_lock():
+        return _rebuild_locked(verbose)

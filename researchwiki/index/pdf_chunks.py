@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +27,8 @@ import numpy as np
 import tantivy
 
 from ..paths import grade_cache_dir, resolve_pdf
+from ..fsatomic import exclusive_lock, file_sha256, write_json_atomic
+from .bundle import load_bundle, save_bundle
 from ..pdf.sections import section_for_offset, section_spans
 from ..pdf.text import (
     PAGE_SEPARATOR,
@@ -186,12 +190,41 @@ def _read_index_version(idx_dir: Path) -> int:
         return 1
 
 
-def _write_index_meta(idx_dir: Path) -> None:
-    (idx_dir / INDEX_META_FILENAME).write_text(
-        json.dumps({"cache_version": CACHE_VERSION}), encoding="utf-8"
-    )
+def _index_metadata(idx_dir: Path) -> dict:
+    try:
+        metadata = json.loads((idx_dir / INDEX_META_FILENAME).read_text(encoding="utf-8"))
+        return metadata if isinstance(metadata, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
+def _write_index_meta(idx_dir: Path, source: Path | None = None, digest: str | None = None) -> None:
+    write_json_atomic(idx_dir / INDEX_META_FILENAME, {
+        "cache_version": CACHE_VERSION, "source_path": str(source.resolve()) if source else None,
+        "source_pdf_sha256": digest,
+    })
+
+
+def _source(stem: str) -> Path:
+    try:
+        return resolve_pdf(stem)
+    except FileNotFoundError:
+        source = _index_metadata(_index_path_for(stem)).get("source_path")
+        if isinstance(source, str) and source:
+            return Path(source)
+        raise
+
+
+def _locked(function):
+    from functools import wraps
+    @wraps(function)
+    def call(stem, *args, **kwargs):
+        with exclusive_lock(_index_path_for(stem)):
+            return function(stem, *args, **kwargs)
+    return call
+
+
+@_locked
 def build_pdf_index(
     stem: str,
     force: bool = False,
@@ -199,8 +232,8 @@ def build_pdf_index(
 ) -> Path:
     """Build (or reuse) the chunk index for a single paper.
 
-    Returns the index directory. Idempotent: if the index already exists and
-    `force` is False, returns immediately.
+    Returns the index directory. Reuses a complete index only when its cache
+    version and source PDF hash match; otherwise stages a fresh index.
 
     Args:
       stem: identifier for the index directory (.grade-cache/{stem}/).
@@ -210,19 +243,17 @@ def build_pdf_index(
                 Pass an explicit path to grade a draft against a PDF that
                 lives elsewhere (e.g. still in inbox/).
     """
-    idx_dir = _index_path_for(stem)
-    # A stale-format index is rebuilt, not reused: the early return below is
-    # what would otherwise leave every pre-existing index without the
-    # provenance fields, silently and with no error.
-    stale = idx_dir.exists() and _read_index_version(idx_dir) != CACHE_VERSION
-    if idx_dir.exists() and not force and not stale:
-        return idx_dir
-    if idx_dir.exists():
-        shutil.rmtree(idx_dir)
-
-    src = Path(pdf_path) if pdf_path is not None else resolve_pdf(stem)
-    if not src.exists():
+    target = _index_path_for(stem)
+    src = Path(pdf_path) if pdf_path is not None else _source(stem)
+    if not src.is_file():
         raise FileNotFoundError(f"PDF not found: {src}")
+    digest = file_sha256(src)
+    meta = _index_metadata(target)
+    if (not force and meta.get("cache_version") == CACHE_VERSION
+            and meta.get("source_pdf_sha256") == digest
+            and (target / ".managed.json").exists()
+            and _opens(target)):
+        return target
     pdf_path = src
     pages = extract_pdf_page_texts(pdf_path, max_pages=MAX_PDF_PAGES)
     text = PAGE_SEPARATOR.join(pages)
@@ -232,81 +263,120 @@ def build_pdf_index(
     if not chunks:
         raise RuntimeError(f"No chunks extracted from {pdf_path}; PDF may be unparseable.")
 
-    idx_dir.mkdir(parents=True, exist_ok=True)
-    schema = _build_schema()
-    index = tantivy.Index(schema, path=str(idx_dir))
-    writer = index.writer(heap_size=15_000_000)
-    for ch in chunks:
-        doc = tantivy.Document()
-        doc.add_unsigned("chunk_id", ch.chunk_id)
-        doc.add_text("text", ch.text)
-        # Tantivy has no null: a page we couldn't place is simply absent from
-        # the document, and `_stored` reads it back as None.
-        if ch.page_start:
-            doc.add_unsigned("page_start", ch.page_start)
-        if ch.page_end:
-            doc.add_unsigned("page_end", ch.page_end)
-        if ch.section:
-            doc.add_text("section", ch.section)
-        writer.add_document(doc)
-    writer.commit()
-    writer.wait_merging_threads()
-    _write_index_meta(idx_dir)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    idx_dir = Path(tempfile.mkdtemp(prefix=f".{stem}-", dir=target.parent))
+    try:
+        schema = _build_schema()
+        index = tantivy.Index(schema, path=str(idx_dir))
+        writer = index.writer(heap_size=15_000_000)
+        for ch in chunks:
+            doc = tantivy.Document()
+            doc.add_unsigned("chunk_id", ch.chunk_id)
+            doc.add_text("text", ch.text)
+            # Tantivy has no null: a page we couldn't place is simply absent from
+            # the document, and `_stored` reads it back as None.
+            if ch.page_start:
+                doc.add_unsigned("page_start", ch.page_start)
+            if ch.page_end:
+                doc.add_unsigned("page_end", ch.page_end)
+            if ch.section:
+                doc.add_text("section", ch.section)
+            writer.add_document(doc)
+        writer.commit()
+        writer.wait_merging_threads()
+        del writer, index  # Close native handles before directory replacement.
 
-    # Embedding cache built alongside the BM25 index. Failures are non-fatal:
-    # if the embedding model isn't installed, BM25 retrieval still works and
-    # the semantic scorer will report unavailable.
-    _build_embeddings_cache(idx_dir, [c.text for c in chunks])
-    return idx_dir
+        # Embedding cache built alongside the BM25 index. Failures are non-fatal:
+        # if the embedding model isn't installed, BM25 retrieval still works and
+        # the semantic scorer will report unavailable.
+        _build_embeddings_cache(idx_dir, [c.text for c in chunks])
+        if file_sha256(src) != digest:
+            shutil.rmtree(idx_dir, ignore_errors=True)
+            raise RuntimeError(f"PDF changed while indexing: {src}")
+        _write_index_meta(idx_dir, src, digest)
+        _swap_in(idx_dir, target)
+        return target
+    finally:
+        shutil.rmtree(idx_dir, ignore_errors=True)
+
+
+def _opens(idx_dir: Path) -> bool:
+    """Can Tantivy open every segment the index lists? A missing one is a miss.
+
+    The markers say a build *finished*, not that its files are still there —
+    an index damaged by an earlier crash (or a hand-pruned cache) keeps them.
+    Opening a searcher reads each segment's files, so this is the cheapest check
+    that catches what would otherwise surface as a `FileDoesNotExist` on the
+    first query, with the stem broken until `--rebuild-index`.
+    """
+    try:
+        index = tantivy.Index.open(str(idx_dir))
+        index.reload()
+        index.searcher()
+        return True
+    except Exception:
+        return False
+
+
+def _swap_in(staged: Path, target: Path) -> None:
+    """Publish `staged` at `target` so a crash leaves old, new, or nothing.
+
+    `shutil.rmtree(target)` deletes entries in directory-listing order, so a
+    crash part-way could keep `index_meta.json` and `.managed.json` while the
+    segment files were gone — a directory that passed the reuse check and then
+    failed every query. The old index is first *renamed* aside (one atomic
+    step), so `target` is either the old complete index or absent, never a
+    partial one; only then is the retired copy deleted.
+    """
+    retired = None
+    if target.exists():
+        retired = target.with_name(f".{target.name}-retired-{secrets.token_hex(6)}")
+        target.replace(retired)
+    staged.replace(target)
+    if retired is not None:
+        shutil.rmtree(retired, ignore_errors=True)
 
 
 def _build_embeddings_cache(idx_dir: Path, chunk_texts: list[str]) -> None:
     """Embed the chunks and persist alongside the Tantivy index.
 
-    Stores the embedding matrix (float32, L2-normalized) plus a sidecar
-    metadata JSON with model name, dim, and chunk texts so the scorer can
-    reload everything in one pass. Silent no-op if the embedding backend is
+    Stores the embedding matrix and model/dimension/chunk-text metadata in
+    one atomic NumPy bundle. Silent no-op if the embedding backend is
     unavailable — semantic.is_available() is the canonical probe.
     """
     from . import embeddings as semantic
     embs = semantic.embed_texts(chunk_texts)
     if embs is None or embs.size == 0:
         return
-    np.save(idx_dir / EMBEDDINGS_FILENAME, embs)
-    meta = {
-        "model": semantic.DEFAULT_MODEL,
-        "dim": int(embs.shape[1]),
-        "n_chunks": int(embs.shape[0]),
-        "chunk_texts": chunk_texts,
-    }
-    (idx_dir / EMBEDDINGS_META_FILENAME).write_text(json.dumps(meta), encoding="utf-8")
+    save_bundle(idx_dir / "embeddings.npz", embs, {
+        "model": semantic.DEFAULT_MODEL, "dim": int(embs.shape[1]),
+        "rows": [{"text": text} for text in chunk_texts],
+    })
 
 
-def get_chunk_embeddings(stem: str) -> tuple[np.ndarray, list[str]] | None:
+@_locked
+def get_chunk_embeddings(
+    stem: str, pdf_path: Path | str | None = None,
+) -> tuple[np.ndarray, list[str]] | None:
     """Return (embeddings, chunk_texts) for a paper. Builds on demand if
     the cache is missing. Returns None if the index can't be built or the
     embedding model is unavailable.
+
+    `pdf_path` must match the one the index was built from (see `query_pdf`).
     """
-    idx_dir = _index_path_for(stem)
-    if not idx_dir.exists():
-        try:
-            build_pdf_index(stem)
-        except Exception:
-            return None
-    emb_path = idx_dir / EMBEDDINGS_FILENAME
-    meta_path = idx_dir / EMBEDDINGS_META_FILENAME
-    if not emb_path.exists() or not meta_path.exists():
-        # Index pre-dates the embedding cache; rebuild just the embeddings
-        # in-place so callers don't have to drop the whole Tantivy index.
-        chunk_texts = _read_cached_chunk_texts(idx_dir)
-        if chunk_texts is None:
-            return None
-        _build_embeddings_cache(idx_dir, chunk_texts)
-        if not emb_path.exists():
-            return None
-    embs = np.load(emb_path)
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    return embs, list(meta.get("chunk_texts") or [])
+    from . import embeddings as semantic
+    try:
+        idx_dir = build_pdf_index(stem, pdf_path=pdf_path)
+        loaded = load_bundle(idx_dir / "embeddings.npz", semantic.DEFAULT_MODEL, row_fields=("text",))
+        if loaded is None:
+            texts = _read_cached_chunk_texts(idx_dir)
+            if texts is None:
+                return None
+            _build_embeddings_cache(idx_dir, texts)
+            loaded = load_bundle(idx_dir / "embeddings.npz", semantic.DEFAULT_MODEL, row_fields=("text",))
+        return (loaded[0], [r["text"] for r in loaded[1]["rows"]]) if loaded else None
+    except (OSError, RuntimeError):
+        return None
 
 
 def _read_cached_chunk_texts(idx_dir: Path) -> list[str] | None:
@@ -353,15 +423,19 @@ def _neutralize_operators(query: str) -> str:
     return _BOOLEAN_PREFIX_RE.sub(r"\1", query)
 
 
-def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT) -> list[RetrievedChunk]:
-    """Run a BM25 query against the paper's chunk index. Returns top-k chunks."""
+@_locked
+def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT,
+              pdf_path: Path | str | None = None) -> list[RetrievedChunk]:
+    """Run a BM25 query against the paper's chunk index. Returns top-k chunks.
+
+    `pdf_path` names the PDF the index must reflect. Pass the same override
+    given to `build_pdf_index`: the index is revalidated by source hash on
+    every query, and without it the canonical `papers/{stem}.pdf` is assumed —
+    so a draft graded against an incoming PDF would be silently re-indexed
+    from the old canonical one and retrieve from the wrong text.
+    """
     query = _neutralize_operators(query)
-    idx_dir = _index_path_for(stem)
-    # `build_pdf_index` also rebuilds a stale-format index, so calling it
-    # whenever the version doesn't match is what backfills provenance onto
-    # indexes written before it existed.
-    if not idx_dir.exists() or _read_index_version(idx_dir) != CACHE_VERSION:
-        build_pdf_index(stem)
+    idx_dir = build_pdf_index(stem, pdf_path=pdf_path)
     index = tantivy.Index.open(str(idx_dir))
     index.reload()
     searcher = index.searcher()

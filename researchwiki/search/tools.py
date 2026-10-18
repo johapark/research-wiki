@@ -23,6 +23,7 @@ import re
 import sqlite3
 
 from ..db.connection import get_connection
+from .freshness import current_rows
 from ..index.pdf_chunks import build_pdf_index, query_pdf
 
 
@@ -115,7 +116,7 @@ def claims_by_stem(stem: str, *, include_context: bool = False) -> list[dict]:
             """
             SELECT id, paper_stem, section, position, text, claim_slug,
                    semantic_score, bm25_top1, bm25_top1_chunk_id,
-                   supporting_text, supporting_provenance, last_graded_at
+                   supporting_text, supporting_provenance, last_graded_at, source_pdf_sha256, numeric_unmatched
               FROM claims
              WHERE paper_stem = ? AND is_cross_ref = 0
              ORDER BY
@@ -128,6 +129,7 @@ def claims_by_stem(stem: str, *, include_context: bool = False) -> list[dict]:
             """,
             (stem,),
         ).fetchall()
+        rows = current_rows(conn, rows)
     finally:
         conn.close()
     out = []
@@ -138,6 +140,7 @@ def claims_by_stem(stem: str, *, include_context: bool = False) -> list[dict]:
             "section": r["section"],
             "position": r["position"],
             "text": r["text"],
+            "checks": r["checks"],
             "semantic_score": r["semantic_score"],
             "bm25_top1": r["bm25_top1"],
             "pdf_anchor_chunk_id": r["bm25_top1_chunk_id"],
@@ -188,6 +191,7 @@ def claim_lookup(query: str, k: int = 5, *, include_context: bool = False) -> li
         rows = _claim_lookup_fts(conn, tokens, k)
         if rows is None:
             rows = _claim_lookup_like(conn, tokens, k)
+        rows = current_rows(conn, rows)
     finally:
         conn.close()
     out = []
@@ -198,6 +202,7 @@ def claim_lookup(query: str, k: int = 5, *, include_context: bool = False) -> li
             "section": r["section"],
             "position": r["position"],
             "text": r["text"],
+            "checks": r["checks"],
             "semantic_score": r["semantic_score"],
             "bm25_top1": r["bm25_top1"],
             "pdf_anchor_chunk_id": r["bm25_top1_chunk_id"],
@@ -223,7 +228,7 @@ def _claim_lookup_fts(conn, tokens: list[str], k: int):
     sql = """
         SELECT c.id, c.paper_stem, c.section, c.position, c.text, c.claim_slug,
                c.semantic_score, c.bm25_top1, c.bm25_top1_chunk_id,
-               c.supporting_text, c.supporting_provenance,
+               c.supporting_text, c.supporting_provenance, c.last_graded_at, c.source_pdf_sha256, c.numeric_unmatched,
                -bm25(claims_fts) AS match_score
         FROM claims_fts
         JOIN claims c ON c.id = claims_fts.rowid
@@ -258,7 +263,7 @@ def _claim_lookup_like(conn, tokens: list[str], k: int):
     sql = f"""
         SELECT id, paper_stem, section, position, text, claim_slug,
                semantic_score, bm25_top1, bm25_top1_chunk_id,
-               supporting_text, supporting_provenance,
+               supporting_text, supporting_provenance, last_graded_at, source_pdf_sha256, numeric_unmatched,
                ({like_clauses}) AS match_score
         FROM claims
         WHERE is_cross_ref = 0 AND ({like_clauses}) > 0

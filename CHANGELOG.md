@@ -20,8 +20,18 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-18
+
+> **After upgrading:** run `researchwiki grade regression` once. Claim grades now
+> record the SHA-256 of the PDF they were scored against, and grades written by an
+> earlier release have none. They are kept, and stay the regression baseline, but
+> claim retrieval and both page gates treat them as unverified until re-graded.
+> `grade regression --missing-only` does not select them, because they still count
+> as graded. Grading makes no model calls.
+
 ### Added
 
+- Grading and claim JSON include `checks` distinguishing source freshness, retrieval/numeric checks, and requested/completed entailment verification. Existing verdicts and opt-in model-call defaults remain unchanged.
 - Fixed H2 structure for synthesis pages — `Question` → `Short answer` → `Background` → `Organizing framework` → `Findings` → `Cross-cutting insights` → `Tensions / open questions` → `Outlook` → `References`. `synthesize` scaffolds it, and `lint --json` gains `synthesis_contract_violations` (advisory) to check it: missing or misordered sections, unexpected H2s, a `Findings` with no themes, source labels outside `Outlook`, undefined footnotes. A page in the old shape reports one `synthesis_legacy_spine` finding rather than one per section. Procedure in `prompts/synthesis-page-author.md`, which absorbs the old citation-format file and is also what the `synthesis-page` Claude Code skill reads.
 - `lint --json` key `undefined_footnote_refs`: pages citing a `[^id]` with no definition line. Both page gates under-report this — `check-grounding` fails a unit only when the undefined footnote is its *sole* citation, so a paragraph citing `[^a][^b]` with `b` undefined passes, and `grade synthesis` then grades it against `a` alone and reports no unresolved citation. Both gates go green while a paper's worth of claims was never checked. Advisory.
 - `lint --json` key `crosslink_impossible_citations`: *Related Papers* bullets whose citation direction the two pages' `year:` fields rule out — a `cites this paper` bullet whose target is the older paper, or `cited by this paper` whose target is newer. This is the one part of the cross-link corollary checkable without opening a PDF, and no other check sees a bullet's claim: `missing_backlinks` is satisfied by its presence and both gates parse paragraphs. 177 findings on the current corpus; three spot-checks confirmed the older paper's PDF never mentions the newer one. Advisory.
@@ -36,6 +46,20 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Agent ingest no longer writes `senior_authors:`. It was inferred from author order (last one or two authors), which does not establish senior authorship; the field stays available for a source-verified manual edit and `db papers --author` still searches it.
+- Promotion validates the previous DOI before replacing a page, preserves its canonical category, and defers database/backlink projections until file commit. Removal also defers derived deletions; failed file writes preserve previous rows and grades.
+- Rebuild preserves records for present but malformed pages and reports them as invalid. Claim retrieval withholds malformed, removed, or edited claims and stale PDF evidence.
+- PDF chunk caches and grades record source hashes; same-stem PDF replacement invalidates old evidence. Embedding caches validate model identity and publish matrices with metadata in atomic NumPy bundles. Legacy cache pairs rebuild on demand.
+- Reindex and database rebuild share the corpus mutation guard. Empty rebuilds clear search hits, and skipped semantic maintenance marks the view unavailable. Existing committed journals survive failed projection repair and reconcile current files on retry without model calls.
+- Rebuild and page upserts clear a claim's grade only when its recorded source hash differs from a present PDF. Grades written before hashes were recorded, and grades whose PDF is temporarily absent, are kept; claim retrieval still withholds them as unverified until `grade regression` re-grades them, and they remain its drift baseline. Previously the first `db rebuild` after upgrading erased every existing grade.
+- Promote and remove keep the page-semantic index available. Their reconciliation drops rows for removed pages and outdated text instead of marking the whole index stale, which had switched semantic search and cross-link KNN off until the next reindex.
+- `db verify` (and so `lint --fix` and journal reconciliation) refuses an incomplete scan — a missing `wiki/`, an offline synced folder, an unreadable subdirectory — rather than reporting every unseen page as deleted and removing its rows.
+- Draft grading against an incoming PDF (re-ingest, preprint→journal upgrade) scores that PDF again. Each per-claim chunk query revalidated its index against `papers/{stem}.pdf`, so with the old PDF still there the draft was re-indexed from it and graded against text it was never written from — and the index was rebuilt twice per draft.
+- One page with a blank `type:` or an unquoted numeric `title:` no longer disables the page-semantic index. The row stored YAML's `None`/int verbatim and the bundle loader rejects any non-string row field, so `index_exists()` went false for every caller and each later upsert re-embedded the whole corpus; a numeric title crashed the build outright. Both are now stored as strings, a blank type as `paper`.
+- A PDF chunk index left half-deleted by a crash is rebuilt instead of reused. Replacement deleted the old index in place, so a crash part-way could keep its readiness markers while its segment files were gone, and every query on that paper then failed with `FileDoesNotExist` until a forced rebuild. The old index is now renamed aside before deletion, and reuse also requires the index to open.
+- Page embeddings are computed outside the corpus mutation lock and published under it. `reindex`, and the page refresh after each ingest, held the lock through the whole embedding pass, blocking concurrent promotes, `db rebuild` and grade persistence for its duration. Vectors are keyed by the text they encode, so a page edited mid-embedding is re-embedded under the lock rather than published with a vector for its old text.
+- Reference-list citation checks (`claim-overlap`'s Related Papers gate and promote's citation-kind upgrade) match a surname as a whole word. A substring search let `li` match Williams, Kline or "public"; across 40 sampled reference lists it roughly halved the matches, and none dropped for a surname of six letters or more. A hyphenated slug now also matches a name printed with a space.
+- `check-grounding` and `grade synthesis` withhold claim anchors from a page with invalid frontmatter or edited claim text, matching claim retrieval. Claim-freshness checks read PDF hashes from a new `pdf_hashes` state-DB table, validated against each file's size, mtime and inode, instead of re-reading every PDF (gigabytes, or a cloud download per file) on each query. Writers still hash the bytes.
 - `grade synthesis` ignores links to the wiki's own authored pages (`synthesis/`, `ideas/`, `proposals/`, `concepts/`) when resolving a unit's sources: those are cross-references, not premises. `references/` documents still count, since each has a real PDF. Without this a see-also link to a sibling synthesis page made an inference `inference_ungradable` even with three cited papers behind it.
 - `grade synthesis` fails an `*(inference)*` unit if any cited premise lacks readable PDF text (`inference_ungradable` verdict, exit 1). The label asserts the conclusion follows from every paper cited *and* suppresses the retrieval and negation checks, so one missing or unreadable source previously left the inference uncheckable while both required gates passed. Plain `uncited` prose stays advisory — it asserts no provenance, and a scope sentence pointing at a sibling synthesis page is legitimate.
 - `check-coverage` no longer dies with an internal error (exit 3) on a draft page outside `wiki/`, so recall can be reviewed before a page is landed.
@@ -2456,7 +2480,8 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/johapark/research-wiki/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/johapark/research-wiki/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/johapark/research-wiki/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/johapark/research-wiki/compare/v0.4.5...v0.5.0

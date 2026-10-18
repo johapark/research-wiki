@@ -29,7 +29,7 @@ from ..search import format_claim_ref
 from ..fsatomic import update_locked, write_text_atomic
 from ..wiki import commit_page, find_stem_collision, read_page, read_pages, strip_non_prose
 # Reuse the synthesis scaffolder's slug + dominant-category helpers.
-from ..tasks.synthesize import _dominant_category, _slugify
+from ..page_naming import dominant_category as _dominant_category, page_slug as _slugify
 from .semantic_members import semantic_member_candidates, suggested_alias_set
 from .term_claims import (
     _matching_claims,

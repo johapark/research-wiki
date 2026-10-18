@@ -28,6 +28,7 @@ from ...index.pdf_chunks import build_pdf_index, query_pdf, get_chunk_embeddings
 from ...index import embeddings as semantic_mod
 from ...pdf.sections import anchor_sections
 from ..salience import SalienceReport, score_salience
+from ..checks import entailment_check
 
 try:
     from ...db.connection import get_connection as _db_connection
@@ -69,7 +70,15 @@ class ClaimScore:
     graded: bool                   # False if cross-ref (skipped)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        result = asdict(self)
+        result["checks"] = {
+            "source_freshness": "checked_on_read",
+            "retrieval": "completed" if self.graded else "not_checked",
+            "numeric": ("failed" if self.numeric_unmatched else "passed")
+                       if self.graded and self.top1_chunk_id >= 0 else "not_checked",
+            "entailment": entailment_check({}),
+        }
+        return result
 
 
 @dataclass
@@ -94,10 +103,19 @@ class PaperFidelityReport:
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["claims"] = [c.to_dict() for c in self.claims]
+        d["checks"] = {
+            "source_freshness": "checked_on_read",
+            "retrieval": "completed" if self.n_graded else "not_checked",
+            "numeric": ("failed" if self.n_with_numeric_drift else
+                        "incomplete" if any(c.graded and c.top1_chunk_id < 0 for c in self.claims)
+                        else "passed" if self.n_graded else "not_checked"),
+            "entailment": entailment_check({}),
+        }
         return d
 
 
-def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool) -> ClaimScore:
+def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool,
+                 pdf_path: Path | None = None) -> ClaimScore:
     if claim.is_cross_ref:
         return ClaimScore(
             section=claim.section,
@@ -116,7 +134,7 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
             graded=False,
         )
 
-    hits = query_pdf(stem, claim.text, topk=5)
+    hits = query_pdf(stem, claim.text, topk=5, pdf_path=pdf_path)
     if not hits:
         return ClaimScore(
             section=claim.section,
@@ -152,14 +170,14 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
         # the prior NLI path: multi-aspect claims have evidence spread across
         # multiple chunks). The bi-encoder's max-over-chunks aggregation makes
         # this safe; irrelevant chunks just don't move the max.
-        sem_hits = query_pdf(stem, claim.text, topk=10)
+        sem_hits = query_pdf(stem, claim.text, topk=10, pdf_path=pdf_path)
         if sem_hits:
             chunk_texts = [h.text for h in sem_hits]
             # If the per-PDF embedding cache is populated and the chunk_id ↔
             # text mapping matches, reuse the cached embeddings for the
             # retrieved chunks. Otherwise fall back to embedding the chunks
             # ad-hoc inside score_claim — slower but correct.
-            cached = get_chunk_embeddings(stem)
+            cached = get_chunk_embeddings(stem, pdf_path=pdf_path)
             chunk_embs = None
             if cached is not None:
                 cache_embs, cache_texts = cached
@@ -191,7 +209,8 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
     )
 
 
-def _persist_scores(stem: str, scored: list[ClaimScore], *, embed_model: str | None) -> None:
+def _persist_scores(stem: str, scored: list[ClaimScore], *, embed_model: str | None,
+                    pdf_digest: str | None = None) -> None:
     """Update grader-output columns on existing claims rows.
 
     The rows themselves come from `db rebuild`. We don't INSERT here — if
@@ -207,47 +226,60 @@ def _persist_scores(stem: str, scored: list[ClaimScore], *, embed_model: str | N
     import time as _time
     if not scored:
         return
-    try:
-        conn = _db_connection()
-    except Exception:
-        return
-    now = int(_time.time())
-    with conn:
-        for s in scored:
-            conn.execute(
-                """
-                UPDATE claims
-                SET bm25_top1 = ?,
-                    bm25_top3_mean = ?,
-                    bm25_top1_chunk_id = ?,
-                    supporting_text = ?,
-                    supporting_provenance = ?,
-                    semantic_score = ?,
-                    embed_model = ?,
-                    negation_mismatch = ?,
-                    numeric_tokens = ?,
-                    numeric_unmatched = ?,
-                    last_graded_at = ?
-                WHERE paper_stem = ? AND section = ? AND position = ?
-                """,
-                (
-                    s.top1_score if s.graded else None,
-                    s.top3_mean if s.graded else None,
-                    s.top1_chunk_id if s.graded and s.top1_chunk_id >= 0 else None,
-                    s.supporting_text if s.graded and s.supporting_text else None,
-                    s.supporting_provenance if s.graded and s.supporting_provenance else None,
-                    s.semantic_score,
-                    embed_model if s.semantic_score is not None else None,
-                    1 if s.negation_mismatch else 0,
-                    _json.dumps(s.numeric_tokens) if s.numeric_tokens else None,
-                    _json.dumps(s.numeric_unmatched) if s.numeric_unmatched else None,
-                    now,
-                    stem,
-                    s.section,
-                    s.position,
-                ),
-            )
-    conn.close()
+    from ...mutation import corpus_lock
+    from ...fsatomic import file_sha256
+    with corpus_lock():
+        if pdf_digest is not None:
+            current = _resolve_page(stem)
+            fresh = {(c.section, c.position): c.text for c in parse_claims(current)}
+            if (file_sha256(resolve_pdf(stem)) != pdf_digest or not current.fm
+                    or any(fresh.get((c.section, c.position)) != c.text for c in scored)):
+                raise RuntimeError(f"Source changed before persisting grades: {stem}")
+        try:
+            conn = _db_connection()
+        except Exception:
+            return
+        now = int(_time.time())
+        try:
+            with conn:
+                for s in scored:
+                    conn.execute(
+                        """
+                        UPDATE claims
+                        SET bm25_top1 = ?,
+                            bm25_top3_mean = ?,
+                            bm25_top1_chunk_id = ?,
+                            supporting_text = ?,
+                            supporting_provenance = ?,
+                            semantic_score = ?,
+                            embed_model = ?,
+                            negation_mismatch = ?,
+                            numeric_tokens = ?,
+                            numeric_unmatched = ?,
+                            last_graded_at = ?, source_pdf_sha256 = ?
+                        WHERE paper_stem = ? AND section = ? AND position = ? AND text = ?
+                        """,
+                        (
+                            s.top1_score if s.graded else None,
+                            s.top3_mean if s.graded else None,
+                            s.top1_chunk_id if s.graded and s.top1_chunk_id >= 0 else None,
+                            s.supporting_text if s.graded and s.supporting_text else None,
+                            s.supporting_provenance if s.graded and s.supporting_provenance else None,
+                            s.semantic_score,
+                            embed_model if s.semantic_score is not None else None,
+                            1 if s.negation_mismatch else 0,
+                            _json.dumps(s.numeric_tokens) if s.numeric_tokens else None,
+                            _json.dumps(s.numeric_unmatched) if s.numeric_unmatched else None,
+                            now,
+                            pdf_digest,
+                            stem,
+                            s.section,
+                            s.position,
+                            s.text,
+                        ),
+                    )
+        finally:
+            conn.close()
 
 
 def _resolve_page(stem: str) -> Page:
@@ -306,6 +338,8 @@ def grade_page(
     resolved_pdf = Path(pdf_path) if pdf_path is not None else resolve_pdf(stem)
 
     # Ensure the per-PDF index exists before scoring claims
+    from ...fsatomic import file_sha256
+    pdf_digest = file_sha256(resolved_pdf)
     build_pdf_index(stem, pdf_path=resolved_pdf)
 
     # Load full PDF text once for the numeric integrity fallback check
@@ -313,7 +347,8 @@ def grade_page(
 
     semantic_available = semantic and semantic_mod.is_available()
     scored: list[ClaimScore] = [
-        _score_claim(stem, c, full_pdf_text, use_semantic=semantic_available) for c in claims
+        _score_claim(stem, c, full_pdf_text, use_semantic=semantic_available,
+                     pdf_path=resolved_pdf) for c in claims
     ]
 
     graded = [s for s in scored if s.graded]
@@ -345,9 +380,6 @@ def grade_page(
 
     n_negation_mismatches = sum(1 for s in graded if s.negation_mismatch)
 
-    if persist and page_path is None and _DB_AVAILABLE:
-        _persist_scores(stem, scored, embed_model=semantic_mod.DEFAULT_MODEL if semantic else None)
-
     salience: SalienceReport | None = None
     if include_salience:
         sections = anchor_sections(full_pdf_text)
@@ -357,6 +389,12 @@ def grade_page(
             stem, full_pdf_text, sections, page.body,
             use_semantic=semantic_available,
         )
+
+    if file_sha256(resolved_pdf) != pdf_digest:
+        raise RuntimeError(f"PDF changed while grading: {resolved_pdf}")
+    if persist and page_path is None and _DB_AVAILABLE:
+        _persist_scores(stem, scored, embed_model=semantic_mod.DEFAULT_MODEL if semantic else None,
+                        pdf_digest=pdf_digest)
 
     return PaperFidelityReport(
         stem=stem,

@@ -32,7 +32,7 @@ from pathlib import Path
 
 from .. import backlinks as _bl
 from ..fsatomic import write_text_atomic
-from ..mutation import mutation as _mutation
+from ..mutation import corpus_lock, mutation as _mutation
 from ..paths import inbox_dir, papers_dir, wiki_dir
 from ..provenance import specific_author_model
 from .category_selection import suggest_category_for_page as _suggest_category
@@ -262,18 +262,6 @@ def detect_publication_status(
     return None
 
 
-def _detect_senior_authors(authors_str: str | None) -> str | None:
-    """Heuristic: senior authors are typically the LAST author plus an optional
-    second-to-last. Returns 'X' or 'X, Y' when there are at least 4 authors —
-    on shorter lists the senior/first conflation makes the field misleading."""
-    if not authors_str:
-        return None
-    parts = [a.strip() for a in authors_str.split(",") if a.strip()]
-    if len(parts) < 4:
-        return None
-    return parts[-1] if len(parts) < 6 else f"{parts[-2]}, {parts[-1]}"
-
-
 def _yaml_dq(value: str) -> str:
     """Double-quoted YAML scalar, collapsed to one line.
 
@@ -332,24 +320,13 @@ def _build_frontmatter(
     doi = metadata.get("doi") or ""
     venue = metadata.get("venue") or ""
     pub_status = metadata.get("publication_status")
-    # Skip senior-author detection when authors came from --authors override
-    # AND the user-supplied list is short — they likely truncated for
-    # convenience, and inferring "senior = last entry" would silently mislabel.
-    # When the list is long enough (≥10) it's plausibly complete.
-    authors_origin = metadata.get("authors_origin")
-    n_authors = len(authors.split(",")) if isinstance(authors, str) else 0
-    if authors_origin == "override" and n_authors < 10:
-        senior = None
-    else:
-        senior = _detect_senior_authors(authors if isinstance(authors, str) else None)
-
     fm_lines = [
         "---",
         f"title: {_yaml_dq(title)}",
         f"authors: {authors}",
     ]
-    if senior:
-        fm_lines.append(f"senior_authors: {senior}")
+    # Author order alone does not establish senior authorship. Leave this
+    # optional field for a source-verified manual edit.
     fm_lines.append(f"year: {year}")
     if doi:
         fm_lines.append(f"doi: {doi}")
@@ -569,6 +546,7 @@ def _append_backlinks(
     source_stem: str,
     source_page: Path | None = None,
     source_pdf: Path | None = None,
+    *, sync_db: bool = True,
 ) -> tuple[list[str], list[str]]:
     """Write BOTH directions of each verified cross-link. Idempotent.
 
@@ -606,7 +584,7 @@ def _append_backlinks(
         target_path = wiki_dir() / f"{cand.wikilink}.md"
         kind = _upgrade_kind_from_references(cand, source_pdf)
         note = _BACKLINK_NOTES.get(kind, _BACKLINK_NOTE_DEFAULT)
-        if append_related_paper(target_path, source_key, note=note):
+        if append_related_paper(target_path, source_key, note=note, sync_db=sync_db):
             added.append(cand.wikilink)
         else:
             skipped.append(cand.wikilink)
@@ -614,7 +592,7 @@ def _append_backlinks(
         if source_page is not None:
             append_related_paper(
                 source_page, cand.wikilink,
-                note=_bl.invert_relationship_note(note),
+                note=_bl.invert_relationship_note(note), sync_db=sync_db,
             )
     return added, skipped
 
@@ -774,82 +752,69 @@ def promote_to_wiki(
     category = cat_suggestion or "other"
     res.category = category
 
-    target_dir = wiki_dir() / category
-    target_dir.mkdir(parents=True, exist_ok=True)
-    page_path = target_dir / f"{stem}.md"
+    from ..wiki import find_stem_collision
+    with corpus_lock():
+        existing_page = find_stem_collision(stem)
+        if existing_page is not None:
+            category = existing_page.parent.name
+            res.category = category
+        target_dir = wiki_dir() / category
+        target_dir.mkdir(parents=True, exist_ok=True)
+        page_path = target_dir / f"{stem}.md"
 
-    # Every path the steps below can write, declared before any of them runs.
-    # Computable up front because the back-link targets come from candidates
-    # that were verified before promote was called — that is what makes the
-    # whole operation snapshottable.
-    touched = _promote_paths(
-        page_path=page_path,
-        stem=stem,
-        source_pdf_path=source_pdf_path,
-        candidates=candidates,
-    )
-
-    with _mutation(
-        touched,
-        operation="promote",
-        details={"stem": stem, "category": category},
-    ) as snap:
-        # Write the wiki page BEFORE moving the PDF. The frontmatter's pdf_path
-        # is computed from the stem (papers/{stem}.pdf), not from the move, so
-        # the page can be written first — and doing so keeps the source PDF in
-        # inbox/ until the page is durably committed.
-        full_page = _build_frontmatter(
-            metadata, stem, category, draft_text,
-            short_name=short_name,
-            hook=hook,
-            category_strength=cat_strength,
-            keywords=keywords,
-            author_model=exact_author_model,
+        # Every path the steps below can write, declared before any of them runs.
+        # Computable up front because the back-link targets come from candidates
+        # that were verified before promote was called — that is what makes the
+        # whole operation snapshottable.
+        touched = _promote_paths(
+            page_path=page_path,
+            stem=stem,
+            source_pdf_path=source_pdf_path,
+            candidates=candidates,
         )
-        write_text_atomic(page_path, full_page)
-        from ..wiki import commit_page as _commit_page
-        _commit_page(page_path)
-        # The one place this transaction spans two storage systems. The row is
-        # not in the file snapshot — SQLite isn't snapshotted here — so an
-        # in-process rollback deletes it explicitly. A *crash*-recovered
-        # rollback can't run this (nothing persists the callback), which is
-        # why markdown stays canonical: the page is removed and the next
-        # `db rebuild` reconciles the orphaned row.
-        snap.also_undo(lambda: _delete_db_row(stem))
-        res.wiki_path = page_path
 
-        # Move/copy PDF only after the page is committed.
-        try:
-            res.pdf_path, res.pdf_upgrade = _move_pdf(
-                source_pdf_path, stem, new_doi=metadata.get("doi"),
+        with _mutation(
+            touched,
+            operation="promote",
+            details={"stem": stem, "category": category, "repair_projections": True},
+        ) as snap:
+            # Classify against the old page before replacing it. The journal
+            # restores the PDF if any later file operation fails.
+            try:
+                res.pdf_path, res.pdf_upgrade = _move_pdf(
+                    source_pdf_path, stem, new_doi=metadata.get("doi"),
+                )
+            except Exception as e:
+                res.warnings.append(f"PDF move/copy failed: {e}")
+                res.promoted = False
+                # Leaving the block without `mark_committed()` rolls everything
+                # back, preserving prior files and database rows.
+                return res
+
+            # All canonical writes remain inside the file transaction.
+            full_page = _build_frontmatter(
+                metadata, stem, category, draft_text,
+                short_name=short_name,
+                hook=hook,
+                category_strength=cat_strength,
+                keywords=keywords,
+                author_model=exact_author_model,
             )
-        except Exception as e:
-            res.warnings.append(f"PDF move/copy failed: {e}")
-            res.promoted = False
-            # Leaving the block without `mark_committed()` rolls everything
-            # back, so this early return un-writes the page and its DB row
-            # rather than stranding them.
-            return res
+            write_text_atomic(page_path, full_page)
+            res.wiki_path = page_path
 
-        _finish_promote(
-            res=res, stem=stem, metadata=metadata, category=category,
-            candidates=candidates, page_path=page_path, attempt_id=attempt_id,
-            hook=hook, short_name=short_name,
-        )
-        snap.mark_committed()
+            _finish_promote(
+                res=res, stem=stem, metadata=metadata, category=category,
+                candidates=candidates, page_path=page_path, attempt_id=attempt_id,
+                hook=hook, short_name=short_name,
+            )
+            snap.mark_committed()
+            try:
+                snap.reconcile()
+            except Exception as exc:
+                res.warnings.append(f"projection repair pending; journal retained: {exc}")
 
     return res
-
-
-def _delete_db_row(stem: str) -> None:
-    """Undo `commit_page`'s upsert. Best-effort, like `commit_page` itself."""
-    try:
-        from ..db import delete_page as _delete
-        _delete(stem)
-    except Exception as e:
-        from ..log import log as _log
-        _log(f"WARN: could not remove db row for {stem} during rollback: {e}",
-             tag="promote")
 
 
 def _promote_paths(
@@ -885,7 +850,7 @@ def _finish_promote(
         source_category=category,
         source_stem=stem,
         source_page=page_path,
-        source_pdf=res.pdf_path,
+        source_pdf=res.pdf_path, sync_db=False,
     )
     res.backlinks_added = added
     res.backlinks_skipped = skipped

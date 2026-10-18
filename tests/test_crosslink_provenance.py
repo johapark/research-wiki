@@ -35,7 +35,7 @@ def captured(monkeypatch):
     """Capture (target_key, note) instead of writing to disk."""
     seen: list[tuple[str, str]] = []
 
-    def fake_append(target_path, source_key, note="DEFAULT"):
+    def fake_append(target_path, source_key, note="DEFAULT", *, sync_db=True):
         seen.append((target_path.stem, note))
         return True
 

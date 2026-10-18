@@ -3,8 +3,8 @@
 Finds existing wiki papers whose claims are near-paraphrases of the new paper's
 claims (cheap cosine, no LLM), then asks a small LLM judge whether each is a
 *real* relationship — the new paper builds on, extends, refines, or corroborates
-the existing one — versus mere vocabulary overlap. Those get a reciprocal
-`[[wikilink]]` auto-added to both pages' Related Papers.
+the existing one — versus mere vocabulary overlap. A reciprocal `[[wikilink]]`
+is added only when a PDF reference list verifies that one paper cites the other.
 
 A `measures_same` verdict is real but weaker: both claims measure the same
 quantity on different cohorts, which in practice means shared methodology
@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import time
 from typing import Callable
@@ -42,8 +43,41 @@ from ..backlinks import append_related_paper
 from ..errors import EnvironmentFailure
 from ..log import log
 from ..wiki import read_pages
+from ..paths import papers_dir
 
 _NOTE = "claim-grounded match (auto-added; claim-overlap)"
+
+
+def _source_cites_target(source, target) -> bool:
+    """Require a positive citation in the source PDF before writing a wikilink.
+
+    Claim similarity and the relation judge can establish a useful claim-graph
+    edge, but neither proves that one paper engages the other. A Related Papers
+    bullet needs that extra source evidence. A missing or unreadable PDF leaves
+    the pair edge-only.
+    """
+    from ..pdf.text import cites_reference, extract_ref_dois
+
+    pdf = papers_dir() / f"{source.stem}.pdf"
+    if not pdf.is_file():
+        return False
+    doi = target.str_field("doi", "").strip().lower()
+    if doi and doi in extract_ref_dois(pdf, own_doi=source.str_field("doi", "")):
+        return True
+    stem_match = re.match(r"^(.+?)-((?:19|20)\d{2})[a-z]?-.+$", target.stem)
+    if stem_match is None:
+        return False
+    surname, stem_year = stem_match.group(1), stem_match.group(2)
+    years = {stem_year}
+    yaml_year = target.year_int()
+    if yaml_year is not None:
+        years.add(str(yaml_year))
+    return any(cites_reference(pdf, surname, year) for year in years)
+
+
+def _pair_has_explicit_citation(page_a, page_b) -> bool:
+    """The PDF of at least one paper must cite the other paper."""
+    return _source_cites_target(page_a, page_b) or _source_cites_target(page_b, page_a)
 
 # Typed relation vocabulary — a superset of the earlier binary
 # {cross_link, coincidence} vocabulary. The specific verdict decides BOTH what
@@ -398,8 +432,13 @@ def review_pair(
         return result
 
     relation = _relation_from_verdict(value)
+    citation_proven = (_pair_has_explicit_citation(page_a, page_b)
+                       if value in _CROSS_LINK_VERDICTS else False)
+    links = value in _CROSS_LINK_VERDICTS and citation_proven
     record = {"existing": key_b, "cosine": cosine, "rationale": rationale,
               "relation": relation, "direction": direction}
+    if value in _CROSS_LINK_VERDICTS and not citation_proven:
+        record["reason"] = "no explicit citation verified in either PDF"
     if not dry_run and relation is not None:
         src_claim, dst_claim = claim_a, claim_b
         if direction == "b_to_a":
@@ -409,12 +448,12 @@ def review_pair(
             dst_claim["paper_stem"], dst_claim,
             relation, rationale, cosine,
         )
-        if value in _CROSS_LINK_VERDICTS:
+        if links:
             record["wrote"] = {
                 "a_page": append_related_paper(page_a.path, key_b, note=_NOTE),
                 "b_page": append_related_paper(page_b.path, key_a, note=_NOTE),
             }
-    (result["applied"] if value in _CROSS_LINK_VERDICTS else result["edge_only"]).append(record)
+    (result["applied"] if links else result["edge_only"]).append(record)
     return result
 
 
@@ -705,7 +744,10 @@ def run(
         relation = _relation_from_verdict(v)
         record = {"existing": ex_key, "cosine": cand.cosine,
                   "rationale": rationale, "relation": relation}
-        links = v in _CROSS_LINK_VERDICTS
+        citation_proven = _pair_has_explicit_citation(new_page, ex) if v in _CROSS_LINK_VERDICTS else False
+        links = v in _CROSS_LINK_VERDICTS and citation_proven
+        if v in _CROSS_LINK_VERDICTS and not citation_proven:
+            record["reason"] = "no explicit citation verified in either PDF"
         if not dry_run:
             # Typed edge lands for every real relation, and regardless of
             # whether a wikilink was already present — the edge cache is

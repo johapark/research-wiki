@@ -45,7 +45,7 @@ Check by hand only when one of these is true:
 
 - **`status` still lists an interrupted mutation.** The process died before the rollback finished. The next `agent ingest` drains it automatically; run one, or call the drain directly. A journal reporting 5 failed attempts has given up and needs a look.
 - **`RW_MUTATION_JOURNAL=0` was set.** Journalling was off, so the half-landed state below is real.
-- **The page exists but its DB row doesn't, or vice versa.** File state is journalled; the `state.db` row is not. A crash-recovered rollback removes the page and leaves the row for `db rebuild` to reconcile — run `researchwiki db rebuild`.
+- **The page exists but its DB row doesn't, or vice versa.** Database and index repair runs after the files commit, and a failed repair keeps its journal (`committed`) for the next `agent ingest` to retry from the current files. If `status` shows no pending journal and the drift remains, run `researchwiki db rebuild`.
 
 In those three cases, check the four things in order:
 
