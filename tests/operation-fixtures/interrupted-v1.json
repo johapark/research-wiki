@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "request_id": "request-1",
+  "job_id": "job-1",
+  "attempt_id": "attempt-1",
+  "execution": "interrupted",
+  "outcome": null,
+  "publication": "unknown",
+  "projections": "unknown",
+  "error": {
+    "code": "worker_interrupted",
+    "category": "environment",
+    "message": "Reconcile publication before retrying.",
+    "retry": "reconcile_first"
+  }
+}

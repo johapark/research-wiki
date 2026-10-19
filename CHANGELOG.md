@@ -22,6 +22,13 @@ the reasoning behind any line below.
 
 ### Added
 
+- Versioned ingestion application contracts distinguish published content,
+  reviewable drafts, unknown publication, pending maintenance, and individual
+  check results. Optional model progress observation supports direct API calls,
+  chat-relay, and mixed per-phase routing, including parallel draft calls.
+  Structured relay handoffs preserve existing foreground messages, retries,
+  cache reuse, timeout recovery, and actual responder-model provenance. The
+  durable jobs/application service are not included in this first increment.
 - `benchmark-retrieval` compares BGE-small with Harrier-OSS-V1 270M or 0.6B
   on available claim/page fixtures, recording ranking changes, warm query
   latency, document throughput, and model/corpus provenance. Harrier query
@@ -960,7 +967,6 @@ the reasoning behind any line below.
   callers had disagreed (`lint` walks every `*.md`; `status` holds
   `read_pages()`, which drops a file with no `---` fence), and it keeps
   `status` off the ~20 ms `lint` package import for one predicate.
-
 
 - **`WORKFLOW.md` gains *Bottom-up discovery — when the wiki proposes the page*.**
   Documents the four proposal tiers and, more importantly, carries the calibration
