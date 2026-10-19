@@ -28,7 +28,29 @@ the reasoning behind any line below.
   chat-relay, and mixed per-phase routing, including parallel draft calls.
   Structured relay handoffs preserve existing foreground messages, retries,
   cache reuse, timeout recovery, and actual responder-model provenance. The
-  durable jobs/application service are not included in this first increment.
+  durable jobs are a subsequent increment.
+- Single-PDF `add` / `agent ingest` accepts `--events-file` for model/relay
+  JSONL progress and `--result-file` for a versioned terminal result. Reports
+  require new paths outside canonical content, preserve human output and exit
+  codes, and distinguish unknown publication/maintenance from success. Batch
+  report routing remains deferred.
+- A synchronous `researchwiki.operations.ingest(request, event_sink=...)`
+  operation now owns single-PDF validation, provider preflight, mutation
+  recovery, runner execution, and post-publication hooks. The foreground CLI
+  uses that same operation and retains receipts, exit codes, and relay
+  handoffs. Unresolved mutation recovery blocks new ingestion. Optional-hook
+  failures preserve published outcomes and appear as partial post-work;
+  projection status and runner-owned memory evolution remain conservative when
+  their owners provide no completion evidence.
+- Ingestion events now use schema version 2 for operation/attempt/phase
+  lifecycle, parallel draft slots, gate outcomes, canonical publication, and
+  maintenance results. Version 1 model events remain readable; request/result
+  schemas and relay mailbox protocols remain at version 1. Publication comes
+  from the file transaction's commit point, and mutation journals carry
+  request/attempt/job correlation. Known publication survives maintenance or
+  event-delivery failures without inviting a repeated paid ingest. Required
+  claim-grade persistence reports unavailable storage or missing rows; commentary
+  remains excluded from the citable claims DB.
 
 ## [0.5.3] - 2026-10-18
 

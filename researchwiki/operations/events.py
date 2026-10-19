@@ -49,7 +49,10 @@ class EventRecorder:
         with self._lock:
             if self.attempt_id is not None and self.attempt_id != attempt_id:
                 raise ValueError("an event recorder belongs to one ingest attempt")
+            first = self.attempt_id is None
             self.attempt_id = attempt_id
+            if first:
+                self.emit("attempt_started", call_id=attempt_id)
 
     def emit(self, kind: str, *, call_id: str, **details) -> None:
         with self._lock:
@@ -73,7 +76,7 @@ class EventRecorder:
             except Exception:
                 self._delivery_errors += 1
                 if self._delivery_errors == 1:
-                    print("[operations] progress delivery failed; model execution continues", file=sys.stderr)
+                    print("[operations] progress delivery failed; ingest execution continues", file=sys.stderr)
 
 
 class ModelCallObserver:

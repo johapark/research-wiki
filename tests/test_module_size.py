@@ -95,9 +95,6 @@ MAX_FUNCTION_CODE_LINES = 250
 # Function key (`repo/path.py::qualified.name`) -> current code-line count.
 # Retire a pin as soon as the function drops below MAX_FUNCTION_CODE_LINES.
 _FUNCTION_DEBT: dict[str, int] = {
-    # Journalled commit/promotion coordinator. Each transactional step is a
-    # natural extraction boundary; until then, it may shrink but not grow.
-    "researchwiki/agents/runner.py::_phase_commit": 269,
 }
 
 # Locate the package through the import system rather than by walking up from

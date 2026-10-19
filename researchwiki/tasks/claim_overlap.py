@@ -808,7 +808,8 @@ def run(
     }
 
 
-def run_after_ingest(stem: str, committed_path, *, sim_threshold: float = 0.83) -> dict | None:
+def run_after_ingest(stem: str, committed_path, *, sim_threshold: float = 0.83,
+                     render: bool = True) -> dict | None:
     """Ingest-hook entry point: cross-link a just-promoted paper.
 
     Reads the new paper's claims from its committed page (they aren't in the DB
@@ -828,6 +829,15 @@ def run_after_ingest(stem: str, committed_path, *, sim_threshold: float = 0.83) 
         log(f"claim-overlap hook skipped: {type(e).__name__}: {e}", tag="claim-overlap")
         return None
 
+    if render:
+        print_ingest_result(result)
+    log(f"claim-overlap {stem}: {len(result['applied'])} link(s), {len(result['coincidence'])} coincidence, "
+        f"{len(result['skipped'])} already-linked", tag="claim-overlap")
+    return result
+
+
+def print_ingest_result(result: dict) -> None:
+    """Render an already-computed receipt without repeating model work."""
     n = len(result["applied"])
     if n:
         print()
@@ -837,9 +847,6 @@ def run_after_ingest(stem: str, committed_path, *, sim_threshold: float = 0.83) 
     if result["judge_failed"]:
         print(f"  ⚠ judge gave no verdict for {len(result['judge_failed'])} candidate(s) "
               f"(LLM provider unreachable?) — not linked.")
-    log(f"claim-overlap {stem}: {n} link(s), {len(result['coincidence'])} coincidence, "
-        f"{len(result['skipped'])} already-linked", tag="claim-overlap")
-    return result
 
 
 def _run_backlog(args) -> int:

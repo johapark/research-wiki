@@ -31,18 +31,7 @@ def result_from_context(request: IngestRequest, context, *, projections="unknown
     if artifact is None or not context.paper_stem:
         raise ContractError("terminal ingestion outcome is missing its artifact identity")
     scores = getattr(getattr(context, "winner", None), "scores", {}) or {}
-    from ..grade.checks import entailment_check
-
-    checks = []
-    if scores:
-        checks.append(CheckResult(name="retrieval", status=(
-            "completed" if scores.get("n_graded", 0) else "unavailable"
-        )))
-        checks.append(CheckResult(name="numeric", status=(
-            "failed" if scores.get("n_drift", 0) else
-            "passed" if scores.get("n_graded", 0) and "n_drift" in scores else "unavailable"
-        )))
-    checks.append(CheckResult(name="entailment", status=entailment_check(scores)["status"]))
+    checks = checks_from_scores(scores)
     published = outcome in ("published", "already_present")
     return IngestResult(
         request_id=request.request_id, attempt_id=context.attempt_id,
@@ -83,3 +72,19 @@ def error_from_exception(error: BaseException) -> OperationError:
     elif isinstance(error, (ContractError, FileNotFoundError)):
         code, category, retry = "invalid_request", "validation", "after_correction"
     return OperationError(code=code, category=category, retry=retry, message=type(error).__name__)
+
+
+def checks_from_scores(scores):
+    from ..grade.checks import entailment_check
+
+    checks = []
+    if scores:
+        checks.append(CheckResult(name="retrieval", status=(
+            "completed" if scores.get("n_graded", 0) else "unavailable"
+        )))
+        checks.append(CheckResult(name="numeric", status=(
+            "failed" if scores.get("n_drift", 0) else
+            "passed" if scores.get("n_graded", 0) and "n_drift" in scores else "unavailable"
+        )))
+    checks.append(CheckResult(name="entailment", status=entailment_check(scores)["status"]))
+    return tuple(checks)
