@@ -17,6 +17,7 @@ ExecutionState = Literal["queued", "running", "finished", "interrupted", "cancel
 Outcome = Literal["published", "draft_ready", "already_present", "failed"]
 PublicationState = Literal["not_published", "published", "unknown"]
 ProjectionState = Literal["not_applicable", "current", "maintenance_pending", "unknown"]
+PostWorkState = Literal["not_requested", "completed", "partial", "failed", "unknown"]
 CheckState = Literal["passed", "failed", "completed", "not_requested", "incomplete", "unavailable"]
 RetryPolicy = Literal[
     "after_correction", "after_environment_recovery", "explicit_retry",
@@ -157,7 +158,7 @@ class IngestResult(WireModel):
     outcome: Outcome | None
     publication: PublicationState
     projections: ProjectionState = "unknown"
-    post_work: Literal["not_requested", "completed", "partial", "failed"] = "not_requested"
+    post_work: PostWorkState = "not_requested"
     job_id: str | None = None
     attempt_id: str | None = None
     paper_stem: str | None = None
@@ -217,6 +218,9 @@ class IngestEvent(WireModel):
     kind: Literal[
         "model_call_started", "model_call_finished", "model_call_failed",
         "relay_waiting", "relay_response_received", "relay_response_rejected", "relay_timeout",
+        "operation_started", "operation_finished", "attempt_started", "attempt_finished",
+        "phase_started", "phase_finished", "phase_failed", "gate_evaluated",
+        "publication_committed", "maintenance_finished", "recovery_finished",
     ]
     call_id: str
     phase: str | None = None
@@ -227,7 +231,21 @@ class IngestEvent(WireModel):
     relay: RelayHandoff | None = None
     usage: UsageReport | None = None
     error_code: str | None = None
-    schema_version: Literal[1] = 1
+    status: Literal[
+        "completed", "failed", "interrupted", "published", "draft_ready", "already_present",
+        "passed", "not_requested", "current", "maintenance_pending", "unknown", "partial",
+    ] | None = None
+    paper_stem: str | None = None
+    page_path: str | None = None
+    pdf_path: str | None = None
+    slot: int | None = None
+    iteration: int | None = None
+    gate_failures: int | None = None
+    promotion: Literal["auto", "always", "never"] | None = None
+    publication: PublicationState | None = None
+    projections: ProjectionState | None = None
+    post_work: PostWorkState | None = None
+    schema_version: Literal[1, 2] = 2
 
     def __post_init__(self):
         super().__post_init__()
@@ -244,3 +262,25 @@ class IngestEvent(WireModel):
             raise ContractError("timestamp: must be in UTC")
         if self.kind.startswith("relay_") and self.relay is None:
             raise ContractError("relay events require exact handoff identity")
+        for name in ("slot", "iteration", "gate_failures"):
+            if getattr(self, name) is not None and getattr(self, name) < 0:
+                raise ContractError(f"{name}: must be nonnegative")
+        for name in ("page_path", "pdf_path"):
+            if getattr(self, name) is not None:
+                absolute_path(getattr(self, name), name)
+        if self.schema_version == 1:
+            if not self.kind.startswith(("model_call_", "relay_")) or any(
+                getattr(self, name) is not None for name in (
+                    "status", "paper_stem", "page_path", "pdf_path", "slot", "iteration",
+                    "gate_failures", "promotion", "publication", "projections", "post_work",
+                )
+            ):
+                raise ContractError("lifecycle events require schema_version 2")
+
+    def to_dict(self):
+        data = super().to_dict()
+        if self.schema_version == 1:
+            for name in ("status", "paper_stem", "page_path", "pdf_path", "slot", "iteration",
+                         "gate_failures", "promotion", "publication", "projections", "post_work"):
+                data.pop(name)
+        return data

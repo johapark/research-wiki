@@ -140,7 +140,7 @@ def test_one_observation_scope_supports_mixed_per_phase_routing(mailbox, monkeyp
         llm.call(phase="author", prompt="a")
         llm.call(phase="critic", prompt="b")
     assert current_recorder() is None
-    assert {e.provider for e in events} == {"anthropic", "chat-relay"}
+    assert {e.provider for e in events if e.provider is not None} == {"anthropic", "chat-relay"}
     assert all(e.attempt_id == "attempt-1" for e in events)
 
 
@@ -235,7 +235,7 @@ def test_runner_binds_attempt_and_observes_model_calls_in_a_phase(mailbox, monke
     ctx = runner.run_ingest(mailbox / "incoming.pdf", event_sink=recorder)
     assert ctx.outcome == "already_present"
     assert {e.attempt_id for e in events} == {ctx.attempt_id}
-    assert {e.provider for e in events} == {"anthropic", "chat-relay"}
+    assert {e.provider for e in events if e.provider is not None} == {"anthropic", "chat-relay"}
     assert current_recorder() is None
 
 

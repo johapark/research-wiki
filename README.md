@@ -205,6 +205,35 @@ researchwiki grade regression --missing-only
 
 Do **not** sync the state DB or cache/index directories. Avoid ingesting or editing on two computers simultaneously, and wait for file sync to settle before switching machines. Knowledge converges from Markdown and PDFs; ingest telemetry and cost history remain machine-local. See the [migration and sync guide](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder) for existing libraries and no-symlink setups.
 
+## Application integration
+
+`researchwiki.operations.ingest(request, event_sink=...)` runs the same single-PDF
+operation as `add` and `agent ingest`, returning a versioned `IngestResult`.
+Construct requests with `IngestRequest` and `IngestOptions`; wire values round-trip
+through `to_dict()` / `from_dict()`. Results distinguish publication, reviewable
+drafts, failed attempts, check outcomes, and incomplete post-processing.
+
+Run it in a process already configured for the request's absolute `library_root`
+and provider profile. It validates that selection without changing CWD or loading
+a different environment. Use separate processes for different libraries/profiles.
+API and chat-relay routing remain phase-configured; relay handoffs stay visible
+and still need a connected responder. An event callback receives `IngestEvent`
+objects containing lifecycle and model/relay progress without paper prose or
+credentials. Events use schema version 2; readers also accept version 1 model
+events. Requests and terminal results remain at version 1. Phase events identify
+each invocation and parallel draft slot. `publication_committed` is emitted only
+after the canonical file transaction commits.
+
+The operation performs no automatic retry. Uncertain publication requires
+reconciliation; an optional-hook failure preserves a successful publication.
+Projection status is `current` only when database repair, keyword/semantic
+indexing, and required claim-grade persistence report completion. A saved paper
+with unfinished maintenance reports `maintenance_pending`. Unobserved existing
+papers still report `unknown`. After a known commit, an interrupted maintenance
+step returns a published result with repair guidance rather than a retryable CLI
+ingest failure. Durable job scheduling and worker supervision are follow-up work;
+in-process receipts do not yet resolve publication after worker loss.
+
 ## Data, privacy, and validation
 
 Git tracks the framework: `researchwiki/`, `prompts/`, config templates, tests, and documentation. Your `wiki/`, `papers/`, `inbox/`, dotenv profiles, active/custom model configs, databases, and caches are gitignored.

@@ -268,6 +268,10 @@ def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
         "2026",
         "--authors",
         "Ada Lovelace;Alan Turing",
+        "--events-file",
+        str(root / "reports/single-events.jsonl"),
+        "--result-file",
+        str(root / "reports/single-result.json"),
     )
     single_stem = "lovelace-2026-alpha-acceptance-pipelines-for-reliable"
     assert single.is_file(), "an external source PDF should be copied, not consumed"
@@ -280,6 +284,15 @@ def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
     assert "Claims:" in added.stdout and "indexed" in added.stdout
     assert "Trace:  researchwiki agent trace" in added.stdout
     assert (root / ".tantivy-index").is_dir()
+    result = json.loads((root / "reports/single-result.json").read_text())
+    events = [json.loads(line) for line in (root / "reports/single-events.jsonl").read_text().splitlines()]
+    assert result["publication"] == "published" and result["outcome"] == "published"
+    assert result["projections"] in ("current", "maintenance_pending")
+    assert all(event["schema_version"] == 2 for event in events)
+    assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
+    assert [event["kind"] for event in events].count("publication_committed") == 1
+    assert events[-1]["kind"] == "operation_finished" and events[-1]["publication"] == "published"
+    assert events[-1]["projections"] == result["projections"]
     claims = run_python(
         root,
         env,
@@ -303,6 +316,28 @@ finally:
     # yield zero claim bullets. What this acceptance pins is that the receipt's
     # count comes from the real claims DB and agrees with its indexed state.
     assert f"Claims: {int(claims.stdout.strip())} indexed" in added.stdout
+
+    # Application callers use the same operation as the CLI, without terminal
+    # parsing. Re-adding these bytes must return the existing canonical paper.
+    run_python(root, env, f"""
+from pathlib import Path
+from researchwiki.operations import IngestOptions, IngestRequest, IngestResult, ingest
+request = IngestRequest(
+    request_id="acceptance-application", library_root=str(Path.cwd().resolve()),
+    source_pdf={str(single)!r},
+    options=IngestOptions(
+        use_stub=True, use_semantic=False, use_llm_reconcile=False, n_drafts=1,
+        title="Alpha Acceptance Pipelines for Reliable Research", year=2026,
+        authors=("Ada Lovelace", "Alan Turing"),
+    ),
+)
+result = ingest(request)
+assert result.outcome == "already_present", result
+assert result.paper_stem == {single_stem!r}, result
+assert result.publication == "published" and result.post_work == "not_requested"
+assert Path(result.pdf_path).read_bytes() == Path(request.source_pdf).read_bytes()
+assert IngestResult.from_dict(result.to_dict()) == result
+""")
 
     batch_ok = root / "inbox" / "batch-ok.pdf"
     batch_retry = root / "inbox" / "batch-retry.pdf"

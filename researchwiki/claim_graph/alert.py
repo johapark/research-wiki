@@ -24,6 +24,7 @@ def alert_after_ingest(
     *,
     sim_threshold: float = 0.85,
     max_pairs: int = 20,
+    render: bool = True,
 ) -> dict | None:
     """Detect contradictions between the new paper's claims and the graded
     corpus, print `⚠ contradicts [[existing#slug]]` per hit, and return a
@@ -46,7 +47,7 @@ def alert_after_ingest(
         if not hits:
             return {"stem": stem, "n_alerts": 0}
 
-        print()
+        alerts = []
         for h in hits:
             a, b = h["pair"]
             other = b if a["paper_stem"] == stem else a
@@ -54,16 +55,30 @@ def alert_after_ingest(
             # infra doesn't include it in the return dict).
             slug = _resolve_slug(other["paper_stem"], other["section"], other["position"])
             citation = format_claim_ref({"paper_stem": other["paper_stem"], "claim_slug": slug})
-            print(f"⚠ contradicts {citation}  ({h['verdict']}, sim={h['similarity']:.2f})")
-            if h.get("rationale"):
-                print(f"    {h['rationale']}")
+            alerts.append({"citation": citation, "verdict": h['verdict'],
+                           "similarity": h['similarity'], "rationale": h.get('rationale')})
         log(f"contradiction-alert {stem}: {len(hits)} disagreement(s) flagged",
             tag="claim_graph")
-        return {"stem": stem, "n_alerts": len(hits)}
+        result = {"stem": stem, "n_alerts": len(hits), "alerts": alerts}
+        if render:
+            print_ingest_alerts(result)
+            return {"stem": stem, "n_alerts": len(hits)}
+        return result
     except Exception as e:
         log(f"contradiction-alert skipped: {type(e).__name__}: {e}",
             tag="claim_graph")
         return None
+
+
+def print_ingest_alerts(result: dict) -> None:
+    """Render a completed hook receipt without running its judge again."""
+    if result.get("alerts"):
+        print()
+    for alert in result.get("alerts", []):
+        print(f"⚠ contradicts {alert['citation']}  "
+              f"({alert['verdict']}, sim={alert['similarity']:.2f})")
+        if alert.get("rationale"):
+            print(f"    {alert['rationale']}")
 
 
 def _resolve_slug(stem: str, section: str, position: int) -> str | None:

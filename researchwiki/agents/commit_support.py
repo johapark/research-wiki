@@ -18,7 +18,7 @@ def promotion_decision_reason(result) -> str:
     return reason
 
 
-def update_indexes_after_promotion(result) -> None:
+def update_indexes_after_promotion(result) -> dict | None:
     """Upsert every parseable wiki page changed by a successful promotion.
 
     Indexes are derived caches, so failure is recorded as a recoverable warning
@@ -41,7 +41,9 @@ def update_indexes_after_promotion(result) -> None:
             f"(bm25={outcome['bm25_mode']}, semantic={outcome['semantic_mode']})",
             tag="agent",
         )
+        return outcome
     except Exception as exc:
         warning = f"incremental index update failed: {exc}; run researchwiki reindex"
         result.warnings.append(warning)
         log(f"indexes  ⚠ {warning}", tag="agent")
+        return None

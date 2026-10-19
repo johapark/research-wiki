@@ -38,9 +38,21 @@ def persist_grades(ctx: "Context", conn) -> dict:
     """
     from ...grade.fidelity.paper import grade_page
 
+    # Commentary is deliberately excluded from the citable claims DB. It has
+    # no claim-grade projection to persist, even when explicitly promoted.
+    if (getattr(ctx, "metadata", None) or {}).get("page_type") == "commentary":
+        write_iteration(
+            attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,
+            pdf_filename=ctx.pdf_filename, iteration=ctx.iteration,
+            role="grade_persist", decision="not_applicable",
+            decision_reason="commentary is excluded from the claims DB",
+            model_used="(local)", duration_ms=0, conn=conn,
+        )
+        return {"n_claims": 0, "n_graded": 0, "not_applicable": True}
+
     t0 = time.monotonic()
     try:
-        report = grade_page(ctx.paper_stem, persist=True)
+        report = grade_page(ctx.paper_stem, persist=True, require_persistence=True)
     except Exception as e:
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         write_iteration(
