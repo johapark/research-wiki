@@ -20,6 +20,16 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- Versioned ingestion application contracts distinguish published content,
+  reviewable drafts, unknown publication, pending maintenance, and individual
+  check results. Optional model progress observation supports direct API calls,
+  chat-relay, and mixed per-phase routing, including parallel draft calls.
+  Structured relay handoffs preserve existing foreground messages, retries,
+  cache reuse, timeout recovery, and actual responder-model provenance. The
+  durable jobs/application service are not included in this first increment.
+
 ## [0.5.3] - 2026-10-18
 
 > **After upgrading:** run `researchwiki grade regression` once. Claim grades now

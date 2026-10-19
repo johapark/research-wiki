@@ -27,10 +27,11 @@ from ..grade import coherence
 from . import fitness, model_config, phases
 from .context import Context, PromoteFailed, ReconcileFailed, StemRenameRefused
 from .commit_support import promotion_decision_reason, update_indexes_after_promotion
-from .budget import BudgetExhausted, activate
+from .budget import BudgetExhausted
+from ..operations.observation import activate_ingest_scope, submit_observed
 from .runner_support import (
     finalize_attempt_timing, handle_budget_exhausted,
-    keyword_body_gaps,
+    keyword_body_gaps as _keyword_body_gaps,
     make_budget_tracker, phase_extract as _phase_extract,
     phase_reconcile as _phase_reconcile,
     phase_target_claims as _phase_target_claims,
@@ -48,10 +49,7 @@ from ..fsatomic import write_text_atomic
 from ..log import log
 from ..provenance import specific_author_model
 
-
-def _keyword_body_gaps(keywords: list[str], body_text: str) -> list[str]:
-    """Compatibility shim for callers that imported the former local helper."""
-    return keyword_body_gaps(keywords, body_text)
+__all__ = ["run_ingest", "_keyword_body_gaps"]
 
 
 def run_ingest(
@@ -77,6 +75,7 @@ def run_ingest(
     max_cost_usd: float | None = None,
     max_wall_seconds: float | None = None,
     run_memory_evolve: bool = False,
+    event_sink=None,
 ) -> Context:
     """Drive a single ingest attempt end-to-end.
 
@@ -129,8 +128,8 @@ def run_ingest(
     # transaction view. Each write_iteration commits its own row, which is
     # what we want — append-only, durable as soon as the row is written.
     attempt_t0 = time.monotonic()
+    budget_scope = activate_ingest_scope(ctx.budget_tracker, event_sink, attempt_id=ctx.attempt_id)
     conn = get_connection()
-    budget_scope = activate(ctx.budget_tracker)
     budget_scope.__enter__()
     try:
         # Phase 1: reconcile
@@ -280,7 +279,7 @@ def run_ingest(
 
         with ThreadPoolExecutor(max_workers=n_drafts) as pool:
             futures = [
-                pool.submit(_author_one, slot, iter_no, t)
+                submit_observed(pool, _author_one, slot, iter_no, t)
                 for (slot, t), iter_no in zip(author_inputs, author_iter_ids)
             ]
             # Place results back in slot order so ctx.drafts[i] corresponds

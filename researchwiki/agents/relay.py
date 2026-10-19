@@ -28,12 +28,15 @@ import json
 import os
 import sys
 import time
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..errors import EnvironmentFailure
 from ..paths import wiki_root
 from ..provenance import specific_author_model
+from ..operations.events import EventRecorder, relay_event
+from ..operations.observation import current_recorder
 
 # `LLMResponse` is imported lazily at runtime inside call_chat_relay to dodge the
 # llm.py ↔ relay.py cycle: llm.py imports `call_chat_relay` from us, so
@@ -342,6 +345,8 @@ def call_chat_relay(
     timeout: float | None = None,
     fresh: bool = False,
     schema: dict | None = None,
+    event_sink: EventRecorder | None = None,
+    call_id: str | None = None,
 ) -> LLMResponse:
     """Delegate the prompt to a chat-platform agent via the filesystem.
 
@@ -380,6 +385,7 @@ def call_chat_relay(
     # import, which would freeze whatever RW_RELAY_TIMEOUT held at that moment.
     if timeout is None:
         timeout = _default_timeout()
+    event_sink = event_sink if event_sink is not None else current_recorder()
 
     op_id = _stable_op_id(phase, prompt, fresh=fresh)
     # The content key is also a shared filesystem mailbox. Hold ownership from
@@ -393,6 +399,7 @@ def call_chat_relay(
             op_id=op_id, model=model, prompt=prompt, temperature=temperature,
             max_tokens=max_tokens, system=system, phase=phase,
             timeout=timeout, schema=schema,
+            event_sink=event_sink, call_id=call_id or op_id,
         )
 
 
@@ -400,6 +407,7 @@ def _call_chat_relay_owned(
     *, op_id: str, model: str, prompt: str, temperature: float,
     max_tokens: int, system: str | None, phase: str | None,
     timeout: float, schema: dict | None,
+    event_sink: EventRecorder | None = None, call_id: str = "relay",
 ) -> LLMResponse:
     """Publish and consume one request while holding its mailbox lock."""
     from .llm import LLMResponse
@@ -411,6 +419,13 @@ def _call_chat_relay_owned(
     last_err: str | None = None
     for attempt in range(_RELAY_MAX_RETRIES + 1):           # 0, 1, 2 → 3 total
         prompt_path, response_path = _paths_for(op_id)
+        response_reused = response_path.exists()
+
+        observe = partial(
+            relay_event, event_sink, call_id=call_id, phase=phase, model=model,
+            op_id=op_id, prompt_path=prompt_path, response_path=response_path,
+            timeout=timeout, retry_of=retry_of, response_reused=response_reused,
+        )
 
         # A response is a cache hit. Otherwise announce every wait, including a
         # pending prompt recovered from an earlier timed-out invocation.
@@ -436,11 +451,18 @@ def _call_chat_relay_owned(
             _emit_handoff_message(prompt_path, response_path, phase, timeout,
                                   retry_of=retry_of)
 
-        _poll_until_exists(response_path, timeout)
+        if not response_reused:
+            observe("relay_waiting")
+        try:
+            _poll_until_exists(response_path, timeout)
+        except RelayTimeout:
+            observe("relay_timeout")
+            raise
 
         try:
             data = json.loads(response_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
+            observe("relay_response_rejected")
             # File-level corruption is the user's problem to fix manually —
             # retry-via-protocol won't help because the chat already wrote it.
             raise RuntimeError(
@@ -454,8 +476,10 @@ def _call_chat_relay_owned(
             if schema is not None:
                 _validate_against_schema(data["structured"], schema)
             # Pass — exit the retry loop with `data` and the current paths.
+            observe("relay_response_received", model=f"chat-relay:{data['via'].strip()}")
             break
         except SchemaError as e:
+            observe("relay_response_rejected")
             last_err = str(e)
             if attempt >= _RELAY_MAX_RETRIES:
                 # Final failure: clean up the failing pair, then raise with
