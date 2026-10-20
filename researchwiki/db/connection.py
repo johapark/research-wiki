@@ -19,7 +19,6 @@ The schema is created on first use; subsequent connections are no-ops.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
 import sqlite3
@@ -77,9 +76,8 @@ def _repo_key() -> str:
     hash of its absolute path (disambiguates same-named repos in different
     locations)."""
     from ..paths import wiki_root
-    root = wiki_root().resolve()
-    digest = hashlib.sha1(str(root).encode()).hexdigest()[:8]
-    return f"{root.name}-{digest}"
+    from ..runtime import repository_key
+    return repository_key(wiki_root())
 
 
 def db_path(*, prepare: bool = True) -> Path:

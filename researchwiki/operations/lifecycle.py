@@ -100,7 +100,10 @@ def observed_attempt(fn):
 
 
 def publication_details(attempt_id, stem, category):
+    from ..ingest_ledger import journal_binding
+
     details = {"stem": stem, "category": category, "repair_projections": True, "attempt_id": attempt_id}
+    details.update(journal_binding())
     recorder = current_recorder()
     if recorder is not None and recorder.attempt_id == attempt_id:
         details.update(request_id=recorder.request_id, job_id=recorder.job_id)

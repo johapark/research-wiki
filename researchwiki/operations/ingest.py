@@ -1,6 +1,6 @@
 """Synchronous ingestion for one already-configured library process.
 
-This is the shared operation behind the foreground CLI and future workers. It
+This is the shared operation behind the foreground CLI and isolated local workers. It
 does not configure a process, schedule jobs, parse terminal output, or retry.
 """
 

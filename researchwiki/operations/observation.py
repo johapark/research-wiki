@@ -2,7 +2,7 @@
 
 No process-wide callback or stdout interception: two request scopes can observe
 different recorders. Current engine provider/budget globals still require the
-planned process-per-ingest isolation; this does not make the runner thread-safe.
+process-per-ingest isolation; this does not make the runner thread-safe.
 """
 
 from contextlib import contextmanager

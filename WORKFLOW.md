@@ -1188,11 +1188,19 @@ up. Not everything outside `wiki/` is disposable.
   published content. Recovery reads current canonical files, performs no model
   calls, and leaves semantic search unavailable until normal indexing refreshes
   it. Follow the recovery procedure rather than deleting journals as a cache.
+- **Machine-local ingestion jobs** live under
+  `~/.local/share/researchwiki/repos/<library-key>/jobs/` by default. Manifests,
+  publication ledgers, operation checkpoints, and diagnostic/event files survive
+  database/index rebuilds. They are recovery state, not disposable caches.
+  `JobSupervisor.reconcile_job()` resolves interrupted publication and repairs
+  projections without replaying provider calls. Missing proof stays unknown;
+  original event logs and filenames cannot substitute for it. Preserve this
+  directory when retaining job history and crash-recovery evidence.
 
 With source PDFs, wiki pages, and the framework you can regenerate local search
 indexes and grades. External metadata may need refetching; judgments may require
 new model calls. Telemetry, discovery receipts, unapplied proposals, and rollback
-history are not recoverable from Markdown alone. Back up credentials and custom
+history and durable job evidence are not recoverable from Markdown alone. Back up credentials and custom
 configuration securely too, and keep live SQLite databases out of sync folders.
 
 ---
