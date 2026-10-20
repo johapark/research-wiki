@@ -22,13 +22,28 @@ the reasoning behind any line below.
 
 ### Added
 
+- Durable local ingestion jobs provide idempotent submission, atomic versioned
+  manifests, private event/diagnostic files, isolated workers, polling, queued
+  cancellation, and explicit retry of known-unpublished work. Workers select
+  their own library/profile, keep relay handoffs visible, and fence terminal
+  writes by owner/generation under an OS lease. Jobs survive database/index
+  rebuilds; source and configuration identity changes are recorded on retry.
+  Worker loss initially stays interrupted with unknown publication and blocked
+  replay until explicit reconciliation. The job-control CLI follows separately.
+- Explicit `JobSupervisor.reconcile_job()` resolves interrupted publication in
+  an isolated library/profile process under the worker lease and corpus lock.
+  Private versioned publication receipts survive mutation-journal cleanup and
+  derived-state deletion. Confirmed rollback permits a fresh explicit retry;
+  confirmed commit preserves publication, gate/check evidence, and repair-first
+  guidance. Local database, index, and claim-grade repair never repeats provider
+  calls or optional model hooks. Missing/unsupported proof remains unknown;
+  changed/missing canonical artifacts require review rather than replacement.
 - Versioned ingestion application contracts distinguish published content,
   reviewable drafts, unknown publication, pending maintenance, and individual
   check results. Optional model progress observation supports direct API calls,
   chat-relay, and mixed per-phase routing, including parallel draft calls.
   Structured relay handoffs preserve existing foreground messages, retries,
-  cache reuse, timeout recovery, and actual responder-model provenance. The
-  durable jobs are a subsequent increment.
+  cache reuse, timeout recovery, and actual responder-model provenance.
 - Single-PDF `add` / `agent ingest` accepts `--events-file` for model/relay
   JSONL progress and `--result-file` for a versioned terminal result. Reports
   require new paths outside canonical content, preserve human output and exit
@@ -74,6 +89,9 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Mutation cleanup removes its journal before deleting backups, after any
+  required publication-evidence handoff. An unlink failure therefore retains
+  the backups needed by recovery instead of stranding a journal without them.
 - Retrieval benchmark caches validate corpus contents, model identity,
   revision, context limit, dtype, and document instructions. Stale vectors
   and failed encoders can no longer produce misleading comparison scores.

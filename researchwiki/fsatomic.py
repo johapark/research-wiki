@@ -134,6 +134,21 @@ def write_json_atomic(path: Path | str, obj) -> None:
     write_text_atomic(path, json.dumps(obj, indent=2, ensure_ascii=False))
 
 
+def write_private_json(path: Path, value) -> None:
+    """Private operational record: 0600 from creation, fsync, atomic rename."""
+    fd, name = tempfile.mkstemp(prefix=".write-", dir=path.parent)
+    staged = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, indent=2, allow_nan=False)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(staged, path)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def read_text(path: Path | str, default: str | None = None) -> str | None:
     """Read `path` as utf-8; return `default` if the file is missing."""
     path = Path(path)

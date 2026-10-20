@@ -782,6 +782,9 @@ def promote_to_wiki(
             operation="promote",
             details=_publication_details(attempt_id, stem, category),
         ) as snap:
+            from ..ingest_ledger import prepare, set_artifacts
+
+            prepare(snap)
             # Classify against the old page before replacing it. The journal
             # restores the PDF if any later file operation fails.
             try:
@@ -812,6 +815,7 @@ def promote_to_wiki(
                 candidates=candidates, page_path=page_path, attempt_id=attempt_id,
                 hook=hook, short_name=short_name,
             )
+            set_artifacts(snap, res, stem)
             snap.mark_committed()
             _canonical_committed(res, stem)
             try:

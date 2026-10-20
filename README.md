@@ -231,8 +231,35 @@ indexing, and required claim-grade persistence report completion. A saved paper
 with unfinished maintenance reports `maintenance_pending`. Unobserved existing
 papers still report `unknown`. After a known commit, an interrupted maintenance
 step returns a published result with repair guidance rather than a retryable CLI
-ingest failure. Durable job scheduling and worker supervision are follow-up work;
-in-process receipts do not yet resolve publication after worker loss.
+ingest failure. The local jobs layer below can explicitly reconcile publication
+after worker loss without repeating authoring.
+
+`researchwiki.jobs.JobSupervisor` adds durable local submission, isolated worker
+startup, status/events, queued cancellation, and explicit retry. Submission is
+idempotent by library, request ID, and request fingerprint. Each worker selects
+its own library/profile; the supervisor does not switch the application's CWD
+or provider environment. Records live outside the checkout in the existing
+per-library runtime location, independently of the rebuildable database.
+`RESEARCHWIKI_JOBS_ROOT` selects an alternate base, still namespaced per library.
+
+Use `submit_ingest(request)`, `start_job(job_id)`, and `get_job(job_id)` on the
+supervisor. `read_events()` and `pending_relays()` expose progress and exact
+active handoffs. `wait(handle)` blocks; relay work still needs a connected
+responder while the process waits. Terminal stderr handoffs remain visible.
+No daemon or automatic retry is installed. `cancel_queued_job()` prevents work
+only before the worker claims it. `retry_job()` creates a new job for finished,
+known-unpublished work; source/configuration changes are recorded.
+
+`refresh_job()` detects lost ownership using the worker's OS lock, rather than
+PID liveness alone. Worker loss leaves publication unknown and retry blocked.
+Call `reconcile_job(job_id)` to inspect durable publication evidence and recover
+mutation journals in an isolated library/profile process. A confirmed rollback
+or pre-publication stop permits an explicit fresh retry. A confirmed commit
+preserves publication and repairs the database, indexes, and claim grades;
+unavailable maintenance remains pending. Missing/unsupported evidence stays
+unknown. Events and matching filenames never establish publication. Recovery
+does not repeat provider calls, answer relay prompts, run optional model hooks,
+or overwrite changed canonical content. The Community `jobs` CLI follows next.
 
 ## Data, privacy, and validation
 

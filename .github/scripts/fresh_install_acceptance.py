@@ -219,6 +219,67 @@ print(f'{cfg.provider}/{cfg.model}')
     run_python(root, anthropic_env, probe)
 
 
+def verify_job_lifecycle(root: Path, env: dict[str, str], source: Path) -> None:
+    """Queue restart/cancel and a real isolated worker through the public API."""
+    run_python(root, env, f"""
+import os, tempfile
+from pathlib import Path
+from researchwiki.jobs import JobConflict, JobSupervisor
+from researchwiki.operations import IngestOptions, IngestRequest
+root = Path.cwd().resolve()
+profile = root / 'job-acceptance.env'
+profile.write_text('RW_MODELS_CONFIG=' + str(root / 'config/models.acceptance.yaml') + '\\n'
+                   + 'RESEARCHWIKI_DB_PATH=' + str(root / 'state.db') + '\\n')
+profile.chmod(0o600)
+options = IngestOptions(use_stub=True, use_semantic=False, use_llm_reconcile=False, n_drafts=1,
+                        title='Alpha Acceptance Pipelines for Reliable Research', year=2026,
+                        authors=('Ada Lovelace', 'Alan Turing'))
+environment = dict(os.environ)
+for key in ('RW_MODELS_CONFIG', 'RW_LLM_PROVIDER', 'RW_LLM_BASE_URL', 'ANTHROPIC_BASE_URL'):
+    environment.pop(key, None)
+with tempfile.TemporaryDirectory(prefix='researchwiki-job-store-') as runtime:
+    supervisor = JobSupervisor(root, store_root=runtime, environment=environment)
+    def request(identity):
+        return IngestRequest(request_id=identity, library_root=str(root), source_pdf={str(source)!r},
+                             provider_profile=str(profile), options=options)
+    queued = supervisor.submit_ingest(request('acceptance-queued'))
+    restarted = JobSupervisor(root, store_root=runtime, environment=environment)
+    assert restarted.get_job(queued.job_id).execution == 'queued'
+    assert restarted.submit_ingest(request('acceptance-queued')).job_id == queued.job_id
+    assert restarted.cancel_queued_job(queued.job_id).execution == 'cancelled'
+    job = restarted.submit_ingest(request('acceptance-worker'))
+    handle = restarted.start_job(job.job_id)
+    try:
+        result = restarted.wait(handle, timeout=45)
+    finally:
+        if handle.process.poll() is None:
+            handle.process.kill()
+            handle.process.wait()
+    assert result.execution == 'finished', result
+    assert result.result.outcome == 'already_present', result
+    assert result.identity is not None and result.result.job_id == job.job_id
+    assert restarted.read_events(job.job_id)[-1].kind == 'operation_finished'
+    assert restarted.reconcile_job(job.job_id, timeout=30) == result
+    try:
+        restarted.retry_job(job.job_id)
+    except JobConflict:
+        pass
+    else:
+        raise AssertionError('published job must not repeat ingestion')
+    # Exercise installed reconciliation of a durable pre-publication start.
+    # Process-kill coverage around the native commit point lives in pytest.
+    from researchwiki.ingest_ledger import begin
+    abandoned = restarted.submit_ingest(request('acceptance-abandoned'))
+    running = restarted.store.claim(abandoned.job_id, 'exited-acceptance-owner')
+    begin(restarted.store.ledger_binding(running))
+    recovered = restarted.reconcile_job(abandoned.job_id, timeout=30)
+    assert recovered.execution == 'finished' and recovered.result.publication == 'not_published'
+    retry = restarted.retry_job(abandoned.job_id)
+    assert retry.parent_job_id == abandoned.job_id
+    restarted.cancel_queued_job(retry.job_id)
+""")
+
+
 def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
     run_cli(root, env, "init", "--scaffold-only")
     for rel in (
@@ -316,6 +377,7 @@ finally:
     # yield zero claim bullets. What this acceptance pins is that the receipt's
     # count comes from the real claims DB and agrees with its indexed state.
     assert f"Claims: {int(claims.stdout.strip())} indexed" in added.stdout
+    verify_job_lifecycle(root, env, single)
 
     # Application callers use the same operation as the CLI, without terminal
     # parsing. Re-adding these bytes must return the existing canonical paper.
