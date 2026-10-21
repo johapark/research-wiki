@@ -20,6 +20,13 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Changed
+
+- Ingest batches record input, prompt, model-routing and framework fingerprints
+  in `plan.json`. Resume refuses drift before dispatch or checkpoint changes;
+  restore the original workflow or start a new batch with the remaining PDFs.
+  Legacy checkpoints remain resumable with an explicit provenance warning.
+
 ## [0.5.3] - 2026-10-18
 
 > **After upgrading:** run `researchwiki grade regression` once. Claim grades now

@@ -515,7 +515,8 @@ def main(argv: list[str]) -> int:
                              "Omit for the current serial-loop behavior.")
     parser.add_argument("--resume", metavar="BATCH_DIR", default=None,
                         help="Continue an interrupted batch. Reads its plan.json + "
-                             "checkpoint.json and re-runs only what's pending.")
+                             "checkpoint.json, verifies input/configuration "
+                             "identity, and re-runs only what's pending.")
     parser.add_argument("--no-retry", action="store_true",
                         help="With --resume: skip PDFs that previously failed "
                              "(default is to retry them).")
