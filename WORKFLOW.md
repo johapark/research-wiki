@@ -165,7 +165,10 @@ Resume refuses changed inputs or configuration before dispatching workers or
 altering the checkpoint. Restore the original settings, or start a new batch
 with the remaining PDFs to intentionally change the workflow. Completed PDFs
 may have moved into `papers/`; only pending inputs are rehashed. Missing pending
-PDFs still follow the recovery path below. Legacy plans without an identity
+PDFs still follow the recovery path below. **Repairing a failed input is not a
+resume path**: fixing the PDF changes its bytes, so the resume refuses it rather
+than let one batch mix two versions of an input. Ingest the repaired file as its
+own batch, which is what the fresh-install acceptance exercises. Legacy plans without an identity
 remain resumable with an explicit unverified-provenance warning; their original
 configuration is not reconstructed or backfilled.
 
