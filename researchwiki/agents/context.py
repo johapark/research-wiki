@@ -132,6 +132,7 @@ class Context:
     winner: phases.Draft | None = None
     committed_path: Path | None = None
     outcome: Literal["pending", "promoted", "sandboxed", "already_present"] = "pending"
+    duplicate_archive_path: Path | None = None
     gate_reasons: list[str] = field(default_factory=list)
 
     def next_iter(self) -> int:

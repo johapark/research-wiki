@@ -85,22 +85,26 @@ def _write_checkpoint(batch_dir: Path, state: dict) -> None:
 def _resolve_inputs(paths: list[str]) -> list[str]:
     """Absolute-path every input. Reject non-existent or non-PDF entries so
     a typo doesn't silently produce a smaller batch than expected. Dedup
-    while preserving order (shell glob can occasionally yield dupes)."""
+    by resolved target while preserving order. Keep file symlink spellings
+    so workers can preserve their targets during duplicate inbox cleanup."""
     out: list[str] = []
+    seen: set[Path] = set()
     for p in paths:
-        path = Path(p).expanduser().resolve()
+        source_path = Path(p).expanduser()
+        path = source_path.resolve()
         if not path.exists():
             print(f"ingest-batch: not found: {p}", file=sys.stderr)
             sys.exit(1)
         if path.suffix.lower() != ".pdf":
             print(f"ingest-batch: not a PDF: {p}", file=sys.stderr)
             sys.exit(1)
-        out.append(str(path))
+        if path not in seen:
+            seen.add(path)
+            out.append(str(source_path.absolute() if source_path.is_symlink() else path))
     if not out:
         print("ingest-batch: no PDFs given", file=sys.stderr)
         sys.exit(1)
-    seen: set[str] = set()
-    return [x for x in out if not (x in seen or seen.add(x))]
+    return out
 
 
 def _worker_log_path(batch_dir: Path, pdf_path: str) -> Path:

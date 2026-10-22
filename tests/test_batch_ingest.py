@@ -100,6 +100,17 @@ def _only_batch(wiki: Path) -> Path:
 # ---------- driver internals ----------
 
 
+def test_resolved_inputs_deduplicate_aliases_and_keep_first_spelling(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "target.pdf"
+    target.write_bytes(b"%PDF-1.4\n")
+    alias = tmp_path / "alias.pdf"
+    alias.symlink_to(target)
+
+    assert _ingest_batch._resolve_inputs(["target.pdf", "./target.pdf", "alias.pdf"]) == [str(target)]
+    assert _ingest_batch._resolve_inputs(["alias.pdf", "./alias.pdf", "target.pdf"]) == [str(alias)]
+
+
 def test_atomic_write_survives_partial(tmp_path):
     """`_atomic_write_json` uses tmp+rename — target file appears only
     after the payload is fully written. Guards against a crash mid-write

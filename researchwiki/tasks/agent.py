@@ -96,7 +96,9 @@ def _print_ingest_receipt(ctx) -> None:
         if ctx.committed_path:
             print(f"  Page:   {_display_path(ctx.committed_path)}")
         print(f"  PDF:    papers/{ctx.paper_stem}.pdf")
-        print("  Input:  unchanged")
+        archive = getattr(ctx, "duplicate_archive_path", None)
+        cleanup = f"duplicate inbox PDF archived to {_display_path(archive)}" if archive else "unchanged"
+        print(f"  Input:  {cleanup}")
         print(f"  Trace:  researchwiki agent trace {ctx.attempt_id}")
         return
 

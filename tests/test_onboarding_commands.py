@@ -152,17 +152,21 @@ def test_sandbox_receipt_is_not_reported_as_added(tmp_path, capsys):
     assert "critical target claim" in out
 
 
-def test_already_present_receipt_is_explicit(tmp_path, capsys):
+@pytest.mark.parametrize("archived", [True, False])
+def test_already_present_receipt_is_explicit(tmp_path, capsys, archived):
+    archive = tmp_path / ".duplicate-pdfs" / "unique" / "original.pdf" if archived else None
     ctx = SimpleNamespace(
         committed_path=tmp_path / "wiki" / "other" / "paper-stem.md",
         paper_stem="paper-stem",
         attempt_id="attempt-789",
         outcome="already_present",
+        duplicate_archive_path=archive,
     )
     agent._print_ingest_receipt(ctx)
     out = capsys.readouterr().out
     assert "Paper already present" in out
     assert "Paper added" not in out
+    assert (f"Input:  duplicate inbox PDF archived to {archive}" if archived else "Input:  unchanged") in out
 
 
 def test_doctor_blocks_an_unattributable_author_model(monkeypatch):

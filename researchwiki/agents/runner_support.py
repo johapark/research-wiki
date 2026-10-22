@@ -1,8 +1,11 @@
-"""Focused helpers for the ingest runner: early phases and budget teardown."""
+"""Focused helpers for the ingest runner: early outcomes and budget teardown."""
 
 from __future__ import annotations
 
 import time
+import shutil
+import tempfile
+from pathlib import Path
 
 from ..db.iterations import write_iteration
 from ..errors import EnvironmentFailure
@@ -187,6 +190,55 @@ def find_exact_duplicate(ctx, prior_stem: str | None):
         return None
     page = find_stem_collision(existing_stem)
     return (existing_stem, page) if page is not None else None
+
+
+def _archive_duplicate_inbox_pdf(input_path: Path, existing_stem: str) -> Path | None:
+    """Move an exact inbox duplicate into a hidden, recoverable archive.
+
+    Resolve directory symlinks for membership, but preserve file symlinks and
+    everything under papers/ so an alias cannot move a source PDF. A unique
+    directory preserves the original filename without overwriting older copies.
+    """
+    from ..fsatomic import file_sha256
+    from ..paths import duplicate_archive_dir, inbox_dir, papers_dir
+
+    try:
+        incoming = input_path.resolve()
+        papers = papers_dir().resolve()
+        canonical_pdf = papers / f"{existing_stem}.pdf"
+        if (input_path.is_symlink()
+                or not incoming.is_relative_to(inbox_dir().resolve())
+                or incoming.is_relative_to(papers)
+                or file_sha256(incoming) != file_sha256(canonical_pdf)):
+            return None
+        archive = duplicate_archive_dir()
+        archive.mkdir(parents=True, exist_ok=True)
+        destination = Path(tempfile.mkdtemp(prefix=f"{existing_stem}-", dir=archive)) / input_path.name
+        # Synced inbox directories may live on another filesystem.
+        shutil.move(str(input_path), str(destination))
+    except OSError as exc:
+        log(f"duplicate ⚠ inbox archive failed; input retained: {exc}", tag="agent")
+        return None
+    return destination
+
+
+def finish_exact_duplicate(ctx, duplicate, input_path: Path, conn) -> None:
+    """Finish a verified duplicate without authoring; clean inbox by default."""
+    existing_stem, existing_page = duplicate
+    ctx.outcome = "already_present"
+    ctx.paper_stem = existing_stem
+    ctx.committed_path = existing_page
+    ctx.next_iter()
+    ctx.duplicate_archive_path = _archive_duplicate_inbox_pdf(input_path, existing_stem)
+    cleanup = f"duplicate inbox PDF archived to {ctx.duplicate_archive_path}" if ctx.duplicate_archive_path else "input unchanged"
+    write_iteration(
+        attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,
+        pdf_filename=ctx.pdf_filename, iteration=ctx.iteration, role="duplicate",
+        decision="already-present",
+        decision_reason=f"incoming PDF is byte-identical to papers/{existing_stem}.pdf; {cleanup}",
+        gate_metrics={"duplicate_archive_path": str(ctx.duplicate_archive_path) if ctx.duplicate_archive_path else None}, conn=conn,
+    )
+    log(f"duplicate → papers/{existing_stem}.pdf is byte-identical; {cleanup}; stopping", tag="agent")
 
 
 _FINDING_SECTIONS = ("results", "discussion", "conclusion", "findings")
