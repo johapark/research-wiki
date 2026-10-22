@@ -138,5 +138,16 @@ jobs:
           pip install --no-deps -e .
           pip install pytest filelock pyyaml
 
+      # `test_batch_boundaries.py` joins the original three because batch
+      # interrupt handling is filesystem-sensitive in the same way the atomic
+      # writes are: a checkpoint is published by rename, and Windows rename
+      # semantics differ from POSIX. It needs no ML stack.
+      #
+      # `test_mutation.py` and `test_remove.py` deliberately stay out. Their
+      # journal-recovery paths call `projections.reconcile`, which imports
+      # tantivy and numpy, so running them here would mean installing the
+      # multi-gigabyte stack this job exists to avoid. Checked rather than
+      # assumed: under this dependency set they fail on import, not on
+      # behaviour.
       - name: Exercise cross-platform writes and provider boundaries
-        run: python -m pytest -q tests/test_fsatomic.py tests/test_provider_cache.py tests/test_provider_http.py
+        run: python -m pytest -q tests/test_fsatomic.py tests/test_provider_cache.py tests/test_provider_http.py tests/test_batch_boundaries.py
