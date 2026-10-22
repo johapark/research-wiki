@@ -67,6 +67,13 @@ the reasoning behind any line below.
   evidence instead of reporting a failed scan. Skips retain a fingerprint and
   earlier paper-review history; changed, removed or retyped sources reopen for
   attention. Missing indexes for actual papers remain visible failures.
+- Opt-in claim-support checks judge a provenance-labelled packet of up to five
+  complete retrieved chunks, rather than a capped display preview or truncated
+  prompt. Evidence late in a chunk or spread across chunks reaches the judge;
+  the display preview stays bounded and the check remains opt-in.
+- Opt-in claim-support checks preserve the draft's explicit PDF path when
+  retrieving complete evidence chunks. Re-ingest support checks no longer
+  switch back to an older canonical PDF during source-hash revalidation.
 
 ## [0.5.3] - 2026-10-18
 

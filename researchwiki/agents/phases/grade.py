@@ -14,7 +14,9 @@ from pathlib import Path
 from ...benchmark.fixture import ContentFixture, FixtureItem
 from ...grade.fidelity.paper import grade_page
 from ...grade.scorer import IMPORTANCE_WEIGHTS, VERDICT_SCORES, score_text
-from ...grade.support import Classifier, check_support, unsupported_claims
+from ...grade.support import (
+    Classifier, check_support, retrieve_support_evidence, unsupported_claims,
+)
 from .draft import _wrap_with_frontmatter
 
 # Per-anchor text budget for the `missed_anchors` entries carried in the
@@ -187,13 +189,16 @@ def grade_draft(
 
     # Opt-in per-claim support (entailment) check. Off by default: no classifier
     # → no LLM call and no `n_unsupported` key, so the promote-gate veto stays
-    # inert. When supplied, judges each graded claim against its already-
-    # retrieved top-1 chunk (`supporting_text`) and surfaces both the count and
-    # the identity of the unsupported claims, so a reviewer sees *which* claims
-    # the source doesn't entail.
+    # inert. When supplied, retrieve complete chunks from the index the grader
+    # already built, not the capped `supporting_text` display preview. Surface
+    # both the count and identity of unsupported claims, so a reviewer sees
+    # *which* claims the source doesn't entail.
     if support_classifier is not None:
         graded_claims = [
-            (c.section, c.position, c.text, c.supporting_text)
+            (
+                c.section, c.position, c.text,
+                retrieve_support_evidence(stem, c.text, pdf_path=pdf_path),
+            )
             for c in report.claims
             if c.graded
         ]
