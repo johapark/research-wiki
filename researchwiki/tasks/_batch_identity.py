@@ -155,6 +155,22 @@ def capture(plan: dict, *, pending: list[str] | None = None) -> dict:
     }
 
 
+def check_readable(inputs: list[str], extra_args: list[str],
+                   per_input_args: dict[str, list[str]]) -> None:
+    """Read everything `capture` will, before a caller commits to side effects.
+
+    `import apply` copies its wave into inbox/ before `new_batch` records the
+    identity. A read failure there strands the copies, and the next apply skips
+    them as already staged instead of dispatching their frozen metadata.
+    """
+    capture({
+        "inputs": inputs,
+        "extra_args": normalize_file_args(extra_args),
+        "per_input_args": {name: normalize_file_args(args)
+                           for name, args in per_input_args.items()},
+    })
+
+
 def _changes(before, after, prefix: str) -> list[str]:
     """Report field names only; never put prompt text or settings in diagnostics."""
     if isinstance(before, dict) and isinstance(after, dict):

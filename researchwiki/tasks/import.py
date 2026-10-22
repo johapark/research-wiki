@@ -412,7 +412,7 @@ def _render_report(
 
 
 def _run_apply(args: argparse.Namespace) -> int:
-    from . import _ingest_batch
+    from . import _batch_identity, _ingest_batch
     from ..refimport.apply import dispatch, plan_wave, stage
     from ..refimport.manifest import open_run_dir
 
@@ -474,6 +474,20 @@ def _run_apply(args: argparse.Namespace) -> int:
                 f"grade BM25-only and need re-grading later. See the install notes "
                 f"in prompts/migration-backfill.md."
             )
+        # The batch identity hashes every PDF and --supplementary file; the
+        # copies are byte-identical, so reading the sources proves it can.
+        try:
+            _batch_identity.check_readable(
+                [rec["primary_pdf"] for rec in plan.staged],
+                [],
+                {rec["primary_pdf"]: list(rec.get("ingest_args") or [])
+                 for rec in plan.staged},
+            )
+        except OSError as exc:
+            raise EnvironmentFailure(
+                f"cannot read a file this wave depends on ({exc}). Nothing was "
+                f"copied into inbox/; restore the file or re-run `import inspect`."
+            ) from exc
 
     # Resolve the provider-aware default before the preview: API-backed waves use
     # four workers, while chat-relay stays sequential unless the user supplied -w.
