@@ -296,6 +296,27 @@ update pages, DB rows, and search indexes incrementally; a routine full rebuild
 after every ingest is unnecessary. Run `status` afterward and follow reported
 index warnings or review queues.
 
+### Durable single-paper jobs
+
+For explicit queue ownership and process-loss reconciliation, use the
+Community `jobs` commands alongside the existing foreground/batch workflows:
+
+```bash
+researchwiki jobs submit inbox/paper.pdf --library-root "$PWD" --request-id paper-001 --json
+researchwiki jobs run JOB_ID --library-root "$PWD" --json
+researchwiki jobs events JOB_ID --library-root "$PWD" --after-sequence 0 --json
+researchwiki jobs reconcile JOB_ID --library-root "$PWD" --json
+```
+
+Replace `JOB_ID` with the submission response's `job.job_id`. Submit/retry only
+enqueue; run starts an isolated foreground worker. Inspection reads durable
+state without writing it. Ctrl+C interrupts the owned worker and retains the
+available state; reconcile before retrying. Cancel applies only to queued work.
+Profiles are selected at submission and loaded in the worker, so library
+selection and read-only inspection do not depend on the caller's `.env`.
+See the [job command guide](./docs/jobs.md) for typed request/options files,
+profile selection, machine-readable results, and command-specific exit codes.
+
 ### 3. Inspect the new wiki page
 
 `wiki/compbio/kim-2026-structural-motif-search-across-the-protein.md`:
