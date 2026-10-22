@@ -15,6 +15,10 @@ from dataclasses import dataclass
 from .connection import get_connection
 
 
+# Commit retries for a write that lost a race with a long maintenance lock.
+_BUSY_RETRIES = 4
+_BUSY_BACKOFF = 0.25
+
 VALID_ROLES = {
     "reconcile", "extract", "target_claims", "crosslinks", "author",
     "grade", "grade_persist", "tournament", "critic", "debug", "short_name",
@@ -163,7 +167,23 @@ def write_iteration(
     # Always commit: ingest_iterations is append-only event log, every row
     # should be durable as soon as it's written. Closing the runner connection
     # without per-write commits would silently lose all rows on rollback.
-    conn.commit()
+    #
+    # Retry on SQLITE_BUSY rather than letting it escape. `busy_timeout` is 5 s,
+    # and a maintenance command that holds the write lock longer than that —
+    # `db rebuild` used to hash all of `papers/` inside its transaction — would
+    # otherwise kill a parallel ingest worker mid-paper with "database is
+    # locked", surfacing as exit 3. The row is an event log entry: a few seconds
+    # late is free, losing it is not.
+    for attempt in range(_BUSY_RETRIES):
+        try:
+            conn.commit()
+            break
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower() and "busy" not in str(e).lower():
+                raise
+            if attempt == _BUSY_RETRIES - 1:
+                raise
+            time.sleep(_BUSY_BACKOFF * (2 ** attempt))
     if own_conn:
         conn.close()
     return cur.lastrowid

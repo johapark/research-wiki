@@ -279,7 +279,8 @@ def _resolve_slug(
     return disambiguate_slug(base, position)
 
 
-def _upsert_claims(conn: sqlite3.Connection, page: Page) -> int:
+def _upsert_claims(conn: sqlite3.Connection, page: Page,
+                   digests: dict[str, str] | None = None) -> int:
     """Reconcile claims rows for this paper against a fresh parse of the page.
 
     Grader-output columns (bm25_top1, semantic_score, last_graded_at, …) are
@@ -303,7 +304,11 @@ def _upsert_claims(conn: sqlite3.Connection, page: Page) -> int:
     # `papers/` offline), stays in place; claim retrieval already withholds it
     # as unverified, and `grade regression` still needs it as the baseline.
     pdf = papers_dir() / f"{page.stem}.pdf"
-    digest = file_sha256(pdf) if pdf.is_file() else None
+    if digests is not None:
+        # Precomputed outside the write transaction — see `_precompute_digests`.
+        digest = digests.get(page.stem)
+    else:
+        digest = file_sha256(pdf) if pdf.is_file() else None
     if digest is not None:
         conn.execute(
             "UPDATE claims SET last_graded_at=NULL, bm25_top1=NULL, bm25_top3_mean=NULL, "
@@ -398,7 +403,8 @@ def _upsert_claims(conn: sqlite3.Connection, page: Page) -> int:
     return n
 
 
-def _upsert_one(conn: sqlite3.Connection, md: Path, now_ts: int) -> tuple[Page | None, int]:
+def _upsert_one(conn: sqlite3.Connection, md: Path, now_ts: int,
+                digests: dict[str, str] | None = None) -> tuple[Page | None, int]:
     """Parse and upsert one markdown page. Returns (page, n_claims) or (None, 0).
 
     `n_claims` is 0 for non-paper page types — their claims are pruned.
@@ -419,7 +425,7 @@ def _upsert_one(conn: sqlite3.Connection, md: Path, now_ts: int) -> tuple[Page |
 
     page_type = str(fm.get("type", "paper"))
     if page_type == "paper":
-        n_claims = _upsert_claims(conn, page)
+        n_claims = _upsert_claims(conn, page, digests)
     else:
         # Non-paper pages (synthesis / guidance / whitepaper / ...) don't
         # have gradable claims today — prune any leftovers but keep the
@@ -500,6 +506,38 @@ def delete_page(stem: str) -> bool:
         conn.close()
 
 
+def _precompute_digests(root: Path) -> dict[str, str]:
+    """SHA-256 of every `papers/*.pdf`, hashed *before* the write transaction.
+
+    `_upsert_claims` needs each paper's real content hash to decide whether a
+    recorded grade still describes the current PDF. Hashing inside the
+    transaction meant one SQLite write lock was held for the whole walk plus
+    the full read of `papers/` — measured at 2.4 s for 667 PDFs (4.6 GB), and
+    far worse on a synced folder that must download cloud-only files. Parallel
+    ingest workers call `write_iteration`, which has no retry beyond the 5 s
+    `busy_timeout`, so a rebuild started mid-batch could time a worker out and
+    kill it with "database is locked".
+
+    Deliberately `file_sha256`, not `PdfHashCache`: that cache is documented as
+    read-paths-only because a stat match is evidence rather than proof, and
+    rebuild's grade invalidation is a write path. This change moves *when* the
+    bytes are read, not whether.
+
+    An unreadable PDF is omitted, which `_upsert_claims` treats the same way as
+    an absent one: the existing grade stays, flagged unverified by retrieval.
+    """
+    digests: dict[str, str] = {}
+    papers = papers_dir()
+    if not papers.is_dir():
+        return digests
+    for pdf in sorted(papers.glob("*.pdf")):
+        try:
+            digests[pdf.stem] = file_sha256(pdf)
+        except OSError:
+            continue
+    return digests
+
+
 def _rebuild_locked(verbose: bool = False) -> RebuildStats:
     """Walk wiki/ + papers/ and rewrite the DB index. Returns stats."""
     stats = RebuildStats()
@@ -509,6 +547,10 @@ def _rebuild_locked(verbose: bool = False) -> RebuildStats:
     root = wiki_dir()
     if not root.exists():
         return stats
+
+    # Read every PDF before taking the write lock, never inside it.
+    digests = _precompute_digests(root)
+
     conn = get_connection()
 
     try:
@@ -533,7 +575,7 @@ def _rebuild_locked(verbose: bool = False) -> RebuildStats:
                     continue
                 stats.pages_scanned += 1
                 seen.add(md.stem)  # Presence, not successful parsing, controls deletion.
-                page, n_claims = _upsert_one(conn, md, now_ts)
+                page, n_claims = _upsert_one(conn, md, now_ts, digests)
                 if page is None:
                     stats.parse_errors.append(str(md))
                     continue
