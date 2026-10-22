@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..errors import EnvironmentFailure
 
@@ -99,3 +100,30 @@ class SearchBackend(ABC):
     @abstractmethod
     def exists(self) -> bool:
         """Return True iff the index has been built and is readable."""
+
+
+def swap_in_directory(staged: Path, target: Path) -> None:
+    """Publish `staged` at `target` so a crash leaves old, new, or nothing.
+
+    `shutil.rmtree(target)` deletes entries in directory-listing order, so a
+    crash part-way could keep `index_meta.json` and `.managed.json` while the
+    segment files were gone — a directory that passed the reuse check and then
+    failed every query. The old index is first *renamed* aside (one atomic
+    step), so `target` is either the old complete index or absent, never a
+    partial one; only then is the retired copy deleted.
+
+    Lives here, in the dependency-free module both index builders already
+    import, because `pdf_chunks` (which pioneered this) pulls in numpy and
+    `pages_bm25` must stay light enough for the Windows CI job.
+    """
+    import secrets
+    import shutil
+
+    retired = None
+    if target.exists():
+        retired = target.with_name(f".{target.name}-retired-{secrets.token_hex(6)}")
+        target.replace(retired)
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    staged.replace(target)
+    if retired is not None:
+        shutil.rmtree(retired, ignore_errors=True)

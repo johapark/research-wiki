@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
+from researchwiki.index import pages_bm25
 from researchwiki.index.pages_bm25 import TantivySearchBackend
 from researchwiki.index.types import Document
 from researchwiki.index import pages_semantic
@@ -199,3 +200,82 @@ def test_hand_edited_frontmatter_scalars_keep_the_index_loadable(tmp_path, monke
     batches.clear()
     result = pages_semantic.upsert_pages([normal, blank_type, numeric_title])
     assert result["mode"] == "incremental" and batches == []
+
+
+# ---------- a rebuild must not expose a partial index to readers ----------
+#
+# `build` used to unlink the directory's contents in place. Writers hold
+# `exclusive_lock(search_index_dir())`, but readers take none: category suggest
+# at ingest, `search`, and the MCP server all just open the directory. So an
+# in-place wipe gave a concurrent reader a window where the index looked absent
+# — which ingest treats as "abstain", filing the paper under `other` — or,
+# mid-unlink, a directory that opened and then failed every query.
+
+
+def test_rebuild_keeps_the_old_index_queryable_until_the_swap(tmp_path):
+    """The reader sees the previous index or the new one, never neither."""
+    path = tmp_path / "tantivy"
+    backend = TantivySearchBackend(path)
+    backend.build([_doc(body="olduniquetoken")])
+    assert backend.exists()
+
+    observed = []
+
+    # Observe what a *separate* reader sees at the moment the writer is mid-build.
+    reader = TantivySearchBackend(path)
+    real_swap = pages_bm25.swap_in_directory
+
+    def observing_swap(staged, target):
+        observed.append(("before-swap", reader.exists(),
+                         len(reader.query("olduniquetoken", limit=5))))
+        real_swap(staged, target)
+        observed.append(("after-swap", reader.exists(), None))
+
+    import pytest
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(pages_bm25, "swap_in_directory", observing_swap)
+        backend.build([_doc(body="newuniquetoken")])
+    finally:
+        monkeypatch.undo()
+
+    assert observed[0] == ("before-swap", True, 1), (
+        "the old index must still answer queries while the new one is building")
+    assert observed[1][1] is True
+    # And the new content is what is published.
+    fresh = TantivySearchBackend(path)
+    assert len(fresh.query("newuniquetoken", limit=5)) == 1
+    assert fresh.query("olduniquetoken", limit=5) == []
+
+
+def test_a_crashed_rebuild_leaves_the_old_index_intact(tmp_path):
+    path = tmp_path / "tantivy"
+    backend = TantivySearchBackend(path)
+    backend.build([_doc(body="olduniquetoken")])
+
+    import pytest
+    monkeypatch = pytest.MonkeyPatch()
+
+    def boom(staged, target):
+        raise OSError("disk full at the worst moment")
+
+    try:
+        monkeypatch.setattr(pages_bm25, "swap_in_directory", boom)
+        with pytest.raises(OSError):
+            backend.build([_doc(body="newuniquetoken")])
+    finally:
+        monkeypatch.undo()
+
+    reader = TantivySearchBackend(path)
+    assert reader.exists(), "a failed rebuild must not destroy the live index"
+    assert len(reader.query("olduniquetoken", limit=5)) == 1
+
+
+def test_rebuild_leaves_no_staging_directories_behind(tmp_path):
+    path = tmp_path / "tantivy"
+    backend = TantivySearchBackend(path)
+    backend.build([_doc()])
+    backend.build([_doc()])
+    leftovers = [p.name for p in path.parent.iterdir() if "-building-" in p.name
+                 or "-retired-" in p.name]
+    assert leftovers == []

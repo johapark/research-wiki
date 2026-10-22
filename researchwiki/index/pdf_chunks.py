@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import re
-import secrets
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -28,6 +27,7 @@ import tantivy
 
 from ..paths import grade_cache_dir, resolve_pdf
 from ..fsatomic import exclusive_lock, file_sha256, write_json_atomic
+from .types import swap_in_directory
 from .bundle import load_bundle, save_bundle
 from ..pdf.sections import section_for_offset, section_spans
 from ..pdf.text import (
@@ -318,23 +318,9 @@ def _opens(idx_dir: Path) -> bool:
         return False
 
 
-def _swap_in(staged: Path, target: Path) -> None:
-    """Publish `staged` at `target` so a crash leaves old, new, or nothing.
-
-    `shutil.rmtree(target)` deletes entries in directory-listing order, so a
-    crash part-way could keep `index_meta.json` and `.managed.json` while the
-    segment files were gone — a directory that passed the reuse check and then
-    failed every query. The old index is first *renamed* aside (one atomic
-    step), so `target` is either the old complete index or absent, never a
-    partial one; only then is the retired copy deleted.
-    """
-    retired = None
-    if target.exists():
-        retired = target.with_name(f".{target.name}-retired-{secrets.token_hex(6)}")
-        target.replace(retired)
-    staged.replace(target)
-    if retired is not None:
-        shutil.rmtree(retired, ignore_errors=True)
+# Moved to `index.types` so the page index can share it; both builders need the
+# same crash semantics and `types` is the dependency-free module both import.
+_swap_in = swap_in_directory
 
 
 def _build_embeddings_cache(idx_dir: Path, chunk_texts: list[str]) -> None:
