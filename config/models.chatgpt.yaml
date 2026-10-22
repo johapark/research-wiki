@@ -95,3 +95,5 @@ phases:
   # reserves space for low-effort reasoning as well as the claims list.
   target_claims:    {role: judge, temperature: 0.0, max_tokens: 8000}
   claim_support:    {role: judge}
+  answer:           {role: author, temperature: 0.2, max_tokens: 12000}
+  answer_judge:     {role: judge, temperature: 0.0, max_tokens: 6000}

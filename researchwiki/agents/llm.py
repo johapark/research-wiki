@@ -253,19 +253,19 @@ def _is_local_endpoint(url: str) -> bool:
     return host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
 
-def missing_provider_credentials() -> list[str]:
+def missing_provider_credentials(*, phases: tuple[str, ...] | None = None) -> list[str]:
     """Every provider this config routes to but has no usable credentials for.
 
     Returns one human-readable problem per unusable provider, empty when the
     config is runnable. Pure environment + config inspection: no network, no
     tokens, microseconds.
 
-    Checks *all* registered phases rather than a curated ingest subset. An
+    By default checks *all* registered phases, rather than an ingest subset. An
     ingest already reaches nearly every phase — author, critic, debug, evolve,
     keywords, link_generation, memory_evolution, reconcile, short_name,
     target_claims, and classifier via the category auto-suggest — so a
-    hand-listed subset would be a near-superset that silently rots as phases
-    are added, which is how the gap this closes appeared in the first place.
+    hand-listed ingest subset would silently rot as phases are added. Bounded
+    operations may explicitly supply their phases before spending a model call.
 
     Deliberately stricter than `has_synchronous_llm()`, which answers "is any
     key set anywhere" and so returns True for the failure README and
@@ -275,7 +275,7 @@ def missing_provider_credentials() -> list[str]:
     """
     _validated_anthropic_base_url()
     providers: set[str] = set()
-    for name in model_config.list_phases():
+    for name in model_config.list_phases() if phases is None else phases:
         try:
             providers.add(
                 model_config.canonical_provider_id(
