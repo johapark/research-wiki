@@ -110,20 +110,39 @@ def swap_in_directory(staged: Path, target: Path) -> None:
     segment files were gone — a directory that passed the reuse check and then
     failed every query. The old index is first *renamed* aside (one atomic
     step), so `target` is either the old complete index or absent, never a
-    partial one; only then is the retired copy deleted.
+    partial one; only then is the retired copy deleted. The two renames do
+    leave a microsecond window where `target` is absent — a reader can see the
+    old index, the new one, or briefly nothing, but never a half-built one.
 
     Lives here, in the dependency-free module both index builders already
     import, because `pdf_chunks` (which pioneered this) pulls in numpy and
     `pages_bm25` must stay light enough for the Windows CI job.
     """
+    import os
     import secrets
     import shutil
+
+    if target.is_symlink():
+        # Renaming a symlink aside would replace the user's link with a real
+        # directory and strand the link's own target. Publish *through* the
+        # link instead, so a deliberately relocated index keeps its layout.
+        target = Path(os.path.realpath(target))
 
     retired = None
     if target.exists():
         retired = target.with_name(f".{target.name}-retired-{secrets.token_hex(6)}")
         target.replace(retired)
     staged.parent.mkdir(parents=True, exist_ok=True)
-    staged.replace(target)
-    if retired is not None:
-        shutil.rmtree(retired, ignore_errors=True)
+    try:
+        staged.replace(target)
+    except OSError:
+        # The window between the two renames is the only moment `target` does
+        # not exist. If publishing fails, put the old index back rather than
+        # leaving the caller with nothing.
+        if retired is not None and not target.exists():
+            retired.replace(target)
+            retired = None
+        raise
+    finally:
+        if retired is not None:
+            shutil.rmtree(retired, ignore_errors=True)

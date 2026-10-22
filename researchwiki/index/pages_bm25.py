@@ -132,6 +132,13 @@ class TantivySearchBackend(SearchBackend):
         `other` — or, mid-unlink, a directory that opened and then failed every
         query. A crash left no index at all.
 
+        **Shortened, not closed.** Publishing is two renames (retire the old,
+        move the new in), so there is still an instant where the path does not
+        exist. It is now microseconds rather than the length of a full rebuild,
+        and a reader can no longer see a *partial* index — only the old one, the
+        new one, or briefly nothing. Closing it completely needs a versioned
+        directory plus a pointer, or a retry on the read side.
+
         Same approach, and the same helper, as the PDF-chunk index.
         """
         import shutil

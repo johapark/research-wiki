@@ -229,7 +229,11 @@ def _already_graded(stems: list[str]) -> dict[str, int]:
     )
     try:
         conn = get_connection()
-    except Exception as e:
+    except (EnvironmentFailure, sqlite3.Error, OSError) as e:
+        # Typed failures only. `get_connection` already raises
+        # StateDBUnavailable (an EnvironmentFailure) for a locked or unopenable
+        # DB; catching bare Exception here would relabel a TypeError in our own
+        # code as an environment error, which the exit-code contract forbids.
         raise EnvironmentFailure(
             f"cannot read the state DB to check for existing grading work "
             f"({type(e).__name__}: {e}). Refusing to apply: this check is what "
@@ -239,7 +243,10 @@ def _already_graded(stems: list[str]) -> dict[str, int]:
     try:
         rows = conn.execute(query, stems).fetchall()
     except sqlite3.OperationalError as e:
-        if "no such table" in str(e).lower():
+        if "no such table: claims" in str(e).lower():
+            # Specifically `claims`. A bare "no such table" match would also
+            # swallow a missing schema_meta or papers — a half-initialised DB,
+            # where "nothing is graded" is a guess, not a fact.
             return {}  # fresh DB: no claims yet, so nothing can be graded
         raise EnvironmentFailure(
             f"cannot check for existing grading work ({e}). Refusing to apply; "

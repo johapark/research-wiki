@@ -518,3 +518,23 @@ def test_an_environment_failure_during_apply_still_exits_2(wiki, monkeypatch, ca
     assert cli.main([STEM, "--apply"]) == 2
     err = capsys.readouterr().err
     assert "rolled back" in err, "pre-commit failure really is rolled back"
+
+
+def test_json_mode_reports_a_failure_on_stdout_too(wiki, monkeypatch, capsys):
+    """Exit 2 in JSON mode still emits a document: a consumer should not have
+    to scrape stderr to learn whether the page is still there."""
+    import json as _json
+
+    from researchwiki.errors import EnvironmentFailure
+
+    def boom(*_a, **_k):
+        raise EnvironmentFailure("disk is unreadable")
+
+    monkeypatch.setattr(cli, "apply_removal", boom)
+    assert cli.main([STEM, "--apply", "--json"]) == 2
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["applied"] is False
+    assert payload["committed"] is False
+    assert "unreadable" in payload["error"]
+    assert payload["error_state"] == "rolled back"
+    assert payload["stem"] == STEM

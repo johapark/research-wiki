@@ -120,7 +120,7 @@ def write_iteration(
     if own_conn:
         conn = get_connection()
 
-    cur = conn.execute(
+    _SQL = (
         """
         INSERT INTO ingest_iterations (
             attempt_id, paper_stem, pdf_filename, iteration, role, section,
@@ -139,8 +139,9 @@ def write_iteration(
             :duration_ms, :gate_metrics,
             :created_at
         )
-        """,
-        {
+        """
+    )
+    _PARAMS = {
             "attempt_id": attempt_id,
             "paper_stem": paper_stem,
             "pdf_filename": pdf_filename,
@@ -162,30 +163,45 @@ def write_iteration(
             "duration_ms": duration_ms,
             "gate_metrics": json.dumps(gate_metrics) if gate_metrics is not None else None,
             "created_at": int(time.time()),
-        },
-    )
+    }
     # Always commit: ingest_iterations is append-only event log, every row
     # should be durable as soon as it's written. Closing the runner connection
     # without per-write commits would silently lose all rows on rollback.
     #
     # Retry on SQLITE_BUSY rather than letting it escape. `busy_timeout` is 5 s,
-    # and a maintenance command that holds the write lock longer than that —
-    # `db rebuild` used to hash all of `papers/` inside its transaction — would
-    # otherwise kill a parallel ingest worker mid-paper with "database is
+    # and a maintenance command that holds the write lock longer than that
+    # would otherwise kill a parallel ingest worker mid-paper with "database is
     # locked", surfacing as exit 3. The row is an event log entry: a few seconds
     # late is free, losing it is not.
-    for attempt in range(_BUSY_RETRIES):
-        try:
-            conn.commit()
-            break
-        except sqlite3.OperationalError as e:
-            if "locked" not in str(e).lower() and "busy" not in str(e).lower():
-                raise
-            if attempt == _BUSY_RETRIES - 1:
-                raise
-            time.sleep(_BUSY_BACKOFF * (2 ** attempt))
-    if own_conn:
-        conn.close()
+    #
+    # **The INSERT is inside the loop, not just the commit.** In WAL mode a
+    # writer blocked by another writer fails when it tries to take the write
+    # lock — i.e. at the INSERT — and by commit time it already holds the lock,
+    # so a commit-only retry guards a statement that almost never fails. Verified
+    # against two real connections before changing it. `rollback()` runs first on
+    # every retry so a partially-applied attempt cannot double-insert the row.
+    try:
+        for attempt in range(_BUSY_RETRIES):
+            try:
+                cur = conn.execute(_SQL, _PARAMS)
+                conn.commit()
+                break
+            except sqlite3.OperationalError as e:
+                msg = str(e).lower()
+                if "locked" not in msg and "busy" not in msg:
+                    raise
+                if attempt == _BUSY_RETRIES - 1:
+                    raise
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                time.sleep(_BUSY_BACKOFF * (2 ** attempt))
+    finally:
+        # Closed even when the retries are exhausted: this function owns the
+        # connection, so an escaping error must not leak it.
+        if own_conn:
+            conn.close()
     return cur.lastrowid
 
 

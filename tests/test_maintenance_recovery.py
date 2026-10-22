@@ -291,6 +291,56 @@ def test_pdf_digests_are_computed_before_the_write_transaction(tmp_path, monkeyp
         "every PDF must be hashed before the write connection is opened")
 
 
+def test_write_iteration_survives_a_real_concurrent_writer(tmp_path, monkeypatch):
+    """Two real connections on a real file, not a fake whose commit raises.
+
+    In WAL mode a blocked writer fails when it takes the write lock — at the
+    INSERT — so a commit-only retry would leave this failing. The fake-connection
+    test below pins the backoff mechanics; this one pins the actual failure mode.
+
+    The holder is released from inside the backoff callback rather than from a
+    helper thread: a sqlite connection may only be used by its creating thread.
+    """
+    import sqlite3
+
+    from researchwiki.db import iterations as it
+
+    db = tmp_path / "state.db"
+    monkeypatch.setenv("RESEARCHWIKI_DB_PATH", str(db))
+    from researchwiki.db.connection import get_connection
+    get_connection().close()        # create the schema
+
+    holder = sqlite3.connect(db, timeout=30)
+    holder.execute("PRAGMA busy_timeout = 100")
+    holder.execute("BEGIN IMMEDIATE")
+    holder.execute("INSERT INTO schema_meta (key, value) VALUES ('probe', '1')")
+
+    monkeypatch.setattr(it, "_BUSY_BACKOFF", 0.01)
+    state = {"released": False}
+
+    def release_on_first_backoff(_seconds):
+        if not state["released"]:
+            state["released"] = True
+            holder.rollback()       # same thread that opened it
+            holder.close()
+
+    monkeypatch.setattr(it.time, "sleep", release_on_first_backoff)
+
+    row_id = it.write_iteration(
+        attempt_id="concurrent", paper_stem="s", pdf_filename="s.pdf",
+        iteration=1, role="commit",
+    )
+    assert row_id is not None, "the retry must land the row once the lock clears"
+    assert state["released"], "sanity: the first attempt really was blocked"
+
+    check = sqlite3.connect(db)
+    rows = check.execute(
+        "SELECT COUNT(*) FROM ingest_iterations WHERE attempt_id='concurrent'"
+    ).fetchone()[0]
+    check.close()
+    assert rows == 1, f"expected exactly one row, got {rows} (double-insert?)"
+
+
 def test_write_iteration_retries_a_busy_commit_instead_of_dying(monkeypatch):
     import sqlite3
 
@@ -302,16 +352,23 @@ def test_write_iteration_retries_a_busy_commit_instead_of_dying(monkeypatch):
     class Conn:
         def __init__(self):
             self.attempts = 0
+            self.rollbacks = 0
 
         def execute(self, *_a, **_k):
+            self.attempts += 1
+            if self.attempts < 3:
+                # WAL blocks the writer here, at the INSERT, not at commit.
+                raise sqlite3.OperationalError("database is locked")
+
             class Cur:
                 lastrowid = 7
             return Cur()
 
         def commit(self):
-            self.attempts += 1
-            if self.attempts < 3:
-                raise sqlite3.OperationalError("database is locked")
+            pass
+
+        def rollback(self):
+            self.rollbacks += 1
 
         def close(self):
             pass
@@ -323,6 +380,7 @@ def test_write_iteration_retries_a_busy_commit_instead_of_dying(monkeypatch):
     )
     assert row_id == 7
     assert conn.attempts == 3, "retried until the lock cleared"
+    assert conn.rollbacks == 2, "rolled back before each retry, so no double-insert"
     assert sleeps, "backed off between attempts"
 
 
@@ -339,13 +397,14 @@ def test_write_iteration_does_not_retry_a_real_error(monkeypatch):
         attempts = 0
 
         def execute(self, *_a, **_k):
-            class Cur:
-                lastrowid = 1
-            return Cur()
-
-        def commit(self):
             Conn.attempts += 1
             raise sqlite3.OperationalError("no such column: nonsense")
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
 
         def close(self):
             pass
