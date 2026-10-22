@@ -19,6 +19,7 @@ from researchwiki.synthesis import compose, SynthesisReceipt
 from researchwiki.synthesis import pipeline, publication
 from researchwiki.synthesis.gates import page_gates
 from researchwiki.synthesis.publication import publish
+from researchwiki.synthesis.receipt import Source
 from tests.synthesis_fixture import TEXT, author_response, judge_response
 
 
@@ -286,3 +287,21 @@ def test_paper_footnotes_cannot_mask_a_dangling_claim_anchor(corpus, monkeypatch
     text = result.markdown().replace('## Background', 'A sourced paragraph contains a bad specific claim anchor. [[alpha#kc-deadbeef]][^alpha]\n\n## Background')
     report = page_gates(text, result.question, corpus)
     assert report.dangling_anchors == 1 and not report.passed
+
+
+@pytest.mark.parametrize('category', ['cell biology', '유전체', 'methods.v2'])
+def test_source_keys_preserve_existing_category_names(category):
+    source = Source(stem='alpha', key=f'{category}/alpha')
+    assert Source.from_dict(source.to_dict()) == source
+
+
+def test_spaced_category_can_be_composed_and_published(corpus, monkeypatch):
+    Path('wiki/cell biology').mkdir()
+    for stem in ('alpha', 'beta'):
+        Path(f'wiki/cat/{stem}.md').rename(f'wiki/cell biology/{stem}.md')
+    # The bare stems and bytes are stable; source paths are captured afresh.
+    models(monkeypatch)
+    result = make(corpus)
+    assert result.status == 'verified', result.reason
+    assert '[^alpha]: [[cell biology/alpha]]' in result.markdown()
+    assert publish(result, corpus, 'spaced-category-map')['publication'] == 'published'

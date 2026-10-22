@@ -23,7 +23,9 @@ class Source(WireModel):
     def __post_init__(self):
         super().__post_init__()
         validate_stem(self.stem)
-        if not re.fullmatch(r"[a-zA-Z0-9_-]+/" + re.escape(self.stem), self.key):
+        category, separator, stem = self.key.partition('/')
+        if (not separator or stem != self.stem or category in ('', '.', '..')
+                or not re.fullmatch(r'[^/\\\[\]#|\r\n]+', category)):
             raise ValueError("invalid synthesis source key")
 
 
