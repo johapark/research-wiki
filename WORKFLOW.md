@@ -151,10 +151,16 @@ needs an active conversational responder. Tune either with `-w N`. Every
 completion is recorded atomically under `.ingest/batch-<ts>/checkpoint.json`.
 Resume skips recorded completions and restarts unfinished or retryable papers
 from the beginning; there is no per-phase checkpoint. New batches record a
-versioned identity in `plan.json`: PDF and supplementary hashes, prompt and
-agent-instruction hashes, resolved model settings and endpoints, selected
-configuration and pricing hashes, command flags, framework version, and actual
-Python-source fingerprint. Credentials and prompt bodies are not stored.
+versioned identity in `plan.json`: PDF and supplementary hashes, author-prompt
+hashes (`prompts/author-system-*.md`, the only prompts ingest loads), resolved
+model settings and endpoints, the selected configuration path, pricing hash,
+command flags, framework version, and actual Python-source fingerprint.
+Credentials and prompt bodies are not stored. Model settings are compared as
+resolved values rather than YAML bytes, so a comment edit is not drift, and the
+`ingest.n_drafts` default counts only for a batch whose argv carries no `-n`.
+Editing procedure docs under `prompts/` or `CLAUDE.md` never refuses a resume.
+Digest-path batches (`researchwiki ingest -w N`) make no model calls, so their
+identity omits prompts and model settings.
 Resume refuses changed inputs or configuration before dispatching workers or
 altering the checkpoint. Restore the original settings, or start a new batch
 with the remaining PDFs to intentionally change the workflow. Completed PDFs

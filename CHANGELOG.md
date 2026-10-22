@@ -22,10 +22,13 @@ the reasoning behind any line below.
 
 ### Changed
 
-- Ingest batches record input, prompt, model-routing and framework fingerprints
-  in `plan.json`. Resume refuses drift before dispatch or checkpoint changes;
-  restore the original workflow or start a new batch with the remaining PDFs.
-  Legacy checkpoints remain resumable with an explicit provenance warning.
+- Ingest batches record input, author-prompt, model-routing and framework
+  fingerprints in `plan.json`. Resume refuses drift before dispatch or
+  checkpoint changes; restore the original workflow or start a new batch with
+  the remaining PDFs. Only settings that can change a worker's output count:
+  procedure docs and `CLAUDE.md`, YAML comments, and model routing for
+  digest-path batches do not. Legacy checkpoints remain resumable with an
+  explicit provenance warning.
 
 ## [0.5.3] - 2026-10-18
 

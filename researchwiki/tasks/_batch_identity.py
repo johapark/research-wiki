@@ -91,17 +91,24 @@ def _framework() -> dict:
 
 
 def _prompts() -> dict:
+    """Hash the prompts ingest loads, not the procedure docs beside them.
+
+    `prompt_lib.load_author_system` is the pipeline's only prompts/ reader;
+    the glob also catches a newly added paper-type prompt. Procedures and
+    CLAUDE.md are read by agents, so editing them must not block a resume.
+    """
     root = paths.wiki_root()
-    result = {path.relative_to(root).as_posix(): file_sha256(path)
-              for path in sorted((root / "prompts").glob("*.md"))}
-    # AGENTS.md may be a symlink; hash the instructions it actually exposes.
-    for name in ("CLAUDE.md", "AGENTS.md"):
-        result[name] = _hash(root / name, allow_missing=True)
-    return result
+    return {path.relative_to(root).as_posix(): file_sha256(path)
+            for path in sorted((root / "prompts").glob("author-system-*.md"))}
 
 
-def _models() -> dict:
-    """Resolve dispatch settings without probing or recording credentials."""
+def _models(*, n_drafts_frozen: bool) -> dict:
+    """Resolve dispatch settings without probing or recording credentials.
+
+    Records the parsed routing, not the YAML bytes, so a comment edit cannot
+    refuse a resume. `ingest.n_drafts` counts only when no `-n` is frozen in
+    the batch's argv: `agent ingest` freezes one, `import apply` does not.
+    """
     from ..agents import llm, model_config
 
     # A resume in the same process must observe edits to the selected YAML.
@@ -115,15 +122,15 @@ def _models() -> dict:
         endpoints["openai"] = llm.resolve_openai_endpoint().url
     if "anthropic" in providers:
         endpoints["anthropic"] = llm._validated_anthropic_base_url() or "https://api.anthropic.com"
-    config = model_config.config_path().resolve()
     pricing = model_config.pricing_path().resolve()
     return {
-        "config_path": str(config),
-        "config_sha256": _hash(config, allow_missing=True),
+        "config_path": str(model_config.config_path().resolve()),
         "phases": phases,
         "endpoints": endpoints,
-        "ingest_defaults": {"n_drafts": model_config.default_n_drafts(),
-                            "target_claims_max_chars": model_config.target_claims_max_chars()},
+        "ingest_defaults": {
+            "n_drafts": None if n_drafts_frozen else model_config.default_n_drafts(),
+            "target_claims_max_chars": model_config.target_claims_max_chars(),
+        },
         "pricing_path": str(pricing),
         "pricing_sha256": _hash(pricing, allow_missing=True),
     }
@@ -140,12 +147,18 @@ def capture(plan: dict, *, pending: list[str] | None = None) -> dict:
     """Snapshot at creation, or re-read the workflow and pending inputs on resume."""
     allow_missing = pending is not None
     inputs = plan["inputs"] if pending is None else pending
+    # The digest path (`researchwiki ingest -w N`) makes no model calls and
+    # loads no prompts; recording them would refuse resumes it can't affect.
+    command = _command(plan)
+    llm_backed = command["subcommand"] != ["ingest"]
+    n_drafts_frozen = any(arg in ("-n", "--n-drafts") or arg.startswith("--n-drafts=")
+                          for arg in command["extra_args"])
     return {
         "version": IDENTITY_VERSION,
         "framework": _framework(),
-        "prompts": _prompts(),
-        "models": _models(),
-        "command": _command(plan),
+        "prompts": _prompts() if llm_backed else {},
+        "models": _models(n_drafts_frozen=n_drafts_frozen) if llm_backed else {},
+        "command": command,
         "shared_files": _files(plan.get("extra_args", []), allow_missing=allow_missing),
         "inputs": {name: {
             "pdf_sha256": _hash(Path(name), allow_missing=allow_missing),

@@ -64,7 +64,7 @@ def test_plan_freezes_identity_without_credentials(run, monkeypatch):
 @pytest.mark.parametrize("change, field", [
     ("pdf", "pdf_sha256"), ("prompt", "author-system-research.md"),
     ("new_prompt", "author-system-review.md"), ("removed_prompt", "author-system-research.md"),
-    ("contract", "CLAUDE.md"), ("model", "models.phases.author.model"),
+    ("model", "models.phases.author.model"),
     ("temperature", "models.phases.author.temperature"),
     ("reasoning", "models.phases.author.reasoning_effort"),
     ("provider", "models.phases.author.provider"), ("endpoint", "models.endpoints.openai"),
@@ -87,8 +87,6 @@ def test_drift_refuses_resume_before_workers_or_checkpoint_changes(
         (prompt.parent / "author-system-review.md").write_text("New prompt\n")
     elif change == "removed_prompt":
         prompt.unlink()
-    elif change == "contract":
-        (root / "CLAUDE.md").write_text("Changed contract\n")
     elif change == "model":
         config.write_text(config.read_text().replace("original", "different"))
     elif change in {"temperature", "reasoning"}:
@@ -116,6 +114,64 @@ def test_drift_refuses_resume_before_workers_or_checkpoint_changes(
     err = capsys.readouterr().err
     assert "resume refused" in err and field in err
     assert "start a new batch" in err
+
+
+def _allowed(directory, calls, inputs):
+    """Resume dispatched the pending input; its recorded failure is the exit 1."""
+    assert batch.resume_batch(directory, no_retry=False) == 1
+    assert calls == [inputs[1]]
+
+
+@pytest.mark.parametrize("edit", ["procedure", "contract"])
+def test_agent_procedure_docs_do_not_refuse_resume(run, edit):
+    # Only author-system-*.md reach the pipeline; procedures are for agents.
+    root, _, inputs, calls, start = run
+    (root / "prompts" / "recovery.md").write_text("Original procedure\n")
+    directory = start()
+    target = root / ("prompts/recovery.md" if edit == "procedure" else "CLAUDE.md")
+    target.write_text("Edited\n")
+    _allowed(directory, calls, inputs)
+
+
+@pytest.mark.parametrize("frozen", [True, False])
+def test_n_drafts_default_counts_only_when_argv_does_not_freeze_it(run, frozen, capsys):
+    _, config, inputs, calls, start = run
+    directory = start(extra_args=["-n", "1"] if frozen else [])
+    config.write_text(config.read_text() + "ingest:\n  n_drafts: 3\n")
+    if frozen:
+        _allowed(directory, calls, inputs)
+    else:
+        assert batch.resume_batch(directory, no_retry=False) == 1
+        assert calls == []
+        assert "models.ingest_defaults.n_drafts" in capsys.readouterr().err
+
+
+def test_config_comment_edit_does_not_refuse_resume(run):
+    _, config, inputs, calls, start = run
+    directory = start()
+    config.write_text("# annotated later\n" + config.read_text())
+    _allowed(directory, calls, inputs)
+
+
+def test_digest_batch_ignores_model_routing_and_prompts(run, monkeypatch):
+    # `researchwiki ingest -w N` makes no model calls, so neither can matter.
+    root, config, inputs, calls, start = run
+    directory = start(subcommand=["ingest"])
+    saved = json.loads((directory / "plan.json").read_text())["identity"]
+    assert saved["models"] == {} and saved["prompts"] == {}
+    config.write_text(config.read_text().replace("original", "different"))
+    (root / "prompts" / "author-system-research.md").write_text("Changed\n")
+    monkeypatch.setenv("RW_LLM_BASE_URL", "https://different.test/v1")
+    _allowed(directory, calls, inputs)
+
+
+def test_digest_batch_still_refuses_changed_pdf(run, capsys):
+    _, _, inputs, calls, start = run
+    directory = start(subcommand=["ingest"])
+    Path(inputs[1]).write_bytes(b"%PDF-1.4 replacement")
+    assert batch.resume_batch(directory, no_retry=False) == 1
+    assert calls == []
+    assert "pdf_sha256" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("entry_point", [agent, ingest])
