@@ -63,6 +63,10 @@ the reasoning behind any line below.
   post-promote loop caught only three exception types while its staging calls
   raise plain `OSError`, so a full disk or read-only mount skipped grading and
   indexing and made `--resume` file a complete paper as unresumable.
+- Post-ingest impact review explicitly skips commentary sources as non-primary
+  evidence instead of reporting a failed scan. Skips retain a fingerprint and
+  earlier paper-review history; changed, removed or retyped sources reopen for
+  attention. Missing indexes for actual papers remain visible failures.
 
 ## [0.5.3] - 2026-10-18
 

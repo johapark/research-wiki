@@ -10,6 +10,15 @@ evidence and not permission to edit an authored page. `audit:` retains every
 scanned target, including those below the candidate threshold; `candidates:`
 lists the pages requiring a decision. The scan makes no model calls.
 
+Commentary sources are explicitly `state: skipped`, with
+`skip_reason: commentary_not_primary_evidence`: no retrieval was attempted and
+this is not a successful zero-candidate scan. Cite and ingest the primary paper
+instead; do not retype the commentary as a paper to clear a warning. A skipped
+receipt is current only while the source remains a commentary with the same
+substantive fingerprint. Source edits, removal, or retyping reopen it as stale.
+Earlier paper decisions are retained under `prior_paper_review`, not as live
+evidence candidates. Other unsupported source types remain errors.
+
 For each candidate, read its wiki page and the new paper's graded claims first.
 Use the PDF when the wiki lacks the deciding detail. Edit the candidate row's
 `decision:` to `incorporated`, `not_relevant`, or `deferred`, and write a short,
