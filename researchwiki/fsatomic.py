@@ -172,17 +172,49 @@ def read_json(path: Path | str, default=None):
         return default
 
 
+def _lock_base_dir() -> Path:
+    """Stable directory holding every lock file for this user.
+
+    **Not under `tempfile.gettempdir()`**, which is what this used to be and is
+    the one thing that silently breaks mutual exclusion: `TMPDIR` is per-process,
+    so a sandboxed agent shell, a cron entry or a launchd job resolves a
+    *different* lock directory than the user's terminal. Both processes then take
+    locks nobody else can see, and `agent ingest` promotes into a tree that
+    `reindex` or `db rebuild` is walking — exactly the interleaving the corpus
+    lock exists to prevent. The failure leaves no trace, because each side
+    acquires its lock successfully.
+
+    `~/.local/share/researchwiki` is the same base the per-repo `state.db` uses,
+    so a user who can write the DB can write its locks. The path is computed
+    here rather than imported from `db.connection`: this module is a dependency
+    of 39 others and must stay import-free. `$RESEARCHWIKI_LOCK_DIR` overrides,
+    which is what the tests use; `$TMPDIR` deliberately no longer does.
+    """
+    override = os.environ.get("RESEARCHWIKI_LOCK_DIR")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".local" / "share" / "researchwiki" / "locks"
+
+
 def _lock_path_for(path: Path) -> Path:
-    """Lock-file path for `path`, in a host-temp dir keyed by the target's
-    absolute path.
+    """Lock-file path for `path`, keyed by the target's absolute path.
 
     Kept OUT of the repo tree: a sibling `{page}.lock` would litter the Obsidian
     vault and git status, and deleting such a lockfile after use is unsafe (the
     classic unlink race breaks mutual exclusion). All processes on the host
-    resolve the same absolute target path, so they agree on the lock file.
+    resolve the same absolute target path, so they agree on the lock file —
+    provided they also agree on the directory, which is why that is no longer
+    `TMPDIR`-derived (see `_lock_base_dir`).
     """
-    lock_dir = Path(tempfile.gettempdir()) / "researchwiki-locks"
-    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_dir = _lock_base_dir()
+    try:
+        lock_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # An unwritable home (read-only mount, odd container) must not make
+        # every write unusable. Fall back to the old temp location and keep
+        # going: single-TMPDIR hosts, the common case, still exclude correctly.
+        lock_dir = Path(tempfile.gettempdir()) / "researchwiki-locks"
+        lock_dir.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha1(str(path.resolve()).encode("utf-8")).hexdigest()
     return lock_dir / f"{digest}.lock"
 
