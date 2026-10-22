@@ -10,9 +10,9 @@ retrieved chunk actually **support** the claim? — modeled on Self-RAG's
 segment-level `ISSUP` critique (see wiki/ai/asai-2023-self-rag-...).
 
 Design notes:
-  - Reuses `ClaimScore.supporting_text` (the top-1 chunk already retrieved at
-    grade time), so the marginal cost is one entailment classification per
-    claim, not any new retrieval.
+  - Retrieves a bounded packet of complete chunks from the PDF index built
+    at grade time. `ClaimScore.supporting_text` is a display/persistence
+    preview, not entailment evidence: its character cap can hide support.
   - The classifier is dependency-injected (`Classifier`): the default batches
     all (claim, chunk) pairs into a single judge-role LLM call, but tests pass
     a stub and a future cheap NLI cross-encoder can drop in unchanged.
@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Literal
 
 SupportVerdict = Literal["supported", "partial", "unsupported"]
@@ -36,6 +37,40 @@ SupportVerdict = Literal["supported", "partial", "unsupported"]
 Classifier = Callable[[list[tuple[str, str]]], list[SupportVerdict]]
 
 _VALID: frozenset[str] = frozenset({"supported", "partial", "unsupported"})
+
+# Each indexed chunk is at most CHUNK_WORDS (currently 250) words. Bound the
+# evidence by chunk count, not characters, so late sentences and multi-part
+# claims survive. This local retrieval runs only for the opt-in support gate.
+_SUPPORT_TOP_K = 5
+
+
+def retrieve_support_evidence(
+    stem: str, claim_text: str, *, pdf_path: Path | str | None = None,
+) -> str:
+    """Return complete top-K PDF chunks, with provenance, for entailment.
+
+    The caller has already built the per-PDF index (including an inbox PDF
+    when grading before promotion). Pass the same PDF override: each query
+    revalidates the source hash and would otherwise prefer an old canonical
+    PDF during re-ingest. Never fall back to a truncated display
+    preview: absent evidence must remain absent so verification is incomplete.
+    """
+    from ..index.pdf_chunks import query_pdf
+
+    hits = query_pdf(stem, claim_text, topk=_SUPPORT_TOP_K, pdf_path=pdf_path)
+    blocks = []
+    seen = set()
+    for hit in hits[:_SUPPORT_TOP_K]:
+        text = hit.text.strip()
+        if not text or hit.chunk_id in seen:
+            continue
+        seen.add(hit.chunk_id)
+        provenance = hit.provenance()
+        label = f"Chunk {hit.chunk_id}"
+        if provenance:
+            label += f"; {provenance}"
+        blocks.append(f"<{label}>\n{text}")
+    return "\n\n".join(blocks)
 
 
 @dataclass
@@ -97,7 +132,9 @@ def count_unsupported(supports: list[ClaimSupport]) -> int:
 # --------------------------------------------------------------------------
 
 _SUPPORT_SYSTEM = (
-    "You verify whether a SOURCE passage supports a CLAIM. Judge only against "
+    "You verify whether SOURCE passages support a CLAIM. Each SOURCE contains "
+    "retrieved chunks from the same paper; consider them together. "
+    "Judge only against "
     "the SOURCE text given — not outside knowledge. 'supported' = the source "
     "states or directly entails the claim; 'partial' = the source is related "
     "and partly backs it but not fully; 'unsupported' = the source does not "
@@ -129,7 +166,7 @@ def _build_support_prompt(pairs: list[tuple[str, str]]) -> str:
     blocks = []
     for i, (claim, chunk) in enumerate(pairs):
         blocks.append(
-            f"[{i}]\nCLAIM: {claim}\nSOURCE: {chunk.strip()[:1200]}"
+            f"[{i}]\nCLAIM: {claim}\nSOURCE: {chunk.strip()}"
         )
     return (
         "For each numbered item, judge whether SOURCE supports CLAIM.\n"
