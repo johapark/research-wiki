@@ -28,6 +28,7 @@ import json
 import os
 import secrets
 import stat
+import sys
 import tempfile
 import time
 from contextlib import contextmanager
@@ -172,6 +173,9 @@ def read_json(path: Path | str, default=None):
         return default
 
 
+_lock_fallback_warned = False
+
+
 def _lock_base_dir() -> Path:
     """Stable directory holding every lock file for this user.
 
@@ -209,10 +213,23 @@ def _lock_path_for(path: Path) -> Path:
     lock_dir = _lock_base_dir()
     try:
         lock_dir.mkdir(parents=True, exist_ok=True)
-    except OSError:
+    except OSError as exc:
         # An unwritable home (read-only mount, odd container) must not make
         # every write unusable. Fall back to the old temp location and keep
         # going: single-TMPDIR hosts, the common case, still exclude correctly.
+        #
+        # Warned once per process, because this path degrades to exactly the
+        # per-process-TMPDIR behaviour the stable directory exists to remove.
+        # Silence would make a host that always falls back indistinguishable
+        # from one that never does, which is how the original bug stayed
+        # invisible for so long.
+        global _lock_fallback_warned
+        if not _lock_fallback_warned:
+            _lock_fallback_warned = True
+            print(f"researchwiki: cannot create {lock_dir} ({exc}); locking via "
+                  f"$TMPDIR instead. Processes with a different TMPDIR will not "
+                  f"exclude each other — set $RESEARCHWIKI_LOCK_DIR to a shared, "
+                  f"writable path.", file=sys.stderr)
         lock_dir = Path(tempfile.gettempdir()) / "researchwiki-locks"
         lock_dir.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha1(str(path.resolve()).encode("utf-8")).hexdigest()

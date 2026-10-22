@@ -43,6 +43,7 @@ import argparse
 import json
 import sys
 
+from ..errors import EnvironmentFailure
 from ..log import append_log_md
 from ..mutation import mutation, corpus_lock, recover_pending
 from ..removal import apply as apply_removal, scan
@@ -126,8 +127,8 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 1
 
-    if args.as_json:
-        print(json.dumps({
+    def _plan_doc() -> dict:
+        return {
             "stem": plan.stem,
             "page": str(plan.page_path) if plan.page_path else None,
             "page_type": plan.page_type,
@@ -143,10 +144,22 @@ def main(argv: list[str]) -> int:
             ],
             "db_rows": plan.db_rows,
             "edge_count": plan.edge_count,
-            "applied": False,
-        }, indent=2))
-        if not args.apply:
-            return 0
+        }
+
+    # JSON mode emits exactly one document, and emits it *after* the work, so
+    # `applied` reports what happened rather than what was planned. Printing the
+    # plan up front and the prose summary afterwards put a JSON object and human
+    # text on the same stream, which no consumer can parse, and hard-coded
+    # `"applied": false` on a run that had in fact removed the page.
+    if args.as_json and not args.apply:
+        print(json.dumps({**_plan_doc(), "applied": False}, indent=2))
+        return 0
+
+    # Snapshot the plan while the files still exist. `plan` is rebound to a
+    # fresh scan inside the lock below, so reading it afterwards would describe
+    # the already-emptied tree and report a shorter `files` list than the
+    # removal actually touched.
+    planned = _plan_doc() if args.as_json else None
 
     if not args.as_json:
         _print_plan(plan, keep_pdf=args.keep_pdf)
@@ -155,6 +168,11 @@ def main(argv: list[str]) -> int:
         print(f"\n  dry run — nothing written. Re-run with --apply to remove.")
         return 0
 
+    # `committed` distinguishes the two failure stories: before the mark the
+    # journal rolls the tree back, after it the files are gone and the journal is
+    # retained for projection repair. Reporting "rolled back" in the second case
+    # told the user the opposite of what happened.
+    committed = False
     try:
         with corpus_lock():
             recover_pending()
@@ -165,14 +183,35 @@ def main(argv: list[str]) -> int:
             ) as snap:
                 res = apply_removal(plan, keep_pdf=args.keep_pdf, sync_db=False)
                 snap.mark_committed()
+                committed = True
                 try:
                     snap.reconcile()
                     res.db_rows_deleted = plan.db_rows
                     res.edges_deleted = plan.edge_count
                 except Exception as exc:
                     res.warnings.append(f"projection repair pending; journal retained: {exc}")
-    except Exception as e:
-        print(f"researchwiki remove: failed, rolled back: {e}", file=sys.stderr)
+    except (EnvironmentFailure, OSError) as e:
+        # Environment failures only — the typed carrier, plus bare OSError,
+        # which is what a full disk or an unreadable mount raises from the file
+        # operations this command is made of (the funnel maps only
+        # EnvironmentFailure to exit 2, so OSError would otherwise surface as a
+        # "bug" exit 3). A genuine bug in the removal code — a TypeError, a
+        # KeyError — now reaches the funnel with its traceback instead of being
+        # relabelled an environment error, which the exit-code contract forbids.
+        state = ("files removed; journal retained for repair" if committed
+                 else "rolled back")
+        print(f"researchwiki remove: failed ({state}): {e}", file=sys.stderr)
+        if args.as_json:
+            # A JSON consumer must not have to scrape stderr to learn what
+            # happened — and "rolled back" vs "committed, journal retained" is
+            # the difference between the page still being there and not.
+            print(json.dumps({
+                **(planned or {}),
+                "applied": bool(committed),
+                "committed": bool(committed),
+                "error": str(e),
+                "error_state": state,
+            }, indent=2))
         return 2
 
     # log.md is append-only: a removal records that it happened rather than
@@ -188,6 +227,20 @@ def main(argv: list[str]) -> int:
         + (f" {len(plan.prose_refs)} authored citation(s) left for review."
            if plan.prose_refs else ""),
     )
+
+    if args.as_json:
+        print(json.dumps({
+            **(planned or {}),
+            "applied": True,
+            "removed_files": [str(f) for f in res.removed_files],
+            "backlinks_removed": res.backlinks_removed,
+            "index_bullet_removed": res.index_bullet_removed,
+            "concept_hubs_updated": [str(p) for p in res.concept_hubs_updated],
+            "db_rows_deleted": res.db_rows_deleted,
+            "edges_deleted": res.edges_deleted,
+            "warnings": res.warnings,
+        }, indent=2))
+        return 0
 
     # The index bullet is named separately rather than folded into the counts:
     # the plan promises it above, so a summary that never mentions it leaves the

@@ -19,7 +19,13 @@ from pathlib import Path
 import tantivy
 
 from ..paths import search_index_dir
-from .types import Document, SearchBackend, SearchBackendUnavailable, SearchHit
+from .types import (
+    Document,
+    SearchBackend,
+    SearchBackendUnavailable,
+    SearchHit,
+    swap_in_directory,
+)
 
 
 # Default retrieval fields, with priorities implicit in the field list we pass
@@ -115,22 +121,45 @@ class TantivySearchBackend(SearchBackend):
     # ---------- writes ----------
 
     def build(self, docs: list[Document]) -> None:
-        """Rebuild the index from scratch."""
-        # Clear any existing index by wiping the directory.
-        if self._path.exists():
-            for p in sorted(self._path.glob("*")):
-                try:
-                    p.unlink()
-                except IsADirectoryError:
-                    import shutil
-                    shutil.rmtree(p)
+        """Rebuild the index from scratch, publishing it atomically.
+
+        **Built in a sibling directory and swapped in**, rather than wiping
+        `self._path` in place. Writers hold `exclusive_lock(search_index_dir())`
+        but *readers take no lock*: category suggest at ingest, `search`, and
+        the MCP server all just open the directory. An in-place wipe therefore
+        gave a concurrent reader a window where the index looked absent —
+        which `ingest` treats as "abstain", silently filing the paper under
+        `other` — or, mid-unlink, a directory that opened and then failed every
+        query. A crash left no index at all.
+
+        **Shortened, not closed.** Publishing is two renames (retire the old,
+        move the new in), so there is still an instant where the path does not
+        exist. It is now microseconds rather than the length of a full rebuild,
+        and a reader can no longer see a *partial* index — only the old one, the
+        new one, or briefly nothing. Closing it completely needs a versioned
+        directory plus a pointer, or a retry on the read side.
+
+        Same approach, and the same helper, as the PDF-chunk index.
+        """
+        import shutil
+        import secrets
+
+        staged = self._path.with_name(f".{self._path.name}-building-{secrets.token_hex(6)}")
+        shutil.rmtree(staged, ignore_errors=True)
+        staged.mkdir(parents=True, exist_ok=True)
+        try:
+            idx = tantivy.Index(self._schema, path=str(staged))
+            writer = idx.writer(heap_size=30_000_000)
+            for d in docs:
+                writer.add_document(_to_tantivy_doc(d))
+            writer.commit()
+            writer.wait_merging_threads()
+            swap_in_directory(staged, self._path)
+        finally:
+            shutil.rmtree(staged, ignore_errors=True)
+        # Drop the cached handle so the next read opens the published directory.
         self._index = None
-        idx = self._open_or_create()
-        writer = idx.writer(heap_size=30_000_000)
-        for d in docs:
-            writer.add_document(_to_tantivy_doc(d))
-        writer.commit()
-        writer.wait_merging_threads()
+        idx = self._open()
         idx.reload()
 
     def add(self, doc: Document) -> None:

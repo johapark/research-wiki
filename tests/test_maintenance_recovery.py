@@ -244,3 +244,174 @@ def test_prepared_vectors_make_an_unchanged_upsert_embed_nothing_under_the_guard
     corpus.write_text(corpus.read_text().replace("Original", "Updated"))
     incremental.update_page_indexes([corpus])
     assert len(calls) == 1 and "Updated" in calls[0][0]
+
+
+# ---------- rebuild must not hold the write lock while reading papers/ ----------
+#
+# `_upsert_claims` needs each paper's real content hash to decide whether a
+# recorded grade still describes the current PDF. Hashing inside the write
+# transaction held one SQLite lock for the whole walk plus a full read of
+# `papers/` — 2.4 s for 667 PDFs here, far worse on a synced folder — while
+# parallel ingest workers call `write_iteration`, whose only protection was a
+# 5 s busy_timeout.
+
+
+def test_pdf_digests_are_computed_before_the_write_transaction(tmp_path, monkeypatch):
+    """No file_sha256 call may happen while the transaction is open."""
+    from researchwiki.db import rebuild as rb
+
+    monkeypatch.chdir(tmp_path)
+    from researchwiki.paths import ensure_scaffold
+    ensure_scaffold()
+    (tmp_path / "wiki" / "methods").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "wiki" / "methods" / "smith-2024-a-paper.md").write_text(
+        "---\ntype: paper\nyear: 2024\n---\n\n## Summary\nbody\n", encoding="utf-8")
+    (tmp_path / "papers" / "smith-2024-a-paper.pdf").write_bytes(b"%PDF-1.4\n")
+
+    events = []
+    real_hash = rb.file_sha256
+
+    def tracking_hash(path):
+        events.append("hash")
+        return real_hash(path)
+
+    real_get = rb.get_connection
+
+    def tracking_get():
+        events.append("connect")
+        return real_get()
+
+    monkeypatch.setattr(rb, "file_sha256", tracking_hash)
+    monkeypatch.setattr(rb, "get_connection", tracking_get)
+    rb._rebuild_locked(verbose=False)
+
+    assert "connect" in events, "sanity: the rebuild opened a connection"
+    assert "hash" in events, "sanity: the rebuild hashed the PDF"
+    assert events.index("hash") < events.index("connect"), (
+        "every PDF must be hashed before the write connection is opened")
+
+
+def test_write_iteration_survives_a_real_concurrent_writer(tmp_path, monkeypatch):
+    """Two real connections on a real file, not a fake whose commit raises.
+
+    In WAL mode a blocked writer fails when it takes the write lock — at the
+    INSERT — so a commit-only retry would leave this failing. The fake-connection
+    test below pins the backoff mechanics; this one pins the actual failure mode.
+
+    The holder is released from inside the backoff callback rather than from a
+    helper thread: a sqlite connection may only be used by its creating thread.
+    """
+    import sqlite3
+
+    from researchwiki.db import iterations as it
+
+    db = tmp_path / "state.db"
+    monkeypatch.setenv("RESEARCHWIKI_DB_PATH", str(db))
+    from researchwiki.db.connection import get_connection
+    get_connection().close()        # create the schema
+
+    holder = sqlite3.connect(db, timeout=30)
+    holder.execute("PRAGMA busy_timeout = 100")
+    holder.execute("BEGIN IMMEDIATE")
+    holder.execute("INSERT INTO schema_meta (key, value) VALUES ('probe', '1')")
+
+    monkeypatch.setattr(it, "_BUSY_BACKOFF", 0.01)
+    state = {"released": False}
+
+    def release_on_first_backoff(_seconds):
+        if not state["released"]:
+            state["released"] = True
+            holder.rollback()       # same thread that opened it
+            holder.close()
+
+    monkeypatch.setattr(it.time, "sleep", release_on_first_backoff)
+
+    row_id = it.write_iteration(
+        attempt_id="concurrent", paper_stem="s", pdf_filename="s.pdf",
+        iteration=1, role="commit",
+    )
+    assert row_id is not None, "the retry must land the row once the lock clears"
+    assert state["released"], "sanity: the first attempt really was blocked"
+
+    check = sqlite3.connect(db)
+    rows = check.execute(
+        "SELECT COUNT(*) FROM ingest_iterations WHERE attempt_id='concurrent'"
+    ).fetchone()[0]
+    check.close()
+    assert rows == 1, f"expected exactly one row, got {rows} (double-insert?)"
+
+
+def test_write_iteration_retries_a_busy_commit_instead_of_dying(monkeypatch):
+    import sqlite3
+
+    from researchwiki.db import iterations as it
+
+    sleeps = []
+    monkeypatch.setattr(it.time, "sleep", sleeps.append)
+
+    class Conn:
+        def __init__(self):
+            self.attempts = 0
+            self.rollbacks = 0
+
+        def execute(self, *_a, **_k):
+            self.attempts += 1
+            if self.attempts < 3:
+                # WAL blocks the writer here, at the INSERT, not at commit.
+                raise sqlite3.OperationalError("database is locked")
+
+            class Cur:
+                lastrowid = 7
+            return Cur()
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            self.rollbacks += 1
+
+        def close(self):
+            pass
+
+    conn = Conn()
+    row_id = it.write_iteration(
+        attempt_id="a", paper_stem="s", pdf_filename="s.pdf", iteration=1,
+        role="commit", conn=conn,
+    )
+    assert row_id == 7
+    assert conn.attempts == 3, "retried until the lock cleared"
+    assert conn.rollbacks == 2, "rolled back before each retry, so no double-insert"
+    assert sleeps, "backed off between attempts"
+
+
+def test_write_iteration_does_not_retry_a_real_error(monkeypatch):
+    import sqlite3
+
+    import pytest as _pytest
+
+    from researchwiki.db import iterations as it
+
+    monkeypatch.setattr(it.time, "sleep", lambda *_a: None)
+
+    class Conn:
+        attempts = 0
+
+        def execute(self, *_a, **_k):
+            Conn.attempts += 1
+            raise sqlite3.OperationalError("no such column: nonsense")
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    with _pytest.raises(sqlite3.OperationalError, match="no such column"):
+        it.write_iteration(
+            attempt_id="a", paper_stem="s", pdf_filename="s.pdf", iteration=1,
+            role="commit", conn=Conn(),
+        )
+    assert Conn.attempts == 1, "a schema error must fail immediately"
