@@ -34,6 +34,7 @@ import sys
 from ..index import pages_semantic as semantic_pages
 from ..search import SearchBackendUnavailable, SearchHit, get_default_backend
 from ..search import hybrid as hybrid_mod
+from ._scope_file import add_scope_argument, load_scope, scope_options, scoped_payload
 
 
 def _fmt_hit(h: SearchHit, rank: int) -> str:
@@ -137,6 +138,7 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Emit a JSON array of hits instead of formatted prose.")
+    add_scope_argument(parser)
     args = parser.parse_args(argv)
 
     if (args.query is None) == (args.like is None):
@@ -144,6 +146,7 @@ def main(argv: list[str]) -> int:
     if args.llm_rerank and args.like:
         parser.error("--llm-rerank currently supports text queries, not --like")
 
+    load_scope(args, parser)
     mode = _resolve_mode(args.mode)
 
     if mode == "hybrid":
@@ -159,14 +162,14 @@ def _run_bm25(args) -> int:
     backend = get_default_backend()
     try:
         if args.like:
-            hits = backend.more_like(args.like, limit=args.limit)
+            hits = backend.more_like(args.like, limit=args.limit, **scope_options(args))
             return _emit_hits(hits, args, header=f"# See-Also for [[{args.like}]] (BM25)")
 
         depth = max(args.limit, 12) if args.llm_rerank else args.limit
-        hits = backend.query(args.query, limit=depth)
+        hits = backend.query(args.query, limit=depth, **scope_options(args))
         hits = _maybe_rerank(args, hits)
         return _emit_hits(hits, args, header=f"# Search results for: {args.query!r}  (BM25; {len(hits)} hit{'s' if len(hits) != 1 else ''})",
-                          extras_for=lambda h: backend.more_like(h.key, limit=2))
+                          extras_for=lambda h: backend.more_like(h.key, limit=2, **scope_options(args)))
     except SearchBackendUnavailable as e:
         if args.as_json:
             print(json.dumps({"error": str(e)}))
@@ -184,7 +187,7 @@ def _emit_hits(hits, args, *, header: str, extras_for=None) -> int:
                 d["see_also"] = [_hit_as_dict(r) for r in extras_for(h)]
             out.append(d)
         payload = {"hits": out, "llm_rerank": args._rerank_meta} if args.llm_rerank else out
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(scoped_payload(args, payload), indent=2))
         return 0 if hits else 1
     if not hits:
         print("No hits.", file=sys.stderr)
@@ -204,11 +207,11 @@ def _emit_hits(hits, args, *, header: str, extras_for=None) -> int:
 
 def _run_semantic(args) -> int:
     if args.like:
-        hits = semantic_pages.query_stem(args.like, k=args.limit)
+        hits = semantic_pages.query_stem(args.like, k=args.limit, **scope_options(args))
         title = f"# See-Also for [[{args.like}]] (semantic)"
     else:
         depth = max(args.limit, 12) if args.llm_rerank else args.limit
-        hits = semantic_pages.query_text(args.query, k=depth)
+        hits = semantic_pages.query_text(args.query, k=depth, **scope_options(args))
         title = f"# Search results for: {args.query!r}  (semantic; {len(hits)} hit{'s' if len(hits) != 1 else ''})"
 
     # Adapt PageHit → SearchHit so the existing formatter works.
@@ -224,15 +227,15 @@ def _run_semantic(args) -> int:
 
 def _run_hybrid(args) -> int:
     if args.like:
-        hits = hybrid_mod.hybrid_more_like(args.like, limit=args.limit)
+        hits = hybrid_mod.hybrid_more_like(args.like, limit=args.limit, **scope_options(args))
         header = f"# See-Also for [[{args.like}]] (hybrid RRF)"
-        extras_for = lambda h: hybrid_mod.hybrid_more_like(h.key, limit=2)
+        extras_for = lambda h: hybrid_mod.hybrid_more_like(h.key, limit=2, **scope_options(args))
     else:
         depth = max(args.limit, 12) if args.llm_rerank else args.limit
-        hits = hybrid_mod.hybrid_query(args.query, limit=depth)
+        hits = hybrid_mod.hybrid_query(args.query, limit=depth, **scope_options(args))
         hits = _maybe_rerank(args, hits)
         header = f"# Search results for: {args.query!r}  (hybrid RRF; {len(hits)} hit{'s' if len(hits) != 1 else ''})"
-        extras_for = lambda h: hybrid_mod.hybrid_more_like(h.key, limit=2)
+        extras_for = lambda h: hybrid_mod.hybrid_more_like(h.key, limit=2, **scope_options(args))
 
     if args.as_json:
         out = []
@@ -242,7 +245,7 @@ def _run_hybrid(args) -> int:
                 d["see_also"] = [_hybrid_as_dict(r) for r in extras_for(h)]
             out.append(d)
         payload = {"hits": out, "llm_rerank": args._rerank_meta} if args.llm_rerank else out
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(scoped_payload(args, payload), indent=2))
         return 0 if hits else 1
 
     if not hits:
@@ -266,6 +269,6 @@ def _maybe_rerank(args, hits):
         return hits
     from ..search.rerank import rerank_hits
 
-    result = rerank_hits(args.query, hits)
+    result = rerank_hits(args.query, hits, **scope_options(args))
     args._rerank_meta = {"applied": result.applied, **result.usage}
     return result.hits[:args.limit]

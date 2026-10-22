@@ -11,6 +11,8 @@
 /papers
 /inbox
 /wiki
+# Local application metadata is user data, separate from engine source.
+/.researchwiki
 # Obsidian Web Clipper drops — per-user captured content, never part of the repo.
 # No trailing slash, same reason as above: it may be a symlink into the vault.
 /Clippings

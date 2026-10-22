@@ -36,7 +36,14 @@ import sys
 from pathlib import Path
 
 
-def _do_search(query: str, limit: int, mode: str) -> list[dict]:
+def _scope_options(scope_file):
+    if scope_file is None:
+        return {}
+    from ._scope_file import read_scope_file
+    return {"scope": read_scope_file(scope_file)}
+
+
+def _do_search(query: str, limit: int, mode: str, scope_file: str | None = None) -> list[dict]:
     """Query the search backend and return hit dicts.
 
     Mirrors the resolution logic in `tasks/search.py` — `auto` picks the
@@ -46,23 +53,24 @@ def _do_search(query: str, limit: int, mode: str) -> list[dict]:
     from . import search as search_task
     from ..search import get_default_backend, SearchBackendUnavailable
 
+    options = _scope_options(scope_file)
     resolved = search_task._resolve_mode(mode)
     if resolved == "hybrid":
         from ..search import hybrid as hybrid_mod
-        hits = hybrid_mod.query(query, limit=limit)
+        hits = hybrid_mod.hybrid_query(query, limit=limit, **options)
         return [search_task._hybrid_as_dict(h) for h in hits]
     # Semantic-only mode returns a different hit shape and is rarely useful
     # standalone (hybrid supersedes it). Fall through to BM25 for a
     # consistent output shape — the user can still get BM25's snippets.
     try:
         backend = get_default_backend()
-        return [search_task._hit_as_dict(h) for h in backend.query(query, limit=limit)]
+        return [search_task._hit_as_dict(h) for h in backend.query(query, limit=limit, **options)]
     except SearchBackendUnavailable as e:
         return [{"error": str(e)}]
 
 
 def _do_claims(query: str | None, by_stem: str | None, k: int,
-               include_context: bool) -> list[dict]:
+               include_context: bool, scope_file: str | None = None) -> list[dict]:
     """Grounded-citation search or per-paper claim dump.
 
     Exactly one of `query` / `by_stem` must be provided (matches the CLI's
@@ -74,9 +82,10 @@ def _do_claims(query: str | None, by_stem: str | None, k: int,
 
     if bool(query) == bool(by_stem):
         return [{"error": "pass exactly one of `query` or `by_stem`"}]
+    options = _scope_options(scope_file)
     if by_stem:
-        return claims_by_stem(by_stem, include_context=include_context)
-    return claim_lookup(query, k=k, include_context=include_context)
+        return claims_by_stem(by_stem, include_context=include_context, **options)
+    return claim_lookup(query, k=k, include_context=include_context, **options)
 
 
 def _do_check_grounding(page_path: str, strict: bool) -> dict:
@@ -146,13 +155,13 @@ def build_server():
     server = FastMCP("researchwiki")
 
     @server.tool(description="Search wiki pages. `mode=auto` picks hybrid over BM25 when both indexes exist.")
-    def search(query: str, limit: int = 10, mode: str = "auto") -> list[dict]:
-        return _do_search(query, limit, mode)
+    def search(query: str, limit: int = 10, mode: str = "auto", scope_file: str | None = None) -> list[dict]:
+        return _do_search(query, limit, mode, scope_file)
 
     @server.tool(description="Grounded-citation search over the claims table. Pass `query` for topic search, or `by_stem` to dump one paper's claims.")
     def claims(query: str | None = None, by_stem: str | None = None,
-               k: int = 5, include_context: bool = False) -> list[dict]:
-        return _do_claims(query, by_stem, k, include_context)
+               k: int = 5, include_context: bool = False, scope_file: str | None = None) -> list[dict]:
+        return _do_claims(query, by_stem, k, include_context, scope_file)
 
     @server.tool(description="Check whether each claim-bearing unit in a wiki page carries a citation. `strict=true` treats the `*(model prior)*` marker as ungrounded.")
     def check_grounding(page_path: str, strict: bool = False) -> dict:

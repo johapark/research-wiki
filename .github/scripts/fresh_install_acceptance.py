@@ -329,6 +329,36 @@ begin(store.ledger_binding(record))
         command('cancel', retry['job_id'])
 
 
+def verify_scoped_cli(root: Path, env: dict[str, str], included: str, excluded: str) -> None:
+    run_python(root, env, f"""
+from researchwiki.evidence import EvidenceScope
+from researchwiki.fsatomic import write_json_atomic
+from pathlib import Path
+scope = EvidenceScope({{ {included!r} }}, library_root=str(Path.cwd()))
+write_json_atomic(Path("scope.json"), {{**scope.to_dict(), "fingerprint": scope.fingerprint}})
+write_json_atomic(Path("empty-scope.json"), EvidenceScope(frozenset()).to_dict())
+""")
+    scoped = run_cli(root, env, "search", "acceptance", "--scope-file", "scope.json",
+                     "--mode", "bm25", "--see-also", "--limit", "1", "--json")
+    assert [hit["stem"] for hit in json.loads(scoped.stdout)["results"]] == [included]
+    empty = run_cli(root, env, "search", "acceptance", "--scope-file", "empty-scope.json",
+                    "--mode", "bm25", "--json", expected=(1,))
+    assert json.loads(empty.stdout)["results"] == []
+    passages = run_cli(root, env, "pdf-search", included, "acceptance", "--scope-file", "scope.json", "--json")
+    assert json.loads(passages.stdout)["results"]
+    outside = run_cli(root, env, "pdf-search", excluded, "acceptance", "--scope-file", "scope.json",
+                      "--json", expected=(1,))
+    assert json.loads(outside.stdout)["results"] == []
+    bibliography = run_cli(root, env, "export", "--scope-file", "scope.json", "--format", "csl-json")
+    assert [record["id"] for record in json.loads(bibliography.stdout)] == [included]
+    run_cli(root, env, "synthesize", "--title", "Scoped acceptance map", "--scope-file", "scope.json",
+            "--topic-seed", "acceptance")
+    snapshot = json.loads((root / ".ingest/synthesis/scoped-acceptance-map/scope.json").read_text())
+    assert snapshot["stems"] == [included]
+    # Community remains independent of the commercial project package.
+    run_python(root, env, "import importlib.util; assert importlib.util.find_spec('researchwiki.projects') is None")
+
+
 def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
     run_cli(root, env, "init", "--scaffold-only")
     for rel in (
@@ -560,6 +590,7 @@ assert IngestResult.from_dict(result.to_dict()) == result
         root, env, "search", "resumable", "--mode", "bm25", "--json"
     )
     assert any(hit["stem"] == hopper_stem for hit in json.loads(recovered.stdout))
+    verify_scoped_cli(root, env, single_stem, hopper_stem)
 
 
 def main() -> int:

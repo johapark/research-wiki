@@ -19,6 +19,7 @@ from pathlib import Path
 import tantivy
 
 from ..paths import search_index_dir
+from ..evidence import EvidenceScope
 from .types import Document, SearchBackend, SearchBackendUnavailable, SearchHit
 
 
@@ -150,16 +151,23 @@ class TantivySearchBackend(SearchBackend):
 
     # ---------- reads ----------
 
-    def query(self, q: str, limit: int = 10) -> list[SearchHit]:
+    def query(self, q: str, limit: int = 10, *, scope: EvidenceScope | None = None) -> list[SearchHit]:
+        if scope is not None:
+            scope.check_root()
+        if limit <= 0 or (scope is not None and not scope.stems):
+            return []
         idx = self._open()
         searcher = idx.searcher()
         parsed = idx.parse_query(q, QUERY_FIELDS)
+        parsed = self._scoped_query(parsed, scope)
         res = searcher.search(parsed, limit=limit)
         snippet_gen = tantivy.SnippetGenerator.create(searcher, parsed, self._schema, "body")
         return [_doc_to_hit(searcher, addr, s, snippet_gen) for s, addr in res.hits]
 
-    def more_like(self, key: str, limit: int = 10) -> list[SearchHit]:
+    def more_like(self, key: str, limit: int = 10, *, scope: EvidenceScope | None = None) -> list[SearchHit]:
         """Find documents similar to the one at `category/stem`."""
+        if limit <= 0 or (scope is not None and not scope.allows(key.rsplit('/', 1)[-1])):
+            return []
         idx = self._open()
         searcher = idx.searcher()
         # Look up the seed document by its `key` (category/stem).
@@ -169,12 +177,14 @@ class TantivySearchBackend(SearchBackend):
             return []
         seed_doc = searcher.doc(seed.hits[0][1])
         dd = seed_doc.to_dict()
+        if scope is not None and not scope.allows((dd.get("stem") or [""])[0], (dd.get("page_type") or [""])[0]):
+            return []
         title = (dd.get("title") or [""])[0]
         summary = (dd.get("summary") or [""])[0]
         # Use title + summary as the similarity query. Avoid `body` as seed
         # because very long bodies swamp IDF.
         seed_text = f"{title}\n{summary}"
-        hits = self.more_like_text(seed_text, limit=limit + 1)
+        hits = self.more_like_text(seed_text, limit=limit + 1, **({"scope": scope} if scope is not None else {}))
         return [h for h in hits if h.key != key][:limit]
 
     def more_like_text(
@@ -182,7 +192,12 @@ class TantivySearchBackend(SearchBackend):
         text: str,
         limit: int = 10,
         page_type: str | None = None,
+        *, scope: EvidenceScope | None = None,
     ) -> list[SearchHit]:
+        if scope is not None:
+            scope.check_root()
+        if limit <= 0 or (scope is not None and not scope.stems):
+            return []
         idx = self._open()
         searcher = idx.searcher()
         # Use parse_query_lenient so punctuation in the seed text doesn't blow up.
@@ -201,12 +216,29 @@ class TantivySearchBackend(SearchBackend):
         except Exception:
             # Fallback: try the strict parser on a heavily-sanitized text
             parsed = idx.parse_query(_sanitize_query(text, aggressive=True), QUERY_FIELDS)
-        res = searcher.search(parsed, limit=limit * 2 if page_type else limit)
+        parsed = self._scoped_query(parsed, scope)
+        if page_type is not None:
+            parsed = tantivy.Query.boolean_query([
+                (tantivy.Occur.Must, parsed),
+                (tantivy.Occur.Must, tantivy.Query.term_query(idx.schema, "page_type", page_type)),
+            ])
+        res = searcher.search(parsed, limit=limit)
         snippet_gen = tantivy.SnippetGenerator.create(searcher, parsed, self._schema, "body")
         hits = [_doc_to_hit(searcher, addr, s, snippet_gen) for s, addr in res.hits]
         if page_type is not None:
             hits = [h for h in hits if h.page_type == page_type]
         return hits[:limit]
+
+    def _scoped_query(self, parsed, scope):
+        if scope is None:
+            return parsed
+        scope.check_root()
+        schema = self._open().schema
+        stems = tantivy.Query.term_set_query(schema, "stem", sorted(scope.stems))
+        paper = tantivy.Query.term_query(schema, "page_type", "paper")
+        return tantivy.Query.boolean_query([
+            (tantivy.Occur.Must, parsed), (tantivy.Occur.Must, stems), (tantivy.Occur.Must, paper),
+        ])
 
 
 # ---------- helpers ----------

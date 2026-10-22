@@ -23,6 +23,8 @@ import argparse
 import json
 import sys
 
+from ._scope_file import add_scope_argument, load_scope, scope_options, scoped_payload
+
 from ..search import claim_query, claims_by_stem
 
 
@@ -80,7 +82,9 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--include-context", dest="include_context", action="store_true",
                         help="Surface each claim's supporting_text — the verbatim source-PDF chunk "
                              "the grader matched (≤500 chars). Off by default to keep dumps narrow.")
+    add_scope_argument(parser)
     args = parser.parse_args(argv)
+    load_scope(args, parser)
 
     if args.by_stem and args.query:
         parser.error("Pass either a query or --by-stem, not both.")
@@ -88,15 +92,15 @@ def main(argv: list[str]) -> int:
         parser.error("Pass a query or --by-stem.")
 
     if args.by_stem:
-        hits = claims_by_stem(args.by_stem, include_context=args.include_context)
+        hits = claims_by_stem(args.by_stem, include_context=args.include_context, **scope_options(args))
     else:
         hits = claim_query(
             args.query, k=args.k, mode=args.mode,
-            include_context=args.include_context,
+            include_context=args.include_context, **scope_options(args),
         )
 
     if args.as_json:
-        print(json.dumps(hits, indent=2, ensure_ascii=False))
+        print(json.dumps(scoped_payload(args, hits), indent=2, ensure_ascii=False))
         return 0 if hits else 1
 
     if not hits:

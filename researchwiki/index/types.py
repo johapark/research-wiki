@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from ..errors import EnvironmentFailure
+from ..evidence import EvidenceScope
 
 
 class SearchBackendUnavailable(EnvironmentFailure):
@@ -73,11 +74,11 @@ class SearchBackend(ABC):
         """Incrementally upsert one document, replacing the same stem."""
 
     @abstractmethod
-    def query(self, q: str, limit: int = 10) -> list[SearchHit]:
+    def query(self, q: str, limit: int = 10, *, scope: EvidenceScope | None = None) -> list[SearchHit]:
         """Ranked keyword search across title / summary / body / authors."""
 
     @abstractmethod
-    def more_like(self, key: str, limit: int = 10) -> list[SearchHit]:
+    def more_like(self, key: str, limit: int = 10, *, scope: EvidenceScope | None = None) -> list[SearchHit]:
         """Find documents similar to the one identified by `category/stem`.
 
         The seed document itself is excluded from results.
@@ -89,6 +90,7 @@ class SearchBackend(ABC):
         text: str,
         limit: int = 10,
         page_type: str | None = None,
+        *, scope: EvidenceScope | None = None,
     ) -> list[SearchHit]:
         """Find documents similar to arbitrary text.
 

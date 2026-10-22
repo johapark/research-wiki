@@ -278,13 +278,15 @@ def _record_for(page: Page, report: Report) -> Record | None:
 
 def collect(*, categories: list[str] | None = None,
             years: tuple[int, int] | None = None,
-            stems: list[str] | None = None) -> tuple[list[Record], Report]:
+            stems: list[str] | None = None, scope=None) -> tuple[list[Record], Report]:
     """Every exportable page matching the filters, in a deterministic order."""
     report = Report()
     wanted = set(stems or ())
     records: list[Record] = []
 
     for page in read_pages():
+        if scope is not None and not scope.allows(page.stem, page.page_type):
+            continue
         if page.page_type not in EXPORTABLE_TYPES:
             continue
         if categories and page.category not in categories:
