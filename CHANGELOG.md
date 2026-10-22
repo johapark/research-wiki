@@ -32,6 +32,23 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- `remove --json --apply` emits one JSON document carrying the real outcome
+  (`applied`, `removed_files`, `backlinks_removed`, `db_rows_deleted`,
+  `edges_deleted`, `warnings`). It previously printed the plan with a
+  hard-coded `"applied": false` and then the human summary to the same
+  stream, which no consumer could parse. A bug during `--apply` now reaches
+  the funnel as exit 3 instead of being relabelled an environment error, and
+  a post-commit failure no longer claims "rolled back".
+- A page-index rebuild is published atomically. `build` wiped the directory
+  in place while readers take no lock, so a concurrent reader saw the index
+  as absent — which ingest treats as "abstain", filing the paper under
+  `other` — and a crash left no index at all.
+- `db rebuild` hashes every PDF before opening its write transaction instead
+  of inside it, so one SQLite write lock is no longer held across a full read
+  of `papers/` (2.4 s for 667 PDFs locally, far longer on synced storage).
+  `write_iteration` retries a busy commit with backoff, so a maintenance
+  command can no longer kill a parallel ingest worker with "database is
+  locked".
 - Lock files move from `$TMPDIR/researchwiki-locks` to
   `~/.local/share/researchwiki/locks`, the base the per-repo state DB already
   uses. `TMPDIR` is per-process, so a sandboxed shell, cron entry or launchd
