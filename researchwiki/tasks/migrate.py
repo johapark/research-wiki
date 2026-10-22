@@ -204,23 +204,52 @@ def _already_graded(stems: list[str]) -> dict[str, int]:
     Re-applying over these would rewrite bodies and mass-NULL grader columns on
     the next `db rebuild`, forcing a full re-grade. Refused unless the user
     explicitly opts in.
+
+    **Deliberately not `safe_read`.** That helper downgrades every failure to
+    the caller's default, which is right for the read-only reporting it was
+    built for (`status`, `insights`, `lint`) and wrong here: this is the guard
+    standing between `--apply` and other people's grading work. A locked,
+    unreadable or corrupt DB would answer "nothing is graded" and wave the
+    overwrite through at precisely the moment the answer is unknowable. A DB
+    that genuinely has no `claims` table yet — a fresh clone before the first
+    ingest — really does hold no grades, so only that case returns empty.
     """
-    from ..db.safe import safe_read
+    import sqlite3
+
+    from ..db.connection import get_connection
 
     if not stems:
         return {}
 
-    def _q(conn):
-        marks = ",".join("?" * len(stems))
-        return conn.execute(
-            f"""SELECT paper_stem, COUNT(*) AS n
-                  FROM claims
-                 WHERE last_graded_at IS NOT NULL AND paper_stem IN ({marks})
-                 GROUP BY paper_stem""",
-            stems,
-        ).fetchall()
-
-    rows = safe_read(_q, default=[], label="migrate.already_graded")
+    marks = ",".join("?" * len(stems))
+    query = (
+        f"SELECT paper_stem, COUNT(*) AS n FROM claims "
+        f"WHERE last_graded_at IS NOT NULL AND paper_stem IN ({marks}) "
+        f"GROUP BY paper_stem"
+    )
+    try:
+        conn = get_connection()
+    except Exception as e:
+        raise EnvironmentFailure(
+            f"cannot read the state DB to check for existing grading work "
+            f"({type(e).__name__}: {e}). Refusing to apply: this check is what "
+            f"protects graded pages from being overwritten. Fix the DB, or pass "
+            f"--force-regrade-ok to accept a full re-grade."
+        ) from e
+    try:
+        rows = conn.execute(query, stems).fetchall()
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e).lower():
+            return {}  # fresh DB: no claims yet, so nothing can be graded
+        raise EnvironmentFailure(
+            f"cannot check for existing grading work ({e}). Refusing to apply; "
+            f"pass --force-regrade-ok to accept a full re-grade."
+        ) from e
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
     return {r["paper_stem"]: r["n"] for r in rows}
 
 

@@ -347,3 +347,96 @@ def test_assess_writes_nothing(tmp_path):
     before = p.read_text()
     assess(p, pdf_dir=tmp_path, category="compbio")
     assert p.read_text() == before
+
+
+# ---------- the graded-work guard ----------
+#
+# `_already_graded` is what stands between `migrate apply` and somebody else's
+# grading work: re-applying rewrites page bodies, and the next `db rebuild`
+# NULLs every grader column whose claim text changed. It previously read the DB
+# through `safe_read`, which downgrades *any* failure to the caller's default —
+# so a locked or corrupt DB answered "nothing is graded" and the refusal never
+# fired, at exactly the moment the answer was unknowable.
+
+def _migrate_task():
+    import importlib
+    return importlib.import_module("researchwiki.tasks.migrate")
+
+
+def test_graded_guard_refuses_when_the_db_cannot_be_opened(monkeypatch):
+    from researchwiki.errors import EnvironmentFailure
+
+    migrate = _migrate_task()
+
+    def boom():
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr("researchwiki.db.connection.get_connection", boom)
+    with pytest.raises(EnvironmentFailure, match="protects graded pages"):
+        migrate._already_graded(["smith-2024-a-paper-about-things"])
+
+
+def test_graded_guard_refuses_on_a_corrupt_claims_table(monkeypatch):
+    import sqlite3
+
+    from researchwiki.errors import EnvironmentFailure
+
+    migrate = _migrate_task()
+
+    class Conn:
+        def execute(self, *_a, **_k):
+            raise sqlite3.OperationalError("database disk image is malformed")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("researchwiki.db.connection.get_connection", lambda: Conn())
+    with pytest.raises(EnvironmentFailure, match="--force-regrade-ok"):
+        migrate._already_graded(["smith-2024-a-paper-about-things"])
+
+
+def test_graded_guard_treats_a_fresh_db_as_genuinely_ungraded(monkeypatch):
+    """A clone before its first ingest has no claims table, and really does
+    hold no grades — the one case that may answer empty."""
+    import sqlite3
+
+    migrate = _migrate_task()
+
+    class Conn:
+        def execute(self, *_a, **_k):
+            raise sqlite3.OperationalError("no such table: claims")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("researchwiki.db.connection.get_connection", lambda: Conn())
+    assert migrate._already_graded(["smith-2024-a-paper-about-things"]) == {}
+
+
+def test_graded_guard_reports_grading_work_it_finds(monkeypatch):
+    """Against a real sqlite connection, so the sqlite3.Row access the
+    production path relies on is exercised rather than mocked away."""
+    import sqlite3
+
+    migrate = _migrate_task()
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE claims (paper_stem TEXT, last_graded_at INTEGER)")
+    conn.executemany(
+        "INSERT INTO claims VALUES (?, ?)",
+        [("a-2024-x", 1)] * 7 + [("b-2024-y", None), ("c-2024-z", 1)],
+    )
+    conn.commit()
+    monkeypatch.setattr("researchwiki.db.connection.get_connection", lambda: conn)
+    # b has only an ungraded claim, so it must not appear; c is not asked about.
+    assert migrate._already_graded(["a-2024-x", "b-2024-y"]) == {"a-2024-x": 7}
+
+
+def test_graded_guard_skips_the_query_entirely_for_no_stems(monkeypatch):
+    migrate = _migrate_task()
+
+    def boom():
+        raise AssertionError("must not open the DB for an empty stem list")
+
+    monkeypatch.setattr("researchwiki.db.connection.get_connection", boom)
+    assert migrate._already_graded([]) == {}

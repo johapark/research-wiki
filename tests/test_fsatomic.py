@@ -226,3 +226,50 @@ def test_explicit_crlf_content_is_preserved_verbatim(tmp_path):
     target = tmp_path / "keep.txt"
     fsatomic.write_text_atomic(target, "a\r\nb\r\n")
     assert target.read_bytes() == b"a\r\nb\r\n"
+
+
+# ---------- lock-file location ----------
+#
+# The lock directory used to be `$TMPDIR/researchwiki-locks`. `TMPDIR` is
+# per-process, so a sandboxed shell, cron entry or launchd job resolved a
+# different directory than the user's terminal, and the two stopped excluding
+# each other with no error on either side. These pin the directory against
+# the environment rather than pinning a particular path.
+
+
+def test_tmpdir_does_not_change_the_lock_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("RESEARCHWIKI_LOCK_DIR", raising=False)
+    target = tmp_path / "page.md"
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp-a"))
+    first = fsatomic._lock_path_for(target)
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp-b"))
+    second = fsatomic._lock_path_for(target)
+    assert first == second, "two TMPDIRs must not split mutual exclusion"
+    assert fsatomic.tempfile.gettempdir() not in str(first)
+
+
+def test_lock_dir_is_overridable_and_keyed_by_absolute_target(tmp_path, monkeypatch):
+    locks = tmp_path / "locks"
+    monkeypatch.setenv("RESEARCHWIKI_LOCK_DIR", str(locks))
+    a = fsatomic._lock_path_for(tmp_path / "one.md")
+    b = fsatomic._lock_path_for(tmp_path / "two.md")
+    assert a.parent == b.parent == locks
+    assert a != b
+    # Same file reached by a different spelling is the same lock.
+    assert a == fsatomic._lock_path_for(tmp_path / "sub" / ".." / "one.md")
+
+
+def test_unwritable_lock_dir_falls_back_rather_than_failing_writes(tmp_path, monkeypatch):
+    """A read-only home must not make every atomic write unusable."""
+    monkeypatch.setenv("RESEARCHWIKI_LOCK_DIR", str(tmp_path / "blocked" / "locks"))
+    real_mkdir = fsatomic.Path.mkdir
+
+    def deny_blocked(self, *args, **kwargs):
+        if "blocked" in str(self):
+            raise PermissionError(f"read-only: {self}")
+        return real_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(fsatomic.Path, "mkdir", deny_blocked)
+    path = fsatomic._lock_path_for(tmp_path / "page.md")
+    assert path.parent.is_dir()
+    assert "blocked" not in str(path)

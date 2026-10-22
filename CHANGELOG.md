@@ -30,6 +30,23 @@ the reasoning behind any line below.
   digest-path batches do not. Legacy checkpoints remain resumable with an
   explicit provenance warning.
 
+### Fixed
+
+- Lock files move from `$TMPDIR/researchwiki-locks` to
+  `~/.local/share/researchwiki/locks`, the base the per-repo state DB already
+  uses. `TMPDIR` is per-process, so a sandboxed shell, cron entry or launchd
+  job resolved a different lock directory than the user's terminal and the two
+  silently stopped excluding each other. `$RESEARCHWIKI_LOCK_DIR` overrides.
+  **Finish any in-flight command before upgrading**: a process started under
+  the old path holds a lock the new one cannot see.
+- `migrate apply` refuses with exit 2 when it cannot check for existing grading
+  work, instead of reading an unhealthy state DB as "nothing is graded" and
+  overwriting graded pages. A missing `claims` table still counts as ungraded.
+- A failed supplementary attachment no longer retracts a promoted paper. The
+  post-promote loop caught only three exception types while its staging calls
+  raise plain `OSError`, so a full disk or read-only mount skipped grading and
+  indexing and made `--resume` file a complete paper as unresumable.
+
 ## [0.5.3] - 2026-10-18
 
 > **After upgrading:** run `researchwiki grade regression` once. Claim grades now
