@@ -280,6 +280,55 @@ with tempfile.TemporaryDirectory(prefix='researchwiki-job-store-') as runtime:
 """)
 
 
+def verify_jobs_cli(root: Path, env: dict[str, str], source: Path) -> None:
+    """Exercise the installed Community adapter, including JSON and queue-only controls."""
+    options = root / 'reports/job-options.json'
+    options.write_text(json.dumps(dict(use_stub=True, use_semantic=False, use_llm_reconcile=False,
+                                      n_drafts=1, title='Alpha Acceptance Pipelines for Reliable Research',
+                                      year=2026, authors=['Ada Lovelace', 'Alan Turing'])))
+    with tempfile.TemporaryDirectory(prefix='researchwiki-jobs-cli-') as runtime:
+        common = ['--library-root', str(root), '--store-root', runtime, '--json']
+
+        def command(*args, expected=(0,)):
+            proc = run_cli(root, env, 'jobs', *args, *common, expected=expected)
+            payload = json.loads(proc.stdout)
+            assert payload['schema_version'] == 1
+            return payload
+
+        submitted = command('submit', str(source), '--request-id', 'acceptance-cli',
+                            '--options-file', str(options))
+        job = submitted['job']
+        assert job['execution'] == 'queued'
+        assert command('submit', str(source), '--request-id', 'acceptance-cli',
+                       '--options-file', str(options))['job'] == job
+        assert len(command('list', '--state', 'queued')['jobs']) == 1
+        assert command('show', job['job_id'])['job'] == job
+        terminal = command('run', job['job_id'])['job']
+        assert terminal['result']['outcome'] == 'already_present'
+        events = command('events', job['job_id'])
+        assert events['events'][-1]['kind'] == 'operation_finished'
+        assert command('events', job['job_id'], '--after-sequence', str(events['next_sequence']))['events'] == []
+        assert command('reconcile', job['job_id'])['job'] == terminal
+        assert command('retry', job['job_id'], expected=(1,))['error']['code'] == 'invalid_request'
+        queued = command('submit', str(source), '--request-id', 'acceptance-cli-cancel')['job']
+        assert command('cancel', queued['job_id'])['job']['execution'] == 'cancelled'
+        # An abandoned start is explicitly reconciled, then retried only as a
+        # new queued record. Nothing here starts that retry's model work.
+        abandoned = command('submit', str(source), '--request-id', 'acceptance-cli-recover')['job']
+        run_python(root, env, f"""
+from researchwiki.ingest_ledger import begin
+from researchwiki.jobs import JobStore
+store = JobStore({str(root)!r}, store_root={runtime!r})
+record = store.claim({abandoned['job_id']!r}, 'exited-cli-acceptance-owner')
+begin(store.ledger_binding(record))
+""")
+        recovered = command('reconcile', abandoned['job_id'])['job']
+        assert recovered['result']['publication'] == 'not_published'
+        retry = command('retry', abandoned['job_id'])['job']
+        assert retry['execution'] == 'queued' and retry['parent_job_id'] == abandoned['job_id']
+        command('cancel', retry['job_id'])
+
+
 def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
     run_cli(root, env, "init", "--scaffold-only")
     for rel in (
@@ -378,6 +427,7 @@ finally:
     # count comes from the real claims DB and agrees with its indexed state.
     assert f"Claims: {int(claims.stdout.strip())} indexed" in added.stdout
     verify_job_lifecycle(root, env, single)
+    verify_jobs_cli(root, env, single)
 
     # Application callers use the same operation as the CLI, without terminal
     # parsing. Re-adding these bytes must return the existing canonical paper.

@@ -10,7 +10,7 @@ import uuid
 from filelock import FileLock
 
 from ..fsatomic import exclusive_lock
-from ..operations import IngestResult, OperationError
+from ..operations import ContractError, IngestResult, OperationError
 from ..runtime import repository_key, repository_runtime_dir
 from .admission import normalize_request, validate_inputs
 from .contracts import JobRecord, validate_job_id
@@ -45,12 +45,26 @@ class JobStore:
         return FileLock(str(path / "owner.lock"), timeout=0)
 
     def get_job(self, job_id):
-        record = JobRecord.from_dict(read_json(self.path(job_id) / "manifest.json"))
+        path = self.path(job_id)
+        try:
+            record = JobRecord.from_dict(read_json(path / "manifest.json"))
+        except ContractError as exc:
+            raise JobStoreUnavailable("Job manifest schema is invalid or unsupported") from exc
         if record.job_id != job_id or record.library_id != self.library_id or (
             Path(record.request.library_root).resolve() != self.library_root
         ) or record.request_sha256 != digest(record.request.to_dict()):
             raise JobStoreUnavailable("job record library/request identity mismatch")
         return record
+
+    def list_jobs(self):
+        """Read durable records without refreshing ownership or creating a store."""
+        try:
+            paths = list(self.root.iterdir())
+        except FileNotFoundError:
+            return ()
+        records = [self.get_job(path.name) for path in paths
+                   if len(path.name) == 32 and not path.name.startswith('.') and path.is_dir()]
+        return tuple(sorted(records, key=lambda record: (record.created_at, record.job_id), reverse=True))
 
     def submit_ingest(self, request, *, parent_job_id=None):
         request = normalize_request(request)

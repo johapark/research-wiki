@@ -22,6 +22,13 @@ the reasoning behind any line below.
 
 ### Added
 
+- Community `jobs submit`, `run`, `list`, `show`, `events`, `reconcile`, `retry`,
+  and `cancel` commands expose the existing durable supervisor. Queueing and
+  retry remain separate from foreground execution; cancellation is queued-only.
+  Explicit library selection works outside the checkout, and profiles load
+  only in workers. Version 1 JSON envelopes keep stdout parseable while native
+  diagnostics and relay handoffs stay on stderr. Read-only inspection does not
+  refresh ownership or mutate records; existing ingest/batch commands remain.
 - Durable local ingestion jobs provide idempotent submission, atomic versioned
   manifests, private event/diagnostic files, isolated workers, polling, queued
   cancellation, and explicit retry of known-unpublished work. Workers select

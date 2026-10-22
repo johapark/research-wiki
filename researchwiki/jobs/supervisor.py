@@ -29,6 +29,9 @@ class JobSupervisor:
     def get_job(self, job_id):
         return self.store.get_job(job_id)
 
+    def list_jobs(self):
+        return self.store.list_jobs()
+
     def read_events(self, job_id, *, after_sequence=0):
         return read_events(self.store, job_id, after_sequence=after_sequence)
 

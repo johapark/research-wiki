@@ -259,7 +259,23 @@ preserves publication and repairs the database, indexes, and claim grades;
 unavailable maintenance remains pending. Missing/unsupported evidence stays
 unknown. Events and matching filenames never establish publication. Recovery
 does not repeat provider calls, answer relay prompts, run optional model hooks,
-or overwrite changed canonical content. The Community `jobs` CLI follows next.
+or overwrite changed canonical content.
+
+The Community CLI exposes the same controls:
+
+```bash
+researchwiki jobs submit inbox/paper.pdf --library-root "$PWD" --request-id paper-001 --json
+researchwiki jobs run JOB_ID --library-root "$PWD" --json
+researchwiki jobs show JOB_ID --library-root "$PWD" --json
+researchwiki jobs reconcile JOB_ID --library-root "$PWD" --json
+```
+
+`submit` and `retry` only enqueue; `run` owns a foreground worker with visible
+relay handoffs. `list`, `show`, and cursor-based `events` inspect durable state;
+`cancel` applies only to queued work. Explicit library selection works from
+outside the checkout, and profiles load only in workers. See the
+[job command guide](./docs/jobs.md) for request/options files, profiles, JSON,
+exit codes, and recovery behavior.
 
 ## Data, privacy, and validation
 
