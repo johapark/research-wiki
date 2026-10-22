@@ -393,6 +393,21 @@ def test_apply_hard_fails_when_the_embedding_model_is_unusable(
     capsys.readouterr()
 
 
+def test_an_unreadable_supplementary_fails_before_copying(wiki, no_spend):
+    """The batch identity hashes every --supplementary file. Failing inside
+    `new_batch` would strand the wave in inbox/, and the next apply would skip
+    it as already staged without dispatching its frozen metadata."""
+    from researchwiki.errors import EnvironmentFailure
+
+    record = rec(wiki)
+    record["ingest_args"] += ["--supplementary", str(wiki / "src" / "gone.xlsx")]
+    run = write_manifest(wiki, [record])
+    with pytest.raises(EnvironmentFailure, match="Nothing was copied"):
+        import_task.main(["apply", "--run", str(run)])
+    assert list((wiki / "inbox").glob("*.pdf")) == []
+    assert no_spend == []
+
+
 def test_failed_dispatch_does_not_print_success_followups(wiki, monkeypatch, capsys):
     from researchwiki.tasks import _ingest_batch
 

@@ -341,12 +341,16 @@ finally:
     assert len(checkpoint["completed"]) == 1
     assert len(checkpoint["failed"]) == 1
 
+    # Repairing a failed input changes its bytes, and a resume refuses that:
+    # the recorded identity exists so one batch cannot mix two versions of an
+    # input. Repair-then-resume is therefore not a recovery path — the
+    # repaired PDF goes through a new batch, which this exercises in turn.
     write_fixture_pdf(
         batch_retry,
         title="Resumable Acceptance Pipelines Recover Interrupted Work",
         author="Grace Hopper; Barbara Liskov",
     )
-    run_cli(
+    refused = run_cli(
         root,
         env,
         "agent",
@@ -355,9 +359,40 @@ finally:
         str(batch_dir),
         "-w",
         "1",
+        expected=(1,),
     )
+    assert "resume refused" in refused.stderr, refused.stderr
+    assert "pdf_sha256" in refused.stderr, refused.stderr
+    # A refused resume leaves the experiment exactly as it was.
     checkpoint = json.loads((batch_dir / "checkpoint.json").read_text(encoding="utf-8"))
-    assert len(checkpoint["completed"]) == 2
+    assert len(checkpoint["completed"]) == 1
+    assert len(checkpoint["failed"]) == 1
+
+    run_cli(
+        root,
+        env,
+        "agent",
+        "ingest",
+        str(batch_retry),
+        "--stub",
+        "--no-semantic",
+        "--no-llm-reconcile",
+        "--no-cross-link",
+        "--auto-promote",
+        "--max-evolve",
+        "0",
+        "-n",
+        "1",
+        "-w",
+        "1",
+    )
+    [repaired_dir] = [
+        d for d in (root / ".ingest").glob("batch-*") if d != batch_dir
+    ]
+    checkpoint = json.loads(
+        (repaired_dir / "checkpoint.json").read_text(encoding="utf-8")
+    )
+    assert len(checkpoint["completed"]) == 1
     assert checkpoint["failed"] == {}
 
     hopper_stem = "hopper-2026-resumable-acceptance-pipelines-recover-interrupted"

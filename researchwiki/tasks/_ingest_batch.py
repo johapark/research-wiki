@@ -20,7 +20,8 @@ Design notes:
     bash-fan-out mental model. One crash can't corrupt siblings.
   - `concurrent.futures.ThreadPoolExecutor` over subprocesses (threads are
     I/O-bound on `subprocess.wait`).
-  - Absolute paths as checkpoint keys — `--resume` works from any cwd.
+  - Absolute paths as checkpoint keys — PDF paths keep their original meaning.
+    Commands still run from the repository root, where prompts/config resolve.
   - Atomic checkpoint via tmp+rename. Every worker completion re-writes.
   - SIGINT cancels unstarted futures, lets in-flight subprocesses finish.
     Killing mid-ingest could strand state.db mid-transaction; the 5s
@@ -44,6 +45,7 @@ import sys
 from pathlib import Path
 
 from ..errors import EnvironmentFailure
+from . import _batch_identity
 
 
 def _now_iso() -> str:
@@ -542,15 +544,18 @@ def new_batch(
     caller like `researchwiki import apply` holds a *different* DOI for every
     input, which is the whole point of importing from a reference manager, and
     that case the guard was never about. Keys are the same absolute paths
-    `_resolve_inputs` produces, so `--resume` still works from any cwd.
+    `_resolve_inputs` produces, so the overrides survive a restart.
 
     `workers_explicit` records intent separately from the effective worker
-    count.  Provider defaults are re-resolved on resume (API=4, chat-relay=1),
-    while a user-supplied `-w N` remains N across provider switches.
+    count. Resume verifies the workflow identity before re-resolving worker
+    policy; a user-supplied `-w N` remains N.
     """
     resolved = _resolve_inputs(pdfs)
-    batch_dir = _batch_dir_for_new_run()
+    extra_args = _batch_identity.normalize_file_args(extra_args)
+    per_input_args = {name: _batch_identity.normalize_file_args(args)
+                      for name, args in (per_input_args or {}).items()}
     plan = {
+        "version": _batch_identity.PLAN_VERSION,
         "started_at": _now_iso(),
         "subcommand": subcommand,
         "workers": workers,
@@ -559,6 +564,12 @@ def new_batch(
         "extra_args": extra_args,
         "per_input_args": per_input_args or {},
     }
+    try:
+        plan["identity"] = _batch_identity.capture(plan)
+    except (EnvironmentFailure, OSError) as exc:
+        print(f"ingest-batch: could not record batch identity: {exc}", file=sys.stderr)
+        return 2
+    batch_dir = _batch_dir_for_new_run()
     _atomic_write_json(batch_dir / "plan.json", plan)
     return _run_batch(
         batch_dir,
@@ -576,7 +587,7 @@ def resume_batch(
     workers_override: int | None = None,
 ) -> int:
     """Continue an interrupted batch. Reads plan.json for its subcommand +
-    passthrough flags so semantics don't drift across a restart.
+    passthrough flags, verifying its recorded workflow identity before dispatch.
 
     Retried failures re-enter the queue (dropped from `failed` so the retry
     either promotes to `completed` or overwrites with a fresh failure) —
@@ -617,6 +628,29 @@ def resume_batch(
                 skipped_non_retryable.append(pdf)
                 continue
         pending.append(pdf)
+
+    # Validate before checkpoint mutations (including clearing retryable
+    # failures). A rejected resume must leave the original experiment intact.
+    try:
+        changes = _batch_identity.check_resume(plan, pending)
+    except (EnvironmentFailure, OSError) as exc:
+        print(f"ingest-batch: could not verify batch identity: {exc}", file=sys.stderr)
+        return 2
+    if changes is None:
+        print("ingest-batch: legacy checkpoint has no recorded identity; "
+              "original inputs, prompts, models and framework cannot be verified.",
+              file=sys.stderr)
+    elif changes:
+        print("ingest-batch: resume refused — batch inputs or workflow changed:",
+              file=sys.stderr)
+        for change in changes[:8]:
+            print(f"    · {change}", file=sys.stderr)
+        if len(changes) > 8:
+            print(f"    · {len(changes) - 8} more changed field(s)", file=sys.stderr)
+        print("  Restore the original inputs/configuration, or start a new batch "
+              "with the remaining PDFs. Completed papers were not re-run; "
+              "the checkpoint is unchanged.", file=sys.stderr)
+        return 1
 
     # An input whose PDF is no longer on disk cannot be re-run. The common
     # cause is a worker that died *after* `_move_pdf` shutil.move'd the file
@@ -696,7 +730,9 @@ def resume_batch(
     try:
         workers = resolve_batch_workers(requested_workers, stub=stub)
     except EnvironmentFailure as exc:
-        # Resuming must not require a healthy provider config. Reading the
+        # Legacy plans have no identity to verify and may resume without a
+        # healthy provider config; modern plans fail before reaching this
+        # block when their original configuration cannot be verified. Reading the
         # routing snapshot is new here, and on its own it turned an unparseable
         # RW_MODELS_CONFIG into "this half-finished batch cannot be resumed at
         # all" — including for a --stub batch the config is irrelevant to.

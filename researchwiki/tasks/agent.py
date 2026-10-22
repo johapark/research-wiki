@@ -684,7 +684,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="BATCH_DIR",
         default=None,
         help="Continue an interrupted batch. Reads its plan.json + "
-        "checkpoint.json and re-runs only what's pending.",
+        "checkpoint.json, verifies input/configuration identity, and "
+        "re-runs only what's pending.",
     )
     p_ingest.add_argument(
         "--no-retry",
