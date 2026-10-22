@@ -59,12 +59,31 @@ def test_an_unknown_command_is_a_user_error_not_a_crash():
 
 
 @pytest.mark.parametrize("command", ["lint", "status", "search", "remove", "export"])
-def test_every_entry_point_can_at_least_render_its_help(command):
+def test_every_entry_point_can_at_least_render_its_help(command, tmp_path):
     """A command whose module fails to import still has a parser, so `--help`
-    is the cheapest proof that each entry point is wired up at all."""
-    proc = _cli(command, "--help")
+    is the cheapest proof that each entry point is wired up at all.
+
+    Run from a scaffolded `tmp_path`, never the inherited cwd. `__main__`
+    rejects any command but `init` outside a wiki with exit 2 *before*
+    dispatching, so a test that relied on the cwd passed on a developer
+    machine (which has a `wiki/`) and failed in CI (which does not) — the
+    cwd-dependence this file exists to catch.
+    """
+    _scaffolded(tmp_path)
+    proc = _cli(command, "--help", cwd=tmp_path)
     assert proc.returncode == 0, f"{command} --help failed: {proc.stderr[:400]}"
     assert "Traceback" not in proc.stderr
+
+
+def test_a_command_outside_a_wiki_is_an_environment_error():
+    """The guard the test above works around is itself worth pinning: exit 2,
+    naming the cwd, so `cd` is the obvious fix rather than editing flags."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as empty:
+        proc = _cli("status", cwd=empty)
+    assert proc.returncode == 2
+    assert "no wiki/ directory" in proc.stderr
 
 
 def _repo_root():
@@ -83,6 +102,14 @@ def _checkout_like(tmp_path):
     root = _repo_root()
     for name in ("config", "prompts"):
         (tmp_path / name).symlink_to(root / name, target_is_directory=True)
+    return tmp_path
+
+
+def _scaffolded(tmp_path):
+    """A checkout-like dir that has been through `init --scaffold-only`."""
+    _checkout_like(tmp_path)
+    proc = _cli("init", "--scaffold-only", cwd=tmp_path)
+    assert proc.returncode == 0, proc.stderr
     return tmp_path
 
 
