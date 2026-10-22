@@ -176,22 +176,54 @@ def _unscanned_result(source_key: str, error: str, previous: dict) -> dict:
     }
 
 
+def _skipped_commentary(source: Page, previous: dict) -> dict:
+    """Exclude non-primary evidence explicitly, preserving earlier decisions."""
+    result = {
+        "source": source.key,
+        "source_type": "commentary",
+        "source_fingerprint": _fingerprint(_source_text(source)),
+        "scanned_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "state": "skipped",
+        "skip_reason": "commentary_not_primary_evidence",
+        "reason": "Commentary is not independent primary evidence; ingest and cite "
+                  "the primary paper for authored-page updates.",
+        "error": "",
+        "candidates": [],
+        "audit": [],
+    }
+    history = previous.get("prior_paper_review")
+    if previous.get("state") != "skipped" and (
+        previous.get("candidates") or previous.get("audit")
+    ):
+        history = previous
+    if history:
+        result["prior_paper_review"] = history
+    return result
+
+
 def scan(source_key: str) -> dict:
     """Scan every eligible authored page and persist a durable review receipt.
 
     A missing index is ``unscanned``, never a clean zero-candidate result.
+    Commentary is explicitly ``skipped`` before retrieval, not treated as an
+    independent evidence source. Other non-paper source types remain errors.
     Existing dispositions survive an identical rescan; substantive source or
     target changes reopen them. The scan never calls a remote model.
     """
     from .index import pages_semantic
 
     source = read_page(wiki_dir() / f"{source_key}.md")
-    if source is None or source.page_type != "paper":
+    if source is None or source.page_type not in {"paper", "commentary"}:
         raise ValueError(f"not a paper page: {source_key}")
-    source_text = _source_text(source)
-    source_hash = _fingerprint(source_text)
     path = review_path(source.stem)
     previous = _load_previous(path)
+    if source.page_type == "commentary":
+        result = _skipped_commentary(source, previous)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(path, yaml.safe_dump(result, sort_keys=False, allow_unicode=True))
+        return result
+    source_text = _source_text(source)
+    source_hash = _fingerprint(source_text)
     source_changed = bool(previous.get("source_fingerprint") and
                           previous.get("source_fingerprint") != source_hash)
     old_rows = {r.get("target"): r for r in previous.get("candidates", [])
@@ -283,9 +315,18 @@ def pending_reviews() -> list[tuple[Path, dict]]:
     out = []
     for path in sorted(root.glob("*.yaml")) if root.is_dir() else []:
         data = _load_previous(path)
+        if data.get("state") == "skipped":
+            source = read_page(wiki_dir() / f"{data.get('source', '')}.md")
+            if (source is not None and source.page_type == "commentary"
+                    and data.get("source_type") == "commentary"
+                    and data.get("skip_reason") == "commentary_not_primary_evidence"
+                    and _fingerprint(_source_text(source)) == data.get("source_fingerprint")):
+                continue
+            data["state"] = "stale"
         if data.get("state") == "complete":
             source = read_page(wiki_dir() / f"{data.get('source', '')}.md")
-            if source is None or _fingerprint(_source_text(source)) != data.get("source_fingerprint"):
+            if (source is None or source.page_type != "paper"
+                    or _fingerprint(_source_text(source)) != data.get("source_fingerprint")):
                 data["state"] = "stale"
             else:
                 for row in data.get("audit", []):

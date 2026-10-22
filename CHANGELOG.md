@@ -30,6 +30,13 @@ the reasoning behind any line below.
   digest-path batches do not. Legacy checkpoints remain resumable with an
   explicit provenance warning.
 
+### Fixed
+
+- Post-ingest impact review explicitly skips commentary sources as non-primary
+  evidence instead of reporting a failed scan. Skips retain a fingerprint and
+  earlier paper-review history; changed, removed or retyped sources reopen for
+  attention. Missing indexes for actual papers remain visible failures.
+
 ## [0.5.3] - 2026-10-18
 
 > **After upgrading:** run `researchwiki grade regression` once. Claim grades now

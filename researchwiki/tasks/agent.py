@@ -496,13 +496,16 @@ def _finish_ingest(ctx, args) -> int:
                 impact = impact_review.record_unscanned(source_key, str(exc))
             except Exception:
                 impact = {"state": "unscanned", "error": str(exc), "candidates": []}
-        review_state = ("unscanned" if impact["state"] != "complete" else
+        review_state = ("skipped" if impact["state"] == "skipped" else
+                        "unscanned" if impact["state"] != "complete" else
                         "pending" if impact_review.unresolved_count(impact) else "reviewed")
         print(f"  Impact review: {review_state} "
               f"({len(impact['candidates'])} candidate(s)); "
               f"{impact_review.review_path(ctx.paper_stem)}")
         if impact.get("error"):
             print(f"    ⚠ {impact['error']}")
+        elif impact["state"] == "skipped":
+            print(f"    {impact['reason']}")
         elif impact["candidates"]:
             for row in impact["candidates"][:5]:
                 print(f"    → {row['target']} ({row['type']}, "

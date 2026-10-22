@@ -158,3 +158,94 @@ def test_cited_target_reopens_after_source_change(tmp_path, monkeypatch):
     second = impact.scan(SOURCE)
     assert second["candidates"][0]["target"] == TARGET
     assert second["candidates"][0]["decision"] == "pending"
+
+
+def test_commentary_is_explicitly_skipped_without_retrieval(tmp_path, monkeypatch):
+    source_path, _ = _fixture(tmp_path, monkeypatch, index_ok=False)
+    source_path.write_text(source_path.read_text().replace("type: paper", "type: commentary"))
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("commentary must not trigger index checks or retrieval")
+
+    monkeypatch.setattr(pages_semantic, "index_exists", unexpected)
+    monkeypatch.setattr(pages_semantic, "query_text", unexpected)
+    monkeypatch.setattr(impact, "_passage_scores", unexpected)
+    result = impact.scan(SOURCE)
+    assert result["state"] == "skipped"
+    assert result["source_type"] == "commentary"
+    assert result["skip_reason"] == "commentary_not_primary_evidence"
+    assert result["reason"]
+    assert result["error"] == ""
+    assert result["candidates"] == result["audit"] == []
+    assert impact.review_path(source_path.stem).is_file()
+    assert impact.pending_reviews() == []
+
+
+def test_skipped_commentary_reopens_when_retyped_as_paper(tmp_path, monkeypatch):
+    source_path, _ = _fixture(tmp_path, monkeypatch)
+    original = source_path.read_text()
+    source_path.write_text(original.replace("type: paper", "type: commentary"))
+    impact.scan(SOURCE)
+    source_path.write_text(original)
+    assert impact.pending_reviews()[0][1]["state"] == "stale"
+    assert impact.scan(SOURCE)["state"] == "complete"
+    assert impact.pending_reviews()[0][1]["candidates"]
+
+
+def test_skipped_commentary_edit_and_removal_are_stale(tmp_path, monkeypatch):
+    source_path, _ = _fixture(tmp_path, monkeypatch)
+    source_path.write_text(source_path.read_text().replace("type: paper", "type: commentary"))
+    impact.scan(SOURCE)
+    source_path.write_text(source_path.read_text() + "\n## Results\nChanged discussion.\n")
+    assert impact.pending_reviews()[0][1]["state"] == "stale"
+    assert impact.scan(SOURCE)["state"] == "skipped"
+    assert impact.pending_reviews() == []
+    source_path.unlink()
+    assert impact.pending_reviews()[0][1]["state"] == "stale"
+
+
+def test_commentary_retyping_preserves_paper_decisions_without_nested_history(tmp_path, monkeypatch):
+    source_path, _ = _fixture(tmp_path, monkeypatch)
+    impact.scan(SOURCE)
+    path = impact.review_path(source_path.stem)
+    saved = yaml.safe_load(path.read_text())
+    saved["candidates"][0].update(decision="deferred", reason="Needs primary follow-up.")
+    path.write_text(yaml.safe_dump(saved))
+    source_path.write_text(source_path.read_text().replace("type: paper", "type: commentary"))
+    assert impact.pending_reviews()[0][1]["state"] == "stale"
+    skipped = impact.scan(SOURCE)
+    assert skipped["prior_paper_review"] == saved
+    assert skipped["candidates"] == []
+    assert impact.scan(SOURCE)["prior_paper_review"] == saved
+
+
+def test_existing_failed_commentary_receipt_can_be_reconciled(tmp_path, monkeypatch):
+    source_path, _ = _fixture(tmp_path, monkeypatch)
+    source_path.write_text(source_path.read_text().replace("type: paper", "type: commentary"))
+    impact.record_unscanned(SOURCE, f"not a paper page: {SOURCE}")
+    assert impact.pending_reviews()[0][1]["state"] == "unscanned"
+    assert impact.scan(SOURCE)["state"] == "skipped"
+    assert impact.pending_reviews() == []
+
+
+def test_other_nonpaper_and_missing_sources_remain_errors(tmp_path, monkeypatch):
+    import pytest
+
+    source_path, _ = _fixture(tmp_path, monkeypatch)
+    source_path.write_text(source_path.read_text().replace("type: paper", "type: book"))
+    with pytest.raises(ValueError, match="not a paper page"):
+        impact.scan(SOURCE)
+    source_path.unlink()
+    with pytest.raises(ValueError, match="not a paper page"):
+        impact.scan(SOURCE)
+
+
+def test_incomplete_skip_receipt_is_not_silently_ignored(tmp_path, monkeypatch):
+    source_path, _ = _fixture(tmp_path, monkeypatch)
+    source_path.write_text(source_path.read_text().replace("type: paper", "type: commentary"))
+    impact.scan(SOURCE)
+    path = impact.review_path(source_path.stem)
+    saved = yaml.safe_load(path.read_text())
+    saved.pop("skip_reason")
+    path.write_text(yaml.safe_dump(saved))
+    assert impact.pending_reviews()[0][1]["state"] == "stale"
