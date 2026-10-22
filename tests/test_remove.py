@@ -452,3 +452,69 @@ def test_apply_never_edits_a_proposal_page(wiki):
     assert any(ref.path == page and ref.page_type == "proposal" for ref in plan.prose_refs)
     removal.apply(plan)
     assert page.read_text(encoding="utf-8") == before
+
+
+# ---------- --json is a machine contract, including with --apply ----------
+#
+# `--json --apply` used to print the plan (with a hard-coded `"applied": false`)
+# and then the human summary to the same stream. A consumer got a JSON document
+# followed by prose, which does not parse, and the document said the removal had
+# not happened when it had.
+
+
+def test_json_apply_emits_one_parseable_document_reporting_the_removal(wiki, capsys):
+    assert cli.main([STEM, "--apply", "--json"]) == 0
+    out = capsys.readouterr().out
+    payload = json.loads(out)  # the whole stream, not a prefix of it
+    assert payload["applied"] is True
+    assert payload["stem"] == STEM
+    assert payload["index_bullet_removed"] is True
+    assert payload["backlinks_removed"] >= 1
+    # `files` is the plan's generated-artefact list (the PDF); the page itself
+    # is `page`. `removed_files` covers both, so it is the longer list.
+    assert payload["page"] in payload["removed_files"]
+    assert set(payload["files"]) <= set(payload["removed_files"])
+    assert len(payload["removed_files"]) == len(payload["files"]) + 1
+    # The page really is gone, so `applied: true` is not a cosmetic flag.
+    assert not (wiki / "wiki" / "compbio" / f"{STEM}.md").exists()
+
+
+def test_json_apply_stdout_carries_no_prose(wiki, capsys):
+    cli.main([STEM, "--apply", "--json"])
+    out = capsys.readouterr().out
+    for marker in ("removed       ", "next: researchwiki db rebuild", "dry run"):
+        assert marker not in out, f"prose leaked into --json stdout: {marker!r}"
+
+
+def test_prose_apply_is_unchanged_and_still_human_readable(wiki, capsys):
+    assert cli.main([STEM, "--apply"]) == 0
+    out = capsys.readouterr().out
+    assert "removed" in out and "next: researchwiki db rebuild" in out
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(out)
+
+
+def test_a_bug_during_apply_is_not_relabelled_an_environment_error(wiki, monkeypatch):
+    """CLAUDE.md's exit-code contract: 2 is for the machine, 3 for a bug.
+
+    `except Exception: return 2` swallowed the traceback and reported a plain
+    TypeError as an unreadable disk.
+    """
+    def boom(*_a, **_k):
+        raise TypeError("regression in the removal code")
+
+    monkeypatch.setattr(cli, "apply_removal", boom)
+    with pytest.raises(TypeError):
+        cli.main([STEM, "--apply"])
+
+
+def test_an_environment_failure_during_apply_still_exits_2(wiki, monkeypatch, capsys):
+    from researchwiki.errors import EnvironmentFailure
+
+    def boom(*_a, **_k):
+        raise EnvironmentFailure("disk is unreadable")
+
+    monkeypatch.setattr(cli, "apply_removal", boom)
+    assert cli.main([STEM, "--apply"]) == 2
+    err = capsys.readouterr().err
+    assert "rolled back" in err, "pre-commit failure really is rolled back"
