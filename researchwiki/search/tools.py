@@ -23,13 +23,14 @@ import re
 import sqlite3
 
 from ..db.connection import get_connection
+from ..evidence import EvidenceScope
 from .freshness import current_rows
 from ..index.pdf_chunks import build_pdf_index, query_pdf
 
 
 # ---------- pdf_section_search ----------
 
-def pdf_section_search(stem: str, query: str, k: int = 3) -> list[dict]:
+def pdf_section_search(stem: str, query: str, k: int = 3, *, scope: EvidenceScope | None = None) -> list[dict]:
     """BM25 search inside one paper's PDF for passages matching `query`.
 
     Use this when the wiki page summary doesn't have the specific detail
@@ -45,6 +46,8 @@ def pdf_section_search(stem: str, query: str, k: int = 3) -> list[dict]:
 
     Example: pdf_section_search("smith-2024-...", "training data composition", k=3)
     """
+    if k <= 0 or (scope is not None and not scope.allows(stem)):
+        return []
     try:
         build_pdf_index(stem)
     except FileNotFoundError:
@@ -89,7 +92,7 @@ def _tokenize_query(q: str) -> list[str]:
     return [t for t in toks if len(t) >= 3 and t not in _STOPWORDS]
 
 
-def claims_by_stem(stem: str, *, include_context: bool = False) -> list[dict]:
+def claims_by_stem(stem: str, *, include_context: bool = False, scope: EvidenceScope | None = None) -> list[dict]:
     """Return every graded claim for one paper, sorted by section then position.
 
     Use when authoring a synthesis page that references this paper — the
@@ -109,6 +112,8 @@ def claims_by_stem(stem: str, *, include_context: bool = False) -> list[dict]:
     the experimental setting alongside the bare claim (off by default to keep
     JSON dumps narrow).
     """
+    if scope is not None and not scope.allows(stem):
+        return []
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     try:
@@ -153,7 +158,7 @@ def claims_by_stem(stem: str, *, include_context: bool = False) -> list[dict]:
     return out
 
 
-def claim_lookup(query: str, k: int = 5, *, include_context: bool = False) -> list[dict]:
+def claim_lookup(query: str, k: int = 5, *, include_context: bool = False, scope: EvidenceScope | None = None) -> list[dict]:
     """Find atomic claims (Key Contribution / Results bullets) matching the query.
 
     This is the grounded-citation primitive. Each claim is anchored to a
@@ -182,15 +187,17 @@ def claim_lookup(query: str, k: int = 5, *, include_context: bool = False) -> li
 
     Example: claim_lookup("AlphaFold 3 accuracy on protein-ligand", k=5)
     """
+    if scope is not None:
+        scope.check_root()
     tokens = _tokenize_query(query)
-    if not tokens:
+    if not tokens or k <= 0 or (scope is not None and not scope.stems):
         return []
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     try:
-        rows = _claim_lookup_fts(conn, tokens, k)
+        rows = _claim_lookup_fts(conn, tokens, k, scope=scope)
         if rows is None:
-            rows = _claim_lookup_like(conn, tokens, k)
+            rows = _claim_lookup_like(conn, tokens, k, scope=scope)
         rows = current_rows(conn, rows)
     finally:
         conn.close()
@@ -215,7 +222,7 @@ def claim_lookup(query: str, k: int = 5, *, include_context: bool = False) -> li
     return out
 
 
-def _claim_lookup_fts(conn, tokens: list[str], k: int):
+def _claim_lookup_fts(conn, tokens: list[str], k: int, *, scope=None):
     """FTS5 path. Returns rows on success, None if the FTS table is missing.
 
     Query form: `"tok1" OR "tok2" OR …` — quoting each token defuses FTS5
@@ -225,7 +232,8 @@ def _claim_lookup_fts(conn, tokens: list[str], k: int):
     match_score is positive and higher = better).
     """
     fts_query = " OR ".join(f'"{t}"' for t in tokens)
-    sql = """
+    clause, params = scope.sql("c.paper_stem") if scope is not None else ("", [])
+    sql = f"""
         SELECT c.id, c.paper_stem, c.section, c.position, c.text, c.claim_slug,
                c.semantic_score, c.bm25_top1, c.bm25_top1_chunk_id,
                c.supporting_text, c.supporting_provenance, c.last_graded_at, c.source_pdf_sha256, c.numeric_unmatched,
@@ -234,13 +242,14 @@ def _claim_lookup_fts(conn, tokens: list[str], k: int):
         JOIN claims c ON c.id = claims_fts.rowid
         WHERE claims_fts MATCH ?
           AND c.is_cross_ref = 0
+          {clause}
         ORDER BY match_score DESC,
                  COALESCE(c.semantic_score, 0) DESC,
                  COALESCE(c.bm25_top1, 0) DESC
         LIMIT ?
     """
     try:
-        return conn.execute(sql, (fts_query, k)).fetchall()
+        return conn.execute(sql, [fts_query, *params, k]).fetchall()
     except sqlite3.OperationalError as e:
         # Signal fallback ONLY on FTS5-specific errors. Narrowly matches
         # "no such module: fts5" (FTS5 not compiled in) and any error
@@ -254,12 +263,13 @@ def _claim_lookup_fts(conn, tokens: list[str], k: int):
         raise
 
 
-def _claim_lookup_like(conn, tokens: list[str], k: int):
+def _claim_lookup_like(conn, tokens: list[str], k: int, *, scope=None):
     """LIKE fallback — the original behavior when FTS5 isn't available."""
     like_clauses = " + ".join(
         ["(CASE WHEN LOWER(text) LIKE ? THEN 1 ELSE 0 END)"] * len(tokens)
     )
     params = [f"%{t}%" for t in tokens]
+    clause, scope_params = scope.sql() if scope is not None else ("", [])
     sql = f"""
         SELECT id, paper_stem, section, position, text, claim_slug,
                semantic_score, bm25_top1, bm25_top1_chunk_id,
@@ -267,9 +277,10 @@ def _claim_lookup_like(conn, tokens: list[str], k: int):
                ({like_clauses}) AS match_score
         FROM claims
         WHERE is_cross_ref = 0 AND ({like_clauses}) > 0
+        {clause}
         ORDER BY match_score DESC,
                  COALESCE(semantic_score, 0) DESC,
                  COALESCE(bm25_top1, 0) DESC
         LIMIT ?
     """
-    return conn.execute(sql, params + params + [k]).fetchall()
+    return conn.execute(sql, params + params + scope_params + [k]).fetchall()

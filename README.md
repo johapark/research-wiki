@@ -277,6 +277,15 @@ outside the checkout, and profiles load only in workers. See the
 [job command guide](./docs/jobs.md) for request/options files, profiles, JSON,
 exit codes, and recovery behavior.
 
+## Explicit evidence selections
+
+Search, claims, PDF lookup, synthesis scaffolding, and bibliography export accept
+`--scope-file selection.json` to restrict evidence before ranking and model context
+construction. Empty selections remain empty; unscoped operations retain their
+existing behavior. Applications can supply versioned selections without adding a
+project database or commercial dependency to the engine. See the
+[evidence-scope guide](./docs/evidence-scopes.md).
+
 ## Data, privacy, and validation
 
 Git tracks the framework: `researchwiki/`, `prompts/`, config templates, tests, and documentation. Your `wiki/`, `papers/`, `inbox/`, dotenv profiles, active/custom model configs, databases, and caches are gitignored.

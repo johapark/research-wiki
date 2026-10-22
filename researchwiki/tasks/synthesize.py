@@ -39,6 +39,7 @@ from ..log import append_log_md, log
 from ..paths import ingest_dir, wiki_dir
 from ..page_naming import dominant_category as _dominant_category, page_slug as _slugify
 from ..wiki import commit_page, find_stem_collision, read_pages
+from ._scope_file import add_scope_argument, load_scope
 
 
 def _resolve_paper(stem_or_link: str, known: dict[str, str]) -> str | None:
@@ -86,6 +87,7 @@ def _evidence_block(
     referenced: list[str],
     seed_k: int,
     per_paper_k: int | None,
+    *, scope=None,
 ) -> str:
     """Build the pre-grounded claim evidence the author drafts from.
 
@@ -101,6 +103,7 @@ def _evidence_block(
     Returns markdown for `.ingest/synthesis/<slug>/evidence.md`.
     """
     from ..search import claim_lookup, claims_by_stem
+    options = {"scope": scope} if scope is not None else {}
 
     def _safe_comment(text: str) -> str:
         # HTML comments close at `-->`. If interpolated text (an exception
@@ -120,7 +123,7 @@ def _evidence_block(
             "addressed anchor; see the bullet heads below). -->"
         )
         try:
-            hits = claim_lookup(topic_seed, k=seed_k)
+            hits = claim_lookup(topic_seed, k=seed_k, **options)
         except Exception as e:
             hits = []
             out.append(f"<!-- claim_lookup failed: {_safe_comment(str(e))} -->")
@@ -143,7 +146,7 @@ def _evidence_block(
         for r in referenced:
             stem = r.split("/", 1)[1] if "/" in r else r
             try:
-                paper_hits = claims_by_stem(stem)
+                paper_hits = claims_by_stem(stem, **options)
             except Exception as e:
                 paper_hits = []
                 out.append("")
@@ -267,7 +270,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--per-paper-k", type=int, default=None,
                         help="Max claims to pull per --papers entry. Default: all "
                              "(typically 10–25 per paper).")
+    add_scope_argument(parser)
     args = parser.parse_args(argv)
+    load_scope(args, parser)
+    scope = args.evidence_scope
 
     slug = args.slug or _slugify(args.title)
     if not slug:
@@ -280,7 +286,10 @@ def main(argv: list[str]) -> int:
     # hit `missing_doi`, got dropped without surfacing the WARN unless
     # stderr was visible). The synthesize CLI cares about stem-existence,
     # not DOI completeness.
-    existing_papers = {p.stem: f"{p.category}/{p.stem}" for p in read_pages()}
+    existing_papers = {p.stem: f"{p.category}/{p.stem}" for p in read_pages()
+                       if scope is None or scope.allows(p.stem, p.page_type)}
+    if scope is not None and not args.papers:
+        args.papers = sorted(scope.stems)
 
     resolved: list[str] = []
     missing: list[str] = []
@@ -288,7 +297,16 @@ def main(argv: list[str]) -> int:
         r = _resolve_paper(p, existing_papers)
         (resolved if r else missing).append(r or p)
     if missing:
+        if scope is not None:
+            parser.error("all --papers entries must be selected scope references")
         log(f"WARN: papers not found in wiki: {', '.join(missing)}", tag="synthesize")
+    if scope is not None:
+        if not resolved:
+            parser.error("scope has no references; select papers before synthesizing")
+        from dataclasses import replace
+        selected = frozenset(r.split("/", 1)[-1] for r in resolved)
+        scope = replace(scope, stems=selected,
+                        source_revisions=tuple(r for r in scope.source_revisions if r[0] in selected))
 
     target_dir = wiki_dir() / "synthesis"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -306,9 +324,14 @@ def main(argv: list[str]) -> int:
         referenced=resolved,
         seed_k=args.seed_k,
         per_paper_k=args.per_paper_k,
+        **({"scope": scope} if scope is not None else {}),
     )
 
     evidence_rel: str | None = None
+    if scope is not None:
+        from ..fsatomic import write_json_atomic
+        write_json_atomic(ingest_dir() / "synthesis" / slug / "scope.json",
+                          {**scope.to_dict(), "fingerprint": scope.fingerprint})
     if evidence_block:
         evidence_file = ingest_dir() / "synthesis" / slug / "evidence.md"
         evidence_file.parent.mkdir(parents=True, exist_ok=True)

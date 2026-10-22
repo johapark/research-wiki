@@ -22,6 +22,8 @@ import argparse
 import json
 import sys
 
+from ._scope_file import add_scope_argument, load_scope, scope_options, scoped_payload
+
 from ..search import pdf_section_search
 
 
@@ -35,20 +37,22 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--k", type=int, default=3, help="Max passages to return (default: 3).")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Emit a JSON array instead of formatted prose.")
+    add_scope_argument(parser)
     args = parser.parse_args(argv)
+    load_scope(args, parser)
 
-    hits = pdf_section_search(args.stem, args.query, k=args.k)
+    hits = pdf_section_search(args.stem, args.query, k=args.k, **scope_options(args))
 
     # The primitive signals failure as a single-element list carrying a `note`.
     if len(hits) == 1 and "note" in hits[0] and "chunk_id" not in hits[0]:
         if args.as_json:
-            print(json.dumps(hits, indent=2, ensure_ascii=False))
+            print(json.dumps(scoped_payload(args, hits), indent=2, ensure_ascii=False))
         else:
             print(hits[0]["note"], file=sys.stderr)
         return 2
 
     if args.as_json:
-        print(json.dumps(hits, indent=2, ensure_ascii=False))
+        print(json.dumps(scoped_payload(args, hits), indent=2, ensure_ascii=False))
         return 0 if hits else 1
 
     if not hits:

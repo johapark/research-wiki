@@ -22,6 +22,12 @@ the reasoning behind any line below.
 
 ### Added
 
+- Generic version 1 evidence selections constrain page, claim, PDF, hybrid,
+  See-Also, and reranker retrieval before top-K/context construction. CLI
+  `--scope-file` inputs and MCP `scope_file` parameters are independent of
+  project storage or commercial packages. Empty scopes stay empty; source
+  snapshots detect changed bytes; fallbacks retain selection. Synthesis evidence
+  and bibliography export support narrowed scopes. Unscoped contracts remain.
 - Community `jobs submit`, `run`, `list`, `show`, `events`, `reconcile`, `retry`,
   and `cancel` commands expose the existing durable supervisor. Queueing and
   retry remain separate from foreground execution; cancellation is queued-only.

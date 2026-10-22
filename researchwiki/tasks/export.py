@@ -69,6 +69,7 @@ import sys
 from pathlib import Path
 
 from ..errors import EnvironmentFailure
+from ._scope_file import add_scope_argument, load_scope, scoped_payload
 
 _BIB_FORMATS = ("bibtex", "ris", "csl-json")
 _FORMATS = (*_BIB_FORMATS, "okf")
@@ -208,7 +209,21 @@ def main(argv: list[str]) -> int:
     p.add_argument("--json", dest="as_json", action="store_true",
                    help="print the report instead of the bibliography; "
                         "combine with --out to get both")
+    add_scope_argument(p)
     args = p.parse_args(argv)
+    load_scope(args, p)
+    if args.scope_file is not None:
+        if args.format == "okf":
+            p.error("--scope-file currently supports bibliography formats only; OKF can carry cross-paper dependencies")
+        selected = args.evidence_scope.stems
+        if args.stem:
+            selected = selected.intersection(args.stem)
+        from dataclasses import replace
+        args.evidence_scope = replace(args.evidence_scope, stems=frozenset(selected),
+                                     source_revisions=tuple(r for r in args.evidence_scope.source_revisions if r[0] in selected))
+        # collect treats an empty list as no filter. Handle an empty scope
+        # explicitly below rather than accidentally exporting the library.
+        args.stem = sorted(selected)
 
     if args.format == "okf":
         return _run_okf(args)
@@ -223,7 +238,7 @@ def main(argv: list[str]) -> int:
     from ..refexport import RENDERERS, collect
 
     records, report = collect(categories=args.category, years=years,
-                              stems=args.stem)
+                              stems=args.stem, **({"scope": args.evidence_scope} if args.scope_file is not None else {}))
     text = RENDERERS[args.format](records)
 
     if args.out:
@@ -237,7 +252,7 @@ def main(argv: list[str]) -> int:
     # `--json` claims stdout for the report instead, and then `--out` is the only
     # way to also get the bibliography.
     if args.as_json:
-        print(json.dumps(report.as_dict(args.format), indent=2, ensure_ascii=False))
+        print(json.dumps(scoped_payload(args, report.as_dict(args.format)), indent=2, ensure_ascii=False))
     else:
         if not args.out:
             sys.stdout.write(text)
