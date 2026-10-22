@@ -270,6 +270,30 @@ def test_unwritable_lock_dir_falls_back_rather_than_failing_writes(tmp_path, mon
         return real_mkdir(self, *args, **kwargs)
 
     monkeypatch.setattr(fsatomic.Path, "mkdir", deny_blocked)
+    monkeypatch.setattr(fsatomic, "_lock_fallback_warned", False)
     path = fsatomic._lock_path_for(tmp_path / "page.md")
     assert path.parent.is_dir()
     assert "blocked" not in str(path)
+
+
+def test_the_lock_fallback_announces_itself_once(tmp_path, monkeypatch, capsys):
+    """Falling back restores the per-TMPDIR behaviour the move removed, so it
+    must not be silent — otherwise a host that always falls back looks exactly
+    like one that never does."""
+    monkeypatch.setenv("RESEARCHWIKI_LOCK_DIR", str(tmp_path / "blocked" / "locks"))
+    real_mkdir = fsatomic.Path.mkdir
+
+    def deny_blocked(self, *args, **kwargs):
+        if "blocked" in str(self):
+            raise PermissionError(f"read-only: {self}")
+        return real_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(fsatomic.Path, "mkdir", deny_blocked)
+    monkeypatch.setattr(fsatomic, "_lock_fallback_warned", False)
+    fsatomic._lock_path_for(tmp_path / "one.md")
+    first = capsys.readouterr().err
+    assert "will not exclude each other" in first
+    assert "RESEARCHWIKI_LOCK_DIR" in first
+    # Once per process, not once per lock: this is called on every write.
+    fsatomic._lock_path_for(tmp_path / "two.md")
+    assert capsys.readouterr().err == ""

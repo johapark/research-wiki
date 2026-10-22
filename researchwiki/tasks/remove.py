@@ -201,6 +201,17 @@ def main(argv: list[str]) -> int:
         state = ("files removed; journal retained for repair" if committed
                  else "rolled back")
         print(f"researchwiki remove: failed ({state}): {e}", file=sys.stderr)
+        if args.as_json:
+            # A JSON consumer must not have to scrape stderr to learn what
+            # happened — and "rolled back" vs "committed, journal retained" is
+            # the difference between the page still being there and not.
+            print(json.dumps({
+                **(planned or {}),
+                "applied": bool(committed),
+                "committed": bool(committed),
+                "error": str(e),
+                "error_state": state,
+            }, indent=2))
         return 2
 
     # log.md is append-only: a removal records that it happened rather than

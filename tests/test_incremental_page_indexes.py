@@ -279,3 +279,59 @@ def test_rebuild_leaves_no_staging_directories_behind(tmp_path):
     leftovers = [p.name for p in path.parent.iterdir() if "-building-" in p.name
                  or "-retired-" in p.name]
     assert leftovers == []
+
+
+def test_a_symlinked_index_dir_keeps_its_symlink(tmp_path):
+    """A user who relocates the index with a symlink (the same thing CLAUDE.md
+    documents for wiki/, papers/ and inbox/) must keep that layout: renaming
+    the link aside would replace it with a real directory and strand the
+    link's own target."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    link = tmp_path / "tantivy"
+    link.symlink_to(elsewhere, target_is_directory=True)
+
+    backend = TantivySearchBackend(link)
+    backend.build([_doc(body="olduniquetoken")])
+    assert link.is_symlink(), "the index path must still be a symlink"
+    assert len(TantivySearchBackend(link).query("olduniquetoken", limit=5)) == 1
+    # The content really lives at the link's destination.
+    assert any(elsewhere.iterdir())
+
+    backend.build([_doc(body="newuniquetoken")])
+    assert link.is_symlink()
+    assert len(TantivySearchBackend(link).query("newuniquetoken", limit=5)) == 1
+
+
+def test_a_failed_publish_puts_the_old_index_back(tmp_path):
+    """The gap between the two renames is the only moment the target is
+    absent. If the publish fails there, the old index is restored rather than
+    leaving the caller with nothing."""
+    import pytest
+
+    from researchwiki.index import types as idx_types
+
+    path = tmp_path / "tantivy"
+    backend = TantivySearchBackend(path)
+    backend.build([_doc(body="olduniquetoken")])
+
+    real_replace = idx_types.Path.replace
+    calls = {"n": 0}
+
+    def fail_on_publish(self, target):
+        calls["n"] += 1
+        if calls["n"] == 2:          # 1 = retire the old, 2 = publish the new
+            raise OSError("publish failed")
+        return real_replace(self, target)
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(idx_types.Path, "replace", fail_on_publish)
+        with pytest.raises(OSError):
+            backend.build([_doc(body="newuniquetoken")])
+    finally:
+        monkeypatch.undo()
+
+    reader = TantivySearchBackend(path)
+    assert reader.exists(), "the old index must be restored, not left absent"
+    assert len(reader.query("olduniquetoken", limit=5)) == 1

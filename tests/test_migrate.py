@@ -368,11 +368,48 @@ def test_graded_guard_refuses_when_the_db_cannot_be_opened(monkeypatch):
 
     migrate = _migrate_task()
 
+    from researchwiki.db.connection import StateDBUnavailable
+
     def boom():
-        raise RuntimeError("database is locked")
+        # What `get_connection` really raises for a locked or unopenable DB.
+        raise StateDBUnavailable("cannot open state.db: database is locked")
 
     monkeypatch.setattr("researchwiki.db.connection.get_connection", boom)
     with pytest.raises(EnvironmentFailure, match="protects graded pages"):
+        migrate._already_graded(["smith-2024-a-paper-about-things"])
+
+
+def test_graded_guard_lets_a_bug_surface_as_a_bug(monkeypatch):
+    """A TypeError in our own code must not be relabelled an environment
+    error — the funnel reports it as exit 3 with a traceback."""
+    migrate = _migrate_task()
+
+    def boom():
+        raise TypeError("regression in the connection helper")
+
+    monkeypatch.setattr("researchwiki.db.connection.get_connection", boom)
+    with pytest.raises(TypeError):
+        migrate._already_graded(["smith-2024-a-paper-about-things"])
+
+
+def test_graded_guard_refuses_when_another_table_is_missing(monkeypatch):
+    """Only a missing `claims` table means "nothing is graded". A missing
+    schema_meta is a half-initialised DB, where that is a guess."""
+    import sqlite3
+
+    from researchwiki.errors import EnvironmentFailure
+
+    migrate = _migrate_task()
+
+    class Conn:
+        def execute(self, *_a, **_k):
+            raise sqlite3.OperationalError("no such table: schema_meta")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("researchwiki.db.connection.get_connection", lambda: Conn())
+    with pytest.raises(EnvironmentFailure):
         migrate._already_graded(["smith-2024-a-paper-about-things"])
 
 
