@@ -23,6 +23,7 @@ from pathlib import Path
 
 from ..db.connection import get_connection
 from ..db.iterations import write_iteration, update_paper_stem
+from ..errors import EnvironmentFailure
 from ..grade import coherence
 from . import fitness, model_config, phases
 from .context import Context, PromoteFailed, ReconcileFailed, StemRenameRefused
@@ -1039,8 +1040,19 @@ def _phase_commit(ctx: Context, conn) -> Path:
                     origin = " (moved out of inbox/)" if staged["consumed"] else ""
                     log(f"supp     → papers/{ctx.paper_stem}.supp/"
                           f"{staged['filename']} ({staged['kind']}){origin}", tag="agent")
-                except (FileNotFoundError, FileExistsError, ValueError) as e:
-                    log(f"supp     ⚠ skipped {sp}: {e}", tag="agent")
+                except (OSError, ValueError, EnvironmentFailure) as e:
+                    # OSError, not just its FileNotFound/FileExists subclasses:
+                    # `stage_supplementary` calls mkdir and copy2, which raise
+                    # plain PermissionError/OSError on a full disk, a read-only
+                    # mount or a synced-folder hiccup, and `insert_supplementary_
+                    # entry` writes the page and syncs the DB. By this point the
+                    # page, PDF move, back-links, index bullet and log entry have
+                    # all landed, so raising here would make the worker exit 2 —
+                    # which `_should_retry` treats as retryable, and with the PDF
+                    # already out of inbox/ `--resume` then files a complete,
+                    # twice-gated paper as unresumable. House rule 2 in errors.py:
+                    # an attachment is optional work and records a skip.
+                    log(f"supp     ⚠ skipped {sp}: {type(e).__name__}: {e}", tag="agent")
 
         # Update only the new/edited pages. Parallel ingests serialize in the
         # index layer; failures remain recoverable derived-cache warnings.

@@ -115,3 +115,59 @@ def test_unlink_failure_is_reported_not_raised(repo, monkeypatch):
 
     assert staged["consumed"] is False
     assert (supp_dir("smith-2024-a-paper") / staged["filename"]).exists()
+
+
+# ---------- post-promote failure must not retract a landed paper ----------
+#
+# House rule 2 (errors.py): once `promote_to_wiki` has landed the page, the PDF
+# move, the back-links, the index bullet and the log entry, no later phase may
+# retract that by raising. Attachment staging runs *after* all of that, and its
+# handler used to catch only FileNotFoundError/FileExistsError/ValueError —
+# while `stage_supplementary` calls mkdir and copy2, which raise plain
+# PermissionError/OSError on a full disk, a read-only mount or a synced-folder
+# hiccup. Escaping there made the worker exit 2, which `_should_retry` treats as
+# retryable, and with the PDF already out of inbox/ `--resume` filed a complete,
+# twice-gated paper as unresumable.
+
+
+def _supplementary_handler_types():
+    """The exception tuple guarding the post-promote attachment loop."""
+    import ast
+    import pathlib
+
+    tree = ast.parse(pathlib.Path("researchwiki/agents/runner.py").read_text())
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        calls = {ast.unparse(c.func) for c in ast.walk(node) if isinstance(c, ast.Call)}
+        if "stage_supplementary" in calls:
+            handler, = node.handlers
+            return set(ast.unparse(handler.type).strip("()").replace(" ", "").split(","))
+    raise AssertionError("post-promote supplementary loop not found in runner.py")
+
+
+@pytest.mark.parametrize("exc_name", ["OSError", "ValueError", "EnvironmentFailure"])
+def test_post_promote_attachment_failures_are_caught_not_raised(exc_name):
+    assert exc_name in _supplementary_handler_types()
+
+
+def test_staging_failures_really_are_oserror_subclasses(repo, monkeypatch):
+    """Pins the premise: what mkdir/copy2 raise is caught by the handler above.
+
+    PermissionError and the disk-full OSError are not FileNotFoundError or
+    FileExistsError, which is exactly why the narrower tuple let them through.
+    """
+    import shutil
+
+    src = repo / "inbox" / "supp.xlsx"
+    src.write_bytes(b"x")
+
+    def deny(*_a, **_k):
+        raise PermissionError(13, "read-only file system")
+
+    monkeypatch.setattr(shutil, "copy2", deny)
+    with pytest.raises(OSError) as caught:
+        stage_supplementary("smith-2024-a-paper-about-things", src)
+    assert not isinstance(caught.value, (FileNotFoundError, FileExistsError))
+    # The source survives a failed staging, so the attachment stays retryable.
+    assert src.is_file()
