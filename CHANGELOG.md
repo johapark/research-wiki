@@ -22,6 +22,13 @@ the reasoning behind any line below.
 
 ### Added
 
+- `compose` authors a complete scoped synthesis with numeric checks, mandatory
+  PDF/claim support judgment, nonzero page-gate grading, theme/coverage review,
+  and versioned provenance. `publish-synthesis` explicitly journals verified
+  pages with source/path freshness, an optional application-file commit guard,
+  idempotent publication, and recoverable post-commit index maintenance.
+  `check-coverage --scope-file` keeps advisory recall inside the selected papers.
+
 - Generic version 1 evidence selections constrain page, claim, PDF, hybrid,
   See-Also, and reranker retrieval before top-K/context construction. CLI
   `--scope-file` inputs and MCP `scope_file` parameters are independent of

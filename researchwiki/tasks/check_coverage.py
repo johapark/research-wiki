@@ -54,6 +54,7 @@ import yaml
 from .lint.staleness import unreferenced_top_hits
 from .lint.walk import all_pages, page_key, self_key as _self_key
 from ..log import log
+from ._scope_file import add_scope_argument, load_scope
 
 
 _RRF_K = 60
@@ -106,7 +107,9 @@ def main(argv: list[str]) -> int:
                              "not already cited. Default 20.")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="Emit a structured report instead of prose.")
+    add_scope_argument(parser)
     args = parser.parse_args(argv)
+    load_scope(args, parser)
 
     md = Path(args.path).resolve()
     if not md.is_file():
@@ -122,6 +125,10 @@ def main(argv: list[str]) -> int:
         print(f"check-coverage: {md} has no `topic_seed` in frontmatter — nothing to check.",
               file=sys.stderr)
         return 2
+
+    if args.evidence_scope is not None:
+        from ._scoped_coverage import run
+        return run(args, fm)
 
     try:
         from ..search import get_default_backend, SearchBackendUnavailable

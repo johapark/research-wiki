@@ -291,6 +291,11 @@ generation with mandatory PDF, citation, numeric, and model support checks. API
 and chat-relay use the same operation. `--json` returns a versioned provenance
 receipt; no answer is saved automatically. See the [answer guide](./docs/answers.md).
 
+`researchwiki compose "question" --title "Title" --scope-file selection.json`
+authors a complete theme-based synthesis with mandatory page and support checks.
+Preview first; `publish-synthesis` explicitly journals a verified receipt into
+the wiki. See the [synthesis authoring guide](./docs/synthesis-authoring.md).
+
 ## Data, privacy, and validation
 
 Git tracks the framework: `researchwiki/`, `prompts/`, config templates, tests, and documentation. Your `wiki/`, `papers/`, `inbox/`, dotenv profiles, active/custom model configs, databases, and caches are gitignored.

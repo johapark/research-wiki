@@ -19,6 +19,8 @@ researchwiki claims "validation setting" --scope-file selection.json --include-c
 researchwiki pdf-search PAPER_STEM "validation setting" --scope-file selection.json --json
 researchwiki synthesize --title "Method comparison" --scope-file selection.json --topic-seed "validation setting"
 researchwiki export --scope-file selection.json --format bibtex --out references.bib
+researchwiki compose "What do these results show together?" --title "Result comparison" --scope-file selection.json --json
+researchwiki check-coverage wiki/synthesis/result-comparison.md --scope-file selection.json --json
 ```
 
 Run from the selected library checkout root. A scoped JSON retrieval response has
