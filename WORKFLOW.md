@@ -304,7 +304,7 @@ attempts; `records recover` resolves retained publication journals without model
 calls. Capture failures require inspection/reconciliation before paid work is
 repeated. See the [retention guide](./docs/ingest-retention.md) for settings, repair
 commands, portability and storage/time limits. Retention is off by default.
-Enabled attempts also retain [full grading evidence](./docs/ingest-grading-records.md),
+Enabled attempts also retain [full grading evidence](./docs/ingest-retention.md#what-is-saved),
 inspectable with `records show <attempt-id> --grading --json`, including exact
 check contexts and semantic vectors independent of disposable caches.
 

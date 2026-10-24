@@ -23,16 +23,12 @@ changes, with the following corrections incorporated before runtime work:
 - Freeze retention settings at worker execution and include them in job configuration
   identity, while preserving strict version-1 public wire contracts.
 
-The archive foundation in §19 Stage 0 is implemented on
-`feat/ingest-records-foundation`; see [its internal contract](../docs/ingest-records.md).
-It uses explicit temporary-root fixtures and is not wired into live ingestion.
-Stage 1's [extraction-observation slice](../docs/ingest-extraction-records.md) is
-implemented, along with its [opt-in lifecycle integration](../docs/ingest-retention.md).
-All retention work is consolidated on `feat/ingest-retention`. Capture remains off
-by default. The next coding stage is remaining phase and publication lineage.
-Stage 2 now retains full grading evidence and verification inputs;
-see [the grading guide](../docs/ingest-grading-records.md). Controlled storage/time
-measurements still gate any default switch.
+Stages 0–2 are implemented on the consolidated `feat/ingest-retention` branch.
+The [user guide](../docs/ingest-retention.md) describes enabling capture, inspecting
+records and recovery; the [developer reference](../docs/ingest-dev-reference.md) owns
+current archive/capture contracts and validation details. Capture remains off by
+default. Remaining phase/publication lineage is next; controlled storage/time
+measurements still gate a default switch.
 
 ## 1. Purpose
 
@@ -883,101 +879,43 @@ transformations where their code/configuration is available.
 
 ## 19. Implementation stages
 
-### Stage 0 — freeze contract and fixtures
+### Stage 0 — freeze contract and fixtures (implemented)
 
-Implementation checkpoint (2026-10-23): `researchwiki/records/` now provides strict
-version-1 contracts, immutable payload insertion, attempt event/checkpoint projection,
-verification and explicit safe checkpoint repair. The extraction profile's six
-minimum slots are frozen in `tests/record-fixtures/attempt-spec-v1.json` and documented
-in [the foundation guide](../docs/ingest-records.md). Ingestion, provider dispatch,
-public operation/job wire schemas and capture defaults remain unchanged.
+Completed 2026-10-23. Immutable payloads, strict version-1 contracts, attempt
+inventory/event/checkpoint history, integrity verification and explicit safe
+checkpoint repair are implemented. See [archive contracts](../docs/ingest-dev-reference.md#implemented-contracts)
+and [validation](../docs/ingest-dev-reference.md#validation).
 
-First coding PR: new internal `researchwiki/records/` contract/store primitives
-and disposable fixtures. Include only the common envelope, source/reference identity,
-attempt event/inventory/checkpoint, and capture-policy types needed by extraction.
-Use normalized strict JSON; do not create a speculative domain ontology.
+Acceptance: the store verifies independently of corpus databases/caches, rejects
+conflicting or corrupt history, and preserves identities on relocation. Public
+operation/job wire contracts remain unchanged.
 
-Implement immutable blob insertion, attempt-scoped event/checkpoint publication,
-strict reads, integrity verification, and repair of an understood stale checkpoint.
-Fixture code exercises the store with synthetic payloads and explicit temporary
-roots. Runtime ingestion defaults and provider dispatch remain untouched. Defer
-import, legacy salvage, cleanup, a searchable catalog and general CLI ergonomics.
+### Stage 1 — stop target-extraction loss (implemented)
 
-Meaningful tests cover byte identity/deduplication, immutable ID conflicts, corrupt
-and future-version records, interrupted event/checkpoint order, concurrent writers,
-relative reference containment, and moving the store without losing references.
-Do not treat a passing store fixture as an instrumented ingestion attempt.
-
-Acceptance: every required artifact has an identity, owner, persistence boundary,
-and missing-state representation; API/relay capture maps to the same contract.
-The store verifies independently of corpus databases/caches, with no writes outside
-its selected test root and no public operation/job wire changes. The first review
-should be limited to these foundational behaviors.
-
-### Stage 1 — stop target-extraction loss
-
-Extraction checkpoint (2026-10-23): immutable processing-source binding, page-aware
-raw/repaired representations preserving legacy joined text, a pure target parser
-with candidate selection traces, and scoped shared-client/API/relay capture hooks
-are implemented. Synthetic fixtures exercise retry cleanup, missing usage,
-provider-controlled settings, budget cancellation/settlement and archive failures.
-Unreadable relay protocol envelopes are explicitly unavailable rather than copied
-wholesale or represented as full answer capture. See the
-[extraction guide](../docs/ingest-extraction-records.md). Lifecycle activation and
-its operator tooling below are now implemented; see the lifecycle checkpoint.
-
-Deliver through two dependent, reviewable PRs after the store foundation:
-
-**Extraction PR:** page-aware source snapshots preserving existing text, separate
-processing/original ownership paths, pure parse-result/trace extraction, and exact
-target-phase request/answer capture through the shared client and relay hooks.
-Include adapter normalization and correctly identified synthetic/no-call output.
-Keep the recorder test-injected until lifecycle integration is complete.
-
-**Lifecycle PR:** opt-in required policy, selected-profile/job identity propagation,
-latched typed failures and budget cancellation/settlement, operation/direct-run
-scope ownership, early and duplicate exits, minimal publication health check and
-displaced-source preservation, and publication-safe finalization. Add minimal
-list/show/verify and self-contained export for independent acceptance. No default
-switch, public wire-field additions, import/catalog/pruning, or paid backfill.
-
-Lifecycle checkpoint (2026-10-24): the active models profile can select required
-`extraction-v1` capture with an explicit archive root. One owner spans operation
-post-work, with a direct-runner fallback. Native jobs freeze selection across
-configuration identity and execution. Promotion preserves displaced PDFs, checks
-canonical bytes before commit, and hands a validated receipt to the archive before
-journal cleanup. Inspection, explicit checkpoint repair, publication-journal
-recovery and self-contained export are available through `researchwiki records`.
-Captured batch result sidecars block automatic replay of capture failures or
-unknown outcomes. Interrupted attempts can remain open after receipt recovery;
-no missing observations or successful terminal outcome are reconstructed.
+Extraction capture completed 2026-10-23; lifecycle integration completed 2026-10-24.
+Source snapshots, full target answers/candidate traces and API/relay observations
+are integrated with opt-in required capture. Publication guards, displaced-source
+preservation, safe budget settlement and operator recovery shipped with that
+integration. See [extraction capture](../docs/ingest-dev-reference.md#source-ownership-and-representations)
+and the [operator guide](../docs/ingest-retention.md).
 
 Acceptance: source, request, response and transformations remain inspectable after
-relay cleanup, DB deletion, cache deletion and relocation; an unselected candidate
-is still present; no additional model calls occur. Incomplete runs remain honestly
-incomplete. Only the `extraction-v1` profile is advertised.
+relay cleanup, DB/cache deletion and relocation; unselected candidates survive.
+Capture failures do not cause automatic paid retries. Interrupted attempts remain
+honestly incomplete; receipt recovery does not invent missing terminal history.
 
-Stage 1 cannot ship required capture without its lifecycle PR: deferring all
-publication/retry integration until Stage 3 would invalidate its failure guarantees.
+### Stage 2 — make grading explainable (implemented)
 
-### Stage 2 — make grading explainable
+Completed 2026-10-24. Full ordered evidence sets, exact source spans/check inputs,
+retriever identity, numeric/negation observations, semantic scores/vectors, coverage
+results and optional support-judge calls are retained. See
+[grading capture](../docs/ingest-dev-reference.md#grading-capture) and
+[user-visible evidence limits](../docs/ingest-retention.md#evidence-and-check-limits).
 
-Implementation checkpoint (2026-10-24): grading runs retain source/index identities,
-exact page/claim inputs, complete ordered candidate sets and source spans,
-numeric/negation inputs and observations, semantic scores and actual vectors,
-coverage fixtures/results, and optional support inputs/visible API or relay replies.
-Index cache version 3 adds exact source offsets without changing chunk text.
-Grading payloads are available through `records show --grading` and portable export.
-Existing preview/check context limits are retained and exposed explicitly; retrieved
-candidates and classifier observations do not become reviewed scientific labels.
-
-Deliverables: full ordered evidence sets, exact check inputs and source spans,
-retriever/index identity, numeric/negation observations, optional support-judge
-calls, and evidence-role/completion distinctions.
-
-Acceptance: every retained score/verdict can be traced to the exact claim/context
-used; long passages are not truncated in the archive; caches can be removed without
-losing evidence. Retrieval-only results remain retrieval-only.
+Acceptance: scores/verdicts trace to their actual claim/context, long passages
+survive without truncation, and portable exports verify after sources/caches are
+removed. Existing scoring/preview limits remain; retrieval candidates and
+classifier observations do not become reviewed scientific labels.
 
 ### Stage 3 — complete phase and publication lineage
 

@@ -1,10 +1,39 @@
-# Opt-in ingestion retention
+# Ingestion retention guide
 
-The `extraction-v1` profile retains source PDFs, page-aware representations,
-target-extraction inputs, visible answers, candidate transformations, full grading
-evidence and publication receipts. It applies to `researchwiki add`, `agent ingest`, their batch workers,
-the synchronous ingestion operation and durable local ingestion jobs. The legacy
-digest-only `researchwiki ingest` workflow is outside this profile.
+Opt-in retention preserves the source versions, extraction output and grading
+evidence observed during ingestion. Use this guide to enable it, inspect/export
+records and recover from capture failures. The [developer reference](ingest-dev-reference.md)
+describes archive contracts and capture implementation.
+
+The `extraction-v1` profile applies to `researchwiki add`, `agent ingest`, their
+batch workers, the synchronous ingestion operation and durable local ingestion
+jobs. The legacy digest-only `researchwiki ingest` workflow is outside this profile.
+
+## What is saved
+
+- Immutable original PDF snapshots and displaced canonical PDFs when replaced.
+- Page-aware extracted text, full target-extraction answers and candidate/filter traces.
+- Grading inputs, complete retrieved passages, check observations and optional support judgments, detailed below.
+- Attempt identities, completion states and publication receipts.
+
+| Layer | Retained information |
+| --- | --- |
+| Page/draft input | Original draft Markdown when supplied, exact parsed page body, parsed claims and cross-reference flags, requested grading options |
+| Source representations | Original PDF identity, the exact page-repaired text behind the retrieval index, raw full-text numeric input, and the transformed numeric full text |
+| Retrieval | Ordered top-five candidates and top-ten semantic candidates actually returned; ranks/scores, chunk IDs, query text and parser fallback, chunk/page limits, index/cache/extractor versions |
+| Source mapping | Full normalized retrieval text, full source slice, character offsets into the archived index representation, page ranges and section labels |
+| Numeric check | Raw and transformed claim/neighborhood inputs, full-text input reference, extracted tokens, unmatched values and whether matches came from retrieval or elsewhere in the PDF |
+| Negation check | Exact claim/neighborhood, matched tokens, rule/pattern and advisory mismatch result |
+| Semantic check | Requested/available/completed status, configured model/device, unknown model revision, token limit when exposed, cache-use status, ordered candidate cosine scores, chosen index and actual vectors |
+| Coverage | Salience and target fixtures, complete scoring inputs and results before bounded missed-anchor transport |
+| Support check | Eligible/skipped claims, original positions and classifier item IDs, exact provided contexts, expected/checked counts, returned verdicts or failure class |
+| Support model call | Logical inputs/schema, observable dispatches, complete visible answers, actual route/model-origin/usage metadata, relay validation/retry/reuse and parser-input text |
+| Results | Full fidelity report and final aggregate, completed/failed/interrupted state and available partial observations |
+
+Retention records what the engine observed. Retrieved passages and classifier
+judgments are not automatically reviewed scientific labels. Completeness means
+that the declared inventory was retained or explicitly skipped; it does not
+establish scientific truth.
 
 ## Enable it in the selected models profile
 
@@ -56,6 +85,24 @@ only the chosen attempt, its events/checkpoint, archive identity and referenced
 blobs. Exported attempts verify without the original corpus, databases, caches,
 mailboxes or mount path. These commands can inspect an explicit archive outside
 an initialized library.
+
+## Evidence and check limits
+
+The archive keeps complete retrieval candidates. Existing database/report previews
+remain capped at 500 characters, and the optional support judge currently receives
+that preview. Its prompt builder also strips whitespace and caps contexts at 1,200
+characters. Retention saves both the supplied context and generated request, without
+extra retrieval or judge calls.
+
+Numeric and negation checks retain their actual top-three neighborhood; numeric
+checks also retain the separate full-PDF fallback. The existing 80-page text-read
+limit is recorded. No hits, skipped cross-references, unavailable semantic scoring,
+missing support context and failed judgments remain distinguishable.
+
+Source spans, vectors and check contexts travel with an export, so inspecting them
+does not depend on the original PDF, wiki, database or disposable grading cache.
+PDF chunk cache version 3 adds offsets and text identity; old caches rebuild on
+next use. Chunk text and scoring rules keep their existing behavior.
 
 ## Capture and publication failures
 
@@ -121,22 +168,13 @@ and verifies referenced payloads on updates. Storage and elapsed-time budgets on
 representative papers remain a controlled-rollout prerequisite before changing the
 default. This release deliberately leaves the choice explicit.
 
-The [grading guide](ingest-grading-records.md) describes source spans, exact check
-contexts, semantic vector replay and support-call provenance. Only the extraction
-profile is advertised, with grading inventory declared on new attempts. Supplementary attachment retention
-belongs to a later profile extension. Complete capture means its declared
-inventory was observed or explicitly skipped; it does not establish scientific
-truth or publication authority. Remaining model phases, author/revision/selection
+Candidate passages, source representations and semantic vectors add storage and
+verification I/O. Candidate text/vectors are deduplicated within a grading run;
+identical payloads reuse content-addressed blobs. There are no extra model calls
+for retention.
+
+Only `extraction-v1` is advertised, with grading inventory declared on new attempts.
+Supplementary attachments, remaining model phases, full author/revision/selection
 lineage, import/pruning and general archive reconciliation remain later work.
-Host-local locks and atomic writes provide process-crash recovery, with the
-filesystem/sync durability limits in [the archive guide](ingest-records.md).
-
-The live acceptance harness uses a synthetic PDF and stub models through the real
-CLI. A local sentinel asserts zero provider requests. It exports the attempt,
-deletes the corpus/database, verifies the portable archive and explicitly repairs
-a missing checkpoint. The CI installed acceptance job runs it on Linux, macOS and
-Windows:
-
-```bash
-python .github/scripts/retention_acceptance.py --expect-installed
-```
+Host-local locks and atomic writes support process-crash recovery, subject to the
+[filesystem and sync limits](ingest-dev-reference.md#storage-and-concurrency-limits).
