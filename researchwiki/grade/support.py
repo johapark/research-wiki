@@ -36,6 +36,7 @@ SupportVerdict = Literal["supported", "partial", "unsupported"]
 Classifier = Callable[[list[tuple[str, str]]], list[SupportVerdict]]
 
 _VALID: frozenset[str] = frozenset({"supported", "partial", "unsupported"})
+SUPPORT_CONTEXT_CHARS = 1200
 
 
 @dataclass
@@ -59,11 +60,33 @@ def check_support(
     to entail against, and a fabricated "unsupported" verdict on missing
     evidence would be noise. The caller sees them absent from the result.
     """
+    from ..records.grading import current_run, note
+    run = current_run()
     scored = [c for c in claims if (c[3] or "").strip()]
+    if run is not None:
+        run.evidence("pre_support_evidence")
+        positions = iter(range(len(scored)))
+        run.support_input = run.emit("input", {
+            "boundary": "support_classifier_inputs", "role": "entailment_input",
+            "claims": [{"section": c[0], "position": c[1], "claim": c[2], "context": c[3],
+                        "eligible": bool((c[3] or "").strip()),
+                        "classifier_index": next(positions) if (c[3] or "").strip() else None} for c in claims],
+            "expected_count": len(claims), "eligible_count": len(scored),
+            "prompt_context_limit": SUPPORT_CONTEXT_CHARS if classify is llm_support_classifier else None,
+            "classifier": {"module": getattr(classify, "__module__", None),
+                           "name": getattr(classify, "__qualname__", type(classify).__name__)}})
     if not scored:
+        note({"boundary": "support_classifier_result", "status": "not_run", "reason": "no_eligible_context",
+              "expected_count": len(claims), "checked_count": 0})
         return []
     pairs = [(c[2], c[3]) for c in scored]
-    verdicts = classify(pairs)
+    try:
+        verdicts = classify(pairs)
+    except BaseException as exc:
+        note({"boundary": "support_classifier_result", "status": "failed", "error_code": type(exc).__name__})
+        raise
+    if run is not None:
+        note({"boundary": "support_classifier_return", "returned_json": json.dumps(verdicts, ensure_ascii=False)})
     if len(verdicts) != len(scored):
         raise ValueError(
             f"classifier returned {len(verdicts)} verdicts for {len(scored)} claims"
@@ -73,6 +96,10 @@ def check_support(
         if v not in _VALID:
             raise ValueError(f"classifier returned invalid support verdict {v!r}")
         out.append(ClaimSupport(section=section, position=position, text=text, verdict=v))
+    from dataclasses import asdict
+    if run is not None:
+        note({"boundary": "support_classifier_result", "status": "completed", "decision_origin": "classifier",
+              "checked_count": len(out), "results": [asdict(item) for item in out]})
     return out
 
 
@@ -129,7 +156,7 @@ def _build_support_prompt(pairs: list[tuple[str, str]]) -> str:
     blocks = []
     for i, (claim, chunk) in enumerate(pairs):
         blocks.append(
-            f"[{i}]\nCLAIM: {claim}\nSOURCE: {chunk.strip()[:1200]}"
+            f"[{i}]\nCLAIM: {claim}\nSOURCE: {chunk.strip()[:SUPPORT_CONTEXT_CHARS]}"
         )
     return (
         "For each numbered item, judge whether SOURCE supports CLAIM.\n"

@@ -39,6 +39,9 @@ class ExtractionRecorder:
         self.full_text = None
         self.result_id = None
         self.answer_unavailable = False
+        self.grading_runs = []
+        self.grading_call_ids = set()
+        self.grading_answer_unavailable = False
 
     def check(self):
         if self.failure is not None:

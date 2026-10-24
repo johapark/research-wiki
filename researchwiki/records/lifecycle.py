@@ -10,6 +10,7 @@ from .errors import RecordStoreUnavailable
 from .extraction import ExtractionRecorder
 from .settings import selected
 from .store import RecordStore, now
+from .grading import grading_requirements
 
 
 _owner = ContextVar("researchwiki_ingest_capture_owner", default=None)
@@ -66,7 +67,8 @@ class CaptureOwner:
                            requirements=extraction_requirements() + (
                                Requirement(slot="source.displaced", kind="source_snapshot", required=False),
                                Requirement(slot="publication.receipt", kind="terminal_result"),
-                               Requirement(slot="attempt.result", kind="terminal_result")))
+                               Requirement(slot="attempt.result", kind="terminal_result"))
+                           + grading_requirements(ctx.verify_claim_entailment))
         store = RecordStore.create(self.settings.root)
         store.start_attempt(spec)
         self.records = ExtractionRecorder(store, ctx.attempt_id)
@@ -84,10 +86,21 @@ class CaptureOwner:
         records = self.records
         self.check()
         manifest = records._write(records.store.read_attempt, records.spec.attempt_id)
+        if records.grading_answer_unavailable:
+            records._write(records.store.resolve_slot, records.spec.attempt_id, "grading.response", "unavailable",
+                           "visible_verification_answer_unavailable")
         for item in manifest.inventory:
             if item.status != "pending" or item.slot in ("publication.receipt", "attempt.result"):
                 continue
             ran = "extract" if item.slot == "source.representation" else "target_claims"
+            if item.slot.startswith("grading."):
+                ran = "grade" if records.grading_runs else "grading_not_executed"
+                if not records.grading_runs or (item.slot in ("grading.request", "grading.response") and not records.grading_call_ids):
+                    records._write(records.store.resolve_slot, records.spec.attempt_id, item.slot, "not_run",
+                                   "grading_not_executed_or_no_judge_call")
+                    continue
+                records._write(records.store.resolve_slot, records.spec.attempt_id, item.slot, "unknown", "grading_output_unavailable")
+                continue
             if item.slot == "source.displaced" or ran not in self.visited:
                 status, reason = "not_run", "phase_not_executed"
             else:

@@ -156,6 +156,10 @@ def score_claim(
     # Clamp to [0, 1] — for normalized BGE embeddings sims are typically
     # already non-negative, but float noise can produce tiny negatives.
     best = float(max(0.0, min(1.0, sims[best_idx])))
+    from ..records.grading import observe_semantic, claim_active
+    if claim_active():
+        observe_semantic([float(v) for v in sims], best_idx, DEFAULT_MODEL, DEFAULT_DEVICE,
+                         claim_emb[0], chunk_embeddings, getattr(model, "max_seq_length", None))
     return SemanticScore(
         score=best,
         best_chunk_preview=evidence_chunks[best_idx][:200],

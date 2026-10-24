@@ -1,8 +1,8 @@
 # Opt-in ingestion retention
 
 The `extraction-v1` profile retains source PDFs, page-aware representations,
-target-extraction inputs, visible answers, candidate transformations and publication
-receipts. It applies to `researchwiki add`, `agent ingest`, their batch workers,
+target-extraction inputs, visible answers, candidate transformations, full grading
+evidence and publication receipts. It applies to `researchwiki add`, `agent ingest`, their batch workers,
 the synchronous ingestion operation and durable local ingestion jobs. The legacy
 digest-only `researchwiki ingest` workflow is outside this profile.
 
@@ -43,6 +43,7 @@ Use the selected profile's root, or pass an explicit archive:
 ```bash
 researchwiki records list --json
 researchwiki records show <attempt-id> --json
+researchwiki records show <attempt-id> --grading --json
 researchwiki records verify <attempt-id> --json
 researchwiki records export <attempt-id> --output /path/to/new-export --json
 researchwiki records --root /path/to/archive verify <attempt-id> --json
@@ -120,11 +121,13 @@ and verifies referenced payloads on updates. Storage and elapsed-time budgets on
 representative papers remain a controlled-rollout prerequisite before changing the
 default. This release deliberately leaves the choice explicit.
 
-Only the extraction profile is advertised. Supplementary attachment retention
+The [grading guide](ingest-grading-records.md) describes source spans, exact check
+contexts, semantic vector replay and support-call provenance. Only the extraction
+profile is advertised, with grading inventory declared on new attempts. Supplementary attachment retention
 belongs to a later profile extension. Complete capture means its declared
 inventory was observed or explicitly skipped; it does not establish scientific
-truth or publication authority. Full grading evidence, remaining model phases,
-losing drafts, import/pruning and general archive reconciliation remain later work.
+truth or publication authority. Remaining model phases, author/revision/selection
+lineage, import/pruning and general archive reconciliation remain later work.
 Host-local locks and atomic writes provide process-crash recovery, with the
 filesystem/sync durability limits in [the archive guide](ingest-records.md).
 

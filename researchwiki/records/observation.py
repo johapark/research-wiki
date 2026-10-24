@@ -26,6 +26,10 @@ def observe_extraction(recorder):
 @contextmanager
 def observe_call(phase, call_id, request):
     recorder = _extraction.get() if phase == "target_claims" else None
+    if phase == "claim_support":
+        from .grading import current_run, GradingCallRecorder
+        if current_run() is not None:
+            recorder = GradingCallRecorder(current_run())
     capture = RetainedCall(recorder, call_id, request) if recorder else None
     token = _call.set(capture)
     try:

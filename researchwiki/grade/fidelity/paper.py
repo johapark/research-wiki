@@ -28,6 +28,7 @@ from ...index.pdf_chunks import build_pdf_index, query_pdf, get_chunk_embeddings
 from ...index import embeddings as semantic_mod
 from ...pdf.sections import anchor_sections
 from ..salience import SalienceReport, score_salience
+from ...records.grading import observed_grading, observed_claim, current_run
 from ..checks import entailment_check
 
 try:
@@ -114,6 +115,7 @@ class PaperFidelityReport:
         return d
 
 
+@observed_claim
 def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool,
                  pdf_path: Path | None = None) -> ClaimScore:
     if claim.is_cross_ref:
@@ -135,6 +137,9 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
         )
 
     hits = query_pdf(stem, claim.text, topk=5, pdf_path=pdf_path)
+    run = current_run()
+    if run is not None:
+        run.hits("bm25", hits)
     if not hits:
         return ClaimScore(
             section=claim.section,
@@ -163,6 +168,13 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
     # Negation parity is cheap and orthogonal to the embedding signal — always
     # run it on the same top-3 retrieved chunks the numeric check uses.
     neg_mismatch = _negation_mismatch(claim.text, haystack)
+    if run is not None:
+        from ...records.grading import observe_negation
+        from ..primitives import NEGATION_RE
+        observe_negation({"status": "completed", "role": "advisory_parity", "claim_text": claim.text,
+            "evidence_text": haystack, "rule": "negation-presence-v1", "pattern": NEGATION_RE.pattern,
+            "claim_tokens": NEGATION_RE.findall(claim.text), "evidence_tokens": NEGATION_RE.findall(haystack),
+            "mismatch": neg_mismatch})
 
     semantic_score: float | None = None
     if use_semantic:
@@ -171,6 +183,8 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
         # multiple chunks). The bi-encoder's max-over-chunks aggregation makes
         # this safe; irrelevant chunks just don't move the max.
         sem_hits = query_pdf(stem, claim.text, topk=10, pdf_path=pdf_path)
+        if run is not None:
+            run.hits("semantic", sem_hits)
         if sem_hits:
             chunk_texts = [h.text for h in sem_hits]
             # If the per-PDF embedding cache is populated and the chunk_id ↔
@@ -185,11 +199,19 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
                 rows = [idx_by_text.get(t) for t in chunk_texts]
                 if all(r is not None for r in rows):
                     chunk_embs = cache_embs[rows]
+            from ...records.grading import semantic_status
+            semantic_status(embedding_cache="used" if chunk_embs is not None else "not_used",
+                            embedding_dimension=int(chunk_embs.shape[1]) if chunk_embs is not None else None)
             result = semantic_mod.score_claim(
                 claim.text, chunk_texts, chunk_embeddings=chunk_embs,
             )
             if result is not None:
                 semantic_score = result.score
+            else:
+                semantic_status(status="unavailable")
+        else:
+            from ...records.grading import semantic_status
+            semantic_status(status="no_candidates")
 
     return ClaimScore(
         section=claim.section,
@@ -300,6 +322,7 @@ def _resolve_page(stem: str) -> Page:
     return page
 
 
+@observed_grading
 def grade_page(
     stem: str,
     page_path: Path | str | None = None,
@@ -341,6 +364,10 @@ def grade_page(
         page = _resolve_page(stem)
 
     claims = parse_claims(page)
+    run = current_run()
+    if run is not None:
+        run.page_input(page, claims, {"semantic": semantic, "include_salience": include_salience,
+                                     "persist": persist, "require_persistence": require_persistence})
 
     # PDF source: explicit override (used by the ingest agent on pre-ingest
     # PDFs) takes precedence over the canonical papers/{stem}.pdf location.
@@ -355,6 +382,17 @@ def grade_page(
     full_pdf_text, _ = extract_pdf(resolved_pdf, max_pages=MAX_PDF_PAGES)
 
     semantic_available = semantic and semantic_mod.is_available()
+    run = current_run()
+    if run is not None:
+        from ...index.pdf_chunks import grading_snapshot
+        from ...records.errors import RecordStoreUnavailable
+        try:
+            index_metadata, representation, representation_digest = grading_snapshot(stem)
+        except (OSError, ValueError) as exc:
+            raise RecordStoreUnavailable("grading index representation is unavailable") from exc
+        run.inputs(page, claims, pdf_digest, full_pdf_text, index_metadata, representation, representation_digest,
+                   {"requested": semantic, "available": semantic_available,
+                    "model": semantic_mod.DEFAULT_MODEL, "device": semantic_mod.DEFAULT_DEVICE})
     scored: list[ClaimScore] = [
         _score_claim(stem, c, full_pdf_text, use_semantic=semantic_available,
                      pdf_path=resolved_pdf) for c in claims
@@ -407,7 +445,7 @@ def grade_page(
     elif require_persistence:
         raise RuntimeError("Canonical claim-grade persistence is unavailable")
 
-    return PaperFidelityReport(
+    report = PaperFidelityReport(
         stem=stem,
         page_path=str(page.path),
         n_claims=len(scored),
@@ -425,3 +463,7 @@ def grade_page(
         salience=salience,
         claims=scored,
     )
+    if run is not None:
+        run.evidence()
+        run.parents.append(run.emit("result", {"boundary": "fidelity_report", "report": report.to_dict()}))
+    return report

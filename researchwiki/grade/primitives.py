@@ -244,6 +244,7 @@ def check_numerics(
     treats a number as drift only when it is unmatched across *all* cited
     papers — catching a number ascribed to a paper that contains it nowhere.
     """
+    raw_claim, raw_retrieved = claim_text, retrieved_text
     # Normalize space-separated thousands on both sides before tokenizing, so a
     # page's "300,000" matches a PDF's "300 000". See collapse_spaced_thousands.
     claim_text = collapse_spaced_thousands(claim_text)
@@ -256,27 +257,39 @@ def check_numerics(
     full_text = restore_lost_decimals(full_text)
     tokens = NUMERIC_TOKEN_RE.findall(claim_text)
     if not tokens:
+        from ..records.grading import observe_numeric
+        observe_numeric({"status": "no_numeric_tokens", "raw_claim": raw_claim, "raw_retrieved": raw_retrieved,
+                         "claim_input": claim_text, "retrieved_input": retrieved_text, "tokens": [], "unmatched": []}, full_text)
         return [], []
     # Evidence value-set: the canonical form(s) of every numeric token in the
     # retrieved chunks and the full text. Value-based (not substring): a claim
     # of "8 heads" won't match a PDF's "128 samples" (8 ≠ 128), and a rounded
     # "510,000" won't match "510,495" — but "350 K" matches "350,000".
-    evidence_forms: set[str] = set()
+    retrieved_forms: set[str] = set()
+    full_forms: set[str] = set()
     for t in NUMERIC_TOKEN_RE.findall(retrieved_text):
-        evidence_forms |= numeric_forms(t)
+        retrieved_forms |= numeric_forms(t)
     for t in NUMERIC_TOKEN_RE.findall(full_text):
-        evidence_forms |= numeric_forms(t)
-    # Values the source only ever writes letter-prefixed ("Q68.9"). See
-    # _PREFIXED_DECIMAL_RE: additive, so this only ever suppresses false drift.
+        full_forms |= numeric_forms(t)
     for t in _PREFIXED_DECIMAL_RE.findall(retrieved_text):
-        evidence_forms |= numeric_forms(t)
+        retrieved_forms |= numeric_forms(t)
     for t in _PREFIXED_DECIMAL_RE.findall(full_text):
-        evidence_forms |= numeric_forms(t)
+        full_forms |= numeric_forms(t)
+    evidence_forms = retrieved_forms | full_forms
     unmatched = []
     for t in tokens:
         if numeric_forms(t) & evidence_forms:
             continue
         unmatched.append(t)
+    from ..records.grading import observe_numeric, claim_active
+    if claim_active():
+        observe_numeric({"status": "completed", "role": "value_presence_only", "rule": "numeric-forms-v1",
+                         "raw_claim": raw_claim, "raw_retrieved": raw_retrieved,
+                         "claim_input": claim_text, "retrieved_input": retrieved_text,
+                         "tokens": tokens, "unmatched": unmatched,
+                         "matches": [{"token": t, "forms": sorted(numeric_forms(t)),
+                                      "retrieved": bool(numeric_forms(t) & retrieved_forms),
+                                      "full_pdf": bool(numeric_forms(t) & full_forms)} for t in tokens]}, full_text)
     return tokens, unmatched
 
 

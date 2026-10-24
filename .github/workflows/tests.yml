@@ -128,6 +128,9 @@ jobs:
       - name: Verify live opt-in retention and portable export
         run: python .github/scripts/retention_acceptance.py --expect-installed
 
+      - name: Verify full grading evidence after source and cache deletion
+        run: python .github/scripts/grading_acceptance.py --expect-installed
+
   windows-concurrency:
     # The shared-write path used to fall back to no locking when `fcntl` was
     # absent. Keep the Windows guarantee executable without paying for the

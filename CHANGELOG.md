@@ -22,6 +22,12 @@ the reasoning behind any line below.
 
 ### Added
 
+- Ingestion retention now preserves complete grading candidate sets, exact source
+  spans and verification inputs, numeric/negation observations, semantic scores
+  and vectors, and optional support-judge API/relay requests and visible replies.
+  `records show --grading` exposes these portable payloads. PDF chunk cache v3
+  records offsets and text identity; existing preview limits and scoring remain.
+
 - Opt-in `ingest.retention` settings activate extraction capture across foreground
   ingestion, batches and durable jobs. Capture spans operation post-work, keeps
   source versions stable through promotion, preserves displaced PDFs and hands

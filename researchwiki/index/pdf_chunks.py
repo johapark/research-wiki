@@ -22,6 +22,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from importlib.metadata import version
 
 import numpy as np
 import tantivy
@@ -54,7 +55,8 @@ INDEX_META_FILENAME = "index_meta.json"
 # which is a different question.
 #   1 — (implicit) chunk_id + text
 #   2 — page_start / page_end / section provenance
-CACHE_VERSION = 2
+CACHE_VERSION = 3  # Adds exact source offsets and a versioned text representation.
+SOURCE_REPRESENTATION_FILENAME = "source_representation.json"
 
 _WORD_RE = re.compile(r"\S+")
 
@@ -69,6 +71,8 @@ class Chunk:
     page_start: int | None = None   # 1-based, as the renderer numbers pages
     page_end: int | None = None     # equal to page_start unless the window spans a break
     section: str | None = None      # PDF section name, e.g. 'results'
+    char_start: int | None = None
+    char_end: int | None = None
 
     def provenance(self) -> str:
         """`§results, p. 7` / `p. 7-8` / `''` — the display form.
@@ -96,6 +100,9 @@ class RetrievedChunk:
     page_start: int | None = None
     page_end: int | None = None
     section: str | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    representation_sha256: str | None = None
 
     def provenance(self) -> str:
         """Display form, e.g. `§results, p. 7`. Empty when unlabelled."""
@@ -157,6 +164,7 @@ def _chunk_text(
             # heading belongs to the section it opens in, which is where its
             # first and most-weighted sentences are.
             section=section_for_offset(spans, start_off) if spans else None,
+            char_start=start_off, char_end=end_off,
         ))
         cid += 1
         if i + chunk_words >= len(matches):
@@ -174,6 +182,8 @@ def _build_schema() -> tantivy.Schema:
     sb.add_unsigned_field("page_start", stored=True, indexed=False)
     sb.add_unsigned_field("page_end", stored=True, indexed=False)
     sb.add_text_field("section", stored=True, index_option="basic")
+    sb.add_unsigned_field("char_start", stored=True, indexed=False)
+    sb.add_unsigned_field("char_end", stored=True, indexed=False)
     return sb.build()
 
 
@@ -202,6 +212,11 @@ def _write_index_meta(idx_dir: Path, source: Path | None = None, digest: str | N
     write_json_atomic(idx_dir / INDEX_META_FILENAME, {
         "cache_version": CACHE_VERSION, "source_path": str(source.resolve()) if source else None,
         "source_pdf_sha256": digest,
+        "chunk_words": CHUNK_WORDS, "overlap_words": OVERLAP_WORDS,
+        "max_pdf_pages": MAX_PDF_PAGES, "text_transform": "pdfium-page-repair-v1",
+        "source_representation_sha256": file_sha256(idx_dir / SOURCE_REPRESENTATION_FILENAME)
+                                        if (idx_dir / SOURCE_REPRESENTATION_FILENAME).is_file() else None,
+        "retriever_version": version("tantivy"),
     })
 
 
@@ -252,6 +267,7 @@ def build_pdf_index(
     if (not force and meta.get("cache_version") == CACHE_VERSION
             and meta.get("source_pdf_sha256") == digest
             and (target / ".managed.json").exists()
+            and (target / SOURCE_REPRESENTATION_FILENAME).is_file()
             and _opens(target)):
         return target
     pdf_path = src
@@ -281,6 +297,9 @@ def build_pdf_index(
                 doc.add_unsigned("page_end", ch.page_end)
             if ch.section:
                 doc.add_text("section", ch.section)
+            if ch.char_start is not None:
+                doc.add_unsigned("char_start", ch.char_start)
+                doc.add_unsigned("char_end", ch.char_end)
             writer.add_document(doc)
         writer.commit()
         writer.wait_merging_threads()
@@ -293,6 +312,15 @@ def build_pdf_index(
         if file_sha256(src) != digest:
             shutil.rmtree(idx_dir, ignore_errors=True)
             raise RuntimeError(f"PDF changed while indexing: {src}")
+        from ..records.jsonio import canonical_bytes
+        representation = {"schema_version": 1, "transform": "pdfium-page-repair-v1",
+                          "extractor": {"name": "pypdfium2", "version": version("pypdfium2")},
+                          "source_pdf_sha256": digest, "page_separator": PAGE_SEPARATOR,
+                          "offset_unit": "unicode_codepoint", "text": text,
+                          "pages": [{"page": i + 1, "start": off, "end": off + len(body)}
+                                    for i, (body, off) in enumerate(zip(pages, page_offsets(pages)))],
+                          "page_limit": MAX_PDF_PAGES}
+        (idx_dir / SOURCE_REPRESENTATION_FILENAME).write_bytes(canonical_bytes(representation))
         _write_index_meta(idx_dir, src, digest)
         _swap_in(idx_dir, target)
         return target
@@ -434,7 +462,9 @@ def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT,
     so a draft graded against an incoming PDF would be silently re-indexed
     from the old canonical one and retrieve from the wrong text.
     """
+    raw_query = query
     query = _neutralize_operators(query)
+    parse_mode = "lenient"
     idx_dir = build_pdf_index(stem, pdf_path=pdf_path)
     index = tantivy.Index.open(str(idx_dir))
     index.reload()
@@ -447,11 +477,20 @@ def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT,
         # rather than tripping the strict parser. Best-effort: an unparseable
         # claim scores zero rather than aborting the grade phase.
         cleaned = "".join(c if c.isalnum() or c.isspace() else " " for c in query).lower()
+        query, parse_mode = cleaned, "stripped_fallback"
         try:
             parsed = index.parse_query(cleaned, ["text"])
         except Exception:
+            from ..records.grading import observe_query
+            observe_query({"query": raw_query, "effective_query": query, "topk": topk,
+                           "parse_mode": "unparseable", "returned_count": 0})
             return []
     res = searcher.search(parsed, limit=topk)
+    from ..records.grading import observe_query
+    observe_query({"query": raw_query, "effective_query": query, "topk": topk,
+                   "parse_mode": parse_mode, "returned_count": len(res.hits)})
+    # The offsets index the page-repaired join, rather than whitespace-normalized hits.
+    text_digest = _index_metadata(idx_dir).get("source_representation_sha256")
     out: list[RetrievedChunk] = []
     for score, addr in res.hits:
         d = searcher.doc(addr).to_dict()
@@ -468,6 +507,17 @@ def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT,
                 page_start=_first("page_start", int),
                 page_end=_first("page_end", int),
                 section=_first("section", str),
+                char_start=_first("char_start", int), char_end=_first("char_end", int),
+                representation_sha256=text_digest,
             )
         )
     return out
+
+
+@_locked
+def grading_snapshot(stem: str):
+    """Read the actual index representation under the same lock used by queries."""
+    from ..records.jsonio import decode_json, digest
+    directory = _index_path_for(stem)
+    data = (directory / SOURCE_REPRESENTATION_FILENAME).read_bytes()
+    return _index_metadata(directory), decode_json(data), digest(data)

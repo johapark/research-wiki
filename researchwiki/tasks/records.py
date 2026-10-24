@@ -21,6 +21,8 @@ def _parser():
             sub.add_argument("attempt_id")
         if name == "verify":
             sub.add_argument("--repair-checkpoint", action="store_true")
+        if name == "show":
+            sub.add_argument("--grading", action="store_true", help="include full grading input/evidence/result payloads")
         if name == "export":
             sub.add_argument("--output", type=Path, required=True)
     return parser
@@ -34,8 +36,12 @@ def _dispatch(args, store):
                                "terminal": m.terminal.to_dict() if m.terminal else None}
                               for m in store.list_attempts()]}
     if args.command == "show":
-        return {"manifest": store.read_attempt(args.attempt_id).to_dict(),
-                "publication_receipts": publication_receipts(store, args.attempt_id)}
+        result = {"manifest": store.read_attempt(args.attempt_id).to_dict(),
+                  "publication_receipts": publication_receipts(store, args.attempt_id)}
+        if args.grading:
+            from ..records.grading import read_grading
+            result["grading"] = read_grading(store, args.attempt_id)
+        return result
     if args.command == "verify":
         if args.repair_checkpoint:
             store.repair_checkpoint(args.attempt_id)

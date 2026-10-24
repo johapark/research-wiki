@@ -36,6 +36,7 @@ def write_fixture_pdf(
     title: str,
     author: str | None,
     year: int = 2026,
+    extra_lines: list[str] | None = None,
 ) -> None:
     """Write a tiny two-page PDF with extractable text and optional metadata."""
     page_one = "\n".join(
@@ -62,6 +63,7 @@ def write_fixture_pdf(
             "0 -22 Td (The acceptance lifecycle completes in a disposable wiki.) Tj",
             "0 -28 Td (Discussion) Tj",
             "0 -22 Td (Derived indexes can be deleted and rebuilt.) Tj",
+            *(f"0 -16 Td ({_pdf_string(line)}) Tj" for line in (extra_lines or [])),
             "ET",
         ]
     ).encode("ascii")

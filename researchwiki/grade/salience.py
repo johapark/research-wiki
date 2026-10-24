@@ -466,6 +466,10 @@ def score_salience(
         use_llm=False,
         use_semantic=use_semantic,
     )
+    from ..records.grading import note, current_run
+    if current_run() is not None:
+        note({"boundary": "salience_check", "role": "coverage", "fixture": asdict(fixture),
+              "page_body": page_body, "use_semantic": use_semantic, "result": asdict(report)})
 
     n_match = sum(ar.n_match for ar in report.axes.values())
     n_partial = sum(ar.n_partial for ar in report.axes.values())

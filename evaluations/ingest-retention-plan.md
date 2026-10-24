@@ -1,6 +1,6 @@
 # Ingestion retention, provenance, and auditability plan
 
-Status: Stage 0 foundation and Stage 1 opt-in extraction lifecycle implemented; default rollout pending.
+Status: Stages 0–2 implemented through full grading evidence; default rollout pending.
 Created: 2026-10-22. Code review and implementation-scope refinement: 2026-10-23.
 Code baseline inspected: `0ba18dc162fda2987ae2ba1f8ad7c7b28c0b9750`.
 
@@ -27,11 +27,12 @@ The archive foundation in §19 Stage 0 is implemented on
 `feat/ingest-records-foundation`; see [its internal contract](../docs/ingest-records.md).
 It uses explicit temporary-root fixtures and is not wired into live ingestion.
 Stage 1's [extraction-observation slice](../docs/ingest-extraction-records.md) is
-implemented on `feat/ingest-extraction-retention`, with explicit test injection.
-Its [opt-in lifecycle integration](../docs/ingest-retention.md) is implemented on
-`feat/ingest-retention-lifecycle`. Capture remains off by default. The next coding
-stage is explainable grading evidence; controlled storage/time measurements still
-gate any default switch.
+implemented, along with its [opt-in lifecycle integration](../docs/ingest-retention.md).
+All retention work is consolidated on `feat/ingest-retention`. Capture remains off
+by default. The next coding stage is remaining phase and publication lineage.
+Stage 2 now retains full grading evidence and verification inputs;
+see [the grading guide](../docs/ingest-grading-records.md). Controlled storage/time
+measurements still gate any default switch.
 
 ## 1. Purpose
 
@@ -960,6 +961,15 @@ Stage 1 cannot ship required capture without its lifecycle PR: deferring all
 publication/retry integration until Stage 3 would invalidate its failure guarantees.
 
 ### Stage 2 — make grading explainable
+
+Implementation checkpoint (2026-10-24): grading runs retain source/index identities,
+exact page/claim inputs, complete ordered candidate sets and source spans,
+numeric/negation inputs and observations, semantic scores and actual vectors,
+coverage fixtures/results, and optional support inputs/visible API or relay replies.
+Index cache version 3 adds exact source offsets without changing chunk text.
+Grading payloads are available through `records show --grading` and portable export.
+Existing preview/check context limits are retained and exposed explicitly; retrieved
+candidates and classifier observations do not become reviewed scientific labels.
 
 Deliverables: full ordered evidence sets, exact check inputs and source spans,
 retriever/index identity, numeric/negation observations, optional support-judge

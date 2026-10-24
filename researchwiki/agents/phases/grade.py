@@ -16,6 +16,7 @@ from ...grade.fidelity.paper import grade_page
 from ...grade.scorer import IMPORTANCE_WEIGHTS, VERDICT_SCORES, score_text
 from ...grade.support import Classifier, check_support, unsupported_claims
 from .draft import _wrap_with_frontmatter
+from ...records.grading import observed_grading
 
 # Per-anchor text budget for the `missed_anchors` entries carried in the
 # aggregate. The list is already capped at `salience._TOP_K_MISSED` entries, so
@@ -64,6 +65,7 @@ class ClaimDetail:
         return False
 
 
+@observed_grading
 def grade_draft(
     *,
     stem: str | None,
@@ -273,6 +275,11 @@ def _score_target_claims(
         related_papers=[],
     )
     report = score_text(fixture, draft_text, use_semantic=use_semantic)
+    from ...records.grading import note, current_run
+    from dataclasses import asdict
+    if current_run() is not None:
+        note({"boundary": "target_coverage_check", "role": "coverage", "fixture": asdict(fixture),
+              "draft_text": draft_text, "use_semantic": use_semantic, "result": asdict(report)})
     verdicts = [
         verdict
         for axis in ("headline_claims", "capabilities", "limitations")

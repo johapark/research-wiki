@@ -40,6 +40,9 @@ def index(tmp_path, monkeypatch):
     pc._write_index_meta(idx_dir, source, file_sha256(source))
     monkeypatch.setattr(pc, "resolve_pdf", lambda s: source)
     monkeypatch.setattr(pc, "_index_path_for", lambda s: tmp_path / s)
+    # Query parsing is isolated from PDF/cache admission. This hand-built
+    # index has no extractable PDF or versioned text/offset snapshot.
+    monkeypatch.setattr(pc, "build_pdf_index", lambda *args, **kwargs: idx_dir)
     return stem
 
 
