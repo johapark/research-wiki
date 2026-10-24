@@ -307,6 +307,8 @@ commands, portability and storage/time limits. Retention is off by default.
 Enabled attempts also retain [full grading evidence](./docs/ingest-retention.md#what-is-saved),
 inspectable with `records show <attempt-id> --grading --json`, including exact
 check contexts and semantic vectors independent of disposable caches.
+Use `records show <attempt-id> --lineage --json` to inspect authored/revised drafts,
+critiques and selection decisions, including losing and rejected drafts.
 
 ### 3. Inspect the new wiki page
 

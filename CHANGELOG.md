@@ -22,6 +22,12 @@ the reasoning behind any line below.
 
 ### Added
 
+- Opt-in ingestion retention now keeps author, critic, evolve and DEBUG model
+  inputs/visible replies, every produced draft, grading/critique parent links and
+  tournament/revision decisions. `records show --lineage` inspects losing and
+  rejected drafts independently of the corpus and database. Full-ingest capture
+  remains pending for remaining phases and final rendered-page lineage.
+
 - Ingestion retention now preserves complete grading candidate sets, exact source
   spans and verification inputs, numeric/negation observations, semantic scores
   and vectors, and optional support-judge API/relay requests and visible replies.

@@ -76,6 +76,8 @@ def phase(name, *, ctx=None, slot=None):
 
 def observed_phase(name):
     def decorate(fn):
+        from ..records.lineage import record_phase
+        fn = record_phase(name, fn)
         @wraps(fn)
         def run(ctx, *args, **kwargs):
             with phase(name, ctx=ctx, slot=kwargs.get("slot")):

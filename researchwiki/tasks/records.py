@@ -22,6 +22,7 @@ def _parser():
         if name == "verify":
             sub.add_argument("--repair-checkpoint", action="store_true")
         if name == "show":
+            sub.add_argument("--lineage", action="store_true", help="include full draft and selection lineage payloads")
             sub.add_argument("--grading", action="store_true", help="include full grading input/evidence/result payloads")
         if name == "export":
             sub.add_argument("--output", type=Path, required=True)
@@ -38,6 +39,9 @@ def _dispatch(args, store):
     if args.command == "show":
         result = {"manifest": store.read_attempt(args.attempt_id).to_dict(),
                   "publication_receipts": publication_receipts(store, args.attempt_id)}
+        if args.lineage:
+            from ..records.lineage import read_lineage
+            result["lineage"] = read_lineage(store, args.attempt_id)
         if args.grading:
             from ..records.grading import read_grading
             result["grading"] = read_grading(store, args.attempt_id)

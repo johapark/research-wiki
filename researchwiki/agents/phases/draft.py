@@ -487,7 +487,9 @@ def tournament(drafts: list[Draft]) -> tuple[Draft, str]:
 
     if not drafts:
         raise ValueError("tournament called with no drafts")
+    from ...records.lineage import tournament_decision
     if len(drafts) == 1:
+        tournament_decision(drafts[0], "single draft, no contest")
         return drafts[0], "single draft, no contest"
 
     winner = max(drafts, key=tournament_key)
@@ -506,4 +508,5 @@ def tournament(drafts: list[Draft]) -> tuple[Draft, str]:
                 f"bm25={(d.scores.get('mean_bm25') or 0.0):.1f}")
 
     rationale = "kept " + _fmt(winner) + "; beat " + " | ".join(_fmt(d) for d in others)
+    tournament_decision(winner, rationale)
     return winner, rationale

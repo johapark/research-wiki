@@ -7,7 +7,7 @@ inspection commands, publication recovery and user-visible limits. The
 
 This reference covers the archive contract, extraction capture, grading capture
 and their validation. Retention is off by default. Enabled attempts use the
-`extraction-v1` profile; new attempts declare additional grading inventory while
+`extraction-v1` profile; new attempts declare additional grading and draft-lineage inventory while
 existing archived attempts remain readable.
 
 ## Implemented contracts
@@ -311,8 +311,56 @@ rather than one archive event per claim, limiting the event/history overhead.
 Retaining complete passages and vectors still adds storage and verification I/O;
 representative overhead measurements remain part of the default-rollout gate.
 
+## Draft, critique and selection lineage
+
+`records.lineage.record_phase` wraps the author, grade, tournament, critic, evolve
+and DEBUG content owners. It does not consume or trust best-effort progress events.
+Each invocation persists an identified input before work and a completed, failed
+or interrupted output. Failure diagnostics retain exception classes, not arbitrary
+exception messages. Disabled retention takes the original path without writes.
+
+New attempts declare `lineage.<phase>.input`, `.output`, `.request` and `.response`
+slots plus draft/decision inventory. Unexecuted phases and no-call critics/stubs
+resolve to `not_run`; missing output from executed work remains unknown. Unavailable
+visible answers mark response inventory unavailable and capture incomplete. A phase
+that fails can have completely observed failure records; completion does not imply
+that the phase succeeded or that a draft is correct.
+
+Draft artifacts retain exact emitted text, model/temperature, usage, stance, trailer
+fields and legacy iteration IDs. Artifact UUIDs are their portable identities;
+machine-local iteration IDs are correlation hints. The attempt-local registry keeps
+strong object references only in memory and serializes access across parallel author
+slots. Distinct drafts retain distinct identities even if their text is identical.
+Changed draft content creates a new observation rather than overwriting an artifact.
+
+Author/evolve outputs depend on their retained phase inputs and visible responses.
+Revisions point to prior drafts; evolve inputs also point to retained critic output
+when available. DEBUG drafts survive rejection, with their nested grading linked
+to the repair input. Grading-run inputs point to the lineage input for the exact
+draft, while grade outputs retain complete scores and claim details.
+
+Tournament records retain ordered candidates, scores, actual ordering keys, selected
+draft and the deterministic rationale. Revision decisions retain the candidate,
+prior winner, both score sets, operator and accepted/rejected result. These are
+operational decisions, not scientific labels. Source hashes and parent links make
+losing drafts and rejected repairs inspectable after DB/source/cache deletion.
+
+`PhaseCallRecorder` reuses shared `RetainedCall` capture for author/critic/evolve/DEBUG
+API and relay calls. Logical requests, dispatches, permitted visible replies,
+parser inputs and usage/retry observations are assigned to the active phase/run;
+they do not enter target-extraction inventory. Required input/call capture failures
+stop further work using the existing latch and budget policy. No extra model calls
+are introduced.
+
+This is a partial Stage 3 implementation. Remaining metadata, crosslink and
+commit-time model calls, final rendered-page identity/publication linkage and richer
+conditional omission reasons are still required before a full-ingest profile.
+The existing mutation journal and ledger remain publication authorities.
+
 ## Inspection payloads
 
+`records show --lineage` includes full draft/critique/selection payloads and their
+artifact envelopes. It can be combined with `--grading`.
 `records show --grading` includes decoded full grading payloads and their artifact
 envelopes, parent links and source references. Ordinary `records show` keeps its
 compact manifest and publication receipts. Exports include all referenced grading
@@ -331,6 +379,7 @@ portability, rather than scientific extraction quality.
 | Extraction | `tests/test_ingest_extraction_retention.py`; `.github/scripts/extraction_acceptance.py` | Real synthetic PDF extraction, complete/discarded candidates, API/relay retry and cleanup, usage/setting normalization, budget and archive failures, relocation after source deletion |
 | Lifecycle | `tests/test_ingest_retention_lifecycle.py`; `.github/scripts/retention_acceptance.py` | Real CLI with stub models and a zero-request local sentinel, portable export after corpus/DB deletion, explicit checkpoint repair and publication/capture failure boundaries |
 | Grading | `tests/test_grading_retention.py`; `.github/scripts/grading_acceptance.py` | Long passages, exact offsets, deterministic semantic vector replay, mock API/relay judgments, failure handling and portable inspection after source/cache deletion |
+| Draft lineage | `tests/test_draft_lineage_retention.py`; `.github/scripts/retention_acceptance.py` | API/relay calls, all parallel author slots, losing/revised/DEBUG drafts, critique/grade parents, actual selection decisions, capture failures and portable CLI inspection |
 | Core ingestion | `.github/scripts/fresh_install_acceptance.py` | Fresh installed-package ingestion behavior |
 
 The archive-only smoke check needs `filelock` without loading PDF, ML, provider or
@@ -339,7 +388,7 @@ mocked model transports. The installed acceptance CI job runs these harnesses on
 Linux, macOS and Windows.
 
 ```bash
-python -m pytest -q tests/test_ingest_records_contracts.py tests/test_ingest_records_store.py tests/test_ingest_extraction_retention.py tests/test_ingest_retention_lifecycle.py tests/test_grading_retention.py
+python -m pytest -q tests/test_ingest_records_contracts.py tests/test_ingest_records_store.py tests/test_ingest_extraction_retention.py tests/test_ingest_retention_lifecycle.py tests/test_grading_retention.py tests/test_draft_lineage_retention.py
 python .github/scripts/records_acceptance.py --expect-installed
 python .github/scripts/extraction_acceptance.py --expect-installed
 python .github/scripts/retention_acceptance.py --expect-installed

@@ -14,6 +14,7 @@ jobs. The legacy digest-only `researchwiki ingest` workflow is outside this prof
 - Immutable original PDF snapshots and displaced canonical PDFs when replaced.
 - Page-aware extracted text, full target-extraction answers and candidate/filter traces.
 - Grading inputs, complete retrieved passages, check observations and optional support judgments, detailed below.
+- Every produced author/evolve/DEBUG draft, critiques, grading links and selection decisions, including losing or rejected drafts.
 - Attempt identities, completion states and publication receipts.
 
 | Layer | Retained information |
@@ -73,6 +74,7 @@ Use the selected profile's root, or pass an explicit archive:
 researchwiki records list --json
 researchwiki records show <attempt-id> --json
 researchwiki records show <attempt-id> --grading --json
+researchwiki records show <attempt-id> --lineage --json
 researchwiki records verify <attempt-id> --json
 researchwiki records export <attempt-id> --output /path/to/new-export --json
 researchwiki records --root /path/to/archive verify <attempt-id> --json
@@ -80,7 +82,8 @@ researchwiki records --root /path/to/archive verify <attempt-id> --json
 
 List/show/verify do not initialize an archive or repair records. Verification
 checks event history, identity, payload hashes and checkpoint correspondence.
-`show` includes publication receipts. Exports require a new destination and copy
+`show` includes publication receipts. `--lineage` adds full draft/critique/decision
+payloads; it can be combined with `--grading` for full grading evidence. Exports require a new destination and copy
 only the chosen attempt, its events/checkpoint, archive identity and referenced
 blobs. Exported attempts verify without the original corpus, databases, caches,
 mailboxes or mount path. These commands can inspect an explicit archive outside
@@ -174,7 +177,10 @@ identical payloads reuse content-addressed blobs. There are no extra model calls
 for retention.
 
 Only `extraction-v1` is advertised, with grading inventory declared on new attempts.
-Supplementary attachments, remaining model phases, full author/revision/selection
-lineage, import/pruning and general archive reconciliation remain later work.
+Author, critic, evolve and DEBUG model calls are retained through both API and
+chat-relay adapters. Remaining metadata/crosslink/commit-time model phases, final
+rendered-page lineage, richer conditional omission reasons, supplementary attachments,
+import/pruning and general archive reconciliation remain later work. No
+`full-ingest-v1` profile is enabled yet.
 Host-local locks and atomic writes support process-crash recovery, subject to the
 [filesystem and sync limits](ingest-dev-reference.md#storage-and-concurrency-limits).

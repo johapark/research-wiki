@@ -47,7 +47,9 @@ class GradingRun:
     def __init__(self, records, role, iteration):
         self.records, self.role = records, role
         self.run_id = uuid.uuid4().hex
-        self.parents = []
+        from .lineage import current_scope
+        scope = current_scope()
+        self.parents = [scope.input_id] if scope is not None else []
         self.response_ids = []
         self.chunks, self.claims, self.extra, self.vectors = {}, [], [], {}
         self.index_text, self.index_digest = None, None

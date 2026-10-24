@@ -63,6 +63,8 @@ def handle_budget_exhausted(ctx, conn, exc: BudgetExhausted) -> None:
 def record_revision_decision(ctx, conn, draft, *, operator: str,
                              accepted: bool, writer=write_iteration) -> None:
     """Append the keep/reject verdict instead of rewriting the draft event."""
+    from ..records.lineage import revision_decision
+    revision_decision(ctx, draft, operator, accepted)
     ctx.next_iter()
     writer(
         attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,

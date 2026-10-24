@@ -1,6 +1,6 @@
 # Ingestion retention, provenance, and auditability plan
 
-Status: Stages 0–2 implemented through full grading evidence; default rollout pending.
+Status: Stages 0–2 implemented; Stage 3 draft/selection slice implemented; default rollout pending.
 Created: 2026-10-22. Code review and implementation-scope refinement: 2026-10-23.
 Code baseline inspected: `0ba18dc162fda2987ae2ba1f8ad7c7b28c0b9750`.
 
@@ -27,7 +27,7 @@ Stages 0–2 are implemented on the consolidated `feat/ingest-retention` branch.
 The [user guide](../docs/ingest-retention.md) describes enabling capture, inspecting
 records and recovery; the [developer reference](../docs/ingest-dev-reference.md) owns
 current archive/capture contracts and validation details. Capture remains off by
-default. Remaining phase/publication lineage is next; controlled storage/time
+default. Remaining phase/publication lineage continues in Stage 3; controlled storage/time
 measurements still gate a default switch.
 
 ## 1. Purpose
@@ -918,6 +918,17 @@ removed. Existing scoring/preview limits remain; retrieval candidates and
 classifier observations do not become reviewed scientific labels.
 
 ### Stage 3 — complete phase and publication lineage
+
+Partial implementation checkpoint (2026-10-24): author, grade, critic, evolve,
+DEBUG and tournament boundaries retain full drafts, critiques, parent/check links
+and selection decisions, including losing and rejected drafts. Shared API/relay
+capture retains author/critic/revision requests and permitted visible replies.
+`records show --lineage` exposes portable payloads. See the
+[developer reference](../docs/ingest-dev-reference.md#draft-critique-and-selection-lineage).
+
+Still required: remaining metadata/crosslink/commit-time model observations,
+final rendered-page identity and publication linkage, and richer conditional
+omission reasons. Keep `full-ingest-v1` disabled until these are covered.
 
 Deliverables: remaining model/metadata observations, all author/critic/revision/
 selection artifacts, parent links, conditional phase omissions, post-operation

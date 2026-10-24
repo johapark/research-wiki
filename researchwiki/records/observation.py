@@ -30,6 +30,10 @@ def observe_call(phase, call_id, request):
         from .grading import current_run, GradingCallRecorder
         if current_run() is not None:
             recorder = GradingCallRecorder(current_run())
+    from .lineage import current_scope, PhaseCallRecorder
+    scope = current_scope()
+    if scope is not None and phase == scope.phase and recorder is None:
+        recorder = PhaseCallRecorder(scope)
     capture = RetainedCall(recorder, call_id, request) if recorder else None
     token = _call.set(capture)
     try:

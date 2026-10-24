@@ -11,6 +11,7 @@ from .extraction import ExtractionRecorder
 from .settings import selected
 from .store import RecordStore, now
 from .grading import grading_requirements
+from .lineage import LineageRecorder, requirements as lineage_requirements
 
 
 _owner = ContextVar("researchwiki_ingest_capture_owner", default=None)
@@ -68,10 +69,11 @@ class CaptureOwner:
                                Requirement(slot="source.displaced", kind="source_snapshot", required=False),
                                Requirement(slot="publication.receipt", kind="terminal_result"),
                                Requirement(slot="attempt.result", kind="terminal_result"))
-                           + grading_requirements(ctx.verify_claim_entailment))
+                           + grading_requirements(ctx.verify_claim_entailment) + lineage_requirements())
         store = RecordStore.create(self.settings.root)
         store.start_attempt(spec)
         self.records = ExtractionRecorder(store, ctx.attempt_id)
+        self.lineage = LineageRecorder(self.records)
         self.records.snapshot_source(ctx.pdf_path)
         self.records.bind_context(ctx)
 
@@ -86,11 +88,12 @@ class CaptureOwner:
         records = self.records
         self.check()
         manifest = records._write(records.store.read_attempt, records.spec.attempt_id)
+        self.lineage.close(manifest)
         if records.grading_answer_unavailable:
             records._write(records.store.resolve_slot, records.spec.attempt_id, "grading.response", "unavailable",
                            "visible_verification_answer_unavailable")
         for item in manifest.inventory:
-            if item.status != "pending" or item.slot in ("publication.receipt", "attempt.result"):
+            if item.slot.startswith("lineage.") or item.status != "pending" or item.slot in ("publication.receipt", "attempt.result"):
                 continue
             ran = "extract" if item.slot == "source.representation" else "target_claims"
             if item.slot.startswith("grading."):

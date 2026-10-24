@@ -35,7 +35,7 @@ def exercise(root, port):
     write_fixture_pdf(source, title="Alpha Acceptance Pipelines for Reliable Research", author="Ada Lovelace; Alan Turing")
     report = root / "result.json"
     run_cli(root, env, "add", str(source), "--stub", "--no-semantic", "--no-llm-reconcile", "--no-cross-link",
-            "--auto-promote", "--max-evolve", "0", "-n", "1", "--title", "Alpha Acceptance Pipelines for Reliable Research",
+            "--auto-promote", "--max-evolve", "0", "-n", "2", "--title", "Alpha Acceptance Pipelines for Reliable Research",
             "--year", "2026", "--authors", "Ada Lovelace;Alan Turing", "--result-file", str(report))
     result = json.loads(report.read_text())
     assert result["publication"] == "published" and not source.exists()
@@ -45,6 +45,12 @@ def exercise(root, port):
     shown = json.loads(run_cli(root, env, "records", "show", attempt, "--json").stdout)
     assert shown["manifest"]["spec"]["request_id"] == result["request_id"]
     assert shown["publication_receipts"][-1]["state"] == "committed"
+    lineage = json.loads(run_cli(root, env, "records", "show", attempt, "--lineage", "--json").stdout)
+    drafts = [item for item in lineage["lineage"] if item["payload"].get("boundary") == "draft"]
+    assert len(drafts) == 2 and len({item["artifact"]["artifact_id"] for item in drafts}) == 2
+    selection = next(item["payload"] for item in lineage["lineage"]
+                     if item["payload"].get("boundary") == "selection_decision")
+    assert selection["selected"] in {item["artifact"]["artifact_id"] for item in drafts}
     portable = root.parent / "portable-archive"
     run_cli(root, env, "records", "export", attempt, "--output", str(portable), "--json")
     shutil.rmtree(root / ".researchwiki")
@@ -60,6 +66,9 @@ def exercise(root, port):
     run_cli(root, env, "records", "--root", str(portable), "verify", attempt, "--repair-checkpoint", "--json")
     restored = json.loads(run_cli(root, env, "records", "--root", str(portable), "show", attempt, "--json").stdout)
     assert restored == shown
+    retained_lineage = json.loads(run_cli(root, env, "records", "--root", str(portable), "show", attempt,
+                                         "--lineage", "--json").stdout)
+    assert retained_lineage == lineage
 
 
 def main():
