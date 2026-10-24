@@ -25,7 +25,7 @@ from ..db.connection import get_connection
 from ..db.iterations import write_iteration, update_paper_stem
 from ..grade import coherence
 from . import fitness, model_config, phases
-from .context import Context, PromoteFailed, ReconcileFailed, StemRenameRefused
+from .context import Context, PromoteFailed, ReconcileFailed, StemRenameRefused, processing_pdf
 from .commit_support import promotion_decision_reason, update_indexes_after_promotion
 from .budget import BudgetExhausted
 from ..operations.observation import activate_ingest_scope, submit_observed
@@ -393,7 +393,7 @@ def _phase_crosslinks(ctx: Context, conn) -> list:
     t0 = time.monotonic()
     cl_stats: dict = {}
     cite_cands = phases.crosslink_candidates(
-        ctx.pdf_path, ctx.metadata or {}, stats=cl_stats
+        processing_pdf(ctx), ctx.metadata or {}, stats=cl_stats
     )
     cite_keys = frozenset(c.wikilink for c in cite_cands)
     topical_cands = phases.propose_crosslinks(
@@ -499,7 +499,7 @@ def _phase_grade(ctx: Context, conn, draft) -> None:
         draft_text=draft.text,
         metadata=ctx.metadata,
         sandbox_dir=ctx.sandbox_dir,
-        pdf_path=ctx.pdf_path,
+        pdf_path=processing_pdf(ctx),
         use_semantic=ctx.use_semantic,
         target_claims=ctx.target_claims,
     )

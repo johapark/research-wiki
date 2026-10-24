@@ -58,6 +58,8 @@ from ..errors import EnvironmentFailure
 from ..provenance import specific_author_model
 from ..operations.events import EventRecorder, ModelCallObserver
 from ..operations.observation import current_recorder
+from ..records import observation as retained
+from ..records.errors import RecordStoreUnavailable
 
 
 # --- Client-side rate limiting -------------------------------------------
@@ -653,11 +655,14 @@ def call_openai_compatible(
             },
             method="POST",
         )
+        retained.dispatch({"provider": "openai-compatible", "payload": payload,
+                           "transport_enforcement": "not_applied"})
         try:
             with urllib.request.urlopen(req, timeout=600) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             break
         except urllib.error.HTTPError as e:
+            retained.rejected("HTTPError", e.code)
             body_text = e.read().decode("utf-8", errors="replace")[:500]
             # A direct 400, or a LiteLLM-wrapped 500, naming reasoning effort
             # is the server telling us its vocabulary. Renegotiate and resend
@@ -706,6 +711,7 @@ def call_openai_compatible(
                 f"{body_text}"
             ) from e
         except urllib.error.URLError as e:
+            retained.rejected("URLError")
             # EAI_AGAIN denotes a temporary resolver failure. Other DNS
             # errors (including EAI_NONAME from a missing resolver or an
             # unknown hostname) require diagnosis rather than repeated waits.
@@ -749,6 +755,13 @@ def call_openai_compatible(
     usage = data.get("usage") or {}
     details = usage.get("prompt_tokens_details") or {}
     cached = int(details.get("cached_tokens", 0) or 0)
+    retained.answer(text, model=data.get("model"),
+                    usage={"input_tokens": int(usage.get("prompt_tokens", 0)),
+                           "output_tokens": int(usage.get("completion_tokens", 0)),
+                           "cache_read_tokens": cached, "cache_write_tokens": 0}
+                    if "prompt_tokens" in usage and "completion_tokens" in usage else None,
+                    finish_reason=data["choices"][0].get("finish_reason"),
+                    transform="answer-after-reasoning-exclusion-v1")
     return LLMResponse(
         text=text,
         model=model,
@@ -849,6 +862,8 @@ def call_anthropic(
             kwargs["thinking"] = {"type": "disabled"}
         if system is not None:
             kwargs["system"] = system
+        retained.dispatch({"provider": "anthropic", "payload": kwargs,
+                           "transport_enforcement": "not_applied"})
         return client.messages.create(**kwargs)
 
     try:
@@ -856,12 +871,15 @@ def call_anthropic(
             resp = _do_call(include_temperature=True)
             used_temp = temperature
         except anthropic.BadRequestError as e:
+            retained.rejected("BadRequestError", getattr(e, "status_code", None))
             msg = str(e).lower()
             if "temperature" in msg and ("deprecated" in msg or "not supported" in msg):
                 resp = _do_call(include_temperature=False)
                 used_temp = float("nan")  # signal: model controls temperature internally
             else:
                 raise
+    except RecordStoreUnavailable:
+        raise
     except Exception as e:
         status = getattr(e, "status_code", None)
         body = str(getattr(e, "body", None) or e)
@@ -877,9 +895,17 @@ def call_anthropic(
             ) from e
         raise
 
-    text = "".join(block.text for block in resp.content if hasattr(block, "text"))
+    text = "".join(block.text for block in resp.content if hasattr(block, "text")
+                   and getattr(block, "type", "text") == "text")
     cache_read = int(getattr(resp.usage, "cache_read_input_tokens", 0) or 0)
     cache_write = int(getattr(resp.usage, "cache_creation_input_tokens", 0) or 0)
+    retained.answer(text, model=getattr(resp, "model", None),
+                    usage={"input_tokens": int(resp.usage.input_tokens) + cache_read + cache_write,
+                           "output_tokens": resp.usage.output_tokens,
+                           "cache_read_tokens": cache_read, "cache_write_tokens": cache_write},
+                    finish_reason=getattr(resp, "stop_reason", None),
+                    temperature=retained.finite_setting(used_temp),
+                    transform="anthropic-visible-text-blocks-v1")
     return LLMResponse(
         text=text,
         model=model,
@@ -1060,86 +1086,111 @@ def call(
     # Optional per-ingest budget. The reservation happens before throttling or
     # network I/O, and is shared by parallel author threads, so two drafts
     # cannot both observe the same remaining allowance and oversubscribe it.
-    from .budget import current_tracker
-    tracker = current_tracker()
-    reservation = None
-    if tracker is not None:
-        prompt_chars = len(_np_prompt) + len(system or "")
-        reservation = tracker.reserve_call(
-            model=model,
-            provider=provider,
-            prompt_chars=prompt_chars,
-            max_tokens=max_tokens,
-            free=call_is_free,
-        )
-
     event_sink = event_sink if event_sink is not None else current_recorder()
     observer = ModelCallObserver(event_sink, phase=phase, provider=p, model=model)
-    observer.started()
-    try:
-        # The reservation already exists, so even an exceptional throttle
-        # implementation must settle it through the same failure path.
-        _throttle(model, rpm)
-        if p == "anthropic":
-            response = call_anthropic(
+    with retained.observe_call(phase, observer.call_id, {
+        "provider": p, "model": model, "system": system, "prompt": prompt,
+        "cache_prefix": cache_prefix, "cache_prompt": cache_prompt,
+        "temperature": retained.finite_setting(temperature), "max_tokens": max_tokens,
+        "reasoning_effort": reasoning_effort, "disable_thinking": disable_thinking,
+        "schema": schema, "transport_enforcement": "relay_validation" if p == "chat-relay" else "not_applied",
+    }) as capture:
+        from .budget import current_tracker
+        tracker = current_tracker()
+        reservation = None
+        if tracker is not None:
+            prompt_chars = len(_np_prompt) + len(system or "")
+            reservation = tracker.reserve_call(
                 model=model,
-                prompt=prompt,
-                temperature=temperature,
+                provider=provider,
+                prompt_chars=prompt_chars,
                 max_tokens=max_tokens,
-                system=system,
-                cache_prompt=cache_prompt,
-                cache_prefix=cache_prefix,
-                disable_thinking=disable_thinking,
+                free=call_is_free,
             )
-        elif p in _OPENAI_COMPAT_PROVIDERS:
-            if cache_prompt:
-                # OpenAI-compatible transports expose no Anthropic-style
-                # cache-control primitive; the caller accepts that no-op.
-                pass
-            # The same resolver drives preflight and status; no path may
-            # report one endpoint and then send the prompt to another.
-            assert openai_endpoint is not None
-            base_url = openai_endpoint.url
-            response = call_openai_compatible(
-                model=model,
-                prompt=_np_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                system=system,
-                base_url=base_url,
-                reasoning_effort=reasoning_effort,
-            )
-        elif p == "chat-relay":
-            response = call_chat_relay(
-                model=model,
-                prompt=_np_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                system=system,
-                phase=phase,
-                fresh=bool(os.environ.get("RW_RELAY_FRESH")),
-                schema=schema,
-                **({"event_sink": event_sink, "call_id": observer.call_id} if event_sink else {}),
-            )
-        else:
-            raise ValueError(
-                f"llm.call: unknown provider {provider!r}. Supported: "
-                "'anthropic', 'openai-compatible' / 'lmstudio' / 'openai', "
-                "'chat-relay'."
-            )
-    except Exception as exc:
-        observer.failed(exc)
+
+        observer.started()
+        try:
+            # The reservation already exists, so even an exceptional throttle
+            # implementation must settle it through the same failure path.
+            _throttle(model, rpm)
+            if p == "anthropic":
+                response = call_anthropic(
+                    model=model,
+                    prompt=prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    system=system,
+                    cache_prompt=cache_prompt,
+                    cache_prefix=cache_prefix,
+                    disable_thinking=disable_thinking,
+                )
+            elif p in _OPENAI_COMPAT_PROVIDERS:
+                if cache_prompt:
+                    # OpenAI-compatible transports expose no Anthropic-style
+                    # cache-control primitive; the caller accepts that no-op.
+                    pass
+                # The same resolver drives preflight and status; no path may
+                # report one endpoint and then send the prompt to another.
+                assert openai_endpoint is not None
+                base_url = openai_endpoint.url
+                response = call_openai_compatible(
+                    model=model,
+                    prompt=_np_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    system=system,
+                    base_url=base_url,
+                    reasoning_effort=reasoning_effort,
+                )
+            elif p == "chat-relay":
+                response = call_chat_relay(
+                    model=model,
+                    prompt=_np_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    system=system,
+                    phase=phase,
+                    fresh=bool(os.environ.get("RW_RELAY_FRESH")),
+                    schema=schema,
+                    **({"event_sink": event_sink, "call_id": observer.call_id} if event_sink else {}),
+                )
+            else:
+                raise ValueError(
+                    f"llm.call: unknown provider {provider!r}. Supported: "
+                    "'anthropic', 'openai-compatible' / 'lmstudio' / 'openai', "
+                    "'chat-relay'."
+                )
+        except Exception as exc:
+            observer.failed(exc)
+            if tracker is not None and reservation is not None:
+                _settle_failed_call(tracker, reservation, exc, capture)
+            raise
         if tracker is not None and reservation is not None:
+            tracker.finish(
+                reservation,
+                model=response.model or model,
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+                cache_read_tokens=response.cache_read_tokens,
+                cache_write_tokens=response.cache_write_tokens,
+            )
+        if capture is not None:
+            try:
+                capture.finished(response, p)
+            except RecordStoreUnavailable as exc:
+                observer.failed(exc)
+                raise
+        observer.finished(response)
+        return response
+
+
+def _settle_failed_call(tracker, reservation, error, capture):
+    if isinstance(error, RecordStoreUnavailable) and capture is not None:
+        if capture.usage is not None:
+            tracker.finish(reservation, model=capture.usage_model, **capture.usage)
+        elif not capture.dispatched:
+            tracker.cancel_undispatched(reservation)
+        else:
             tracker.fail(reservation)
-        raise
-    if tracker is not None and reservation is not None:
-        tracker.finish(
-            reservation,
-            model=response.model or model,
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
-            cache_read_tokens=response.cache_read_tokens,
-            cache_write_tokens=response.cache_write_tokens,
-        )
-    observer.finished(response)
-    return response
+    else:
+        tracker.fail(reservation)

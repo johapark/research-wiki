@@ -411,6 +411,7 @@ def _call_chat_relay_owned(
 ) -> LLMResponse:
     """Publish and consume one request while holding its mailbox lock."""
     from .llm import LLMResponse
+    from ..records import observation as retained
 
     chain: list[str] = [op_id]
     retry_of: str | None = None
@@ -420,6 +421,13 @@ def _call_chat_relay_owned(
     for attempt in range(_RELAY_MAX_RETRIES + 1):           # 0, 1, 2 → 3 total
         prompt_path, response_path = _paths_for(op_id)
         response_reused = response_path.exists()
+
+        retained.dispatch({"provider": "chat-relay", "op_id": op_id,
+                           "retry_of": retry_of, "retry_feedback": retry_feedback,
+                           "response_reused": response_reused, "system": system,
+                           "prompt": prompt, "schema": schema, "model_hint": model,
+                           "temperature": retained.finite_setting(temperature), "max_tokens": max_tokens,
+                           "transport_enforcement": "relay_validation" if schema is not None else "not_applied"})
 
         observe = partial(
             relay_event, event_sink, call_id=call_id, phase=phase, model=model,
@@ -461,7 +469,9 @@ def _call_chat_relay_owned(
 
         try:
             data = json.loads(response_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeError) as e:
+            retained.answer(None, model_origin="unavailable", op_id=op_id,
+                            validation="invalid_protocol_json", answer_status="unavailable")
             observe("relay_response_rejected")
             # File-level corruption is the user's problem to fix manually —
             # retry-via-protocol won't help because the chat already wrote it.
@@ -479,6 +489,7 @@ def _call_chat_relay_owned(
             observe("relay_response_received", model=f"chat-relay:{data['via'].strip()}")
             break
         except SchemaError as e:
+            _retain_reply(data, op_id=op_id, response_reused=response_reused, validation="rejected")
             observe("relay_response_rejected")
             last_err = str(e)
             if attempt >= _RELAY_MAX_RETRIES:
@@ -509,6 +520,8 @@ def _call_chat_relay_owned(
         text = json.dumps(data["structured"], ensure_ascii=False)
     via = data["via"].strip()
 
+    _retain_reply(data, op_id=op_id, response_reused=response_reused, validation="accepted")
+
     prompt_path.unlink(missing_ok=True)
     response_path.unlink(missing_ok=True)
 
@@ -519,6 +532,21 @@ def _call_chat_relay_owned(
         input_tokens=0,
         output_tokens=0,
     )
+
+
+def _retain_reply(data, *, op_id, response_reused, validation):
+    """Whitelist answer fields, before cleanup; never archive mailbox envelopes."""
+    from ..records import observation as retained
+
+    if retained.current_call() is None:
+        return
+    fields = {name: data[name] for name in ("response", "structured") if name in data} if isinstance(data, dict) else {}
+    via = data.get("via") if isinstance(data, dict) else None
+    # Serialize answer fields as text, preserving even non-finite malformed
+    # structured values without turning them into valid archive JSON numbers.
+    retained.answer(json.dumps(fields, ensure_ascii=False) if fields else None, model=via if isinstance(via, str) else None,
+                    model_origin="self_reported", op_id=op_id, response_reused=response_reused,
+                    validation=validation, transform="relay-answer-fields-v1")
 
 
 def _check_response_shape(data, response_path: Path, schema: dict | None) -> None:

@@ -1,6 +1,6 @@
 # Ingestion retention, provenance, and auditability plan
 
-Status: reviewed engineering plan; Stage 0 archive foundation implemented, capture hooks pending.
+Status: Stage 0 foundation and Stage 1 extraction hooks implemented; lifecycle activation pending.
 Created: 2026-10-22. Code review and implementation-scope refinement: 2026-10-23.
 Code baseline inspected: `0ba18dc162fda2987ae2ba1f8ad7c7b28c0b9750`.
 
@@ -26,8 +26,10 @@ changes, with the following corrections incorporated before runtime work:
 The archive foundation in §19 Stage 0 is implemented on
 `feat/ingest-records-foundation`; see [its internal contract](../docs/ingest-records.md).
 It uses explicit temporary-root fixtures and is not wired into live ingestion.
-The next coding change is Stage 1's extraction-observation slice, followed by its
-separate lifecycle integration. No default capture behavior has been activated.
+Stage 1's [extraction-observation slice](../docs/ingest-extraction-records.md) is
+implemented on `feat/ingest-extraction-retention`, with explicit test injection.
+The next coding change is its separate lifecycle integration. No default capture
+behavior has been activated.
 
 ## 1. Purpose
 
@@ -910,6 +912,16 @@ its selected test root and no public operation/job wire changes. The first revie
 should be limited to these foundational behaviors.
 
 ### Stage 1 — stop target-extraction loss
+
+Extraction checkpoint (2026-10-23): immutable processing-source binding, page-aware
+raw/repaired representations preserving legacy joined text, a pure target parser
+with candidate selection traces, and scoped shared-client/API/relay capture hooks
+are implemented. Synthetic fixtures exercise retry cleanup, missing usage,
+provider-controlled settings, budget cancellation/settlement and archive failures.
+Unreadable relay protocol envelopes are explicitly unavailable rather than copied
+wholesale or represented as full answer capture. See the
+[extraction guide](../docs/ingest-extraction-records.md). Lifecycle activation and
+its operator tooling below remain unimplemented.
 
 Deliver through two dependent, reviewable PRs after the store foundation:
 

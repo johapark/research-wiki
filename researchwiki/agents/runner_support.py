@@ -12,6 +12,7 @@ from ..fsatomic import write_text_atomic
 from ..log import log
 from . import fitness, phases
 from .budget import BudgetExhausted, BudgetTracker, IngestBudget
+from .context import processing_pdf
 
 
 def usage_costs(result) -> dict[str, int]:
@@ -221,7 +222,7 @@ def warn_thin_extraction(sections: dict, full_text: str | None = None) -> None:
 def phase_reconcile(ctx, conn):
     t0 = time.monotonic()
     meta = phases.reconcile_metadata(
-        ctx.pdf_path, doi_override=ctx.doi_override, title_override=ctx.title_override,
+        processing_pdf(ctx), doi_override=ctx.doi_override, title_override=ctx.title_override,
         year_override=ctx.year_override, authors_override=ctx.authors_override,
         use_llm=ctx.use_llm_reconcile,
     )
@@ -246,7 +247,8 @@ def phase_reconcile(ctx, conn):
 @observed_phase("extract")
 def phase_extract(ctx, conn):
     t0 = time.monotonic()
-    sections, full_text = phases.extract_sections(ctx.pdf_path)
+    records = getattr(ctx, "extraction_records", None)
+    sections, full_text = phases.extract_sections(processing_pdf(ctx), **({"records": records} if records else {}))
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     from ..pdf.sections import assess_section_health
     health = assess_section_health(full_text, sections)
@@ -269,6 +271,7 @@ def phase_target_claims(ctx, conn):
     out = extract_target_claims(
         metadata=ctx.metadata or {}, sections=ctx.sections or {},
         pdf_full_text=ctx.pdf_full_text, use_stub=ctx.use_stub,
+        **({"records": ctx.extraction_records} if getattr(ctx, "extraction_records", None) else {}),
     )
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     if out.error:
@@ -315,7 +318,7 @@ def run_entailment_check(ctx, conn, cleaned_text: str) -> None:
             draft_text=cleaned_text,
             metadata=ctx.metadata,
             sandbox_dir=ctx.sandbox_dir,
-            pdf_path=ctx.pdf_path,
+            pdf_path=processing_pdf(ctx),
             use_semantic=ctx.use_semantic,
             support_classifier=llm_support_classifier,
         )

@@ -118,6 +118,8 @@ class Context:
     budget_tracker: object | None = None      # BudgetTracker; object avoids a module cycle
     budget_exhausted: dict | None = None
     run_memory_evolve: bool = False          # opt-in model-backed synthesis maintenance
+    processing_pdf_path: Path | None = None  # retained read path; pdf_path still owns inbox/promotion
+    extraction_records: object | None = None  # test-injected until lifecycle activation
 
     # Filled by phases (None until set):
     paper_stem: str | None = None
@@ -139,3 +141,8 @@ class Context:
             self.budget_tracker.check_wall()
         self.iteration += 1
         return self.iteration
+
+
+def processing_pdf(ctx) -> Path:
+    """Read-side source, separate from the original path owned by promotion."""
+    return getattr(ctx, "processing_pdf_path", None) or ctx.pdf_path

@@ -6,6 +6,10 @@ to live ingestion yet. No archive is selected or initialized automatically, no
 provider is called, and no operation/job wire schema or ingestion default changes.
 There are no `researchwiki records` CLI commands in this increment.
 
+The following [extraction slice](ingest-extraction-records.md) adds test-injected
+page-aware source, target-parser and API/relay observation hooks. It does not
+activate runtime capture or replace the archive contracts documented here.
+
 ## Implemented contracts
 
 `RecordStore(root)` selects an explicit archive directory and performs no writes.
@@ -126,8 +130,9 @@ after a crash; no pruning or cleanup API is implemented.
 
 Moving the complete archive preserves identities and relative references. No
 original absolute mount path or database is needed. The implementation has no
-general bundle import/export, legacy migration, publication handoff, runtime
-capture policy selection, or provider callback yet; those remain later increments.
+general bundle import/export, legacy migration, publication handoff, or runtime
+capture policy selection; those remain later increments. Provider observation
+hooks exist only through the explicit extraction recorder described above.
 
 ## Validation
 

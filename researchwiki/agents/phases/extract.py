@@ -15,7 +15,7 @@ from ...pdf.text import extract_pdf
 from ...pdf.sections import anchor_sections
 
 
-def extract_sections(pdf_path: Path) -> tuple[dict, str]:
+def extract_sections(pdf_path: Path, *, records=None) -> tuple[dict, str]:
     """Run the structured section extractor over the PDF.
 
     Returns (sections_dict, full_text). `sections` has whichever
@@ -40,6 +40,8 @@ def extract_sections(pdf_path: Path) -> tuple[dict, str]:
     papers, with per-claim importance. `runner._warn_thin_extraction` now
     keys the zero-claims warning off that instead.
     """
+    if records is not None:
+        return records.extract(pdf_path)
     text, _ = extract_pdf(pdf_path, max_pages=80)
     sections = anchor_sections(text, max_chars=4000)
     return sections, text

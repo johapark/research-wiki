@@ -22,6 +22,13 @@ the reasoning behind any line below.
 
 ### Added
 
+- Test-injected extraction retention records immutable processing sources,
+  page-aware PDF representations, complete visible API/relay answers and target
+  candidate validation, deduplication and cap decisions. Relay retries retain
+  rejected answers before cleanup; archive failures preserve mailbox content and
+  settle budgets without automatic retry. Runtime capture activation follows
+  with the ingestion lifecycle integration.
+
 - Internal ingestion-record primitives retain immutable payloads, versioned
   attempt events, explicit capture inventory, and portable source references.
   Verification detects damaged history and permits explicit repair only for

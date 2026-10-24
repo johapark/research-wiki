@@ -27,7 +27,6 @@ metadata extraction.
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -172,6 +171,7 @@ def extract_target_claims(
     sections: dict,
     pdf_full_text: str | None = None,
     use_stub: bool = False,
+    records=None,
 ) -> TargetClaimsOutput:
     """Run one target-claims LLM call. Returns the parsed list.
 
@@ -180,8 +180,11 @@ def extract_target_claims(
     environment failures propagate: authoring without this checklist after an
     outage would make a degraded ingest indistinguishable from a good one.
     """
+    if records is not None:
+        records.check()
+        records.validate_inputs(sections, pdf_full_text)
     if use_stub:
-        return TargetClaimsOutput(
+        out = TargetClaimsOutput(
             claims=[
                 TargetClaim(
                     type="headline", content="(stub) example headline claim",
@@ -192,6 +195,10 @@ def extract_target_claims(
                       "stub keyword four", "stub keyword five"],
             model="(stub)",
         )
+        if records is not None:
+            records.no_call()
+            records.result(out, {"schema_version": 1, "status": "synthetic_no_call"}, synthetic=True)
+        return out
 
     from .. import model_config
     target_cfg = model_config.for_phase("target_claims")
@@ -199,112 +206,130 @@ def extract_target_claims(
         metadata, sections, pdf_full_text,
         max_chars=model_config.target_claims_max_chars(),
     )
+    from ...records.observation import observe_extraction
     try:
-        resp = llm.call(
-            phase="target_claims",
-            prompt=prompt,
-            system=_SYSTEM_PROMPT,
-            schema=_JSON_SCHEMA,
-            # Claude's adaptive thinking can consume the visible JSON budget.
-            # Keep configured reasoning effort for other providers.
-            disable_thinking=(
-                target_cfg.provider == "anthropic"
-                and target_cfg.model.startswith("claude-")
-            ),
-        )
-    except EnvironmentFailure:
+        with observe_extraction(records):
+            resp = llm.call(
+                phase="target_claims",
+                prompt=prompt,
+                system=_SYSTEM_PROMPT,
+                schema=_JSON_SCHEMA,
+                # Claude's adaptive thinking can consume the visible JSON budget.
+                # Keep configured reasoning effort for other providers.
+                disable_thinking=(
+                    target_cfg.provider == "anthropic"
+                    and target_cfg.model.startswith("claude-")
+                ),
+            )
+    except EnvironmentFailure as exc:
+        if records is not None:
+            records.phase_failed(exc)
         raise  # house rule 1 (errors.py): never author from a hidden outage
     except Exception as e:
-        return TargetClaimsOutput(
-            error=f"LLM call failed: {type(e).__name__}: {e}",
-        )
+        out = TargetClaimsOutput(error=f"LLM call failed: {type(e).__name__}: {e}")
+        if records is not None:
+            records.result(out, {"schema_version": 1, "status": "call_failed", "error_code": type(e).__name__})
+        return out
 
-    raw = resp.text.strip()
-    # Strip code fences if the model wrapped its JSON.
-    if raw.startswith("```"):
+    out, trace = parse_target_claims(resp.text)
+    out.model = resp.model
+    for name in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"):
+        setattr(out, name, getattr(resp, name, 0))
+    if records is not None:
+        records.result(out, trace)
+    return out
+
+
+def parse_target_claims(text: str) -> tuple[TargetClaimsOutput, dict]:
+    """Pure, versioned parse/selection; retain every recognized candidate decision.
+
+    Candidate IDs are local to this trace; artifact/call parents identify the
+    response. Exact offsets are supplied for salvaged objects, otherwise unknown.
+    The returned checklist preserves the existing normalization, tier sort and cap.
+    """
+    from ...records.jsonio import decode_json
+    from ...operations._wire import ContractError
+    from .commit import filter_keywords
+
+    raw = text.strip()
+    fenced = raw.startswith("```")
+    if fenced:
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
-    json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if not json_match:
-        return TargetClaimsOutput(
-            model=resp.model,
-            input_tokens=resp.input_tokens,
-            output_tokens=resp.output_tokens,
-            cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
-            cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
-            error=f"no JSON object in LLM output: {raw[:120]!r}",
-        )
-    raw_json = json_match.group(0)
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    trace = {"schema_version": 1, "parser": "target-claims-v1", "status": "parsed",
+             "code_fence_removed": fenced, "candidates": [], "selection_cap": 35,
+             "normalization": "content-key-v1", "keywords_before": [], "keywords_after": []}
+    if match is None:
+        trace["status"] = "no_json_object"
+        return TargetClaimsOutput(error=f"no JSON object in LLM output: {raw[:120]!r}"), trace
+    raw_json = match.group(0)
+    spans = []
     try:
-        data = json.loads(raw_json)
+        data = decode_json(raw_json)
+        trace["parsed_object"] = data
+        if not isinstance(data, dict) or not isinstance(data.get("claims", []), list):
+            trace["status"] = "invalid_claims_shape"
+            return TargetClaimsOutput(error="target claims must be a JSON array"), trace
         claims_raw = data.get("claims") or []
         keywords_raw = data.get("keywords") or []
         partial = False
-    except json.JSONDecodeError:
-        # Truncated output — extract complete claim objects via regex rather
-        # than failing entirely. Each object ends with `}` before a `,` or `]`.
-        claims_raw = [
-            m for m in (
-                _try_parse(s) for s in re.findall(r"\{[^{}]+\}", raw_json)
-            )
-            if m is not None
-        ]
-        keywords_raw = []
-        partial = True
-
-    _TIER_ORDER = {"critical": 0, "high": 1, "normal": 2}
-    _MAX_CLAIMS = 35
-
-    parsed: list[TargetClaim] = []
-    seen: set[str] = set()
-    for item in claims_raw:
+    except ContractError:
+        claims_raw = []
+        base = text.find(raw) + match.start()
+        for item in re.finditer(r"\{[^{}]+\}", raw_json):
+            try:
+                value = decode_json(item.group(0))
+            except ContractError:
+                value = None
+            claims_raw.append(value)
+            spans.append([base + item.start(), base + item.end()])
+        keywords_raw, partial = [], True
+        trace["status"] = "partial_salvage"
+    trace["keywords_before"] = keywords_raw
+    seen, accepted = {}, []
+    tiers = {"critical": 0, "high": 1, "normal": 2}
+    for index, item in enumerate(claims_raw):
+        candidate = {"candidate_id": f"candidate-{index:04d}", "raw_item_index": index,
+                     "raw_item": item, "response_span": spans[index] if partial else None,
+                     "validation_errors": [], "duplicate_of": None,
+                     "selected_for_checklist": False, "selection_reason": "invalid"}
+        trace["candidates"].append(candidate)
         if not isinstance(item, dict):
+            candidate["validation_errors"].append("not_an_object")
             continue
-        ctype = (item.get("type") or "").strip().lower()
-        importance = (item.get("importance") or "normal").strip().lower()
-        content = (item.get("content") or "").strip()
-        location = (item.get("location") or "").strip() if item.get("location") else ""
-        if not content or ctype not in CLAIM_TYPES or importance not in IMPORTANCE_TIERS:
+        values = {}
+        for name, default in (("type", ""), ("importance", "normal"), ("content", ""), ("location", "")):
+            value = item.get(name)
+            value = default if value is None or value == "" else value
+            if not isinstance(value, str):
+                candidate["validation_errors"].append(f"{name}_not_string")
+                value = ""
+            values[name] = value.strip().lower() if name in ("type", "importance") else value.strip()
+        if not values["content"]:
+            candidate["validation_errors"].append("empty_content")
+        if values["type"] not in CLAIM_TYPES:
+            candidate["validation_errors"].append("invalid_type")
+        if values["importance"] not in IMPORTANCE_TIERS:
+            candidate["validation_errors"].append("invalid_importance")
+        candidate["normalized"] = values
+        if candidate["validation_errors"]:
             continue
-        # Backstop dedup: the extractor sometimes emits the same fact twice
-        # (e.g. once cited to the Abstract, once to the main text). Collapse
-        # on a normalized content key so the author isn't fed near-identical
-        # claims that turn into repeated Key Contributions bullets.
-        key = _content_key(content)
+        key = _content_key(values["content"])
         if key in seen:
+            candidate.update(duplicate_of=seen[key], selection_reason="duplicate")
             continue
-        seen.add(key)
-        parsed.append(TargetClaim(
-            type=ctype, content=content,
-            importance=importance, location=location,
-        ))
-
-    # Sort by importance tier before capping so critical claims survive
-    # truncation even when the model emits them late in the output.
-    parsed.sort(key=lambda c: _TIER_ORDER.get(c.importance, 99))
-    parsed = parsed[:_MAX_CLAIMS]
-
-    from .commit import filter_keywords
-
-    return TargetClaimsOutput(
-        claims=parsed,
-        keywords=filter_keywords(keywords_raw),
-        model=resp.model,
-        input_tokens=resp.input_tokens,
-        output_tokens=resp.output_tokens,
-        cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
-        cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
-        error="partial JSON — truncated output recovered" if partial else None,
-    )
-
-
-def _try_parse(s: str) -> dict | None:
-    """Return parsed dict if `s` is valid JSON, else None."""
-    try:
-        v = json.loads(s)
-        return v if isinstance(v, dict) else None
-    except json.JSONDecodeError:
-        return None
+        seen[key] = candidate["candidate_id"]
+        accepted.append((TargetClaim(**values), candidate))
+    accepted.sort(key=lambda pair: tiers[pair[0].importance])
+    for rank, (_, candidate) in enumerate(accepted):
+        candidate.update(rank=rank, selected_for_checklist=rank < 35,
+                         selection_reason="selected" if rank < 35 else "cap")
+    keywords = filter_keywords(keywords_raw) if isinstance(keywords_raw, list) else []
+    trace["keywords_after"] = keywords
+    trace["keyword_filter"] = "commit.filter_keywords-v1"
+    return TargetClaimsOutput(claims=[claim for claim, _ in accepted[:35]], keywords=keywords,
+                              error="partial JSON — truncated output recovered" if partial else None), trace
 
 
 def _content_key(content: str) -> str:
@@ -434,7 +459,7 @@ def _build_prompt(
     return "\n".join(parts)
 
 
-def render_for_author_prompt(out: TargetClaimsOutput, *, max_normal: int = 5) -> str:
+def render_for_author_prompt(out: TargetClaimsOutput, *, max_normal: int = 5, records=None) -> str:
     """Render target claims for inclusion in the author prompt.
 
     Critical and high importance items are listed in full; normal items
@@ -443,6 +468,8 @@ def render_for_author_prompt(out: TargetClaimsOutput, *, max_normal: int = 5) ->
     when the output is empty (so the author prompt assembly can skip it).
     """
     if out.is_empty():
+        if records is not None:
+            records.author_exposure("", max_normal)
         return ""
     lines: list[str] = []
     for tier in ("critical", "high"):
@@ -468,4 +495,7 @@ def render_for_author_prompt(out: TargetClaimsOutput, *, max_normal: int = 5) ->
             loc = f" ({c.location})" if c.location else ""
             lines.append(f"  - [{c.type}] {c.content}{loc}")
         lines.append("")
-    return "\n".join(lines)
+    rendered = "\n".join(lines)
+    if records is not None:
+        records.author_exposure(rendered, max_normal)
+    return rendered

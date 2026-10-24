@@ -119,6 +119,12 @@ jobs:
       - name: Run fresh-install acceptance lifecycle
         run: python .github/scripts/fresh_install_acceptance.py
 
+      - name: Verify installed ingestion records
+        run: python .github/scripts/records_acceptance.py --expect-installed
+
+      - name: Verify installed extraction adapters
+        run: python .github/scripts/extraction_acceptance.py --expect-installed
+
   windows-concurrency:
     # The shared-write path used to fall back to no locking when `fcntl` was
     # absent. Keep the Windows guarantee executable without paying for the

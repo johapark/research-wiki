@@ -179,6 +179,13 @@ class BudgetTracker:
             self.tokens += actual_tokens
             self.cost_usd += actual_cost
 
+    def cancel_undispatched(self, reservation: _Reservation) -> None:
+        """Release intent prevented from making any observable dispatch."""
+        with self._lock:
+            self.reserved_tokens -= reservation.tokens
+            self.reserved_cost_usd -= reservation.cost_usd
+            self.calls -= 1
+
     def fail(self, reservation: _Reservation) -> None:
         """Charge the reservation when transport failure leaves usage unknown."""
         with self._lock:
