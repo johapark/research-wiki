@@ -1,4 +1,4 @@
-"""Explicit, test-injected extraction recorder; no policy selection or publishing."""
+"""Explicit extraction recorder; lifecycle owns policy, scope and publishing."""
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -22,7 +22,7 @@ class ExtractionRecorder:
     """Own observations for one already-started, required-capture attempt.
 
     Construction is read-only. The caller owns lifecycle, terminal outcome and
-    publication. No CLI/config path instantiates this recorder in this increment.
+    publication. The optional lifecycle owner selects and binds this recorder.
     A failed write latches; subsequent work cannot silently resume recording.
     """
 
@@ -63,7 +63,8 @@ class ExtractionRecorder:
         item = self._write(Artifact, artifact_id=uuid.uuid4().hex, attempt_id=self.spec.attempt_id,
                         kind=kind, payload=payload, producer=self.spec.producer,
                         created_at=now(), origin=origin, sources=tuple(sources),
-                        parents=tuple(parents), phase="target_claims" if slot.startswith("target.") else "extract",
+                        parents=tuple(parents), phase=("target_claims" if slot.startswith("target.") else
+                                                      "extract" if slot.startswith("source.") else None),
                         call_id=call_id, dispatch_id=dispatch_id)
         self._write(self.store.record_artifact, slot, item)
         return item.artifact_id

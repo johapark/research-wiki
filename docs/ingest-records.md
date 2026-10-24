@@ -1,14 +1,14 @@
 # Ingestion-record foundation
 
 The internal `researchwiki.records` package implements the archive foundation in
-[the retention plan](../evaluations/ingest-retention-plan.md). It is not connected
-to live ingestion yet. No archive is selected or initialized automatically, no
-provider is called, and no operation/job wire schema or ingestion default changes.
-There are no `researchwiki records` CLI commands in this increment.
+[the retention plan](../evaluations/ingest-retention-plan.md). The primitives below
+use explicit archive roots. [Opt-in lifecycle integration](ingest-retention.md)
+connects them to live ingestion and provides `researchwiki records` commands.
+Retention remains off unless selected explicitly in the active models profile.
 
-The following [extraction slice](ingest-extraction-records.md) adds test-injected
-page-aware source, target-parser and API/relay observation hooks. It does not
-activate runtime capture or replace the archive contracts documented here.
+The [extraction slice](ingest-extraction-records.md) supplies page-aware source,
+target-parser and API/relay observation hooks. Runtime ownership and recovery
+are documented in the lifecycle guide above.
 
 ## Implemented contracts
 
@@ -130,9 +130,8 @@ after a crash; no pruning or cleanup API is implemented.
 
 Moving the complete archive preserves identities and relative references. No
 original absolute mount path or database is needed. The implementation has no
-general bundle import/export, legacy migration, publication handoff, or runtime
-capture policy selection; those remain later increments. Provider observation
-hooks exist only through the explicit extraction recorder described above.
+general bundle import, legacy migration, or pruning. The lifecycle layer adds
+publication handoff, runtime policy selection and self-contained attempt export.
 
 ## Validation
 

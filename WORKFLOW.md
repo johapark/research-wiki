@@ -295,6 +295,16 @@ selection and read-only inspection do not depend on the caller's `.env`.
 See the [job command guide](./docs/jobs.md) for typed request/options files,
 profile selection, machine-readable results, and command-specific exit codes.
 
+### Retain ingestion observations
+
+Enable `ingest.retention.mode: required` with an explicit archive root in the
+selected models profile to preserve PDF versions, target extraction and publication
+receipts. `researchwiki records list/show/verify/export` inspects or copies those
+attempts; `records recover` resolves retained publication journals without model
+calls. Capture failures require inspection/reconciliation before paid work is
+repeated. See the [retention guide](./docs/ingest-retention.md) for settings, repair
+commands, portability and storage/time limits. Retention is off by default.
+
 ### 3. Inspect the new wiki page
 
 `wiki/compbio/kim-2026-structural-motif-search-across-the-protein.md`:

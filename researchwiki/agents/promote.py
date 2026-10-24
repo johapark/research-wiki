@@ -35,6 +35,7 @@ from ..fsatomic import write_text_atomic
 from ..mutation import corpus_lock, mutation as _mutation
 from ..paths import inbox_dir, papers_dir, wiki_dir
 from ..provenance import specific_author_model
+from ..records.errors import RecordStoreUnavailable
 from ..operations.lifecycle import (
     canonical_committed as _canonical_committed, maintenance as _maintenance,
     publication_details as _publication_details,
@@ -464,6 +465,8 @@ def _move_pdf(
                 "new_doi": new_doi,
             }
 
+    from ..records.publication import before_move
+    before_move(pdf_path, target)
     if pdf_path.parent.resolve() == inbox_dir().resolve():
         shutil.move(str(pdf_path), str(target))
     elif pdf_path.parent.resolve() == papers_dir().resolve():
@@ -791,6 +794,8 @@ def promote_to_wiki(
                 res.pdf_path, res.pdf_upgrade = _move_pdf(
                     source_pdf_path, stem, new_doi=metadata.get("doi"),
                 )
+            except RecordStoreUnavailable:
+                raise
             except Exception as e:
                 res.warnings.append(f"PDF move/copy failed: {e}")
                 res.promoted = False

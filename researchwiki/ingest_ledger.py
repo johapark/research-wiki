@@ -96,11 +96,18 @@ def observe_publication(binding):
 
 
 def journal_binding():
+    from .records.publication import journal_binding as records_binding
     binding = _current.get()
-    return {"ingest_ledger": binding} if binding else {}
+    return {**records_binding(), **({"ingest_ledger": binding} if binding else {})}
+
+
+def current_binding():
+    return _current.get()
 
 
 def prepare(snap):
+    from .records.publication import prepare as prepare_records
+    prepare_records(snap)
     binding = snap.details.get("ingest_ledger")
     if binding is None:
         return
@@ -117,6 +124,8 @@ def prepare(snap):
 
 def set_artifacts(snap, result, stem):
     """Captured before mark_committed, so its atomic journal write carries proof."""
+    from .records.publication import set_artifacts as records_artifacts
+    records_artifacts(snap, result, stem)
     if "ingest_ledger" not in snap.details:
         return
     from .operations.lifecycle import current_facts
@@ -133,13 +142,15 @@ def set_artifacts(snap, result, stem):
 
 def require_backups(document):
     """A missing backup cannot certify that this job's mutation was rolled back."""
-    if "ingest_ledger" in document.get("details", {}):
+    if {"ingest_ledger", "records_binding"} & set(document.get("details", {})):
         for entry in document["entries"]:
             if entry["backup"] and not Path(entry["backup"]).exists():
                 raise ValueError("ingest rollback backup is missing; receipt retained")
 
 
 def archive(document, *, committed):
+    from .records.publication import archive as archive_records
+    archive_records(document, committed=committed)
     binding = document.get("details", {}).get("ingest_ledger")
     if binding is None:
         return

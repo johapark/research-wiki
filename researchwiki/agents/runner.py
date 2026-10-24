@@ -50,10 +50,12 @@ from ..log import log
 from ..operations.lifecycle import gate_evaluated, observed_attempt, observed_phase
 from .publication import finish_publication
 from ..provenance import specific_author_model
+from ..records.lifecycle import record_ingestion, bind_attempt, check_capture
 
 __all__ = ["run_ingest", "_keyword_body_gaps"]
 
 
+@record_ingestion
 @observed_attempt
 def run_ingest(
     pdf_path: str | Path,
@@ -114,6 +116,7 @@ def run_ingest(
         max_wall_seconds=max_wall_seconds,
     )
 
+    bind_attempt(ctx)
     log(f"attempt_id={ctx.attempt_id}", tag="agent")
     log(f"pdf={pdf_path.name}", tag="agent")
 
@@ -361,7 +364,9 @@ def run_ingest(
 
         # Phase 6: commit — write the winning draft to sandbox
         ctx.next_iter()
+        check_capture()
         ctx.committed_path = _phase_commit(ctx, conn)
+        check_capture()
         log(f"commit  → {ctx.committed_path}", tag="agent")
 
     except BudgetExhausted as e:

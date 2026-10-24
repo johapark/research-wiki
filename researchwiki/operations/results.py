@@ -55,9 +55,12 @@ def error_from_exception(error: BaseException) -> OperationError:
     from ..agents.context import PromoteFailed, ReconcileFailed, StemRenameRefused
     from ..agents.relay import RelayTimeout
     from ..errors import EnvironmentFailure
+    from ..records.errors import RecordStoreUnavailable
 
     code, category, retry = "internal_error", "internal", "not_retryable"
-    if isinstance(error, RelayTimeout):
+    if isinstance(error, RecordStoreUnavailable):
+        code, category, retry = "capture_unavailable", "environment", "reconcile_first"
+    elif isinstance(error, RelayTimeout):
         code, category, retry = "relay_timeout", "environment", "after_environment_recovery"
     elif isinstance(error, BudgetExhausted):
         code, category, retry = "budget_exhausted", "budget", "after_correction"

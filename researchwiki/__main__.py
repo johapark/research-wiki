@@ -234,8 +234,8 @@ def main(argv: list[str] | None = None) -> int:
     # `init` is exempt — it's the one command meant for a not-yet-a-wiki dir.
     # The task itself still verifies the clone assets before writing anything;
     # exemption here means "missing wiki inside a checkout", not "any cwd".
-    # Jobs validate their explicit --library-root instead of the caller's CWD.
-    if command not in {"init", "jobs"} and not (Path.cwd() / "wiki").is_dir():
+    # Jobs and records validate explicitly selected library/archive roots.
+    if command not in {"init", "jobs", "records"} and not (Path.cwd() / "wiki").is_dir():
         print(f"researchwiki {command}: no wiki/ directory under {Path.cwd()} — "
               "run from the cloned repository root; if it is not initialized, "
               "run `researchwiki init` there.",

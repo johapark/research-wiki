@@ -546,7 +546,7 @@ def _recover_pending_locked() -> list[str]:
         # Restored files are now canonical. Never replay their backups after a
         # maintenance failure: a later mutation may publish newer content.
         document["status"] = _COMMITTED
-        if "ingest_ledger" in document.get("details", {}):
+        if {"ingest_ledger", "records_binding"} & set(document.get("details", {})):
             document["details"]["ingest_rolled_back"] = True
         write_json_atomic(journal_path,
                           {k: v for k, v in document.items() if k != "journal_path"})

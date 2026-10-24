@@ -184,7 +184,7 @@ def find_exact_duplicate(ctx, prior_stem: str | None):
     try:
         if (not canonical_pdf.exists()
                 or ctx.pdf_path.resolve() == canonical_pdf.resolve()
-                or file_sha256(ctx.pdf_path) != file_sha256(canonical_pdf)):
+                or file_sha256(processing_pdf(ctx)) != file_sha256(canonical_pdf)):
             return None
     except OSError:
         return None

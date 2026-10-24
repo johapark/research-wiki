@@ -1,6 +1,6 @@
 # Ingestion retention, provenance, and auditability plan
 
-Status: Stage 0 foundation and Stage 1 extraction hooks implemented; lifecycle activation pending.
+Status: Stage 0 foundation and Stage 1 opt-in extraction lifecycle implemented; default rollout pending.
 Created: 2026-10-22. Code review and implementation-scope refinement: 2026-10-23.
 Code baseline inspected: `0ba18dc162fda2987ae2ba1f8ad7c7b28c0b9750`.
 
@@ -28,8 +28,10 @@ The archive foundation in §19 Stage 0 is implemented on
 It uses explicit temporary-root fixtures and is not wired into live ingestion.
 Stage 1's [extraction-observation slice](../docs/ingest-extraction-records.md) is
 implemented on `feat/ingest-extraction-retention`, with explicit test injection.
-The next coding change is its separate lifecycle integration. No default capture
-behavior has been activated.
+Its [opt-in lifecycle integration](../docs/ingest-retention.md) is implemented on
+`feat/ingest-retention-lifecycle`. Capture remains off by default. The next coding
+stage is explainable grading evidence; controlled storage/time measurements still
+gate any default switch.
 
 ## 1. Purpose
 
@@ -921,7 +923,7 @@ provider-controlled settings, budget cancellation/settlement and archive failure
 Unreadable relay protocol envelopes are explicitly unavailable rather than copied
 wholesale or represented as full answer capture. See the
 [extraction guide](../docs/ingest-extraction-records.md). Lifecycle activation and
-its operator tooling below remain unimplemented.
+its operator tooling below are now implemented; see the lifecycle checkpoint.
 
 Deliver through two dependent, reviewable PRs after the store foundation:
 
@@ -937,6 +939,17 @@ scope ownership, early and duplicate exits, minimal publication health check and
 displaced-source preservation, and publication-safe finalization. Add minimal
 list/show/verify and self-contained export for independent acceptance. No default
 switch, public wire-field additions, import/catalog/pruning, or paid backfill.
+
+Lifecycle checkpoint (2026-10-24): the active models profile can select required
+`extraction-v1` capture with an explicit archive root. One owner spans operation
+post-work, with a direct-runner fallback. Native jobs freeze selection across
+configuration identity and execution. Promotion preserves displaced PDFs, checks
+canonical bytes before commit, and hands a validated receipt to the archive before
+journal cleanup. Inspection, explicit checkpoint repair, publication-journal
+recovery and self-contained export are available through `researchwiki records`.
+Captured batch result sidecars block automatic replay of capture failures or
+unknown outcomes. Interrupted attempts can remain open after receipt recovery;
+no missing observations or successful terminal outcome are reconstructed.
 
 Acceptance: source, request, response and transformations remain inspectable after
 relay cleanup, DB deletion, cache deletion and relocation; an unselected candidate

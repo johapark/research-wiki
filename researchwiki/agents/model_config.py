@@ -201,7 +201,7 @@ _ROLE_FIELDS = frozenset({
     "provider", "model", "temperature", "max_tokens", "reasoning_effort", "rpm",
 })
 _PHASE_FIELDS = _ROLE_FIELDS | {"role"}
-_INGEST_FIELDS = frozenset({"n_drafts", "target_claims_max_chars"})
+_INGEST_FIELDS = frozenset({"n_drafts", "target_claims_max_chars", "retention"})
 OPENAI_COMPAT_PROVIDERS = frozenset({"openai-compatible", "lmstudio", "openai"})
 SUPPORTED_PROVIDERS = OPENAI_COMPAT_PROVIDERS | {"anthropic", "chat-relay"}
 
@@ -361,8 +361,14 @@ def _validate_document(path: Path, data: dict) -> None:
         raise _schema_error(
             path, f"ingest has unknown field(s): {', '.join(unknown_ingest)}",
         )
-    for name in _INGEST_FIELDS & set(ingest):
+    for name in (_INGEST_FIELDS - {"retention"}) & set(ingest):
         _validate_positive_int(path, f"ingest.{name}", ingest[name])
+    if "retention" in ingest:
+        from ..records.settings import validate
+        try:
+            validate(ingest["retention"])
+        except ValueError as exc:
+            raise _schema_error(path, str(exc)) from exc
 
 
 @dataclass(frozen=True)

@@ -56,11 +56,16 @@ def emit(kind, *, call_id=None, stage=None, **details):
 
 @contextmanager
 def phase(name, *, ctx=None, slot=None):
+    from ..records.lifecycle import current_owner, check_capture
+    owner = current_owner()
+    if owner is not None:
+        owner.visited.add(name)
     identity = uuid.uuid4().hex
     details = {"phase": name, "iteration": getattr(ctx, "iteration", None), "slot": slot}
     emit("phase_started", call_id=identity, **details)
     try:
         yield
+        check_capture()
     except BaseException as exc:
         emit("phase_failed", call_id=identity, status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
              error_code=type(exc).__name__, **details)

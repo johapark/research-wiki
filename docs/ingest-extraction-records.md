@@ -3,9 +3,8 @@
 This is Stage 1's extraction slice from the
 [retention plan](../evaluations/ingest-retention-plan.md), built on the
 [archive foundation](ingest-records.md). The recorder is explicitly injected for
-tests and adapter acceptance. CLI ingestion, jobs, profiles and library defaults
-do not select it. Required capture needs the following lifecycle slice before
-operator activation.
+tests and adapter acceptance. [Lifecycle integration](ingest-retention.md) now
+selects and owns it for explicitly enabled CLI, operation and job ingestion.
 
 ## Source ownership and representations
 
@@ -25,9 +24,9 @@ envelope retains the attempt's producer/version identity.
 
 `bind_context(ctx)` keeps `ctx.pdf_path` as the original file owned by promotion
 and selects `processing_pdf_path` for metadata, extraction, crosslinks and grading
-reads. It verifies attempt/source identity. This binding is test-injected; the
-runner does not instantiate the recorder. Source replacement checks at promotion
-and preservation of displaced canonical PDFs remain lifecycle work.
+reads. It verifies attempt/source identity. The lifecycle layer instantiates and
+binds the recorder before metadata work, guards source replacement at promotion,
+and preserves displaced canonical PDFs.
 
 ## Target extraction
 
@@ -74,7 +73,8 @@ in answer artifacts even when only some items can be salvaged.
 
 The optional `render_for_author_prompt(output, records=records, max_normal=5)`
 records rendered exposure and the normal-item cap separately from the full target
-result. The live author path does not inject this argument yet.
+result. The live author path selects the current attempt's recorder automatically
+when rendering that attempt's target output.
 
 ## API, relay and failure boundaries
 
@@ -106,10 +106,9 @@ the relay mailbox and prevents automatic retry. Phase-input retention failure oc
 after settlement and cannot charge twice. Diagnostic capture stores error classes
 and HTTP status rather than secret-bearing provider exception bodies.
 
-Activation still needs parent operation ownership through post-work, terminal and
-early-exit inventory, profile/job configuration identity, publication guards and
-receipt handoff, and operator inspection/export. The lifecycle must prevent capture
-failure from becoming a publishable success.
+The lifecycle guide describes parent operation ownership through post-work,
+terminal and early-exit inventory, profile/job identity, publication guards,
+receipt handoff and operator inspection/export.
 
 ## Validation
 

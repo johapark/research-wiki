@@ -119,7 +119,7 @@ class Context:
     budget_exhausted: dict | None = None
     run_memory_evolve: bool = False          # opt-in model-backed synthesis maintenance
     processing_pdf_path: Path | None = None  # retained read path; pdf_path still owns inbox/promotion
-    extraction_records: object | None = None  # test-injected until lifecycle activation
+    extraction_records: object | None = None  # optional lifecycle-owned extraction recorder
 
     # Filled by phases (None until set):
     paper_stem: str | None = None

@@ -133,7 +133,15 @@ def _worker(
     child_env["PYTHONIOENCODING"] = "utf-8"
 
     log_path = _worker_log_path(batch_dir, pdf_path)
-    cmd = [sys.executable, "-m", "researchwiki", *subcommand, pdf_path, *extra_args]
+    report_path = None
+    worker_args = list(extra_args)
+    if subcommand == ["agent", "ingest"]:
+        from ..records.settings import selected
+        if selected().mode == "required":
+            import uuid
+            report_path = batch_dir / f"{log_path.stem}-{uuid.uuid4().hex}.result.json"
+            worker_args += ["--result-file", str(report_path.resolve())]
+    cmd = [sys.executable, "-m", "researchwiki", *subcommand, pdf_path, *worker_args]
     with log_path.open("w", encoding="utf-8") as log_fp:
         log_fp.write(f"# cmd: {' '.join(cmd)}\n")
         log_fp.flush()
@@ -154,7 +162,18 @@ def _worker(
                 print(line, file=sys.stderr, end="", flush=True)
         returncode = proc.wait()
     status = "completed" if returncode == 0 else "failed"
-    return {"input": pdf_path, "status": status, "returncode": returncode}
+    record = {"input": pdf_path, "status": status, "returncode": returncode}
+    if report_path is not None:
+        record["retry"] = "reconcile_first"
+        try:
+            from ..operations import IngestResult
+            result = IngestResult.from_dict(json.loads(report_path.read_text(encoding="utf-8")))
+            record["attempt_id"] = result.attempt_id
+            if result.publication != "unknown":
+                record["retry"] = result.error.retry if result.error else "not_retryable"
+        except (OSError, ValueError):
+            pass  # Missing/invalid proof never authorizes replay of captured work.
+    return record
 
 
 def _split_unresumable(
@@ -227,6 +246,8 @@ def _should_retry(record: dict) -> bool:
     Ctrl-C forwarded to the child) is itself the kind of transient condition
     a retry is meant to survive.
     """
+    if record.get("retry") in ("reconcile_first", "not_retryable", "after_correction"):
+        return False
     rc = record.get("returncode")
     return rc not in (1, 3)
 

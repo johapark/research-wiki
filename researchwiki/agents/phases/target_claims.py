@@ -467,6 +467,11 @@ def render_for_author_prompt(out: TargetClaimsOutput, *, max_normal: int = 5, re
     priority context. Returns a markdown-formatted block; empty string
     when the output is empty (so the author prompt assembly can skip it).
     """
+    if records is None:
+        from ...records.lifecycle import current_owner
+        owner = current_owner()
+        if owner is not None and getattr(owner.ctx, "target_claims", None) is out:
+            records = owner.records
     if out.is_empty():
         if records is not None:
             records.author_exposure("", max_normal)

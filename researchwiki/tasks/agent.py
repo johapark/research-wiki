@@ -445,6 +445,10 @@ def _published_with_pending_work(result) -> int:
     print(f"  Page:   {result.page_path}")
     print(f"  PDF:    {result.pdf_path}")
     print(f"  ⚠ Post-publication work interrupted ({result.error.code}); canonical content preserved")
+    if result.error.code == "capture_unavailable":
+        print(f"  Capture: researchwiki records show {result.attempt_id}")
+        print(f"           researchwiki records verify {result.attempt_id} --repair-checkpoint")
+        print("           researchwiki records recover")
     print("  Repair: researchwiki db rebuild; researchwiki reindex")
     print(f"          researchwiki grade paper {result.paper_stem}")
     if result.attempt_id:

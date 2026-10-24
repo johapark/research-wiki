@@ -1,4 +1,4 @@
-"""Internal, explicit-root ingestion record primitives; not wired into live ingestion."""
+"""Internal archive primitives, shared by explicit hooks and opt-in live retention."""
 
 from .contracts import (
     Artifact, AttemptFinished, AttemptSpec, BlobRef, CapturePolicy, Producer,

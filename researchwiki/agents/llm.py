@@ -1001,6 +1001,8 @@ def call(
     silently ignore. Resolution: explicit kwarg → cfg.reasoning_effort
     (when phase=) → None.
     """
+    from ..records.lifecycle import check_capture
+    check_capture()
     # Observation is explicit and per call; mixed API/relay phase routing and
     # existing budget/provider semantics are unchanged.
     rpm: int | None = None

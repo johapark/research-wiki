@@ -67,6 +67,10 @@ def execution_identity(request):
                     sorted((Path(request.library_root) / "prompts").rglob("*.md"))],
         "routing": routing,
     }
+    from ..records.settings import selected
+    retention = selected()
+    if retention.mode == "required":
+        configuration["retention"] = retention.identity()
     # No raw profile bytes, API keys, prompt text, or provider config values
     # appear in the persisted identity. Credentials are not part of its hash.
     auxiliary = [(path, file_sha256(Path(path))) for path in (

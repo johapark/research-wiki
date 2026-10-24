@@ -17,6 +17,7 @@ from .environment import configure_worker, execution_identity
 from .events import EventWriter
 from .files import JobConflict, JobStoreUnavailable
 from .store import JobStore
+from ..records.settings import freeze_selected
 
 
 class Tee:
@@ -61,13 +62,14 @@ def _execute_owned(store, record, owner, operation):
                 begin(binding)
                 validate_inputs(request)
                 effective = configure_worker(request)
-                identity = execution_identity(effective)
-                record = store.set_identity(job_id, owner, generation, identity)
-                events = EventWriter(store.path(job_id) / "events.jsonl")
-                recorder = EventRecorder(request.request_id, events, job_id=job_id)
-                started = True
-                with observe_publication(binding):
-                    result = operation(effective, event_sink=recorder)
+                with freeze_selected():
+                    identity = execution_identity(effective)
+                    record = store.set_identity(job_id, owner, generation, identity)
+                    events = EventWriter(store.path(job_id) / "events.jsonl")
+                    recorder = EventRecorder(request.request_id, events, job_id=job_id)
+                    started = True
+                    with observe_publication(binding):
+                        result = operation(effective, event_sink=recorder)
                 warnings = result.warnings
                 if record.source_changed:
                     warnings += ("Source content changed since the parent job",)

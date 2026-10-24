@@ -39,6 +39,7 @@ def ingest(request: IngestRequest, *, event_sink=None) -> IngestResult:
 
 def execute_ingest(request, *, event_sink=None, runner=None, recover=None) -> IngestExecution:
     """Internal hook for CLI rendering and deterministic engine integration tests."""
+    from ..records.lifecycle import capture_operation
     recorder = event_sink if isinstance(event_sink, EventRecorder) else EventRecorder(
         request.request_id, event_sink if event_sink is not None else lambda event: None,
     )
@@ -52,7 +53,7 @@ def execute_ingest(request, *, event_sink=None, runner=None, recover=None) -> In
             error=error_from_exception(error), promotion=request.options.promotion,
         ), error=error)
     facts = IngestFacts()
-    with observe_models(recorder), observe_lifecycle(facts):
+    with observe_models(recorder), observe_lifecycle(facts), capture_operation(request.request_id) as capture:
         emit("operation_started", call_id=request.request_id)
         execution = _execute(request, recorder, facts, runner, recover)
         result = result_with_facts(execution.result, facts)
@@ -61,6 +62,8 @@ def execute_ingest(request, *, event_sink=None, runner=None, recover=None) -> In
         if facts.publication and result.projections == "maintenance_pending":
             result = replace(result, warnings=result.warnings + ("Required projection maintenance is pending",))
         result = replace(result, job_id=recorder.job_id)
+        execution.result = result
+        result = capture.finish_operation(execution, facts)
         emit("operation_finished", call_id=request.request_id,
              status="interrupted" if result.execution == "interrupted" else result.outcome,
              publication=result.publication, projections=result.projections,
@@ -72,6 +75,7 @@ def execute_ingest(request, *, event_sink=None, runner=None, recover=None) -> In
 
 def _execute(request, recorder, facts, runner, recover):
     from ..agents.budget import BudgetExhausted
+    from ..records.lifecycle import current_owner, check_capture
 
     ctx = None
     started = False
@@ -84,6 +88,8 @@ def _execute(request, recorder, facts, runner, recover):
             raise ContractError("event recorder belongs to a different request")
         with phase("validation"):
             validate_runtime(request)
+            if current_owner() is not None:
+                current_owner().configure()
         if not request.options.use_stub:
             from ..agents.llm import preflight_providers
 
@@ -109,6 +115,7 @@ def _execute(request, recorder, facts, runner, recover):
                 # failure into an invitation to repeat authoring/publication.
                 post = PostWorkReport(state="failed", warnings=[f"post-work: {type(exc).__name__}"])
             result = replace(result, post_work=post.state, warnings=tuple(post.warnings))
+            check_capture()
     except (Exception, BudgetExhausted, KeyboardInterrupt) as exc:
         if ctx is not None:
             # Preserve an explicit terminal runner outcome if a later adapter

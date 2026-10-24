@@ -22,6 +22,14 @@ the reasoning behind any line below.
 
 ### Added
 
+- Opt-in `ingest.retention` settings activate extraction capture across foreground
+  ingestion, batches and durable jobs. Capture spans operation post-work, keeps
+  source versions stable through promotion, preserves displaced PDFs and hands
+  publication receipts to the archive before journal cleanup. Capture failure
+  blocks paid replay and preserves known commits. `records list`, `show`, `verify`,
+  `export` and `recover` provide inspection, explicit checkpoint repair, portable
+  attempt copies and model-free publication-journal recovery.
+
 - Test-injected extraction retention records immutable processing sources,
   page-aware PDF representations, complete visible API/relay answers and target
   candidate validation, deduplication and cap decisions. Relay retries retain
