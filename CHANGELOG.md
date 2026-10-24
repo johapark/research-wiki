@@ -27,8 +27,9 @@ the reasoning behind any line below.
   tournament/revision decisions. `records show --lineage` inspects losing and
   rejected drafts independently of the corpus and database, and recovers the exact
   ingest-time Markdown page linked from staged and committed publication receipts.
-  Full-ingest capture remains pending for conditional omission reasons and terminal
-  post-operation status.
+  Conditional skips now carry phase/call reason records; unexplained missing
+  observations remain unknown. Full-ingest capture remains pending acceptance
+  coverage for interrupted and post-operation paths.
 
 - Ingestion retention now preserves complete grading candidate sets, exact source
   spans and verification inputs, numeric/negation observations, semantic scores

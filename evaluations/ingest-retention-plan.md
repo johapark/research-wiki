@@ -923,7 +923,10 @@ Partial implementation checkpoint (2026-10-24): reconcile and crosslink inputs/r
 author/grade/critic/evolve/DEBUG/tournament boundaries, verified prepublication page
 input and commit-time keyword/category calls are retained. Drafts, critiques, checks,
 parent links and selection decisions include losing/rejected revisions. Shared API/relay
-capture retains phase requests and permitted visible replies.
+capture retains phase requests and permitted visible replies. `lineage.omissions`
+records conditional phase/call skips with stable reason codes and structured context;
+unexplained missing observations stay unknown. Terminal failures explain why later
+phases were not entered.
 `records show --lineage` exposes portable payloads. See the
 [developer reference](../docs/ingest-dev-reference.md#draft-critique-and-selection-lineage).
 
@@ -934,14 +937,10 @@ staged receipt and the page artifact. A rollback receipt links the attempted pag
 when one had been captured. This makes the ingest-time page recoverable independently
 of the mutable, Git-ignored corpus page. `records show --lineage` exposes its text.
 
-Still required: richer conditional omission reasons for phases and calls that are
-intentionally skipped or unavailable. Keep `full-ingest-v1` disabled until these
-are covered.
-
-Remaining deliverables: phase-specific skipped, unavailable and conditional call
-reasons; and terminal status covering post-operation work. Extend Stage 1's
-publication bridge and safe checkpoint reconciliation across that full-pipeline
-lineage.
+Implementation deliverables are present: phase-specific omission reasons, the
+rendered page snapshot/publication bridge, and the operation result recorded after
+post-work. Keep `full-ingest-v1` disabled until the omission matrix, interrupted
+attempts, and post-operation terminal status have acceptance coverage.
 
 Acceptance: losing/rejected drafts and interrupted attempts survive; publication
 status comes from durable commit evidence; post-commit capture failure cannot cause

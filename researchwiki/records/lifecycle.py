@@ -88,7 +88,7 @@ class CaptureOwner:
         records = self.records
         self.check()
         manifest = records._write(records.store.read_attempt, records.spec.attempt_id)
-        self.lineage.close(manifest)
+        self.lineage.close(manifest, terminal=values)
         if records.grading_answer_unavailable:
             records._write(records.store.resolve_slot, records.spec.attempt_id, "grading.response", "unavailable",
                            "visible_verification_answer_unavailable")
@@ -117,7 +117,7 @@ class CaptureOwner:
         records.artifact("attempt.result", "terminal_result", {"schema_version": 1, **values})
         records._write(records.store.finish_attempt, records.spec.attempt_id, AttemptFinished(
             execution=values["execution"], outcome=values["outcome"], publication=values["publication"],
-            projections=values["projections"]))
+            projections=values["projections"], reason=values.get("error_code")))
 
     def finish_operation(self, execution, facts):
         if self.settings is None or self.settings.mode == "off" or self.ctx is None:
@@ -127,7 +127,12 @@ class CaptureOwner:
         result = replace(result, attempt_id=self.ctx.attempt_id, publication=publication,
                          projections=result.projections if publication != "not_published" else "not_applicable")
         try:
-            self.finish({"scope": "operation", **result.to_dict()})
+            values = {"scope": "operation", **result.to_dict()}
+            error = result.error
+            values["error_code"] = (getattr(error, "code", None)
+                                    or (error.get("code") if isinstance(error, dict) else None)
+                                    or (type(execution.error).__name__ if execution.error else None))
+            self.finish(values)
         except RecordStoreUnavailable as exc:
             from ..operations.results import error_from_exception
             execution.error = exc
@@ -180,7 +185,8 @@ def record_ingestion(fn):
                     try:
                         owner.finish({"scope": "runner", "execution": "interrupted" if isinstance(error, KeyboardInterrupt) else "finished",
                                       "outcome": None if isinstance(error, KeyboardInterrupt) else outcome,
-                                      "publication": publication, "projections": facts.projections if publication == "published" else "not_applicable"})
+                                      "publication": publication, "projections": facts.projections if publication == "published" else "not_applicable",
+                                      "error_code": type(error).__name__ if error else None})
                     except RecordStoreUnavailable as exc:
                         exc.publication = publication
                         if error is None:

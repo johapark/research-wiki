@@ -276,6 +276,8 @@ def propose_keywords(
     will surface it as a missing-keywords warning on the next pass.
     """
     if use_stub:
+        from ...records.lineage import note_call_omission
+        note_call_omission("keywords", "stub_keywords_disabled", {"transport": "stub"})
         return KeywordsOutput()
 
     # Pick the input excerpt: full-text re-anchor preferred, sections next, draft last.

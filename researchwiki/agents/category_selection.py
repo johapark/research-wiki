@@ -13,6 +13,10 @@ def suggest_category_for_page(
     A typed provider failure is not an abstention: callers must stop before a
     canonical page is silently filed in ``other``.
     """
+    if not use_llm:
+        from ..records.lineage import note_call_omission
+        note_call_omission("classifier", "llm_classifier_disabled",
+                           {"route": "deterministic_knn"})
     try:
         from ..search import (
             SearchBackendUnavailable,
@@ -21,10 +25,14 @@ def suggest_category_for_page(
             suggest_category_knn,
         )
     except ImportError:
+        from ..records.lineage import note_call_omission
+        note_call_omission("classifier", "search_backend_import_unavailable")
         return None, "none"
     try:
         backend = get_default_backend()
     except SearchBackendUnavailable:
+        from ..records.lineage import note_call_omission
+        note_call_omission("classifier", "search_backend_unavailable")
         return None, "none"
     try:
         suggestion = (suggest_category if use_llm else suggest_category_knn)(

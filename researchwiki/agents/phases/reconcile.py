@@ -109,9 +109,13 @@ def propose_metadata_llm(pdf_text: str, *, use_stub: bool = False) -> dict:
     """
     head = pdf_text[:6000]
     if not head.strip():
+        from ...records.lineage import note_call_omission
+        note_call_omission("reconcile", "source_text_empty")
         return _empty_metadata()
 
     if use_stub:
+        from ...records.lineage import note_call_omission
+        note_call_omission("reconcile", "stub_response_used", {"transport": "stub"})
         return _empty_metadata()
 
     prompt = f"# Paper text (first 1-2 pages)\n\n{head}"
@@ -280,6 +284,9 @@ def reconcile_metadata(
     if use_llm:
         llm_meta = propose_metadata_llm(text)
         sources.extend(["llm-extractor"] if any(llm_meta.values()) else [])
+    else:
+        from ...records.lineage import note_call_omission
+        note_call_omission("reconcile", "llm_reconciliation_disabled")
 
     seed_title = title_override or llm_meta["title"] or pdf_meta_title or pdf_first_page_title
 

@@ -33,7 +33,7 @@ def observe_call(phase, call_id, request):
     from .lineage import MODEL_PHASES, current_scope, PhaseCallRecorder
     scope = current_scope()
     if scope is not None and phase in MODEL_PHASES.get(scope.phase, set()) and recorder is None:
-        recorder = PhaseCallRecorder(scope)
+        recorder = PhaseCallRecorder(scope, phase)
     capture = RetainedCall(recorder, call_id, request) if recorder else None
     token = _call.set(capture)
     try:

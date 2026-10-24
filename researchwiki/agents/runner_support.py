@@ -139,6 +139,9 @@ def prepare_keywords(ctx, conn, cleaned_text: str, *, writer=write_iteration):
     started = time.monotonic()
     extracted = list(getattr(ctx.target_claims, "keywords", None) or [])
     if len(extracted) >= phases.MIN_KEYWORDS:
+        from ..records.lineage import note_call_omission
+        note_call_omission("keywords", "target_claim_keywords_reused",
+                           {"keyword_count": len(extracted)})
         out = phases.KeywordsOutput(
             keywords=extracted,
             model=getattr(ctx.target_claims, "model", "") or "(target_claims)",

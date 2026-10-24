@@ -1056,6 +1056,8 @@ def call(
     _np_prompt = f"{cache_prefix}\n\n{prompt}" if cache_prefix else prompt
 
     if use_stub:
+        from ..records.lineage import note_call_omission
+        note_call_omission(phase, "stub_response_used", {"transport": "stub"})
         return call_stub(
             model=model,
             prompt=_np_prompt,

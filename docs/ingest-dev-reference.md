@@ -359,6 +359,18 @@ they do not enter target-extraction inventory. Required input/call capture failu
 stop further work using the existing latch and budget policy. No extra model calls
 are introduced.
 
+`lineage.omissions` retains each conditional skip as a `conditional_omission`
+artifact with a target (`phase`, `model_call`, or `model_response`), a stable
+reason code, the relevant phase/call name, and bounded structured context.
+Examples include `no_actionable_findings` for a critic pass-through,
+`critic_found_no_revision_targets` for an omitted evolve phase,
+`target_claim_keywords_reused` when commit reuses extracted keywords, and
+`pipeline_stopped_after_error` with the terminal error code for later phases.
+The phase request/response inventory is resolved with a summary reason when every
+declared call was conditionally omitted; the per-call artifacts preserve each
+specific cause. A missing explanation stays `unknown`, so incomplete observation
+is not mistaken for an intentional skip.
+
 The canonical Markdown page is retained as one content-addressed representation
 before the journal commit point. Its digest is checked against the bytes written
 to the corpus. Staged and committed publication receipts link to that same page
@@ -370,8 +382,9 @@ This archive snapshot preserves the ingest-time training text; it is not a claim
 that the draft differs from the published page. The existing mutation journal
 and ledger remain publication authorities.
 
-This remains a partial Stage 3 implementation. Richer conditional omission
-reasons are still required before a full-ingest profile.
+This remains a partial Stage 3 implementation. Keep `full-ingest-v1` disabled
+until the omission matrix, interrupted attempts, and post-operation terminal
+status have acceptance coverage.
 
 ## Inspection payloads
 

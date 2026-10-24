@@ -125,6 +125,9 @@ def critic(
         # its own.
         gaps = gaps if weak else []
     if not weak and not gaps:
+        from ...records.lineage import note_call_omission
+        note_call_omission("critic", "no_actionable_findings",
+                           {"weak_claims": 0, "coverage_gaps": 0})
         return CritiqueOutput(
             notes="no weak claims or coverage gaps detected; draft passes grader thresholds",
             weak_claims=[],
@@ -406,6 +409,8 @@ def debug(
     the gate failure rather than fabricating one.
     """
     if not issues:
+        from ...records.lineage import note_call_omission
+        note_call_omission("debug", "no_structural_issues")
         return DebugOutput(
             text=draft.text, model="(noop)", temperature=0.0,
             input_tokens=0, output_tokens=0, issues_addressed=[],

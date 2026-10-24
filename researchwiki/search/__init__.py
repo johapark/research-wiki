@@ -264,6 +264,8 @@ def suggest_category_llm(
     """
     seed = (title or "").strip() + "\n\n" + (abstract or "").strip()
     if not seed.strip():
+        from ..records.lineage import note_call_omission
+        note_call_omission("classifier", "classifier_seed_empty")
         return None
 
     try:
@@ -274,6 +276,8 @@ def suggest_category_llm(
     try:
         from ..agents import llm
     except ImportError:
+        from ..records.lineage import note_call_omission
+        note_call_omission("classifier", "llm_module_unavailable")
         return None
 
     prompt = _build_classifier_prompt(title, abstract, hits)
@@ -351,6 +355,9 @@ def suggest_category(
     `tasks/ingest.py`) don't need updates.
     """
     if os.environ.get(_DISABLE_LLM_ENV):
+        from ..records.lineage import note_call_omission
+        note_call_omission("classifier", "disabled_by_environment",
+                           {"setting": _DISABLE_LLM_ENV})
         return suggest_category_knn(backend, title, abstract, k=k,
                                     min_agreement=min_agreement)
 

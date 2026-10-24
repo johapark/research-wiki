@@ -329,10 +329,18 @@ def run_ingest(
         # Both axes have to gate the loop: weak claims alone let the worst-recall
         # drafts exit here, since a page that omits content has less text to be
         # weak about.
+        from ..records.lineage import note_phase_omission
+        if ctx.max_evolve <= 0:
+            note_phase_omission("critic", "revision_budget_zero",
+                                {"max_evolve": ctx.max_evolve})
+            note_phase_omission("evolve", "revision_budget_zero",
+                                {"max_evolve": ctx.max_evolve})
         for round_num in range(ctx.max_evolve):
             ctx.next_iter()
             critique = _phase_critic(ctx, conn, ctx.winner)
             if not critique.weak_claims and not critique.coverage_gaps:
+                note_phase_omission("evolve", "critic_found_no_revision_targets",
+                                    {"weak_claims": 0, "coverage_gaps": 0})
                 log(f"critic  → no weak claims or coverage gaps, skipping evolve", tag="agent")
                 break
             log(f"critic  → flagged {len(critique.weak_claims)} weak claims, "
@@ -778,6 +786,10 @@ def _phase_commit(ctx: Context, conn) -> Path:
     """
     t0 = time.monotonic()
     from . import promote as promote_mod
+    from ..records.lineage import note_call_omission, note_phase_omission
+    note_call_omission("short_name", "ingest_uses_author_trailer",
+                       {"handle_present": bool(ctx.winner and ctx.winner.handle),
+                        "hook_present": bool(ctx.winner and ctx.winner.hook)})
 
     cleaned_text, verification = phases.verify_crosslinks(
         ctx.winner.text, ctx.crosslink_candidates
@@ -794,6 +806,8 @@ def _phase_commit(ctx: Context, conn) -> Path:
 
     # Promotion-mode dispatch.
     if ctx.promote_mode == "never":
+        note_phase_omission("debug", "forced_sandbox",
+                            {"promotion_mode": ctx.promote_mode})
         gate = promote_mod.GateResult(
             promoted=False, reasons=["--force-sandbox flag set"]
         )
@@ -805,17 +819,30 @@ def _phase_commit(ctx: Context, conn) -> Path:
             paper_type=(ctx.metadata or {}).get("paper_type", "research"),
             commentary_signals=(ctx.metadata or {}).get("commentary_signals"),
         )
+        if gate.promoted:
+            reason = ("gate_passed_before_entailment_check" if ctx.verify_claim_entailment
+                      else "promotion_gate_passed")
+            note_phase_omission("debug", reason,
+                                {"promotion_mode": ctx.promote_mode,
+                                 "entailment_check_enabled": ctx.verify_claim_entailment})
         # DEBUG operator: when the gate rejects on a structural issue
         # (numeric drift, too few KC bullets, too few graded claims) we
         # try up to `max_debug` targeted repair passes before falling back
         # to sandbox. Skipped under --auto-promote (caller already overrode
         # the gate) and --force-sandbox (gate is informational only there).
         if not gate.promoted and ctx.promote_mode == "auto":
+            if ctx.max_debug <= 0:
+                note_phase_omission("debug", "debug_budget_zero",
+                                    {"max_debug": ctx.max_debug})
             for _ in range(ctx.max_debug):
                 if gate.promoted:
+                    note_phase_omission("debug", "gate_passed_after_repair",
+                                        {"max_debug": ctx.max_debug})
                     break
                 structural_issues = phases.detect_structural_gate_issues(gate.reasons)
                 if not structural_issues:
+                    note_phase_omission("debug", "no_structural_gate_issues",
+                                        {"max_debug": ctx.max_debug})
                     break
                 prior_gate = gate
                 cleaned_text, n_kc, gate, verification = _phase_debug(
@@ -827,7 +854,16 @@ def _phase_commit(ctx: Context, conn) -> Path:
                     # and handed back the same gate object — another pass
                     # would re-run the identical repair against the same
                     # winner. Stop burning the budget.
+                    note_phase_omission("debug", "repair_did_not_improve",
+                                        {"max_debug": ctx.max_debug})
                     break
+            else:
+                if ctx.max_debug > 0:
+                    note_phase_omission("debug", "debug_budget_exhausted",
+                                        {"max_debug": ctx.max_debug})
+        elif not gate.promoted:
+            note_phase_omission("debug", "debug_bypassed_by_promotion_mode",
+                                {"promotion_mode": ctx.promote_mode})
 
         # Opt-in per-claim entailment veto (grade.support). Off unless
         # --verify-claim-entailment is set. Runs on the FINAL winner/text —
@@ -1077,6 +1113,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
         # and cheap; bypassing it just because gates failed forced the
         # user to re-categorize from scratch on every false-positive
         # sandbox.
+        note_call_omission("keywords", "sandbox_page_has_no_canonical_keywords")
         from .phases import _wrap_with_frontmatter
         ctx.sandbox_dir.mkdir(parents=True, exist_ok=True)
         # Stem may be None when reconcile fails outright. Disambiguate the

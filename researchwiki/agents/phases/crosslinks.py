@@ -294,6 +294,8 @@ def propose_crosslinks(
     adds model pressure without adding source evidence.
     """
     if not semantic_pages.index_exists():
+        from ...records.lineage import note_call_omission
+        note_call_omission("link_generation", "semantic_page_index_missing")
         return []
 
     title = (metadata.get("title") or "").strip()
@@ -301,6 +303,8 @@ def propose_crosslinks(
     summary_block = (sections or {}).get("results", "")[:600]
     probe = "\n".join(filter(None, [title, preview, summary_block])).strip()
     if not probe:
+        from ...records.lineage import note_call_omission
+        note_call_omission("link_generation", "source_probe_empty")
         return []
 
     # Restrict to paper-type pages — synthesis pages have a different
@@ -320,11 +324,17 @@ def propose_crosslinks(
             tag="propose_crosslinks",
         )
     if not hits:
+        from ...records.lineage import note_call_omission
+        note_call_omission("link_generation", "no_eligible_semantic_candidates",
+                           {"retrieved": len(eligible), "usable": len(existing)})
         return []
 
     if use_stub:
         # Similarity only nominates candidates; the stub cannot perform the
         # source-engagement judgment required to turn one into a wikilink.
+        from ...records.lineage import note_call_omission
+        note_call_omission("link_generation", "stub_cannot_judge_candidates",
+                           {"candidate_count": len(hits)})
         return []
 
     judged = _judge_candidates(

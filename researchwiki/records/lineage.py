@@ -24,13 +24,16 @@ def current_scope():
 
 
 def requirements():
-    return (Requirement(slot="lineage.drafts", kind="parse_trace", required=False),
-            Requirement(slot="lineage.decisions", kind="parse_trace", required=False),
-            Requirement(slot="lineage.page", kind="representation", required=False)) + tuple(
-        Requirement(slot=f"lineage.{phase}.{slot}", kind=kind)
-        for phase in PHASES for slot, kind in (
-            ("input", "parse_trace"), ("output", "parse_trace"),
-            ("request", "model_request"), ("response", "model_response")))
+    result = [Requirement(slot="lineage.drafts", kind="parse_trace", required=False),
+              Requirement(slot="lineage.decisions", kind="parse_trace", required=False),
+              Requirement(slot="lineage.omissions", kind="parse_trace", required=False),
+              Requirement(slot="lineage.page", kind="representation", required=False)]
+    for phase in PHASES:
+        result.extend((Requirement(slot=f"lineage.{phase}.input", kind="parse_trace"),
+                       Requirement(slot=f"lineage.{phase}.output", kind="parse_trace"),
+                       Requirement(slot=f"lineage.{phase}.request", kind="model_request"),
+                       Requirement(slot=f"lineage.{phase}.response", kind="model_response")))
+    return tuple(result)
 
 
 class LineageRecorder:
@@ -42,6 +45,11 @@ class LineageRecorder:
         self.runs = set()
         self.calls = set()
         self.unavailable = set()
+        self.rejected_calls = set()
+        self.call_omissions = {}
+        self.phase_omissions = {}
+        self.phase_states = {}
+        self.last_phase_output = None
         self.page_artifact_id = None
 
     def artifact(self, slot, value, *, parents=(), kind="parse_trace", **kwargs):
@@ -84,20 +92,135 @@ class LineageRecorder:
         self.page_artifact_id = item
         return item, blob
 
-    def close(self, manifest):
+    def omission(self, target, phase, reason, *, call=None, context=None, run=None):
+        """Retain one explicit conditional omission with a stable reason code."""
+        slot = "lineage.omissions"
+        if not any(item.slot == slot for item in self.records.spec.requirements):
+            return None
+        parents = (run.input_id,) if run is not None else (
+            (self.last_phase_output,) if self.last_phase_output else ())
+        value = {"boundary": "conditional_omission", "target": target,
+                 "phase": phase, "call": call, "reason": reason,
+                 "context": context or {}}
+        if run is not None:
+            value["run_id"] = run.run_id
+        return self.artifact("omissions", value, parents=parents)
+
+    def close(self, manifest, terminal=None):
+        terminal = terminal or {}
+        error = terminal.get("error") or {}
+        error_code = terminal.get("error_code") or (
+            error.get("code") if isinstance(error, dict) else None)
+        if not error_code and terminal.get("execution") == "interrupted":
+            error_code = "interrupted"
+        outcome = terminal.get("outcome")
+
+        def stopped_reason():
+            if outcome == "already_present":
+                return "duplicate_source_short_circuit", {"outcome": outcome}
+            if error_code:
+                reason = "pipeline_interrupted" if error_code == "interrupted" else "pipeline_stopped_after_error"
+                return reason, {"error_code": error_code}
+            return None, {}
+
+        stop_reason, stop_context = stopped_reason()
+        for phase in PHASES:
+            if phase in self.runs or phase in self.phase_omissions:
+                continue
+            if stop_reason:
+                self.phase_omissions.setdefault(phase, []).append(stop_reason)
+                self.omission("phase", phase, stop_reason, context=stop_context)
+
+        # Omission artifacts and their terminal causes update the manifest.
+        # Refresh it before resolving pending inventory so slot states are current.
+        manifest = self.records._write(self.records.store.read_attempt, self.records.spec.attempt_id)
         for item in manifest.inventory:
             if not item.slot.startswith("lineage."):
                 continue
             parts = item.slot.split(".")
+            if len(parts) == 2:
+                if item.status != "pending":
+                    continue
+                reason = {"drafts": "no_draft_created",
+                          "decisions": "no_revision_decision_created",
+                          "omissions": "no_conditional_omissions_observed",
+                          "page": "canonical_page_not_captured"}.get(parts[1], "optional_lineage_not_observed")
+                if parts[1] == "page":
+                    if outcome == "draft_ready":
+                        reason = "sandbox_page_not_published"
+                    elif outcome == "already_present":
+                        reason = "duplicate_source_no_new_page"
+                    elif stop_reason:
+                        reason = "publication_not_reached_after_failure"
+                self.records._write(self.records.store.resolve_slot, self.records.spec.attempt_id,
+                                    item.slot, "not_run", reason)
+                continue
             phase = parts[1]
+            phase_reason = next(iter(reversed(self.phase_omissions.get(phase, ()))), None) or stop_reason
             if len(parts) == 3 and parts[2] == "response" and phase in self.unavailable:
                 self.records._write(self.records.store.resolve_slot, self.records.spec.attempt_id,
-                                    item.slot, "unavailable", "visible_phase_answer_unavailable")
+                                    item.slot, "unavailable", "one_or_more_visible_answers_unavailable")
             elif item.status == "pending":
-                ran = phase in self.runs and not (parts[-1] in ("request", "response") and phase not in self.calls)
+                slot = parts[2]
+                if phase not in self.runs:
+                    status, reason = ("not_run", phase_reason) if phase_reason else (
+                        "unknown", "phase_skip_reason_not_observed")
+                elif slot in ("input", "output"):
+                    status, reason = "unknown", "phase_observation_not_retained"
+                elif slot in ("request", "response"):
+                    names = MODEL_PHASES.get(phase, set())
+                    if not names:
+                        status, reason = "not_run", "phase_has_no_model_call"
+                    elif phase not in self.calls:
+                        omitted = [self.call_omissions.get((phase, name), ()) for name in sorted(names)]
+                        if all(omitted):
+                            status = "not_run"
+                            reasons = sorted({code for values in omitted for code in values})
+                            reason = reasons[0] if len(reasons) == 1 else "all_conditional_model_calls_omitted"
+                        else:
+                            status, reason = "unknown", "call_omission_reason_not_observed"
+                    elif slot == "response":
+                        failed = next((state for state in reversed(self.phase_states.get(phase, ()))
+                                       if state.get("status") in ("failed", "interrupted")), None)
+                        rejected = any(call_phase == phase for call_phase, _ in self.rejected_calls)
+                        if rejected:
+                            status, reason = "failed", "model_transport_rejected"
+                        elif failed:
+                            status, reason = "failed", "phase_failed_before_response_retention"
+                        else:
+                            status, reason = "unknown", "visible_response_not_retained"
+                    else:
+                        status, reason = "unknown", "model_request_not_retained"
+                else:
+                    status, reason = "unknown", "phase_output_not_retained"
                 self.records._write(self.records.store.resolve_slot, self.records.spec.attempt_id,
-                                    item.slot, "unknown" if ran else "not_run",
-                                    "phase_output_unavailable" if ran else "phase_or_model_call_not_executed")
+                                    item.slot, status, reason)
+
+
+def note_call_omission(model_phase, reason, context=None):
+    """Record why a declared model call did not happen in the active phase."""
+    run = current_scope()
+    if run is None or model_phase not in MODEL_PHASES.get(run.phase, set()):
+        return None
+    key = (run.phase, model_phase)
+    run.recorder.call_omissions.setdefault(key, []).append(reason)
+    return run.recorder.omission("model_call", run.phase, reason, call=model_phase,
+                                 context=context, run=run)
+
+
+def note_phase_omission(phase, reason, context=None):
+    """Record why a conditional ingest phase was not entered."""
+    run = current_scope()
+    recorder = run.recorder if run is not None else None
+    if recorder is None:
+        from .lifecycle import current_owner
+        owner = current_owner()
+        recorder = getattr(owner, "lineage", None) if owner is not None else None
+    if recorder is None:
+        return None
+    recorder.phase_omissions.setdefault(phase, []).append(reason)
+    return recorder.omission("phase", phase, reason, context=context,
+                              run=run)
 
 
 class PhaseRun:
@@ -105,6 +228,9 @@ class PhaseRun:
         self.recorder, self.phase, self.ctx = recorder, phase, ctx
         self.run_id = uuid.uuid4().hex
         self.responses = []
+        self.call_names = set()
+        self.response_call_names = set()
+        self.rejected_call_names = set()
         self.parents = [recorder.records.source.artifact_id]
         self.subject = arguments.get("draft") or arguments.get("prior_draft")
         if phase in ("debug", "commit"):
@@ -152,6 +278,15 @@ class PhaseRun:
             {"run_id": self.run_id, "phase": self.phase, **value}, parents=parents)
 
     def finish(self, result=None, error=None):
+        for call in sorted(self.call_names - self.response_call_names):
+            if call in self.rejected_call_names:
+                reason = "transport_rejected_without_visible_answer"
+            elif error is not None:
+                reason = "phase_failed_before_visible_answer"
+            else:
+                reason = "visible_answer_not_observed"
+            self.recorder.omission("model_response", self.phase, reason, call=call,
+                context={"error_code": type(error).__name__ if error else None}, run=self)
         parents = [self.input_id, *self.responses]
         value = {"boundary": "phase_output", "status": "completed" if error is None else
                  "interrupted" if isinstance(error, KeyboardInterrupt) else "failed",
@@ -181,6 +316,11 @@ class PhaseRun:
                     value["rendered_page"] = self.recorder.page_artifact_id
                     parents.append(self.recorder.page_artifact_id)
         item = self.emit("output", value, parents=parents)
+        self.recorder.phase_states.setdefault(self.phase, []).append({
+            "status": value["status"], "error_code": value["error_code"],
+            "artifact_id": item,
+        })
+        self.recorder.last_phase_output = item
         if error is None and self.phase == "critic":
             self.recorder.critiques[id(result)] = (result, item)
 
@@ -218,8 +358,8 @@ def record_phase(name, fn):
 
 class PhaseCallRecorder:
     """Adapt the shared API/relay capture without target-extraction ownership."""
-    def __init__(self, run):
-        self.run, self.records = run, run.recorder.records
+    def __init__(self, run, model_phase):
+        self.run, self.records, self.model_phase = run, run.recorder.records, model_phase
         self.response_ids = run.responses
 
     def check(self):
@@ -236,13 +376,23 @@ class PhaseCallRecorder:
     def answer_unavailable(self, value):
         if value:
             self.run.recorder.unavailable.add(self.run.phase)
+            self.run.recorder.omission("model_response", self.run.phase,
+                "visible_answer_unavailable", call=self.model_phase,
+                context={"observation": "answer_none"}, run=self.run)
 
     def artifact(self, slot, kind, value, **kwargs):
         suffix = {"target.request": "request", "target.response": "response", "target.trace": "output"}[slot]
         if suffix == "request":
             self.run.recorder.calls.add(self.run.phase)
+            self.run.call_names.add(self.model_phase)
+        elif suffix == "response":
+            self.run.response_call_names.add(self.model_phase)
+        elif suffix == "output" and value.get("boundary") == "transport_rejection":
+            self.run.recorder.rejected_calls.add((self.run.phase, self.model_phase))
+            self.run.rejected_call_names.add(self.model_phase)
         return self.run.recorder.artifact(f"{self.run.phase}.{suffix}",
-            {"run_id": self.run.run_id, "model_phase": self.run.phase, **value}, kind=kind, **kwargs)
+            {"run_id": self.run.run_id, "model_phase": self.run.phase,
+             "call_phase": self.model_phase, **value}, kind=kind, **kwargs)
 
 
 def revision_decision(ctx, draft, operator, accepted):
@@ -289,6 +439,6 @@ def read_lineage(store, attempt_id):
         if item.artifact_id not in slots:
             continue
         raw = store.read_blob(item.payload)
-        payload = {"text": raw.decode("utf-8")} if item.kind == "representation" else decode_json(raw)
+        payload = {"text": raw.decode("utf-8")} if slots[item.artifact_id] == "lineage.page" else decode_json(raw)
         result.append({"slot": slots[item.artifact_id], "artifact": item.to_dict(), "payload": payload})
     return result
