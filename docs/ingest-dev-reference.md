@@ -134,6 +134,26 @@ original absolute mount path or database is needed. The implementation has no
 general bundle import, legacy migration, or pruning. The lifecycle layer adds
 publication handoff, runtime policy selection and self-contained attempt export.
 
+## Read-only historical SQLite inventory
+
+`researchwiki records inventory --legacy --json` audits the selected DB path
+and the former machine-global DB path. `--db-path PATH` narrows it to one
+explicit file. This path intentionally bypasses `get_connection()`, which
+creates/migrates schema and may copy the old DB into a per-repository location.
+The inventory opens SQLite with `mode=ro`, enables `query_only`, and rejects SQL
+mutation/attach operations. Missing databases are reported without creating
+them; unsupported or unreadable schemas are reported per file so another
+candidate can still be inspected.
+
+Output is an aggregate view of `ingest_iterations`: per-attempt role counts,
+draft/score/critic row counts, target-claim counters where present, source row-ID
+ranges, observed timestamps, basenames, and model labels. It deliberately omits
+draft and critic prose. The claims-table hash section is grouped by stem and
+labels its scope as current rebuildable claim rows; it is never an attempt-to-PDF
+binding. No SQLite row is imported, rewritten, or given a reconstructed source
+identity by this command. Filesystem sidecars, mailboxes, jobs, publication
+journals, and consistent backup/import remain separate Stage 4 work.
+
 ## Source ownership and representations
 
 `ExtractionRecorder(store, attempt_id)` reads an already-started required-capture

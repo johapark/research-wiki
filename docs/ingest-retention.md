@@ -89,6 +89,27 @@ blobs. Exported attempts verify without the original corpus, databases, caches,
 mailboxes or mount path. These commands can inspect an explicit archive outside
 an initialized library.
 
+## Audit historical SQLite ingest history
+
+Before importing older history, inventory the selected database and the former
+machine-wide `state.db` without initializing, migrating, or rewriting either:
+
+```bash
+researchwiki records inventory --legacy --json
+researchwiki records inventory --legacy --db-path /path/to/state.db --json
+```
+
+The report summarizes per-attempt iteration roles, retained draft/score/critic
+row counts, target-claim counts and decisions where those counters were recorded,
+timestamps, source filenames, and source-hash coverage in the current claims
+table. It does not print draft text, critic notes, or other prose. Claim-table
+hashes are rebuildable state and are not proof of which PDF version a historical
+attempt used; the history rows themselves do not contain the original PDF hash or
+full target-claim list. The inventory currently covers SQLite only. It neither
+imports records nor inventories sandbox files, relay mailboxes, jobs, or
+publication journals. Preserve the original database and its job/recovery state;
+consistent backup and import tooling are still planned.
+
 ## Evidence and check limits
 
 The archive keeps complete retrieval candidates. Existing database/report previews

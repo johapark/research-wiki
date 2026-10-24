@@ -99,6 +99,11 @@ def db_path(*, prepare: bool = True) -> Path:
     return path
 
 
+def legacy_db_path() -> Path:
+    """Return the former machine-global DB location without touching it."""
+    return _LEGACY_DB
+
+
 def _maybe_migrate_legacy(target: Path) -> None:
     """One-time, non-destructive seed of a new per-repo DB from the pre-per-repo
     global `state.db`.

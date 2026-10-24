@@ -1,4 +1,4 @@
-"""Inspect, verify, repair checkpoints, and export retained ingestion attempts."""
+"""Inspect retained ingestion attempts and audit historical ingest history."""
 
 import argparse
 import json
@@ -14,10 +14,10 @@ def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", help="archive path; otherwise use the selected profile")
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("list", "show", "verify", "export", "recover"):
+    for name in ("list", "show", "verify", "export", "recover", "inventory"):
         sub = subs.add_parser(name)
         sub.add_argument("--json", action="store_true")
-        if name not in ("list", "recover"):
+        if name not in ("list", "recover", "inventory"):
             sub.add_argument("attempt_id")
         if name == "verify":
             sub.add_argument("--repair-checkpoint", action="store_true")
@@ -26,10 +26,20 @@ def _parser():
             sub.add_argument("--grading", action="store_true", help="include full grading input/evidence/result payloads")
         if name == "export":
             sub.add_argument("--output", type=Path, required=True)
+        if name == "inventory":
+            sub.add_argument("--legacy", action="store_true",
+                             help="inventory historical SQLite ingest records")
+            sub.add_argument("--db-path", type=Path,
+                             help="read this SQLite file instead of the selected and legacy DB paths")
     return parser
 
 
 def _dispatch(args, store):
+    if args.command == "inventory":
+        if not args.legacy:
+            raise ValueError("records inventory currently requires --legacy")
+        from ..records.legacy import inventory_legacy
+        return inventory_legacy(db_override=args.db_path)
     if args.command == "recover":
         return _recover(store)
     if args.command == "list":
@@ -81,14 +91,19 @@ def _recover(store):
 def main(argv, *, env_file=None):
     args = _parser().parse_args(argv)
     try:
-        if args.root:
-            root = Path(args.root).expanduser().resolve()
+        if args.command == "inventory":
+            result = {"schema_version": 1, "command": args.command,
+                      **_dispatch(args, None), "error": None}
         else:
-            from ..records.settings import selected
-            root = selected().root
-            if root is None:
-                raise RecordConflict("select an archive with --root or an enabled ingest.retention profile")
-        result = {"schema_version": 1, "command": args.command, **_dispatch(args, RecordStore(root)), "error": None}
+            if args.root:
+                root = Path(args.root).expanduser().resolve()
+            else:
+                from ..records.settings import selected
+                root = selected().root
+                if root is None:
+                    raise RecordConflict("select an archive with --root or an enabled ingest.retention profile")
+            result = {"schema_version": 1, "command": args.command,
+                      **_dispatch(args, RecordStore(root)), "error": None}
         code = 0
     except (RecordConflict, ValueError) as exc:
         result, code = {"schema_version": 1, "command": args.command, "error": str(exc)}, 1

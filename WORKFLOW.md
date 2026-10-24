@@ -309,6 +309,9 @@ inspectable with `records show <attempt-id> --grading --json`, including exact
 check contexts and semantic vectors independent of disposable caches.
 Use `records show <attempt-id> --lineage --json` to inspect authored/revised drafts,
 critiques and selection decisions, including losing and rejected drafts.
+For older machine-local SQLite ingest history, `researchwiki records inventory
+--legacy --json` reports attempt-level coverage without initializing or changing
+the databases; it does not reconstruct missing source hashes or target lists.
 
 ### 3. Inspect the new wiki page
 

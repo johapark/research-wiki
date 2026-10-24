@@ -1,6 +1,6 @@
 # Ingestion retention, provenance, and auditability plan
 
-Status: Stages 0–2 implemented; Stage 3 draft/selection slice implemented; default rollout pending.
+Status: Stages 0–2 implemented; Stage 3 lineage slice implemented; Stage 4 read-only SQLite inventory started; default rollout pending.
 Created: 2026-10-22. Code review and implementation-scope refinement: 2026-10-23.
 Code baseline inspected: `0ba18dc162fda2987ae2ba1f8ad7c7b28c0b9750`.
 
@@ -23,12 +23,13 @@ changes, with the following corrections incorporated before runtime work:
 - Freeze retention settings at worker execution and include them in job configuration
   identity, while preserving strict version-1 public wire contracts.
 
-Stages 0–2 are implemented on the consolidated `feat/ingest-retention` branch.
+Stages 0–3 implementation slices are present on the consolidated
+`feat/ingest-retention` branch. Stage 4's SQLite inventory has started.
 The [user guide](../docs/ingest-retention.md) describes enabling capture, inspecting
 records and recovery; the [developer reference](../docs/ingest-dev-reference.md) owns
 current archive/capture contracts and validation details. Capture remains off by
-default. Remaining phase/publication lineage continues in Stage 3; controlled storage/time
-measurements still gate a default switch.
+default: `full-ingest-v1` still needs acceptance coverage, and controlled
+storage/time measurements still gate a default switch.
 
 ## 1. Purpose
 
@@ -948,9 +949,18 @@ paid re-authoring. Enable `full-ingest-v1` only after its declared inventory is 
 
 ### Stage 4 — historical import and operator lifecycle
 
-Deliverables: read-only historical inventory, consistent backup/import tooling,
-explicit reconstruction observations, full import/export validation, storage
-inventory, backup guidance and a conservative cleanup design.
+The first slice is implemented: `researchwiki records inventory --legacy --json`
+reads the selected and former machine-global SQLite paths without schema
+bootstrap or mutation. It reports attempt-level iteration/draft/score/critic
+coverage, retained target counters, and rebuildable claim-table hash coverage,
+while labeling that hash data as unbound to historical attempts. The report does
+not expose draft or critic prose. See the [operator guide](../docs/ingest-retention.md#audit-historical-sqlite-ingest-history)
+and [developer reference](../docs/ingest-dev-reference.md#read-only-historical-sqlite-inventory).
+
+Remaining deliverables: inventory of related files/job/publication evidence,
+consistent SQLite backup/import tooling, explicit reconstruction observations,
+full import/export validation, storage inventory, backup guidance and a
+conservative cleanup design.
 
 Acceptance: old and new observations cannot be confused; unresolved original hashes
 remain unresolved; exports validate on a relocated machine; original DB/history
