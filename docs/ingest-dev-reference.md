@@ -359,9 +359,19 @@ they do not enter target-extraction inventory. Required input/call capture failu
 stop further work using the existing latch and budget policy. No extra model calls
 are introduced.
 
-This is a partial Stage 3 implementation. Final rendered-page identity/publication
-linkage and richer conditional omission reasons are still required before a
-full-ingest profile. The existing mutation journal and ledger remain publication authorities.
+The canonical Markdown page is retained as one content-addressed representation
+before the journal commit point. Its digest is checked against the bytes written
+to the corpus. Staged and committed publication receipts link to that same page
+artifact; the staged receipt also links back to the prepared receipt, and the
+committed receipt links to the staged receipt. A rollback receipt links the page
+artifact when promotion had reached that point. `records show --lineage` can
+recover the exact Markdown bytes after the corpus page has changed or disappeared.
+This archive snapshot preserves the ingest-time training text; it is not a claim
+that the draft differs from the published page. The existing mutation journal
+and ledger remain publication authorities.
+
+This remains a partial Stage 3 implementation. Richer conditional omission
+reasons are still required before a full-ingest profile.
 
 ## Inspection payloads
 

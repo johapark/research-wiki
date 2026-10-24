@@ -927,16 +927,21 @@ capture retains phase requests and permitted visible replies.
 `records show --lineage` exposes portable payloads. See the
 [developer reference](../docs/ingest-dev-reference.md#draft-critique-and-selection-lineage).
 
-Still required: final rendered-page bytes/identity linked to the committed
-publication receipt, and richer conditional omission reasons for phases and calls
-that are intentionally skipped or unavailable. Keep `full-ingest-v1` disabled until
-these are covered.
+The exact canonical Markdown page is now captured once as a content-addressed
+representation before the journal commit point. The staged receipt verifies its
+digest and links to the prepared receipt; the committed receipt links to both the
+staged receipt and the page artifact. A rollback receipt links the attempted page
+when one had been captured. This makes the ingest-time page recoverable independently
+of the mutable, Git-ignored corpus page. `records show --lineage` exposes its text.
 
-Deliverables: exact final rendered page bytes/hash linked through prepared, staged
-and committed/rolled-back publication receipts; phase-specific skipped, unavailable
-and conditional call reasons; and terminal status covering post-operation work.
-Extend Stage 1's publication bridge and safe checkpoint reconciliation across that
-full-pipeline lineage.
+Still required: richer conditional omission reasons for phases and calls that are
+intentionally skipped or unavailable. Keep `full-ingest-v1` disabled until these
+are covered.
+
+Remaining deliverables: phase-specific skipped, unavailable and conditional call
+reasons; and terminal status covering post-operation work. Extend Stage 1's
+publication bridge and safe checkpoint reconciliation across that full-pipeline
+lineage.
 
 Acceptance: losing/rejected drafts and interrupted attempts survive; publication
 status comes from durable commit evidence; post-commit capture failure cannot cause

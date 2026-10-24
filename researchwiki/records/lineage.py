@@ -7,7 +7,7 @@ from inspect import signature
 from threading import RLock
 import uuid
 
-from .contracts import Requirement
+from .contracts import Requirement, SourceRef
 from .grading import _json_value
 from .observation import finite_setting
 
@@ -25,7 +25,8 @@ def current_scope():
 
 def requirements():
     return (Requirement(slot="lineage.drafts", kind="parse_trace", required=False),
-            Requirement(slot="lineage.decisions", kind="parse_trace", required=False)) + tuple(
+            Requirement(slot="lineage.decisions", kind="parse_trace", required=False),
+            Requirement(slot="lineage.page", kind="representation", required=False)) + tuple(
         Requirement(slot=f"lineage.{phase}.{slot}", kind=kind)
         for phase in PHASES for slot, kind in (
             ("input", "parse_trace"), ("output", "parse_trace"),
@@ -41,6 +42,7 @@ class LineageRecorder:
         self.runs = set()
         self.calls = set()
         self.unavailable = set()
+        self.page_artifact_id = None
 
     def artifact(self, slot, value, *, parents=(), kind="parse_trace", **kwargs):
         return self.records.artifact(f"lineage.{slot}", kind, _json_value({"schema_version": 1, **value}),
@@ -64,6 +66,23 @@ class LineageRecorder:
                                  parents=tuple(parents) + ((previous[2],) if previous else ()))
             self.drafts[id(draft)] = (draft, value, item)
             return item
+
+    def rendered_page(self, path):
+        """Retain exact frontmatter/body bytes before the journal commit point."""
+        records = self.records
+        blob = records._write(records.store.put_file, path)
+        scope = current_scope()
+        parents = []
+        if scope is not None and scope.recorder is self and scope.phase == "commit":
+            parents.append(scope.input_id)
+            if scope.ctx.winner is not None:
+                parents.append(self.draft(scope.ctx.winner))
+        source = records.source.source
+        item = records.artifact("lineage.page", "representation", None, payload=blob,
+            sources=(SourceRef(document=source.document, role="effective", representation=blob),),
+            parents=tuple(parents))
+        self.page_artifact_id = item
+        return item, blob
 
     def close(self, manifest):
         for item in manifest.inventory:
@@ -158,6 +177,9 @@ class PhaseRun:
             elif self.phase == "commit":
                 value.update(result_name=result.name, outcome=self.ctx.outcome,
                              paper_stem=self.ctx.paper_stem)
+                if self.recorder.page_artifact_id:
+                    value["rendered_page"] = self.recorder.page_artifact_id
+                    parents.append(self.recorder.page_artifact_id)
         item = self.emit("output", value, parents=parents)
         if error is None and self.phase == "critic":
             self.recorder.critiques[id(result)] = (result, item)
@@ -262,6 +284,11 @@ def read_lineage(store, attempt_id):
     manifest = store.read_attempt(attempt_id)
     slots = {key: item.slot for item in manifest.inventory if item.slot.startswith("lineage.")
              for key in item.artifact_ids}
-    return [{"slot": slots[item.artifact_id], "artifact": item.to_dict(),
-             "payload": decode_json(store.read_blob(item.payload))}
-            for item in manifest.artifacts if item.artifact_id in slots]
+    result = []
+    for item in manifest.artifacts:
+        if item.artifact_id not in slots:
+            continue
+        raw = store.read_blob(item.payload)
+        payload = {"text": raw.decode("utf-8")} if item.kind == "representation" else decode_json(raw)
+        result.append({"slot": slots[item.artifact_id], "artifact": item.to_dict(), "payload": payload})
+    return result

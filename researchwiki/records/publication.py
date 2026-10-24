@@ -74,16 +74,31 @@ def _bound(document):
     return store, manifest
 
 
+def _receipt_id(manifest, journal, state, *, page_bound=False):
+    suffix = f"rendered-page-v1/{state}" if page_bound else state
+    return uuid.uuid5(uuid.NAMESPACE_URL,
+                      f"{manifest.archive_id}/{manifest.spec.attempt_id}/{journal}/{suffix}").hex
+
+
 def _retain(document, state, artifacts=None):
     bound = _bound(document)
     if bound is None:
         return
     store, manifest = bound
+    page_bound = isinstance(artifacts, dict) and "page_artifact_id" in artifacts
     if artifacts is not None:
         originals = next((i.artifact_ids for i in manifest.inventory if i.slot == "source.original"), ())
         expected = {a.payload.sha256 for a in manifest.artifacts if a.artifact_id in originals}
         if artifacts.get("pdf_sha256") not in expected:
             raise RecordCorrupt("publication receipt differs from its retained source")
+        if page_bound:
+            page_id = artifacts["page_artifact_id"]
+            lineage_ids = next((i.artifact_ids for i in manifest.inventory if i.slot == "lineage.page"), ())
+            page = next((a for a in manifest.artifacts if a.artifact_id == page_id), None)
+            if page is None or page_id not in lineage_ids or page.kind != "representation":
+                raise RecordCorrupt("publication receipt names no retained rendered page")
+            if page.payload.sha256 != artifacts.get("page_sha256"):
+                raise RecordCorrupt("rendered-page snapshot differs from the publication digest")
     value = {"schema_version": 1, "boundary": "publication_journal", "state": state,
              "journal": Path(document.get("journal_path") or "journal").name,
              "artifacts": artifacts}
@@ -91,12 +106,33 @@ def _retain(document, state, artifacts=None):
     # journal share the stable allocated ID, including during recovery.
     value["journal"] = Path(document["backup_dir"]).name
     blob = store.put_json(value)
-    item_id = uuid.uuid5(uuid.NAMESPACE_URL,
-                        f"{manifest.archive_id}/{manifest.spec.attempt_id}/{value['journal']}/{state}").hex
+    item_id = _receipt_id(manifest, value["journal"], state, page_bound=page_bound)
+    parents = []
+    if page_bound:
+        page_id = artifacts["page_artifact_id"]
+        if state == "staged":
+            prepared_id = _receipt_id(manifest, value["journal"], "prepared")
+            if not any(a.artifact_id == prepared_id for a in manifest.artifacts):
+                raise RecordCorrupt("staged page receipt has no prepared receipt")
+            parents.extend((prepared_id, page_id))
+        elif state == "committed":
+            staged_id = _receipt_id(manifest, value["journal"], "staged", page_bound=True)
+            if not any(a.artifact_id == staged_id for a in manifest.artifacts):
+                raise RecordCorrupt("committed page receipt has no staged receipt")
+            parents.extend((staged_id, page_id))
+        elif state == "rolled_back":
+            prepared_id = _receipt_id(manifest, value["journal"], "prepared")
+            if any(a.artifact_id == prepared_id for a in manifest.artifacts):
+                parents.append(prepared_id)
+            staged_id = _receipt_id(manifest, value["journal"], "staged", page_bound=True)
+            if any(a.artifact_id == staged_id for a in manifest.artifacts):
+                parents.append(staged_id)
+            parents.append(page_id)
     existing = next((a for a in manifest.artifacts if a.artifact_id == item_id), None)
     item = Artifact(artifact_id=item_id, attempt_id=manifest.spec.attempt_id,
                     kind="terminal_result", payload=blob, producer=manifest.spec.producer,
-                    created_at=existing.created_at if existing else now(), origin="observed", phase=_PUBLICATION_STAGE)
+                    created_at=existing.created_at if existing else now(), origin="observed",
+                    phase=_PUBLICATION_STAGE, parents=tuple(parents))
     store.record_artifact("publication.receipt", item)
     owner = current_owner()
     if owner is not None and owner.records is not None and owner.records.spec.attempt_id == manifest.spec.attempt_id:
@@ -148,8 +184,13 @@ def set_artifacts(snap, result, stem):
     if pdf_hash != records.source.source.document.sha256:
         raise RecordStoreUnavailable("canonical PDF differs from the retained processing source")
     from ..paths import papers_dir, wiki_dir
+    page_artifact_id, page_blob = owner.lineage.rendered_page(result.wiki_path)
+    page_hash = file_sha256(result.wiki_path)
+    if page_blob.sha256 != page_hash:
+        raise RecordCorrupt("rendered page changed during archive capture")
     snap.details["records_artifacts"] = {
-        "paper_stem": stem, "pdf_sha256": pdf_hash, "page_sha256": file_sha256(result.wiki_path),
+        "paper_stem": stem, "pdf_sha256": pdf_hash, "page_sha256": page_hash,
+        "page_artifact_id": page_artifact_id,
         "pdf_path": str(Path("papers") / result.pdf_path.resolve().relative_to(papers_dir().resolve())),
         "page_path": str(Path("wiki") / result.wiki_path.resolve().relative_to(wiki_dir().resolve())),
     }
@@ -161,10 +202,15 @@ def archive(document, *, committed):
     if "records_binding" not in document.get("details", {}):
         return
     artifacts = document["details"].get("records_artifacts") if committed else None
+    if not committed:
+        attempted = document["details"].get("records_artifacts")
+        if isinstance(attempted, dict) and "page_artifact_id" in attempted:
+            artifacts = attempted
     if committed:
         if document.get("status") != "committed":
             raise RecordCorrupt("uncommitted journal cannot prove publication")
-        if not isinstance(artifacts, dict) or set(artifacts) != {"paper_stem", "pdf_sha256", "page_sha256", "pdf_path", "page_path"}:
+        old_fields = {"paper_stem", "pdf_sha256", "page_sha256", "pdf_path", "page_path"}
+        if not isinstance(artifacts, dict) or set(artifacts) not in (old_fields, old_fields | {"page_artifact_id"}):
             raise RecordCorrupt("committed capture journal lacks artifact evidence")
         from .contracts import sha256
         for key in ("pdf_sha256", "page_sha256"):

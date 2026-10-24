@@ -178,9 +178,12 @@ for retention.
 
 Only `extraction-v1` is advertised, with grading inventory declared on new attempts.
 Metadata reconciliation and crosslink results, plus author/critic/revision and
-commit-time model calls are retained through API and chat-relay adapters. Final
-rendered-page bytes/publication linkage and richer conditional omission reasons,
-supplementary attachments, import/pruning and general archive reconciliation
-remain later work. No `full-ingest-v1` profile is enabled yet.
+commit-time model calls are retained through API and chat-relay adapters. The
+exact rendered Markdown page is retained once as a content-addressed representation;
+staged and committed publication receipts bind it by artifact ID and digest, so
+the ingest-time page remains recoverable after the corpus page changes or disappears.
+Richer conditional omission reasons, supplementary attachments, import/pruning and
+general archive reconciliation remain later work. No `full-ingest-v1` profile is
+enabled yet.
 Host-local locks and atomic writes support process-crash recovery, subject to the
 [filesystem and sync limits](ingest-dev-reference.md#storage-and-concurrency-limits).
