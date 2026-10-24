@@ -1,8 +1,33 @@
 # Ingestion retention, provenance, and auditability plan
 
-Status: proposed engineering plan; no runtime changes implemented by this document.
-Date: 2026-10-22.
+Status: reviewed engineering plan; Stage 0 archive foundation implemented, capture hooks pending.
+Created: 2026-10-22. Code review and implementation-scope refinement: 2026-10-23.
 Code baseline inspected: `0ba18dc162fda2987ae2ba1f8ad7c7b28c0b9750`.
+
+### Review outcome
+
+The retention direction is sound. Implementation should proceed in small engine
+changes, with the following corrections incorporated before runtime work:
+
+- Required capture needs a minimal publication guard and outcome/retry integration
+  in the first instrumented release; these cannot all wait for full-pipeline tracing.
+- Initial deployment is explicit opt-in `required` capture. Switch the default only
+  after the controlled-rollout gate; do not add a new default ingestion failure
+  mode before source ownership, budget settlement, and recovery checks pass.
+- Store exact source spans separately from whitespace-normalized retrieval text.
+- Snapshot the displaced canonical PDF before promotion overwrites it. Metadata
+  reconciliation alone does not perform that source upgrade.
+- Normalize provider-controlled/unknown settings into strict JSON, and record where
+  model/schema/usage information actually came from.
+- A full capture scope encloses operation post-work, not only `run_ingest`.
+- Freeze retention settings at worker execution and include them in job configuration
+  identity, while preserving strict version-1 public wire contracts.
+
+The archive foundation in §19 Stage 0 is implemented on
+`feat/ingest-records-foundation`; see [its internal contract](../docs/ingest-records.md).
+It uses explicit temporary-root fixtures and is not wired into live ingestion.
+The next coding change is Stage 1's extraction-observation slice, followed by its
+separate lifecycle integration. No default capture behavior has been activated.
 
 ## 1. Purpose
 
@@ -66,6 +91,10 @@ operation, batch workers, and durable local jobs:
 | Draft history | [`runner.py`](../researchwiki/agents/runner.py) and [`iterations.py`](../researchwiki/db/iterations.py) retain some drafts, scores, notes, and decisions in SQLite | Valuable partial lineage exists, but not a complete portable attempt record |
 | Progress events | [`events.py`](../researchwiki/operations/events.py) deliberately emits bounded observations; delivery failures are best-effort | It is unsuitable as the authoritative content-retention channel |
 | Model responses | [`llm.py`](../researchwiki/agents/llm.py) returns responses to phase code; provider and phase transformations occur along the path | Capture must occur before visible content is discarded or transformed |
+| Provider metadata | The Anthropic adapter can use `NaN` for provider-controlled temperature; both API adapters currently return the configured model in `LLMResponse.model`; schema enforcement differs by route | Strict archive JSON needs a normalized projection; do not label configured IDs as provider-reported or API schema intent as enforced output |
+| Chunk text | [`_chunk_text`](../researchwiki/index/pdf_chunks.py) calculates source offsets but emits whitespace-joined text and currently retains page ranges rather than those exact offsets | Retrieval text is not necessarily a verbatim substring; preserve an exact source slice and its mapping separately |
+| Attempt lifetime | The runner returns before [`run_post_work`](../researchwiki/operations/ingest.py) executes; its failure paths also do not always return a context | A runner-return finalizer alone misses later work and can lose failure identity |
+| PDF upgrade | [`promote._move_pdf`](../researchwiki/agents/promote.py) can overwrite an older canonical PDF during a journalled upgrade | Retaining only the incoming PDF cannot preserve the displaced source version |
 | Chat relay | [`relay.py`](../researchwiki/agents/relay.py) removes consumed replies and some rejected responses | The mailbox cannot serve as an ingest archive |
 | Recovery and backup | [`WORKFLOW.md`](../WORKFLOW.md#what-gets-cached-what-gets-regenerated) distinguishes corpus files, indexes, histories, and machine-local jobs | Copying corpus directories or rebuilding indexes cannot recreate original model calls or missing history |
 
@@ -188,6 +217,13 @@ Verification must distinguish repairable checkpoints from missing/corrupt events
 - Corrections, regrading, and reviews create new observations with parent references.
   Original payloads and decisions remain immutable.
 
+Lock order is explicit: when an operation needs both the corpus guard and archive
+write locks, acquire the corpus guard first. Regular capture must release archive
+locks before requesting the corpus guard. Publish blobs before acquiring the attempt
+event lock; do not hold an attempt lock across model I/O, child processes, or calls
+back into corpus mutation. Readers of immutable blobs need no write lock. Exercise
+promotion, export and reconciliation concurrently to detect lock inversions.
+
 ## 7. Identity and schema contracts
 
 ### 7.1 Identifiers
@@ -252,10 +288,14 @@ and input information actually became available.
 
 ### 8.1 Original versus effective input
 
-Snapshot the submitted PDF before paid work or destructive source movement. If
-reconciliation selects an updated PDF, record a second effective-source snapshot
-and the reason for the change. Every later prompt/representation must refer to
-the document version it actually used.
+Snapshot the submitted PDF before paid work or destructive source movement. Record
+the effective processing source separately if it changes. In the current engine,
+metadata reconciliation reads the incoming source; the preprint-to-journal swap
+happens in `promote._move_pdf`. Under the existing corpus transaction guard, retain
+the old canonical PDF as `displaced_canonical` before overwriting it and bind the
+new canonical version to its already captured incoming bytes. If that required
+snapshot fails, abort before replacing the old canonical file. Every later
+prompt/representation must refer to the document version it actually used.
 
 Copy source bytes into the archive; do not hardlink or symlink individual snapshots
 to files that may be replaced or edited. Distinguish the original user-facing
@@ -263,6 +303,18 @@ source path/ownership from the stable processing input. Scientific extraction
 should read the immutable snapshot or verify a read-stable equivalent. Promotion
 must retain current inbox/external-file move/copy semantics and verify the expected
 effective source instead of accidentally moving the archive's copy.
+
+Introduce a distinct read-side processing-source reference rather than assigning
+the archive blob path to `ctx.pdf_path`. Metadata extraction, target extraction and
+pre-publication grading must use the same retained version. Promotion still owns
+the original path and existing move/copy behavior. Validate source identity when
+crossing that boundary; a changed original must not be published as though its
+new bytes produced an older captured representation. Ordinary in-place extraction
+with only an unrelated before/after file hash is insufficient proof of read identity.
+Check the staged canonical PDF against the retained effective digest before
+`mark_committed`, not only the original pathname before opening/moving it. A source
+replacement between those steps must reject publication rather than bind old
+extraction artifacts to new canonical bytes.
 
 Retain supplied supplementary files with separate digests and parent-document
 references. Record whether they were processed, partially processed, or merely
@@ -314,6 +366,24 @@ Section names and model-supplied “Fig. 2” locations remain location hints un
 resolved. Bounding boxes, table cells, and figure-object references are nullable
 unless the relevant modality was actually processed. No inferred page coordinates.
 
+### 8.4 Retrieval text is a transformed representation
+
+Current chunking finds a window's `start_off`/`end_off` in joined source text but
+sets `Chunk.text` to words joined by single spaces. Newline and spacing differences
+mean that text may not equal the corresponding verbatim slice.
+
+Retain both `source_span` (exact stored representation slice) and `retrieval_text`
+(the bytes the retriever/check actually consumed), plus the transformation/version
+that links them. A multi-page window needs joined offsets and page-map segments;
+do not put the entire window under one page-local quote. Exact-quote verification
+uses `source_span`; check reproduction uses `retrieval_text`.
+
+Expose the offsets when chunks are built, rather than locating them later with
+fuzzy matching or first-substring search. If persisted chunk metadata changes,
+version the cache and rebuild stale entries locally; do not reinterpret old caches
+as carrying coordinates they never stored. Reuse the existing per-page extraction,
+`PAGE_SEPARATOR`, and `page_offsets` equality invariant in `pdf/text.py`.
+
 ## 9. Coverage and context exposure
 
 Retain coverage at three distinct levels:
@@ -358,10 +428,12 @@ local data channel; progress events continue to carry bounded references/status.
 
 ### 10.2 Visible response
 
-Persist complete visible assistant text or structured content before stripping,
-JSON salvage, item filtering, or phase validation. Where a transport adapter
-normalizes content, retain the pre-normalized visible content and the normalized
-value passed to phase code, with a transformation reference.
+Persist complete visible answer text or structured content before answer-format
+stripping, JSON salvage, item filtering, or phase validation. The permitted answer
+boundary excludes reasoning-only blocks as explained below. Within that boundary,
+where a transport adapter normalizes answer content, retain the pre-normalized
+content and the normalized value passed to phase code, with a transformation
+reference. Do not claim byte-exact retention of the entire provider wire response.
 
 Also record, when actually available:
 
@@ -375,6 +447,22 @@ Also record, when actually available:
 Do not collect provider-internal hidden reasoning. Exact reported model names and
 relay `via` values are provenance observations, not cryptographic verification of
 which underlying model executed. Unknown token usage is not zero usage.
+
+Archive normalization must handle current adapter behavior explicitly:
+
+| Observation | Archive representation |
+| --- | --- |
+| Anthropic temperature omitted after negotiation (`NaN` sentinel today) | Preserve requested temperature; applied temperature is null with `provider_controlled`, never JSON `NaN` or invented zero |
+| API `LLMResponse.model` populated from the request | `configured/requested` identity unless a separate provider-reported value was actually observed |
+| Relay `via` | `self_reported` identity, stored separately from the configured hint |
+| API `schema` argument currently ignored by dispatch | Retain requested schema and `transport_enforcement=not_applied`; record phase-parser validation separately |
+| Relay schema validation | Record actual relay validation and retries, not provider-native structured-output enforcement |
+| Stub target phase returns before calling `llm.call` | Synthetic phase output with no dispatched model request/response; do not invent a call to satisfy the profile |
+
+Preserve byte-exact answer content at the permitted visible-output boundary, but
+do not move capture ahead of the adapter's removal of reasoning-only blocks merely
+to call an artifact “raw.” Distinguish answer-content retention, normalization, and
+excluded reasoning; this archive is not a provider wire-response dump.
 
 ### 10.3 API, relay, and mixed parity
 
@@ -398,6 +486,15 @@ Successful archival persistence must precede normal cleanup of a captured relay
 response. A capture failure is not a transient provider error and must not trigger
 an API retry, consume another reply, or conceal an already received response.
 Budget reservations and reported usage still settle correctly when capture fails.
+
+The budget paths require explicit treatment. `BudgetTracker.fail` currently charges
+the reserved tokens/cost because transport usage is unknown; it is not a way to
+cancel a call that capture prevented from dispatching. Persist request intent before
+reservation where possible. If capture fails after reservation but before any I/O,
+release/cancel that undispatched reservation exactly once without charging a call.
+If a response already arrived, settle actual available usage even when the archive
+write fails. Only uncertain dispatched work uses the conservative unknown-usage
+path. Tests must assert call, token, cost, and reservation counters at each boundary.
 
 ## 11. Extraction candidates and transformation lineage
 
@@ -428,6 +525,13 @@ Not every malformed response has recoverable item boundaries. Preserve the raw
 response and record item indexing as unavailable instead of inventing a list.
 An omitted checklist item is not automatically an incorrect scientific claim;
 author selection and scientific support require separate observations.
+
+Make parsing observable through a pure response-to-result/trace helper. The wrapper
+retains its original response before invoking it. Preserve current accepted output,
+ordering, cap and exception behavior; newly tolerating a malformed field is a
+separate parser fix, not an invisible retention side effect. When parsing itself
+raises, keep the response and exception classification even if item-level lineage
+could not be produced. Do not require a second extraction call to generate a trace.
 
 ## 12. Verification and evidence retention
 
@@ -511,14 +615,28 @@ Proposed initial policy:
 | Profile `extraction-v1` | Source snapshots, representations, target-extraction request/responses/transforms, and attempt/terminal status |
 | Later profile `full-ingest-v1` | Declares the additional verification and full phase/draft/publication inventory once implemented |
 
-Default new runs to required retention for the supported profile. Do not silently
-fall back to metadata-only capture when space is exhausted. An initial migration
-must document the new storage/failure behavior and provide an explicit opt-out.
+Develop and validate opt-in required retention first, with existing non-capturing
+behavior remaining the rollout default until §19 Stage 5 passes. Once that gate
+passes, change new-run defaults to required retention for the supported profile
+with documented storage/error behavior and an explicit opt-out. A selected required
+mode must never silently fall back to metadata-only capture when space is exhausted.
 
 Freeze resolved policy and archive location for an executing job. Include their
 non-secret identity in execution configuration; do not borrow a foreign parent
 profile or silently change policy on retry. Proposed environment/config names
 should be finalized with the schema rather than adding unversioned wire fields.
+
+Resolve policy at worker execution after its selected profile loads. Persist that
+effective policy in the attempt and include its safe projection (mode, profile,
+resolved root/archive identity) in `jobs.environment.execution_identity`. The current
+identity whitelist omits it. Historical job identities without these settings are
+`not_recorded`, not evidence of a particular old policy; retries must report this
+comparison limit and create new attempts. Do not retroactively rewrite queued or
+completed version-1 request/manifest JSON to add fields.
+The existing `configuration_changed` flag remains an aggregate comparison of opaque
+configuration digests. Without an independently retained policy on both attempts,
+report the policy-specific comparison as unavailable rather than claiming which
+setting caused that aggregate hash to change.
 
 ### 14.2 Failure matrix
 
@@ -540,6 +658,23 @@ Emergency spooling is best effort, not a guarantee when storage is unavailable.
 There is an unavoidable interval between a remote response and durable local
 receipt. The design must expose ambiguity rather than promise exactly-once model
 execution or losslessness across every possible process/power/network failure.
+
+Capture persistence errors need a dedicated typed classification, proposed
+`CaptureUnavailable(EnvironmentFailure)`, plus an in-memory latched failure on the
+recorder. Existing best-effort `except Exception` paths must not erase required
+capture failure. A pre-publication health check consults the latch even if an
+optional phase caught the exception; post-publication handling reports it without
+rewriting committed publication as a failure to publish. Capture callbacks stay
+outside retryable provider/schema-error handlers.
+Consult the latch before every later model dispatch as well as publication. After
+publication, stop new optional paid work and report it incomplete, while allowing
+required model-free projection/journal repair to finish.
+
+Use existing wire error fields/enums for an initial implementation. Distinguish
+`record_store_unavailable` before dispatch from `record_capture_incomplete` after
+received/uncertain work. Classify these before the generic environment-error branch.
+Use conservative `reconcile_first` where dispatch/publication is unresolved and
+explicit fresh retry where required; neither classification authorizes paid replay.
 
 ### 14.3 Separate state dimensions
 
@@ -581,6 +716,23 @@ pure parsing/scoring helpers where possible: return structured observations and
 persist them in the shared runner/operation wrappers. Transport hooks are justified
 only where otherwise-discarded content/retry details must be observed earlier.
 
+Recorder lifetime has two entry paths:
+
+- The shared operation owns a scope through validation/recovery, runner execution,
+  post-publication work, and final result construction. Bind the runner's actual
+  attempt ID once it exists; a pre-run validation failure must not be presented as
+  a model-executed attempt. Inspect failures using the scope even when no context
+  was returned by the runner.
+- A direct `run_ingest` caller receives a fallback runner-owned scope if no parent
+  scope exists. It must not create a second recorder/attempt under the operation.
+  Its terminal inventory states that operation-level post-work was not invoked.
+
+Do not close the complete-operation archive in the runner's `finally`: optional
+`run_post_work` executes after it. At finalization retain original commit-time page
+bytes separately from later observed page changes, including supplementary YAML
+attachments. Finalization errors must not mask an earlier interruption, failure,
+or the authoritative publication outcome.
+
 ### 15.2 Expected engine changes
 
 | Module area | Planned work |
@@ -596,6 +748,28 @@ only where otherwise-discarded content/retry details must be observed earlier.
 | `mutation.py`, `ingest_ledger.py` | Reuse journal/ledger handoff for archive publication observations; no second commit authority |
 | New `tasks/records.py`, CLI dispatch | Local inspect/verify/export/import/inventory commands |
 | `WORKFLOW.md`, setup/readiness/status docs | Retained-data location, backup/cleanup policy, coverage and incomplete-state reporting |
+
+Minimum publication integration belongs in Stage 1, not exclusively Stage 3.
+Before the first canonical mutation, check the recorder's latched health and the
+profile's pre-publication required inventory. Within the existing corpus guard,
+preserve any displaced PDF before replacement. Required post-work/publication
+observations may still be pending at this boundary; do not demand a terminal
+record for work that has not happened yet.
+
+After `mark_committed`, archive write errors preserve journal/ledger authority and
+the published result, with explicit capture incompleteness. Do not add the archive
+root as an ordinary corpus mutation target: the mutation path restrictions and
+cross-directory configuration require a small reference/handoff integration, not
+a second multi-file transaction system. Stage 3 extends this bridge to full lineage.
+
+The handoff must precede journal discard for captured direct CLI/operation runs as
+well as durable jobs. The existing job-ledger binding requires a job identity and
+an external machine-local `publication.json`; it cannot simply point inside the
+new portable archive. Add a separate validated archive binding to journal details
+and an idempotent publication/rollback handoff keyed by journal and attempt identity.
+Keep the existing job binding and its path restrictions intact. Retain an unresolved
+journal if required handoff persistence fails, so another process can finish it
+without guessing from canonical filenames or replaying provider calls.
 
 ### 15.3 Wire contracts
 
@@ -706,29 +880,59 @@ transformations where their code/configuration is available.
 
 ### Stage 0 — freeze contract and fixtures
 
-Deliverables: artifact/profile vocabulary, versioned schema fixtures, state/failure
-matrix, archive write protocol, and a small synthetic source fixture set.
+Implementation checkpoint (2026-10-23): `researchwiki/records/` now provides strict
+version-1 contracts, immutable payload insertion, attempt event/checkpoint projection,
+verification and explicit safe checkpoint repair. The extraction profile's six
+minimum slots are frozen in `tests/record-fixtures/attempt-spec-v1.json` and documented
+in [the foundation guide](../docs/ingest-records.md). Ingestion, provider dispatch,
+public operation/job wire schemas and capture defaults remain unchanged.
+
+First coding PR: new internal `researchwiki/records/` contract/store primitives
+and disposable fixtures. Include only the common envelope, source/reference identity,
+attempt event/inventory/checkpoint, and capture-policy types needed by extraction.
+Use normalized strict JSON; do not create a speculative domain ontology.
+
+Implement immutable blob insertion, attempt-scoped event/checkpoint publication,
+strict reads, integrity verification, and repair of an understood stale checkpoint.
+Fixture code exercises the store with synthetic payloads and explicit temporary
+roots. Runtime ingestion defaults and provider dispatch remain untouched. Defer
+import, legacy salvage, cleanup, a searchable catalog and general CLI ergonomics.
+
+Meaningful tests cover byte identity/deduplication, immutable ID conflicts, corrupt
+and future-version records, interrupted event/checkpoint order, concurrent writers,
+relative reference containment, and moving the store without losing references.
+Do not treat a passing store fixture as an instrumented ingestion attempt.
 
 Acceptance: every required artifact has an identity, owner, persistence boundary,
 and missing-state representation; API/relay capture maps to the same contract.
-No production ingest or public wire shape changes are necessary in this stage.
+The store verifies independently of corpus databases/caches, with no writes outside
+its selected test root and no public operation/job wire changes. The first review
+should be limited to these foundational behaviors.
 
 ### Stage 1 — stop target-extraction loss
 
-Deliverables:
+Deliver through two dependent, reviewable PRs after the store foundation:
 
-1. Immutable blob store and attempt event/checkpoint implementation.
-2. Required-mode preflight and source-version snapshots.
-3. Page/text representation with explicit processing omissions.
-4. Exact target-extraction request and visible raw/normalized response capture.
-5. Parsed output and item-level validation/deduplication/capping lineage.
-6. Capture before relay cleanup and preservation of malformed/partial replies.
-7. Attempt/failure inventory plus minimal list/show/verify/export support.
+**Extraction PR:** page-aware source snapshots preserving existing text, separate
+processing/original ownership paths, pure parse-result/trace extraction, and exact
+target-phase request/answer capture through the shared client and relay hooks.
+Include adapter normalization and correctly identified synthetic/no-call output.
+Keep the recorder test-injected until lifecycle integration is complete.
+
+**Lifecycle PR:** opt-in required policy, selected-profile/job identity propagation,
+latched typed failures and budget cancellation/settlement, operation/direct-run
+scope ownership, early and duplicate exits, minimal publication health check and
+displaced-source preservation, and publication-safe finalization. Add minimal
+list/show/verify and self-contained export for independent acceptance. No default
+switch, public wire-field additions, import/catalog/pruning, or paid backfill.
 
 Acceptance: source, request, response and transformations remain inspectable after
 relay cleanup, DB deletion, cache deletion and relocation; an unselected candidate
 is still present; no additional model calls occur. Incomplete runs remain honestly
 incomplete. Only the `extraction-v1` profile is advertised.
+
+Stage 1 cannot ship required capture without its lifecycle PR: deferring all
+publication/retry integration until Stage 3 would invalidate its failure guarantees.
 
 ### Stage 2 — make grading explainable
 
@@ -743,8 +947,9 @@ losing evidence. Retrieval-only results remain retrieval-only.
 ### Stage 3 — complete phase and publication lineage
 
 Deliverables: remaining model/metadata observations, all author/critic/revision/
-selection artifacts, parent links, conditional phase omissions, terminal capture
-status, journal/ledger integration, and safe checkpoint/publication reconciliation.
+selection artifacts, parent links, conditional phase omissions, post-operation
+terminal capture status, and expansion of Stage 1's publication bridge and safe
+checkpoint reconciliation to full-pipeline lineage.
 
 Acceptance: losing/rejected drafts and interrupted attempts survive; publication
 status comes from durable commit evidence; post-commit capture failure cannot cause
@@ -760,11 +965,16 @@ Acceptance: old and new observations cannot be confused; unresolved original has
 remain unresolved; exports validate on a relocated machine; original DB/history
 records are not destroyed or silently rewritten.
 
-### Stage 5 — evaluation and controlled rollout
+### Stage 5 — profile evaluation and controlled rollout
 
 Deliverables: frozen fixture results, before/after compatibility report, storage/
 latency measurements, readiness diagnostics, operator documentation, and a reviewed
 sample of complete real ingests when separately authorized.
+
+This is a gate applied per profile as soon as its implementation is ready, not a
+dependency on completing historical Stage 4 or every full-pipeline feature first.
+The extraction profile can pass it after Stage 1; the full profile passes separately
+after Stage 3. Until then capture stays opt-in and the existing default stays off.
 
 Acceptance: stage-specific requirements pass for API, relay and mixed routing;
 existing ingestion/publication behavior remains compatible; documented overhead
@@ -800,6 +1010,17 @@ contract exists; it must not delay loss prevention for new ingests.
 | Legacy count-only/unhashed history | Missing output/identity stays missing; current source hashes are not backdated |
 | Recording disabled explicitly | Operator-visible policy; no completeness claim; existing scientific gates remain active |
 | Credential handling | Logical content retained; authorization/profile secrets and hidden reasoning absent from captured protocol/config fields |
+| Provider-controlled temperature and model identity | Strict JSON has no `NaN`; configured IDs and actually reported IDs have different provenance; unknowns stay null |
+| API schema intent versus relay validation | Identical requested schema does not imply identical transport enforcement; parser and relay checks are recorded separately |
+| Whitespace-normalized or cross-page chunk | Verbatim source segments reproduce exact quotes; retrieval/check text reproduces normalized input; no guessed single-page offset |
+| Capture stops an undispatched reserved call | No provider request and no falsely charged call/token/cost; reservation released once |
+| Response arrives before capture failure | Known model usage settles once; capture error does not enter the provider retry loop |
+| Optional phase catches a capture error | Recorder latch prevents pre-publication success in required mode; published work remains published |
+| Same job retried with changed retention settings | Safe configuration identity shows the change; older identities report retention comparison as unavailable |
+| Direct runner versus shared operation | Exactly one recorder; no returned context needed on failure; full operation includes optional post-work |
+| Canonical PDF upgrade | Old canonical bytes retained before replacement under the corpus guard; failed snapshot leaves old canonical source intact |
+| Concurrent publication and archive operations | No archive-to-corpus lock inversion or parent lock held across provider/child work |
+| Direct CLI crashes between canonical commit and archive handoff | Journal remains recovery authority without a job ledger; handoff is idempotent and completes before journal discard |
 
 Use disposable synthetic PDFs and deterministic local API/relay responders for
 automated coverage. Do not mutate the developer's corpus or contact a real model
@@ -830,19 +1051,28 @@ portability and mode-parity checks. Release full-pipeline capture only after its
 larger inventory meets the same standard. Keep the rollout reversible through an
 explicit policy setting without deleting existing archive data.
 
-## 22. Decisions to settle in Stage 0
+## 22. Decisions resolved by review and remaining proof points
 
-1. Final artifact schema/profile names and event/checkpoint verification rules.
-2. Exact archive-root/configuration selection and frozen job-policy identity.
-3. Initial strict failure behavior and its mapping to existing operation/CLI errors.
-4. Representation/page-map version and normalized/raw text retention granularity.
-5. Which provider-adapter hooks expose otherwise-lost visible response/retry data.
-6. Initial storage admission/quota defaults and backup/readiness messaging.
-7. Export inclusion profiles and any later public wire-version migration.
+| Decision | Implementation direction |
+| --- | --- |
+| First delivery scope | Internal schema/store PR, extraction-observation PR, then lifecycle/opt-in activation PR; no single large rewrite |
+| Initial default | Existing off behavior until the implemented profile passes its rollout gate; selected required mode never silently downgrades |
+| Source ownership | Stable processing snapshots are separate from original move/copy paths; preserve displaced canonical PDFs at promotion |
+| Exact evidence | Store source spans and transformed retrieval/check text separately, with representation/transform versions |
+| Provider metadata | Strict normalized projection with requested/applied/unknown settings, identity origin and actual schema-enforcement layer |
+| Failure and cost | Typed latched capture failure; undispatched cancellation differs from unknown-use transport failure and from known-response settlement |
+| Lifecycle | Parent operation scope includes post-work; direct runner fallback scope is explicit and never double-instantiated |
+| Publication integration | Minimal health/snapshot/outcome bridge in Stage 1; full lineage in Stage 3 |
+| Job compatibility | Resolve settings at execution and extend the non-secret configuration identity without rewriting version-1 requests or adding unknown fields |
+| Locks | Corpus guard before archive writes when both needed; no archive lock across corpus acquisition or provider/child calls |
+| Initial tooling | Minimal inspect/verify/export; defer import, catalog, pruning and historical salvage |
 
-These are bounded implementation decisions. They do not require a new model,
-changed research ontology, stronger promotion policy, or a complete historical
-backfill before the first loss-prevention release can be built.
+Stage 0 freezes the exact implemented internal field spelling, canonical JSON
+encoding and fixture versions. The lifecycle PR chooses profile/configuration setting names
+and their profile-loader integration. Prototype measurements determine storage
+admission/overhead budgets; supported filesystems determine documented durability.
+Any later public wire-schema change needs its own compatibility proposal. These
+proof points do not require a new model or complete historical backfill.
 
 ## 23. Turn retained observations into ingestion improvements
 

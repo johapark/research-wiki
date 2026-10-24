@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "attempt_id": "a132b9fa-90e8-4b73-8040-e67eec62fb29",
+  "policy": {"mode": "required", "profile": "extraction-v1"},
+  "producer": {"name": "synthetic-archive-fixture", "version": "1", "revision": null},
+  "requirements": [
+    {"slot": "source.original", "kind": "source_snapshot", "required": true},
+    {"slot": "source.representation", "kind": "representation", "required": true},
+    {"slot": "target.request", "kind": "model_request", "required": true},
+    {"slot": "target.response", "kind": "model_response", "required": true},
+    {"slot": "target.result", "kind": "extraction_result", "required": true},
+    {"slot": "target.trace", "kind": "parse_trace", "required": true}
+  ],
+  "created_at": "2026-10-23T12:00:00+00:00",
+  "request_id": "synthetic-fixture-request",
+  "job_id": null,
+  "generation": null
+}

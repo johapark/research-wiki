@@ -22,6 +22,12 @@ the reasoning behind any line below.
 
 ### Added
 
+- Internal ingestion-record primitives retain immutable payloads, versioned
+  attempt events, explicit capture inventory, and portable source references.
+  Verification detects damaged history and permits explicit repair only for
+  missing or verified stale checkpoints. This foundation uses an explicitly
+  selected archive; live ingestion capture and operator commands follow later.
+
 - `compose` authors a complete scoped synthesis with numeric checks, mandatory
   PDF/claim support judgment, nonzero page-gate grading, theme/coverage review,
   and versioned provenance. `publish-synthesis` explicitly journals verified
