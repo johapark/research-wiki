@@ -919,21 +919,24 @@ classifier observations do not become reviewed scientific labels.
 
 ### Stage 3 — complete phase and publication lineage
 
-Partial implementation checkpoint (2026-10-24): author, grade, critic, evolve,
-DEBUG and tournament boundaries retain full drafts, critiques, parent/check links
-and selection decisions, including losing and rejected drafts. Shared API/relay
-capture retains author/critic/revision requests and permitted visible replies.
+Partial implementation checkpoint (2026-10-24): reconcile and crosslink inputs/results,
+author/grade/critic/evolve/DEBUG/tournament boundaries, verified prepublication page
+input and commit-time keyword/category calls are retained. Drafts, critiques, checks,
+parent links and selection decisions include losing/rejected revisions. Shared API/relay
+capture retains phase requests and permitted visible replies.
 `records show --lineage` exposes portable payloads. See the
 [developer reference](../docs/ingest-dev-reference.md#draft-critique-and-selection-lineage).
 
-Still required: remaining metadata/crosslink/commit-time model observations,
-final rendered-page identity and publication linkage, and richer conditional
-omission reasons. Keep `full-ingest-v1` disabled until these are covered.
+Still required: final rendered-page bytes/identity linked to the committed
+publication receipt, and richer conditional omission reasons for phases and calls
+that are intentionally skipped or unavailable. Keep `full-ingest-v1` disabled until
+these are covered.
 
-Deliverables: remaining model/metadata observations, all author/critic/revision/
-selection artifacts, parent links, conditional phase omissions, post-operation
-terminal capture status, and expansion of Stage 1's publication bridge and safe
-checkpoint reconciliation to full-pipeline lineage.
+Deliverables: exact final rendered page bytes/hash linked through prepared, staged
+and committed/rolled-back publication receipts; phase-specific skipped, unavailable
+and conditional call reasons; and terminal status covering post-operation work.
+Extend Stage 1's publication bridge and safe checkpoint reconciliation across that
+full-pipeline lineage.
 
 Acceptance: losing/rejected drafts and interrupted attempts survive; publication
 status comes from durable commit evidence; post-commit capture failure cannot cause

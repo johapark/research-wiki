@@ -12,7 +12,10 @@ from .grading import _json_value
 from .observation import finite_setting
 
 
-PHASES = ("author", "grade", "tournament", "critic", "evolve", "debug")
+PHASES = ("reconcile", "crosslinks", "author", "grade", "tournament", "critic", "evolve", "debug", "commit")
+MODEL_PHASES = {"reconcile": {"reconcile"}, "crosslinks": {"link_generation"},
+                "author": {"author"}, "critic": {"critic"}, "evolve": {"evolve"},
+                "debug": {"debug"}, "commit": {"short_name", "keywords", "classifier"}}
 _scope = ContextVar("researchwiki_draft_lineage", default=None)
 
 
@@ -85,7 +88,7 @@ class PhaseRun:
         self.responses = []
         self.parents = [recorder.records.source.artifact_id]
         self.subject = arguments.get("draft") or arguments.get("prior_draft")
-        if phase == "debug":
+        if phase in ("debug", "commit"):
             self.subject = ctx.winner
         if self.subject is not None:
             self.parents.append(recorder.draft(self.subject))
@@ -109,6 +112,19 @@ class PhaseRun:
         if phase == "debug":
             values.update({key: arguments[key] for key in ("cleaned_text", "n_kc", "issues")})
             values.update(gate=asdict(arguments["gate"]), verification=asdict(arguments["verification"]))
+        if phase == "reconcile":
+            source = recorder.records.source.source
+            values.update({key: arguments.get(key) for key in (
+                "doi_override", "title_override", "year_override", "authors_override",
+                "use_llm_reconcile")})
+            values["source_pdf_sha256"] = source.document.sha256
+        if phase == "crosslinks":
+            values.update(metadata=ctx.metadata, sections=ctx.sections,
+                          use_stub=ctx.use_stub, paper_stem=ctx.paper_stem)
+        if phase == "commit":
+            values.update(metadata=ctx.metadata, paper_stem=ctx.paper_stem,
+                          promotion_mode=ctx.promote_mode, gate_reasons=ctx.gate_reasons,
+                          verified_candidates=[asdict(candidate) for candidate in ctx.crosslink_candidates])
         self.input_id = self.emit("input", {"boundary": "phase_input", **values}, parents=self.parents)
         recorder.runs.add(phase)
 
@@ -135,6 +151,13 @@ class PhaseRun:
             elif self.phase == "debug":
                 value.update(cleaned_text=result[0], n_kc=result[1], gate=asdict(result[2]),
                              verification=asdict(result[3]), winner=self.recorder.draft(self.ctx.winner))
+            elif self.phase == "reconcile":
+                value.update(metadata=result[0], iteration_id=result[1])
+            elif self.phase == "crosslinks":
+                value["candidates"] = [asdict(candidate) for candidate in result]
+            elif self.phase == "commit":
+                value.update(result_name=result.name, outcome=self.ctx.outcome,
+                             paper_stem=self.ctx.paper_stem)
         item = self.emit("output", value, parents=parents)
         if error is None and self.phase == "critic":
             self.recorder.critiques[id(result)] = (result, item)
@@ -212,6 +235,17 @@ def revision_decision(ctx, draft, operator, accepted):
         "iteration": ctx.iteration, "candidate": candidate, "prior": prior, "accepted": accepted,
         "candidate_scores": draft.scores, "prior_scores": ctx.winner.scores if ctx.winner else None,
         "decision_origin": "fitness_rule"}, parents=[item for item in (candidate, prior) if item])
+
+
+def commit_input(ctx, cleaned_text, verification, gate):
+    run = current_scope()
+    if run is not None and run.phase == "commit":
+        run.input_id = run.emit("input", {"boundary": "verified_page_before_publication",
+            "cleaned_text": cleaned_text, "verification": asdict(verification),
+            "gate": asdict(gate), "gate_reasons": list(gate.reasons),
+            "winner": run.recorder.draft(ctx.winner)}, parents=(run.input_id,))
+        return run.input_id
+    return None
 
 
 def tournament_decision(winner, rationale):

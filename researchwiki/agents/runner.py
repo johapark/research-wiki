@@ -873,6 +873,8 @@ def _phase_commit(ctx: Context, conn) -> Path:
             )
 
     gate_evaluated(ctx, gate)
+    from ..records.lineage import commit_input
+    commit_input(ctx, cleaned_text, verification, gate)
 
     # Surface non-blocking warnings (e.g. drafter hallucinated wikilinks
     # that verify already stripped) regardless of which path we take.

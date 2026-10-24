@@ -339,23 +339,29 @@ when available. DEBUG drafts survive rejection, with their nested grading linked
 to the repair input. Grading-run inputs point to the lineage input for the exact
 draft, while grade outputs retain complete scores and claim details.
 
+Reconciliation records retain source identity and operator overrides alongside
+returned metadata. Crosslink records retain the source sections, metadata and final
+candidate set. Commit input records the fully cleaned/verified draft, gate outcome
+and crosslink checks before keyword or category calls. These phase inputs and results
+use separate run IDs and parent links.
+
 Tournament records retain ordered candidates, scores, actual ordering keys, selected
 draft and the deterministic rationale. Revision decisions retain the candidate,
 prior winner, both score sets, operator and accepted/rejected result. These are
 operational decisions, not scientific labels. Source hashes and parent links make
 losing drafts and rejected repairs inspectable after DB/source/cache deletion.
 
-`PhaseCallRecorder` reuses shared `RetainedCall` capture for author/critic/evolve/DEBUG
-API and relay calls. Logical requests, dispatches, permitted visible replies,
-parser inputs and usage/retry observations are assigned to the active phase/run;
+`PhaseCallRecorder` reuses shared `RetainedCall` capture for reconciliation,
+crosslink, author/critic/revision/DEBUG, keyword and category API/relay calls.
+Logical requests, dispatches, permitted visible replies, parser inputs and
+usage/retry observations are assigned to the active phase/run;
 they do not enter target-extraction inventory. Required input/call capture failures
 stop further work using the existing latch and budget policy. No extra model calls
 are introduced.
 
-This is a partial Stage 3 implementation. Remaining metadata, crosslink and
-commit-time model calls, final rendered-page identity/publication linkage and richer
-conditional omission reasons are still required before a full-ingest profile.
-The existing mutation journal and ledger remain publication authorities.
+This is a partial Stage 3 implementation. Final rendered-page identity/publication
+linkage and richer conditional omission reasons are still required before a
+full-ingest profile. The existing mutation journal and ledger remain publication authorities.
 
 ## Inspection payloads
 

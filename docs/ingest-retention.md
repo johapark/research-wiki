@@ -177,10 +177,10 @@ identical payloads reuse content-addressed blobs. There are no extra model calls
 for retention.
 
 Only `extraction-v1` is advertised, with grading inventory declared on new attempts.
-Author, critic, evolve and DEBUG model calls are retained through both API and
-chat-relay adapters. Remaining metadata/crosslink/commit-time model phases, final
-rendered-page lineage, richer conditional omission reasons, supplementary attachments,
-import/pruning and general archive reconciliation remain later work. No
-`full-ingest-v1` profile is enabled yet.
+Metadata reconciliation and crosslink results, plus author/critic/revision and
+commit-time model calls are retained through API and chat-relay adapters. Final
+rendered-page bytes/publication linkage and richer conditional omission reasons,
+supplementary attachments, import/pruning and general archive reconciliation
+remain later work. No `full-ingest-v1` profile is enabled yet.
 Host-local locks and atomic writes support process-crash recovery, subject to the
 [filesystem and sync limits](ingest-dev-reference.md#storage-and-concurrency-limits).
