@@ -97,6 +97,8 @@ machine-wide `state.db` without initializing, migrating, or rewriting either:
 ```bash
 researchwiki records inventory --legacy --json
 researchwiki records inventory --legacy --db-path /path/to/state.db --json
+researchwiki records backup --legacy --db-path /path/to/state.db \
+  --output /path/to/new-backup-directory
 ```
 
 The report summarizes per-attempt iteration roles, retained draft/score/critic
@@ -108,7 +110,14 @@ attempt used; the history rows themselves do not contain the original PDF hash o
 full target-claim list. The inventory currently covers SQLite only. It neither
 imports records nor inventories sandbox files, relay mailboxes, jobs, or
 publication journals. Preserve the original database and its job/recovery state;
-consistent backup and import tooling are still planned.
+the backup command captures one SQLite database only. It uses SQLite's online
+backup API so committed WAL content visible to SQLite is included in a consistent
+snapshot. It refuses an existing output directory and writes `state.db` plus a
+`manifest.json` containing the snapshot method/time, database checksum, table
+inventory, and integrity-check result. The manifest marks the backup complete;
+an output folder without it is incomplete. This does not preserve external job
+directories, relay mailboxes, or publication journals, which must be handled
+separately before migration.
 
 ## Evidence and check limits
 

@@ -152,7 +152,16 @@ draft and critic prose. The claims-table hash section is grouped by stem and
 labels its scope as current rebuildable claim rows; it is never an attempt-to-PDF
 binding. No SQLite row is imported, rewritten, or given a reconstructed source
 identity by this command. Filesystem sidecars, mailboxes, jobs, publication
-journals, and consistent backup/import remain separate Stage 4 work.
+journals, and import remain separate Stage 4 work. `researchwiki records backup
+--legacy --db-path SOURCE --output NEW_DIR` creates a private backup bundle using
+`sqlite3.Connection.backup` from a read-only source connection. The new directory
+contains `state.db` and a `manifest.json` completion marker with the backup hash,
+SQLite integrity result, table names and ingest-history row count. The source is
+read through SQLite's online backup API instead of copying the live database and
+sidecars. Existing output directories are refused.
+The manifest records the source path as machine-local provenance; it is not part
+of the backup database's identity. The operation snapshots only that database,
+not external job state, relay mailboxes, publication journals, PDFs, or wiki files.
 
 ## Source ownership and representations
 

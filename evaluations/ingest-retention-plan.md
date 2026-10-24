@@ -1,6 +1,6 @@
 # Ingestion retention, provenance, and auditability plan
 
-Status: Stages 0–2 implemented; Stage 3 lineage slice implemented; Stage 4 read-only SQLite inventory started; default rollout pending.
+Status: Stages 0–2 implemented; Stage 3 lineage slice implemented; Stage 4 read-only inventory and SQLite backup slices implemented; default rollout pending.
 Created: 2026-10-22. Code review and implementation-scope refinement: 2026-10-23.
 Code baseline inspected: `0ba18dc162fda2987ae2ba1f8ad7c7b28c0b9750`.
 
@@ -24,7 +24,8 @@ changes, with the following corrections incorporated before runtime work:
   identity, while preserving strict version-1 public wire contracts.
 
 Stages 0–3 implementation slices are present on the consolidated
-`feat/ingest-retention` branch. Stage 4's SQLite inventory has started.
+`feat/ingest-retention` branch. Stage 4's SQLite inventory and backup slices are
+implemented.
 The [user guide](../docs/ingest-retention.md) describes enabling capture, inspecting
 records and recovery; the [developer reference](../docs/ingest-dev-reference.md) owns
 current archive/capture contracts and validation details. Capture remains off by
@@ -785,20 +786,20 @@ If typed archive pointers/policy are later added to public operation/job contrac
 make an explicit versioning/migration decision, update all readers, and run paired
 consumer compatibility checks before deployment.
 
-## 16. Proposed operator commands
+## 16. Operator commands
 
-The following commands do not exist yet; they define the intended operator surface.
-They should use versioned JSON output, stable error categories, and explicit roots.
+The current surface and remaining import/reconciliation work:
 
-| Proposed command | Purpose and constraints |
+| Command | Status and purpose/constraints |
 | --- | --- |
-| `researchwiki records list --json` | List retained attempts and completeness/profile; optional stem/request/job filters |
-| `researchwiki records show ATTEMPT --json` | Inspect source, inventory, calls, checks and lineage without rewriting records |
-| `researchwiki records verify ATTEMPT --json` | Verify blobs, source references, event continuity, expected inventory and exact text spans; no provider calls |
-| `researchwiki records export ATTEMPT --out NEW_PATH` | Produce a checksum-verifiable bundle with selected attempts and declared included/omitted source payloads; refuse existing destination |
-| `researchwiki records import BUNDLE` | Add immutable records idempotently; reject conflicting IDs/bytes and unsafe paths; never overwrite local observations |
-| `researchwiki records inventory --legacy --json` | Report available historical rows/files and provenance gaps through framework readers |
-| `researchwiki records reconcile ATTEMPT` | Repair an understood checkpoint or publication observation from durable evidence; no re-authoring |
+| `researchwiki records list --json` | Implemented; list retained attempts and completeness/profile |
+| `researchwiki records show ATTEMPT --json` | Implemented; inspect source, inventory, calls, checks and lineage without rewriting records |
+| `researchwiki records verify ATTEMPT --json` | Implemented; verify blobs, source references, event continuity, expected inventory and exact text spans; no provider calls |
+| `researchwiki records export ATTEMPT --output NEW_PATH` | Implemented; checksum-verifiable self-contained attempt bundle; refuses an existing destination |
+| `researchwiki records inventory --legacy --json` | Implemented; aggregate historical SQLite rows and provenance gaps through read-only framework access |
+| `researchwiki records backup --legacy --db-path SOURCE --output NEW_DIR` | Implemented; consistent SQLite online backup with integrity result and checksum manifest; refuses an existing destination |
+| `researchwiki records import BUNDLE` | Planned; add immutable records idempotently, reject conflicting IDs/bytes and unsafe paths, never overwrite local observations |
+| `researchwiki records reconcile ATTEMPT` | Planned; repair an understood checkpoint or publication observation from durable evidence; no re-authoring |
 
 Do not add a general “replay” command that silently dispatches paid calls. Offline
 reconstruction of stored transformations and explicit new reprocessing are different
@@ -813,7 +814,8 @@ the export. Import/export does not change canonical wiki/PDF files.
 
 ### 17.1 Audit before mutation
 
-Add a read-only inventory that reports, per attempt where possible:
+Expand the read-only SQLite inventory and add file/job/publication readers that
+report, per attempt where possible:
 
 - Available iteration/draft/score/critic records and target-count-only history.
 - Existing source-hash bindings, current source availability, and conflicting versions.
@@ -828,11 +830,13 @@ quality or completeness.
 
 ### 17.2 Preserve originals
 
-Before import or schema migration, take a consistent SQLite backup using its
-backup API and preserve machine-local job/recovery records. Coordinate with active
-ingests rather than copying a live database file while ignoring WAL state.
-Record snapshot identity/time and any consistency limits; do not clear active
-journals or mailboxes as a migration step.
+Before import or schema migration, use
+`researchwiki records backup --legacy --db-path SOURCE --output NEW_DIR` to take
+a consistent SQLite backup through SQLite's backup API. Preserve
+machine-local job/recovery records separately. Coordinate with active ingests;
+do not clear active journals or mailboxes as a migration step. The backup bundle
+records its snapshot method/time, database digest, integrity result, and scope
+limits. Do not treat a backup as evidence for historical PDF identity.
 
 Import original rows/files with explicit legacy origin and new import identifiers.
 Keep source row IDs as metadata, not portable record identity. Archive known PDFs
@@ -949,18 +953,22 @@ paid re-authoring. Enable `full-ingest-v1` only after its declared inventory is 
 
 ### Stage 4 — historical import and operator lifecycle
 
-The first slice is implemented: `researchwiki records inventory --legacy --json`
+The inventory and database-backup slices are implemented:
+`researchwiki records inventory --legacy --json`
 reads the selected and former machine-global SQLite paths without schema
 bootstrap or mutation. It reports attempt-level iteration/draft/score/critic
 coverage, retained target counters, and rebuildable claim-table hash coverage,
 while labeling that hash data as unbound to historical attempts. The report does
-not expose draft or critic prose. See the [operator guide](../docs/ingest-retention.md#audit-historical-sqlite-ingest-history)
+not expose draft or critic prose. `researchwiki records backup --legacy
+--db-path SOURCE --output NEW_DIR` makes a consistent SQLite online-backup bundle
+with a checksum, integrity result, and source/snapshot metadata. See the
+[operator guide](../docs/ingest-retention.md#audit-historical-sqlite-ingest-history)
 and [developer reference](../docs/ingest-dev-reference.md#read-only-historical-sqlite-inventory).
 
 Remaining deliverables: inventory of related files/job/publication evidence,
-consistent SQLite backup/import tooling, explicit reconstruction observations,
-full import/export validation, storage inventory, backup guidance and a
-conservative cleanup design.
+SQLite import tooling, explicit reconstruction observations, full import/export
+validation, storage inventory, backup guidance for external job/recovery state,
+and a conservative cleanup design.
 
 Acceptance: old and new observations cannot be confused; unresolved original hashes
 remain unresolved; exports validate on a relocated machine; original DB/history

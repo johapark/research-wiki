@@ -312,6 +312,9 @@ critiques and selection decisions, including losing and rejected drafts.
 For older machine-local SQLite ingest history, `researchwiki records inventory
 --legacy --json` reports attempt-level coverage without initializing or changing
 the databases; it does not reconstruct missing source hashes or target lists.
+Before migration, make a consistent database snapshot with
+`researchwiki records backup --legacy --db-path <state.db> --output <new-dir>`;
+external job/recovery files still need a separate backup.
 
 ### 3. Inspect the new wiki page
 

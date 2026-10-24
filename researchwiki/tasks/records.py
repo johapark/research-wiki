@@ -1,4 +1,4 @@
-"""Inspect retained ingestion attempts and audit historical ingest history."""
+"""Inspect retained ingestion attempts and manage historical ingest records."""
 
 import argparse
 import json
@@ -14,10 +14,10 @@ def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", help="archive path; otherwise use the selected profile")
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("list", "show", "verify", "export", "recover", "inventory"):
+    for name in ("list", "show", "verify", "export", "recover", "inventory", "backup"):
         sub = subs.add_parser(name)
         sub.add_argument("--json", action="store_true")
-        if name not in ("list", "recover", "inventory"):
+        if name not in ("list", "recover", "inventory", "backup"):
             sub.add_argument("attempt_id")
         if name == "verify":
             sub.add_argument("--repair-checkpoint", action="store_true")
@@ -31,10 +31,22 @@ def _parser():
                              help="inventory historical SQLite ingest records")
             sub.add_argument("--db-path", type=Path,
                              help="read this SQLite file instead of the selected and legacy DB paths")
+        if name == "backup":
+            sub.add_argument("--legacy", action="store_true",
+                             help="back up a historical SQLite ingest database")
+            sub.add_argument("--db-path", type=Path, required=True,
+                             help="source SQLite database path")
+            sub.add_argument("--output", type=Path, required=True,
+                             help="new directory for state.db and its manifest")
     return parser
 
 
 def _dispatch(args, store):
+    if args.command == "backup":
+        if not args.legacy:
+            raise ValueError("records backup currently requires --legacy")
+        from ..records.legacy_backup import backup_legacy_database
+        return backup_legacy_database(args.db_path, args.output)
     if args.command == "inventory":
         if not args.legacy:
             raise ValueError("records inventory currently requires --legacy")
@@ -91,7 +103,7 @@ def _recover(store):
 def main(argv, *, env_file=None):
     args = _parser().parse_args(argv)
     try:
-        if args.command == "inventory":
+        if args.command in ("inventory", "backup"):
             result = {"schema_version": 1, "command": args.command,
                       **_dispatch(args, None), "error": None}
         else:
