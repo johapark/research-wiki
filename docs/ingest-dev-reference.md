@@ -151,11 +151,20 @@ ranges, observed timestamps, basenames, and model labels. It deliberately omits
 draft and critic prose. The claims-table hash section is grouped by stem and
 labels its scope as current rebuildable claim rows; it is never an attempt-to-PDF
 binding. No SQLite row is imported, rewritten, or given a reconstructed source
-identity by this command. Filesystem sidecars, mailboxes, jobs, publication
-journals, and import remain separate Stage 4 work. `researchwiki records backup
---legacy --db-path SOURCE --output NEW_DIR` creates a private backup bundle using
-`sqlite3.Connection.backup` from a read-only source connection. The new directory
-contains `state.db` and a `manifest.json` completion marker with the backup hash,
+identity by this command. The command also returns a `related_evidence` summary
+for a selected library root: jobs and publication ledgers are read through
+`JobStore`/the ingest-ledger reader; mutation journals, relay mailbox file pairs,
+top-level sandbox outputs, grading-cache directories and ingest-run/checkpoint
+availability are counted without including their contents in the report. The
+filesystem portion is a best-effort per-file scan, not one cross-store snapshot.
+Consumed relay payloads have already been removed and cannot be inventoried
+retrospectively.
+Use `--library-root PATH` when the target library differs from the current
+working directory. SQLite import remains separate Stage 4 work. The backup
+command `researchwiki records backup --legacy --db-path SOURCE --output NEW_DIR`
+creates a private backup bundle using `sqlite3.Connection.backup` from a
+read-only source connection. The new directory contains `state.db` and a
+`manifest.json` completion marker with the backup hash,
 SQLite integrity result, table names and ingest-history row count. The source is
 read through SQLite's online backup API instead of copying the live database and
 sidecars. Existing output directories are refused.

@@ -311,7 +311,10 @@ Use `records show <attempt-id> --lineage --json` to inspect authored/revised dra
 critiques and selection decisions, including losing and rejected drafts.
 For older machine-local SQLite ingest history, `researchwiki records inventory
 --legacy --json` reports attempt-level coverage without initializing or changing
-the databases; it does not reconstruct missing source hashes or target lists.
+the databases, plus metadata counts for the selected library's jobs, publication
+ledgers, mutation journals, relay mailbox files, sandbox drafts, and cache/run
+directories. The report contains metadata only; missing source hashes and target
+lists remain unresolved.
 Before migration, make a consistent database snapshot with
 `researchwiki records backup --legacy --db-path <state.db> --output <new-dir>`;
 external job/recovery files still need a separate backup.

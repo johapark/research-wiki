@@ -28,9 +28,11 @@ def _parser():
             sub.add_argument("--output", type=Path, required=True)
         if name == "inventory":
             sub.add_argument("--legacy", action="store_true",
-                             help="inventory historical SQLite ingest records")
+                             help="inventory historical ingest records and adjacent local evidence")
             sub.add_argument("--db-path", type=Path,
                              help="read this SQLite file instead of the selected and legacy DB paths")
+            sub.add_argument("--library-root", type=Path,
+                             help="library whose jobs, journals, relay mailboxes and local artifacts to inventory; defaults to cwd")
         if name == "backup":
             sub.add_argument("--legacy", action="store_true",
                              help="back up a historical SQLite ingest database")
@@ -51,7 +53,7 @@ def _dispatch(args, store):
         if not args.legacy:
             raise ValueError("records inventory currently requires --legacy")
         from ..records.legacy import inventory_legacy
-        return inventory_legacy(db_override=args.db_path)
+        return inventory_legacy(db_override=args.db_path, library_root=args.library_root)
     if args.command == "recover":
         return _recover(store)
     if args.command == "list":

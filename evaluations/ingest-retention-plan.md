@@ -796,7 +796,7 @@ The current surface and remaining import/reconciliation work:
 | `researchwiki records show ATTEMPT --json` | Implemented; inspect source, inventory, calls, checks and lineage without rewriting records |
 | `researchwiki records verify ATTEMPT --json` | Implemented; verify blobs, source references, event continuity, expected inventory and exact text spans; no provider calls |
 | `researchwiki records export ATTEMPT --output NEW_PATH` | Implemented; checksum-verifiable self-contained attempt bundle; refuses an existing destination |
-| `researchwiki records inventory --legacy --json` | Implemented; aggregate historical SQLite rows and provenance gaps through read-only framework access |
+| `researchwiki records inventory --legacy --json` | Implemented; aggregate historical SQLite rows plus adjacent job, journal, mailbox and local artifact availability without exporting content |
 | `researchwiki records backup --legacy --db-path SOURCE --output NEW_DIR` | Implemented; consistent SQLite online backup with integrity result and checksum manifest; refuses an existing destination |
 | `researchwiki records import BUNDLE` | Planned; add immutable records idempotently, reject conflicting IDs/bytes and unsafe paths, never overwrite local observations |
 | `researchwiki records reconcile ATTEMPT` | Planned; repair an understood checkpoint or publication observation from durable evidence; no re-authoring |
@@ -814,8 +814,10 @@ the export. Import/export does not change canonical wiki/PDF files.
 
 ### 17.1 Audit before mutation
 
-Expand the read-only SQLite inventory and add file/job/publication readers that
-report, per attempt where possible:
+The initial read-only inventory covers SQLite attempts and adjacent local state:
+job manifests/events/publication ledgers, mutation journals, relay mailbox file
+counts, sandbox outputs, grading-cache directories, and ingest batch checkpoints.
+Continue enriching it to report, per attempt where possible:
 
 - Available iteration/draft/score/critic records and target-count-only history.
 - Existing source-hash bindings, current source availability, and conflicting versions.
@@ -959,16 +961,26 @@ reads the selected and former machine-global SQLite paths without schema
 bootstrap or mutation. It reports attempt-level iteration/draft/score/critic
 coverage, retained target counters, and rebuildable claim-table hash coverage,
 while labeling that hash data as unbound to historical attempts. The report does
-not expose draft or critic prose. `researchwiki records backup --legacy
---db-path SOURCE --output NEW_DIR` makes a consistent SQLite online-backup bundle
+not expose draft or critic prose. Its `related_evidence` section summarizes the
+selected library's jobs, publication ledgers, mutation journals, relay mailbox
+files, sandbox outputs, grading cache, and ingest runs without exposing their
+contents. Consumed relay payloads are no longer available to inventory.
+`researchwiki records backup --legacy --db-path SOURCE --output NEW_DIR`
+makes a consistent SQLite online-backup bundle
 with a checksum, integrity result, and source/snapshot metadata. See the
 [operator guide](../docs/ingest-retention.md#audit-historical-sqlite-ingest-history)
 and [developer reference](../docs/ingest-dev-reference.md#read-only-historical-sqlite-inventory).
 
-Remaining deliverables: inventory of related files/job/publication evidence,
-SQLite import tooling, explicit reconstruction observations, full import/export
-validation, storage inventory, backup guidance for external job/recovery state,
-and a conservative cleanup design.
+Regression coverage in `tests/test_legacy_ingest_records.py` checks inspection
+without database/store initialization, payload privacy, job-ledger/event reads,
+journal backups under an explicitly selected library, committed WAL data in
+backups, overwrite refusal, and cleanup of incomplete backups. It compares
+source bytes before and after inspection and backup.
+
+Remaining deliverables: per-attempt source/PDF availability and conflicting-version
+assessment, SQLite import tooling, explicit reconstruction observations, full
+import/export validation, storage inventory, backup guidance for external
+job/recovery state, and a conservative cleanup design.
 
 Acceptance: old and new observations cannot be confused; unresolved original hashes
 remain unresolved; exports validate on a relocated machine; original DB/history

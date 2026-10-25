@@ -97,6 +97,7 @@ machine-wide `state.db` without initializing, migrating, or rewriting either:
 ```bash
 researchwiki records inventory --legacy --json
 researchwiki records inventory --legacy --db-path /path/to/state.db --json
+researchwiki records inventory --legacy --library-root /path/to/library --json
 researchwiki records backup --legacy --db-path /path/to/state.db \
   --output /path/to/new-backup-directory
 ```
@@ -107,10 +108,15 @@ timestamps, source filenames, and source-hash coverage in the current claims
 table. It does not print draft text, critic notes, or other prose. Claim-table
 hashes are rebuildable state and are not proof of which PDF version a historical
 attempt used; the history rows themselves do not contain the original PDF hash or
-full target-claim list. The inventory currently covers SQLite only. It neither
-imports records nor inventories sandbox files, relay mailboxes, jobs, or
-publication journals. Preserve the original database and its job/recovery state;
-the backup command captures one SQLite database only. It uses SQLite's online
+full target-claim list. `related_evidence` summarizes the selected library's job
+manifests/events/publication ledgers, mutation journals, relay mailbox file counts,
+and top-level sandbox, grading-cache, and ingest-run availability. It returns
+metadata and counts only; draft, event, journal, and relay payload contents are
+not included in the report. This is a best-effort per-file scan, not a single
+cross-store snapshot. `--library-root` selects the library for this filesystem
+inventory. Consumed relay payloads have already been deleted and cannot be
+inventoried retrospectively. Preserve the original database and its job/recovery
+state; the backup command captures one SQLite database only. It uses SQLite's online
 backup API so committed WAL content visible to SQLite is included in a consistent
 snapshot. It refuses an existing output directory and writes `state.db` plus a
 `manifest.json` containing the snapshot method/time, database checksum, table

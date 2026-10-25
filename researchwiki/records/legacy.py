@@ -29,19 +29,32 @@ _TEXT_FLAGS = {
 }
 
 
-def inventory_legacy(*, db_override: Path | None = None) -> dict:
-    """Inventory selected and former global DBs without modifying either one."""
+def inventory_legacy(*, db_override: Path | None = None,
+                     library_root: Path | None = None) -> dict:
+    """Inventory SQLite history and adjacent local evidence without writes."""
     candidates = _database_candidates(db_override)
+    databases = [_inventory_database(path, roles) for path, roles in candidates]
+    attempt_ids = {
+        attempt["attempt_id"]
+        for database in databases if database["status"] == "available"
+        for attempt in database["attempts"] if isinstance(attempt["attempt_id"], str)
+    }
+    from .related_inventory import inventory_related_state
+
     return {
         "inventory_version": 1,
         "read_only": True,
         "scope": "legacy_sqlite_ingest_history",
-        "databases": [_inventory_database(path, roles) for path, roles in candidates],
+        "databases": databases,
+        "related_evidence": inventory_related_state(
+            Path.cwd() if library_root is None else library_root, attempt_ids
+        ),
         "limitations": [
-            "This inventory reads SQLite state only; it does not import or rewrite records.",
+            "This inventory does not import or rewrite SQLite rows or adjacent files.",
             "Legacy iteration history does not contain the original PDF hash or full target-claim list.",
             "Claims-table source hashes describe rebuildable claim rows and are not bound to historical attempts.",
-            "Sandbox outputs, relay mailboxes, jobs, and publication journals are outside this inventory slice.",
+            "Consumed relay mailbox payloads are deleted and cannot be inventoried retrospectively.",
+            "Adjacent jobs, journals, drafts, and caches are summarized as metadata; their content is not exported.",
         ],
     }
 
