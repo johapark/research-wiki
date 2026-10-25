@@ -131,6 +131,11 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Retention verification reuses its validated full-history projection for a
+  current checkpoint, avoiding duplicate replay while preserving payload checks,
+  stale-checkpoint repair and writer locking. A synthetic API/relay cost experiment
+  records the improvement and remaining capture/finalization overhead.
+
 - Mutation cleanup removes its journal before deleting backups, after any
   required publication-evidence handoff. An unlink failure therefore retains
   the backups needed by recovery instead of stranding a journal without them.

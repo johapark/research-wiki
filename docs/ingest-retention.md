@@ -218,6 +218,13 @@ and verifies referenced payloads on updates. Storage and elapsed-time budgets on
 representative papers remain a controlled-rollout prerequisite before changing the
 default. This release deliberately leaves the choice explicit.
 
+The [synthetic cost experiment](../evaluations/ingest-retention-cost.md) measured
+2/12/48-page inputs with API and relay responders. Removing a duplicate history
+projection reduced typical/long median processing time by about 12–13%, preserving
+all payload checks. The fixture still adds seconds of capture/closure overhead;
+repeated full-history reads and hashing remain. These text-only local measurements
+do not predict scanned PDFs, semantic models or slow storage.
+
 Candidate passages, source representations and semantic vectors add storage and
 verification I/O. Candidate text/vectors are deduplicated within a grading run;
 identical payloads reuse content-addressed blobs. There are no extra model calls

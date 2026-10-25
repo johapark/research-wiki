@@ -156,7 +156,11 @@ class RecordStore:
             raise RecordCorrupt("invalid or unsupported archive checkpoint; repair refused") from exc
         if checkpoint.last_sequence > len(events):
             raise RecordCorrupt("checkpoint references missing events")
-        prefix = project(events[:checkpoint.last_sequence])
+        # A current checkpoint describes the full history already projected above.
+        # Reuse that result within this inspection only; all events and blobs are
+        # still read/verified afresh under the same lock. Stale prefixes need their
+        # own projection before explicit repair can be allowed.
+        prefix = manifest if checkpoint.last_sequence == len(events) else project(events[:checkpoint.last_sequence])
         if checkpoint != prefix:
             raise RecordCorrupt("checkpoint is not a valid history prefix; repair refused")
         status = "current" if checkpoint == manifest else "stale"

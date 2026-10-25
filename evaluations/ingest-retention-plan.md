@@ -1,9 +1,32 @@
 # Ingestion retention, provenance, and auditability plan
 
-Status: R1 invocation completeness and acceptance repair implemented and locally validated. Next: measured overhead (R2). Release readiness remains open; retention stays opt-in and historical import is deferred.
+Status: R1 completeness repair and R2 measured overhead work implemented. Next: bounded input/span audits (R3). Release readiness remains open; retention stays opt-in and historical import is deferred.
 Created: 2026-10-22. Design review: 2026-10-23. Implementation review and reprioritization: 2026-10-24.
 Original code baseline: `0ba18dc162fda2987ae2ba1f8ad7c7b28c0b9750`.
 Implementation reviewed: `feat/ingest-retention` through `2ce8ab5`.
+
+### R2 checkpoint — 2026-10-25
+
+The [cost experiment](ingest-retention-cost.md) records a repeatable synthetic
+capture-off/required comparison for 2/12/48-page inputs, API/relay, multiple author
+slots and a rejected revision. Three repetitions with cold/warm application caches
+were run before and after the bounded change (144 phase-fixture runs). Outputs,
+model calls and usage matched. This does not benchmark publication, embeddings,
+support judging, supplementary files, scanned PDFs or slower storage.
+
+Reuse the already-validated full projection when checking a current checkpoint;
+stale prefixes still need a separate projection. Nothing is cached across calls,
+and all event/blob checks and locking remain. This approximately halves projection
+work and reduced typical/long median processing time by 12–13%. The short relay
+case was noisy, including a repetition above the provisional 10-second target.
+Keep that result, the remaining repeated hashing/history reads and the default-off
+policy explicit. Routine-use approval still needs R3/R4 and representative inputs.
+
+Validation: the count regression failed before the optimization and passed after
+it. All 31 focused archive tests and all four source retention acceptance harnesses
+passed; full pytest passed **4,391 tests, 10 skipped**, with Ruff and whitespace
+checks clean. R2 did not repeat R1's wheel build; cross-platform installed CI
+remains a merge-review gate.
 
 ### R1 checkpoint — 2026-10-25
 
@@ -23,8 +46,8 @@ passed from source and an installed wheel (eight runs). Full pytest: **4,387 pas
 10 skipped**; Ruff and whitespace checks passed. Fixtures used disposable libraries
 and local/mock responders, with no external model calls or developer-corpus writes.
 Cross-platform installed CI remains a merge-review gate; this checkpoint records
-local results only. R2 is next; the integrity/performance and span-audit findings
-remain open.
+local results only. This checkpoint led to R2; independent source-span audits
+remain R3 work.
 
 ### Implementation review — 2026-10-24 (historical findings)
 
@@ -930,7 +953,7 @@ Implementation progress and release acceptance are separate:
 | 2 — grading evidence | Full candidate sets, source/check inputs, vectors, support-call records and portable evidence; standalone acceptance repaired in R1 | Add independent known-format span audits |
 | 3 — full phase lineage | Reconcile/crosslink/author/grade/critic/revision/DEBUG/commit observations; losing drafts, omissions, final page and publication receipts; per-invocation coverage audit in R1 | Maintain failure/mode regressions; qualify operating cost and release readiness |
 | 4 — operator/historical lifecycle | Inspect/verify/export/recover, read-only historical/local-evidence inventory, consistent SQLite backup | Generic import, historical reconstruction and pruning are deferred; use existing exports/backups now |
-| 5 — rollout | Full tests and all four source/installed-wheel retention harnesses pass locally | Cross-platform installed CI, current-scope cost and rollout decision remain open |
+| 5 — rollout | Full tests and all four source/installed-wheel retention harnesses pass locally; bounded R2 cost experiment recorded | Cross-platform installed CI, representative real-use cost and rollout decision remain open |
 
 The following order replaces the earlier stage-by-stage expansion. Finish one
 reviewable work packet before adding another feature; do not wait for historical
@@ -975,7 +998,12 @@ acceptance harnesses pass from source and an installed wheel, and relevant/full
 pytest plus Ruff pass. Use representative branch/failure cases at the owning layer
 rather than multiplying every test by every provider/mode combination.
 
-### R2 — measure the current scope, then remove demonstrated overhead (next)
+### R2 — measure the current scope, then remove demonstrated overhead (implemented; measured)
+
+Result: [cost experiment and decision](ingest-retention-cost.md). The bounded
+projection optimization preserves the integrity contract; remaining superlinear
+read/hash cost is explicit. This packet does not approve routine/default-on use.
+The following scope/criteria describe the completed experiment.
 
 Build one small repeatable benchmark using existing synthetic PDFs, fixed model
 answers and the current capture-off/capture-required paths. Cover a short/typical/
@@ -1006,7 +1034,7 @@ without correctness/recovery regressions. No new catalog, background recorder,
 async durability queue, compression format, or automatic quota cleanup is justified
 without those measurements.
 
-### R3 — finish bounded input and portable audit coverage
+### R3 — finish bounded input and portable audit coverage (next)
 
 - Freeze the initial supported scope as primary/displaced PDFs plus the observed
   representations, model work, grading, drafts and publication page. Supplied

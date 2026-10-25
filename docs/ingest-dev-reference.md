@@ -124,9 +124,12 @@ host. It is not a distributed-writer or hostile-filesystem isolation mechanism.
 
 Payload insertion is streamed for files. Blob reads return verified bytes; full
 attempt verification streams source blobs and deduplicates checksum work within
-that verification. The current store replays and verifies the
-attempt when mutating it; large-history/write-overhead measurements and optimization
-are future work. Unreferenced payloads or unpublished `.write-*` files can remain
+that verification. The store replays and verifies the attempt when mutating it.
+A current checkpoint reuses the full projection within that inspection; stale
+checkpoints still require their own prefix projection. There is no cross-call
+integrity cache. The [cost experiment](../evaluations/ingest-retention-cost.md)
+records measured overhead and the remaining superlinear history/hash work.
+Unreferenced payloads or unpublished `.write-*` files can remain
 after a crash; no pruning or cleanup API is implemented.
 
 Moving the complete archive preserves identities and relative references. No
@@ -352,7 +355,7 @@ Candidate text is also deduplicated within each run. Numeric full-text
 representations reuse content-addressed blobs. Evidence is persisted in bundles
 rather than one archive event per claim, limiting the event/history overhead.
 Retaining complete passages and vectors still adds storage and verification I/O;
-representative overhead measurements remain part of the default-rollout gate.
+representative real-use measurements remain part of the default-rollout gate.
 
 ## Draft, critique and selection lineage
 
@@ -437,8 +440,8 @@ can still have complete capture.
 `records verify --coverage` recomputes this audit from portable payloads. Its
 separate status does not rewrite historical producer reports; producers without
 the new declarations remain limited. This audit does not revalidate source spans.
-`extraction-v1` remains the sole supported profile name. The master plan's R2–R4
-queue owns measured overhead, bounded span audits and release sign-off.
+`extraction-v1` remains the sole supported profile name. R2's bounded measurement
+is recorded; the master plan's R3–R4 queue owns span audits and release sign-off.
 
 ## Inspection payloads
 
@@ -454,9 +457,10 @@ work without the original source, corpus, database, mailboxes or caches.
 
 The [implementation review](../evaluations/ingest-retention-plan.md) records
 results and remaining gaps. The standalone grading fixture explicitly declares
-its unrequested pipeline phases. On 2026-10-25, all four retention harnesses passed
-from source and an installed wheel; pytest passed 4,387 tests with 10 skipped,
-and Ruff passed. This is local evidence, not a cross-platform release certificate.
+its unrequested pipeline phases. R1 passed all four retention harnesses from source
+and an installed wheel. R2 reran all four from source; full pytest passed 4,391 tests
+with 10 skipped, and Ruff passed. This is local evidence, not a cross-platform
+release certificate.
 
 All checks use disposable synthetic inputs and local responders, with no external
 provider calls or writes to the developer's corpus. They validate retention and
@@ -465,6 +469,7 @@ portability, rather than scientific extraction quality.
 | Layer | Tests / installed acceptance harness | Coverage |
 | --- | --- | --- |
 | Archive | `tests/test_ingest_records_contracts.py`, `tests/test_ingest_records_store.py`; `.github/scripts/records_acceptance.py` | Strict wire fixture (`tests/record-fixtures/attempt-spec-v1.json`), immutable IDs/deduplication, malformed bytes, corruption/future schemas, interrupted event/checkpoint writes, safe repair, symlink containment, concurrent writers and relocation |
+| Replay cost | `tests/test_ingest_records_scaling.py`; `.github/scripts/retention_benchmark.py` | One full projection per current inspection, exact stale-prefix checks and continued corruption detection; repeatable API/relay output/usage parity and cold/warm stage/storage/work counts |
 | Extraction | `tests/test_ingest_extraction_retention.py`; `.github/scripts/extraction_acceptance.py` | Real synthetic PDF extraction, complete/discarded candidates, API/relay retry and cleanup, usage/setting normalization, budget and archive failures, relocation after source deletion |
 | Lifecycle | `tests/test_ingest_retention_lifecycle.py`; `.github/scripts/retention_acceptance.py` | Real CLI with stub models and a zero-request local sentinel, portable export after corpus/DB deletion, explicit checkpoint repair and publication/capture failure boundaries |
 | Grading | `tests/test_grading_retention.py`; `.github/scripts/grading_acceptance.py` | Long passages, exact offsets, deterministic semantic vector replay, mock API/relay judgments, failure handling and portable inspection after source/cache deletion |
