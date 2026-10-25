@@ -26,7 +26,7 @@ from ..db.iterations import write_iteration, update_paper_stem
 from ..grade import coherence
 from . import fitness, model_config, phases
 from .context import Context, PromoteFailed, ReconcileFailed, StemRenameRefused, processing_pdf
-from .commit_support import promotion_decision_reason, update_indexes_after_promotion
+from .commit_support import evaluate_promotion_gate, promotion_decision_reason, update_indexes_after_promotion
 from .budget import BudgetExhausted
 from ..operations.observation import activate_ingest_scope, submit_observed
 from .runner_support import (
@@ -49,7 +49,6 @@ from ..fsatomic import write_text_atomic
 from ..log import log
 from ..operations.lifecycle import gate_evaluated, observed_attempt, observed_phase
 from .publication import finish_publication
-from ..provenance import specific_author_model
 from ..records.lifecycle import record_ingestion, bind_attempt, check_capture
 
 __all__ = ["run_ingest", "_keyword_body_gaps"]
@@ -786,7 +785,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
     """
     t0 = time.monotonic()
     from . import promote as promote_mod
-    from ..records.lineage import note_call_omission, note_phase_omission
+    from ..records.lineage import note_call_omission
     note_call_omission("short_name", "ingest_uses_author_trailer",
                        {"handle_present": bool(ctx.winner and ctx.winner.handle),
                         "hook_present": bool(ctx.winner and ctx.winner.hook)})
@@ -804,109 +803,10 @@ def _phase_commit(ctx: Context, conn) -> Path:
     else:
         log(f"verify   → all {len(verification.verified)} wikilinks verified", tag="agent")
 
-    # Promotion-mode dispatch.
-    if ctx.promote_mode == "never":
-        note_phase_omission("debug", "forced_sandbox",
-                            {"promotion_mode": ctx.promote_mode})
-        gate = promote_mod.GateResult(
-            promoted=False, reasons=["--force-sandbox flag set"]
-        )
-    else:
-        gate = promote_mod.should_auto_promote(
-            scores=ctx.winner.scores,
-            verification=verification,
-            n_key_contributions=n_kc,
-            paper_type=(ctx.metadata or {}).get("paper_type", "research"),
-            commentary_signals=(ctx.metadata or {}).get("commentary_signals"),
-        )
-        if gate.promoted:
-            reason = ("gate_passed_before_entailment_check" if ctx.verify_claim_entailment
-                      else "promotion_gate_passed")
-            note_phase_omission("debug", reason,
-                                {"promotion_mode": ctx.promote_mode,
-                                 "entailment_check_enabled": ctx.verify_claim_entailment})
-        # DEBUG operator: when the gate rejects on a structural issue
-        # (numeric drift, too few KC bullets, too few graded claims) we
-        # try up to `max_debug` targeted repair passes before falling back
-        # to sandbox. Skipped under --auto-promote (caller already overrode
-        # the gate) and --force-sandbox (gate is informational only there).
-        if not gate.promoted and ctx.promote_mode == "auto":
-            if ctx.max_debug <= 0:
-                note_phase_omission("debug", "debug_budget_zero",
-                                    {"max_debug": ctx.max_debug})
-            for _ in range(ctx.max_debug):
-                if gate.promoted:
-                    note_phase_omission("debug", "gate_passed_after_repair",
-                                        {"max_debug": ctx.max_debug})
-                    break
-                structural_issues = phases.detect_structural_gate_issues(gate.reasons)
-                if not structural_issues:
-                    note_phase_omission("debug", "no_structural_gate_issues",
-                                        {"max_debug": ctx.max_debug})
-                    break
-                prior_gate = gate
-                cleaned_text, n_kc, gate, verification = _phase_debug(
-                    ctx, conn, cleaned_text, n_kc, gate, verification,
-                    issues=structural_issues,
-                )
-                if gate is prior_gate:
-                    # _phase_debug reverted (repair didn't strictly improve)
-                    # and handed back the same gate object — another pass
-                    # would re-run the identical repair against the same
-                    # winner. Stop burning the budget.
-                    note_phase_omission("debug", "repair_did_not_improve",
-                                        {"max_debug": ctx.max_debug})
-                    break
-            else:
-                if ctx.max_debug > 0:
-                    note_phase_omission("debug", "debug_budget_exhausted",
-                                        {"max_debug": ctx.max_debug})
-        elif not gate.promoted:
-            note_phase_omission("debug", "debug_bypassed_by_promotion_mode",
-                                {"promotion_mode": ctx.promote_mode})
-
-        # Opt-in per-claim entailment veto (grade.support). Off unless
-        # --verify-claim-entailment is set. Runs on the FINAL winner/text —
-        # after any DEBUG repair has settled — then re-evaluates the gate so the
-        # veto lands on the draft that actually gets promoted. (Running it
-        # before DEBUG let a successful repair rebuild the winner's scores and
-        # silently drop the n_unsupported veto.) It's the qualitative analogue
-        # of the numeric-drift veto that BM25/semantic similarity can't catch.
-        if ctx.verify_claim_entailment:
-            run_entailment_check(ctx, conn, cleaned_text)
-            gate = promote_mod.should_auto_promote(
-                scores=ctx.winner.scores,
-                verification=verification,
-                n_key_contributions=n_kc,
-                paper_type=(ctx.metadata or {}).get("paper_type", "research"),
-            commentary_signals=(ctx.metadata or {}).get("commentary_signals"),
-            )
-
-        if ctx.promote_mode == "always" and not gate.promoted:
-            log(f"promote  → --auto-promote forced over failed gates: {gate.reasons}", tag="agent")
-            gate = promote_mod.GateResult(
-                promoted=True, reasons=gate.reasons, warnings=gate.warnings,
-            )
-
-    # `promote_to_wiki` refuses a page it cannot attribute, so no mode —
-    # `--auto-promote` included — can land one. Decide that here, where the
-    # sandbox branch keeps the paid draft for review and the run exits 1 as a
-    # review outcome. Reaching promote instead raised PromoteFailed: exit 2,
-    # which batch `--resume` retries by re-running the whole paid pipeline into
-    # the same refusal. Preflight normally stops a config like this before the
-    # first call; this catches what it cannot see.
-    if gate.promoted:
-        winner_model = ctx.winner.model if ctx.winner else None
-        if not specific_author_model(winner_model):
-            gate = promote_mod.GateResult(
-                promoted=False,
-                reasons=[
-                    f"author_model: winning draft's model {winner_model!r} is "
-                    "not an exact model id, so the page cannot record which "
-                    "model authored it"
-                ],
-                warnings=gate.warnings,
-            )
+    cleaned_text, n_kc, gate, verification = evaluate_promotion_gate(
+        ctx, conn, cleaned_text, n_kc, verification,
+        debug=_phase_debug, entailment=run_entailment_check,
+    )
 
     gate_evaluated(ctx, gate)
     from ..records.lineage import commit_input

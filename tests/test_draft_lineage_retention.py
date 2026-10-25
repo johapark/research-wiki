@@ -21,7 +21,7 @@ from researchwiki.records import RecordStore, RecordStoreUnavailable
 from researchwiki.records.export import export_attempt
 from researchwiki.records.jsonio import decode_json
 from researchwiki.records.lifecycle import capture_operation
-from researchwiki.records.lineage import current_scope
+from researchwiki.records.lineage import PHASES, current_scope, note_call_omission, note_phase_omission
 from tests.test_ingest_retention_lifecycle import library as library
 
 
@@ -54,13 +54,20 @@ def draft(text="synthetic draft", **kwargs):
 
 def author(lineage, monkeypatch, text="synthetic draft", slot=0):
     _, ctx, _ = lineage
-    monkeypatch.setattr(phases, "author", lambda **kwargs: draft(text, stance=kwargs["stance"]))
+    def synthetic_author(**kwargs):
+        note_call_omission("author", "stub_response_used", {"transport": "test_fixture"})
+        return draft(text, stance=kwargs["stance"])
+    monkeypatch.setattr(phases, "author", synthetic_author)
     result = runner._phase_author(ctx, None, 0.2, slot=slot)
     ctx.drafts.append(result)
     return result
 
 
-def terminal(owner):
+def terminal(owner, *, complete_fixture=False):
+    if complete_fixture:
+        for phase in PHASES:
+            if phase not in owner.lineage.runs:
+                note_phase_omission(phase, "synthetic_fixture_phase_not_requested")
     owner.finish({"scope": "synthetic-lineage-test", "execution": "finished", "outcome": "draft_ready",
                   "publication": "not_published", "projections": "not_applicable"})
     return owner.records.store.read_attempt(owner.ctx.attempt_id)
@@ -80,7 +87,7 @@ def test_all_candidates_and_real_tournament_rationale_survive(lineage, monkeypat
     inputs = artifacts(owner, "lineage.tournament.input")[0][1]
     assert [c["key"][-2] for c in inputs["candidates"]] == [1, 10]
     assert selection["selected"] == inputs["candidates"][1]["draft"]
-    manifest = terminal(owner)
+    manifest = terminal(owner, complete_fixture=True)
     assert manifest.capture_state == "complete"
     assert next(i.status for i in manifest.inventory if i.slot == "lineage.author.request") == "not_run"
     assert next(i.status for i in manifest.inventory if i.slot == "lineage.evolve.input") == "not_run"
@@ -110,11 +117,32 @@ def test_rejected_revision_retains_parent_critique_and_decision(lineage, monkeyp
 def test_empty_critique_is_observed_without_inventing_a_call(lineage, monkeypatch):
     _, ctx, owner = lineage
     prior = author(lineage, monkeypatch)
-    monkeypatch.setattr(phases, "critic", lambda **kwargs: CritiqueOutput("", [], "(no-call)", 0, 0))
+    def empty_critique(**kwargs):
+        note_call_omission("critic", "no_actionable_findings")
+        return CritiqueOutput("", [], "(no-call)", 0, 0)
+    monkeypatch.setattr(phases, "critic", empty_critique)
     runner._phase_critic(ctx, None, prior)
     manifest = terminal(owner)
     assert artifacts(owner, "lineage.critic.output")[0][1]["critique"]["notes"] == ""
     assert next(i.status for i in manifest.inventory if i.slot == "lineage.critic.request") == "not_run"
+
+
+@pytest.mark.parametrize("gap", ["call", "phase"])
+def test_unexplained_omissions_remain_unknown(lineage, monkeypatch, gap):
+    _, ctx, owner = lineage
+    if gap == "call":
+        # A synthetic result alone cannot prove why no model request was retained.
+        monkeypatch.setattr(phases, "author", lambda **kwargs: draft())
+        runner._phase_author(ctx, None, 0.2)
+        manifest = terminal(owner, complete_fixture=True)
+        slot, reason = "lineage.author.request", "call_omission_reason_not_observed"
+    else:
+        author(lineage, monkeypatch)
+        manifest = terminal(owner)
+        slot, reason = "lineage.evolve.input", "phase_skip_reason_not_observed"
+    missing = next(item for item in manifest.inventory if item.slot == slot)
+    assert missing.status == "unknown" and missing.reason == reason
+    assert manifest.capture_state == "incomplete"
 
 
 @pytest.mark.parametrize("route", ["openai-compatible", "chat-relay"])
