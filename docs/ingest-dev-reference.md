@@ -330,6 +330,11 @@ declared slice reproduces its retrieval text and matches the index representatio
 identity. Unknown mappings are marked unavailable. A contradictory mapping or
 source identity fails required capture and prevents publication.
 
+These are capture-time checks. Generic store verification currently validates
+blob bytes and event/checkpoint structure without decoding evidence payloads to
+repeat the span audit. Bounded independent payload checks are planned in R3 of
+the [master plan](../evaluations/ingest-retention-plan.md#19-implementation-status-and-remaining-execution-order).
+
 The numeric checker also retains its own joined/repaired and normalized text
 representations. It does not assume that their offsets equal the index text's
 offsets across page boundaries.
@@ -420,9 +425,11 @@ This archive snapshot preserves the ingest-time training text; it is not a claim
 that the draft differs from the published page. The existing mutation journal
 and ledger remain publication authorities.
 
-This remains a partial Stage 3 implementation. Keep `full-ingest-v1` disabled
-until the omission matrix, interrupted attempts, and post-operation terminal
-status have acceptance coverage.
+Stage 3 instrumentation is implemented but acceptance remains open, including
+coverage of repeated phase invocations: a retained phase slot can currently mask
+an unexplained missing call in another invocation. `extraction-v1` is the sole supported
+profile name; no `full-ingest-v1` setting exists. The master plan's R1–R4 queue
+owns completeness hardening, acceptance, measured overhead and release sign-off.
 
 ## Inspection payloads
 
@@ -436,6 +443,11 @@ work without the original source, corpus, database, mailboxes or caches.
 
 ## Validation
 
+The [implementation review](../evaluations/ingest-retention-plan.md)
+records current results and gaps, including the failing standalone grading
+acceptance fixture. The table below describes intended coverage rather than a
+blanket release certificate.
+
 All checks use disposable synthetic inputs and local responders, with no external
 provider calls or writes to the developer's corpus. They validate retention and
 portability, rather than scientific extraction quality.
@@ -447,6 +459,7 @@ portability, rather than scientific extraction quality.
 | Lifecycle | `tests/test_ingest_retention_lifecycle.py`; `.github/scripts/retention_acceptance.py` | Real CLI with stub models and a zero-request local sentinel, portable export after corpus/DB deletion, explicit checkpoint repair and publication/capture failure boundaries |
 | Grading | `tests/test_grading_retention.py`; `.github/scripts/grading_acceptance.py` | Long passages, exact offsets, deterministic semantic vector replay, mock API/relay judgments, failure handling and portable inspection after source/cache deletion |
 | Draft lineage | `tests/test_draft_lineage_retention.py`; `.github/scripts/retention_acceptance.py` | API/relay calls, all parallel author slots, losing/revised/DEBUG drafts, critique/grade parents, actual selection decisions, capture failures and portable CLI inspection |
+| Historical/operator state | `tests/test_legacy_ingest_records.py` | No database/store initialization during inspection, payload privacy, selected-library journal backups, job-ledger/event reads, committed WAL backup, overwrite refusal and incomplete-backup cleanup |
 | Core ingestion | `.github/scripts/fresh_install_acceptance.py` | Fresh installed-package ingestion behavior |
 
 The archive-only smoke check needs `filelock` without loading PDF, ML, provider or

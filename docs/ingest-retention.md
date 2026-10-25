@@ -221,7 +221,9 @@ the ingest-time page remains recoverable after the corpus page changes or disapp
 Conditional phase and model-call omissions now have individual reason artifacts
 in `records show --lineage`; an unexplained missing call remains unknown. Supplementary
 attachments, import/pruning and general archive reconciliation remain later work.
-No `full-ingest-v1` profile is enabled yet, pending acceptance coverage for the
-conditional paths and post-operation terminal status.
+`extraction-v1` is the only accepted profile name. Its current producer declares
+the additional grading and lineage inventory in each attempt; independent
+acceptance sign-off for that scope remains open in the
+[master plan](../evaluations/ingest-retention-plan.md#19-implementation-status-and-remaining-execution-order).
 Host-local locks and atomic writes support process-crash recovery, subject to the
 [filesystem and sync limits](ingest-dev-reference.md#storage-and-concurrency-limits).

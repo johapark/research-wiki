@@ -1,36 +1,46 @@
 # Ingestion retention, provenance, and auditability plan
 
-Status: Stages 0–2 implemented; Stage 3 lineage slice implemented; Stage 4 read-only inventory and SQLite backup slices implemented; default rollout pending.
-Created: 2026-10-22. Code review and implementation-scope refinement: 2026-10-23.
-Code baseline inspected: `0ba18dc162fda2987ae2ba1f8ad7c7b28c0b9750`.
+Status: Capture foundations implemented; release readiness remains open. Next: per-invocation completeness and acceptance repair (R1), then measured overhead (R2). Historical import is deferred.
+Created: 2026-10-22. Design review: 2026-10-23. Implementation review and reprioritization: 2026-10-24.
+Original code baseline: `0ba18dc162fda2987ae2ba1f8ad7c7b28c0b9750`.
+Implementation reviewed: `feat/ingest-retention` through `2ce8ab5`.
 
-### Review outcome
+### Implementation review — 2026-10-24
 
-The retention direction is sound. Implementation should proceed in small engine
-changes, with the following corrections incorporated before runtime work:
+Keep the current architecture: immutable content-addressed blobs, attempt events,
+explicit inventory, existing publication journals, and shared API/relay capture.
+Source/target retention, full grading evidence, draft/selection/page lineage,
+conditional omissions, portable export, historical inventory, and consistent
+SQLite backup are implemented. The branch now needs correctness and operating-cost
+proof before more historical tooling. Compare against the retention baseline
+above; a diff against `main` also includes earlier Community features.
 
-- Required capture needs a minimal publication guard and outcome/retry integration
-  in the first instrumented release; these cannot all wait for full-pipeline tracing.
-- Initial deployment is explicit opt-in `required` capture. Switch the default only
-  after the controlled-rollout gate; do not add a new default ingestion failure
-  mode before source ownership, budget settlement, and recovery checks pass.
-- Store exact source spans separately from whitespace-normalized retrieval text.
-- Snapshot the displaced canonical PDF before promotion overwrites it. Metadata
-  reconciliation alone does not perform that source upgrade.
-- Normalize provider-controlled/unknown settings into strict JSON, and record where
-  model/schema/usage information actually came from.
-- A full capture scope encloses operation post-work, not only `run_ingest`.
-- Freeze retention settings at worker execution and include them in job configuration
-  identity, while preserving strict version-1 public wire contracts.
+| Priority | Finding and evidence | Consequence |
+| --- | --- | --- |
+| P0 | **Completeness can hide a missing invocation.** A temporary synthetic diagnostic executed two author invocations: one retained a request/answer; the other had neither call records nor an omission reason. The attempt still finished `complete`. [`lineage.py`](../researchwiki/records/lineage.py) tracks invocation IDs but resolves request/response inventory at phase level; [`contracts.py`](../researchwiki/records/contracts.py) evaluates slot status. | Complete slots are insufficient to establish complete repeated/parallel work. Fix this before claiming full phase capture. |
+| P0 | **The grading acceptance harness fails.** Source execution of [grading_acceptance.py](../.github/scripts/grading_acceptance.py) fails its `capture_state == complete` assertion. Its isolated grading fixture has not accounted for the lineage requirements now declared by the lifecycle owner. | The green pytest suite does not establish that the independently executed package acceptance path passes. Repair the fixture's explicit scope/skips without weakening unknown-state handling. |
+| P1 | **Every append repeats expensive validation.** [`RecordStore._append`](../researchwiki/records/store.py) calls `_inspect`, which replays history and verifies all referenced blobs; reads and final slot resolution add more passes. | History replay grows with accumulated events, and large source bytes are repeatedly hashed. Measure this before expanding capture or promising affordable default retention. |
+| P1 | **Verification guarantees need precision.** Store verification checks event/checkpoint structure, references and payload hashes. Grading offsets are checked when captured; the generic store treats payload contents as opaque. | Do not describe `records verify` as a complete independent span/coverage audit yet. Add bounded checks for the known retained formats in R3. |
+| P1 | **Profile naming has drifted from actual scope.** Only `extraction-v1` is accepted by settings/contracts, while new live attempts also require grading and phase lineage. | Freeze and describe the actual producer inventory. A new profile name by itself provides neither lighter capture nor stronger validation. |
+| P2 | **Historical preservation is ahead of salvage readiness.** Inventory and SQLite backup already protect the available rows. Original request/response data and old PDF identity often cannot be reconstructed. | Pause importer/crawler expansion. Missing history stays missing; historical enrichment follows release readiness. |
 
-Stages 0–3 implementation slices are present on the consolidated
-`feat/ingest-retention` branch. Stage 4's SQLite inventory and backup slices are
-implemented.
-The [user guide](../docs/ingest-retention.md) describes enabling capture, inspecting
-records and recovery; the [developer reference](../docs/ingest-dev-reference.md) owns
-current archive/capture contracts and validation details. Capture remains off by
-default: `full-ingest-v1` still needs acceptance coverage, and controlled
-storage/time measurements still gate a default switch.
+Review evidence uses disposable libraries and synthetic/model-free transports:
+
+- The preceding full pytest run at `2ce8ab5` passed **4,365 tests**, with **10 skipped**;
+  Ruff passed. This review did not repeat that whole suite.
+- Source-mode archive, extraction-adapter, and live-retention acceptance harnesses
+  passed; the grading harness failed as described above. These were source checks,
+  not a fresh wheel or cross-platform CI run. No external provider was called.
+- The two-invocation diagnostic reproduced false completeness. It establishes the
+  gap; it is not acceptance evidence for correct behavior. The temporary diagnostic
+  was removed and no runtime implementation was changed in this review.
+
+**Execution authority:** §19 is the single ordered queue for remaining work.
+Sections 1–18 retain the design rationale and historical requirements; §3 is the
+original gap inventory, not an assertion that every gap still exists. The
+[user guide](../docs/ingest-retention.md) and
+[developer reference](../docs/ingest-dev-reference.md) describe current behavior.
+Retain the default `off` setting until the release decision in R4.
 
 ## 1. Purpose
 
@@ -82,7 +92,10 @@ operation, batch workers, and durable local jobs:
   machine-local job supervisor, or current wiki/claims database.
 - A hosted archive service, distributed writer coordination, or a new GUI.
 
-## 3. Current behavior and confirmed gaps
+## 3. Original baseline behavior and confirmed gaps
+
+This table describes the code before retention instrumentation at `0ba18dc`.
+Use the implementation review and §19 for current status and remaining work.
 
 | Area | Inspected behavior | Consequence |
 | --- | --- | --- |
@@ -143,8 +156,9 @@ For any phase declared captured by an attempt's profile, an operator can:
 - Move/export the record and validate it without the original database or caches.
 
 Completeness is always relative to a named capture profile and an explicit artifact
-inventory. The first extraction-focused release must not describe itself as full
-tracing of every ingestion phase.
+inventory. A complete attempt must account for each executed invocation and call,
+not only the presence of at least one artifact in each phase slot. Capture
+completeness does not establish scientific quality or exhaustive paper coverage.
 
 ## 6. Storage model
 
@@ -607,39 +621,37 @@ merely because a page path exists or a progress event mentioned publication.
 
 ## 14. Capture policy and failure semantics
 
-### 14.1 Explicit profiles
+### 14.1 Explicit policy and the existing profile
 
-Proposed initial policy:
-
-| Setting | Behavior |
+| Setting | Current behavior |
 | --- | --- |
 | Mode `required` | Required records must persist at the defined boundaries; storage errors become explicit ingest failures/incomplete outcomes |
-| Mode `off` | Explicit operator opt-out; record/report that audit content was not retained using available operational channels |
-| Profile `extraction-v1` | Source snapshots, representations, target-extraction request/responses/transforms, and attempt/terminal status |
-| Later profile `full-ingest-v1` | Declares the additional verification and full phase/draft/publication inventory once implemented |
+| Mode `off` | Current default; capture is disabled while existing scientific gates remain active |
+| Profile `extraction-v1` | The sole implemented profile name. Its immutable minimum inventory covers extraction; new producers also declare grading, phase lineage and publication requirements in each attempt specification. |
 
-Develop and validate opt-in required retention first, with existing non-capturing
-behavior remaining the rollout default until §19 Stage 5 passes. Once that gate
-passes, change new-run defaults to required retention for the supported profile
-with documented storage/error behavior and an explicit opt-out. A selected required
-mode must never silently fall back to metadata-only capture when space is exhausted.
+Freeze the current live producer's capture scope while R1–R4 establish readiness.
+Keep old attempt specifications and their original completeness observations
+unchanged. Existing readers must continue to accept them. The proposed name
+`full-ingest-v1` is not an implemented setting and is deferred; do not add profiles
+or a dynamic profile registry solely to match the original stage names. A lighter
+or differently scoped profile should be designed only if measured cost or an
+operator need justifies it, with an explicit compatibility decision.
 
-Freeze resolved policy and archive location for an executing job. Include their
-non-secret identity in execution configuration; do not borrow a foreign parent
-profile or silently change policy on retry. Proposed environment/config names
-should be finalized with the schema rather than adding unversioned wire fields.
+Use the attempt's declared inventory, producer identity, and independently audited
+coverage to explain what was captured. Do not retroactively infer stronger
+invocation-level guarantees from older phase-level completeness reports.
 
-Resolve policy at worker execution after its selected profile loads. Persist that
-effective policy in the attempt and include its safe projection (mode, profile,
-resolved root/archive identity) in `jobs.environment.execution_identity`. The current
-identity whitelist omits it. Historical job identities without these settings are
-`not_recorded`, not evidence of a particular old policy; retries must report this
-comparison limit and create new attempts. Do not retroactively rewrite queued or
-completed version-1 request/manifest JSON to add fields.
-The existing `configuration_changed` flag remains an aggregate comparison of opaque
-configuration digests. Without an independently retained policy on both attempts,
-report the policy-specific comparison as unavailable rather than claiming which
-setting caused that aggregate hash to change.
+Policy is frozen at execution after the selected worker profile loads. The current
+job configuration identity includes the retention mode/profile/root when capture
+is required. It does not independently retain an archive UUID there; archive and
+attempt records own that binding. Older identities without retention settings are
+`not_recorded`, not evidence for a particular old policy. Keep version-1 job and
+operation requests unchanged and preserve the aggregate `configuration_changed`
+semantics; do not claim which individual setting caused a digest change.
+
+Required mode never silently falls back when storage fails. Changing the rollout
+default is a separate reviewed decision after R4, not an automatic consequence of
+finishing the implementation or historical salvage.
 
 ### 14.2 Failure matrix
 
@@ -794,12 +806,14 @@ The current surface and remaining import/reconciliation work:
 | --- | --- |
 | `researchwiki records list --json` | Implemented; list retained attempts and completeness/profile |
 | `researchwiki records show ATTEMPT --json` | Implemented; inspect source, inventory, calls, checks and lineage without rewriting records |
-| `researchwiki records verify ATTEMPT --json` | Implemented; verify blobs, source references, event continuity, expected inventory and exact text spans; no provider calls |
+| `researchwiki records verify ATTEMPT --json` | Implemented; verify referenced blob bytes, structural event/inventory/checkpoint integrity; payload-level span and invocation audits remain R1/R3 work |
 | `researchwiki records export ATTEMPT --output NEW_PATH` | Implemented; checksum-verifiable self-contained attempt bundle; refuses an existing destination |
 | `researchwiki records inventory --legacy --json` | Implemented; aggregate historical SQLite rows plus adjacent job, journal, mailbox and local artifact availability without exporting content |
 | `researchwiki records backup --legacy --db-path SOURCE --output NEW_DIR` | Implemented; consistent SQLite online backup with integrity result and checksum manifest; refuses an existing destination |
-| `researchwiki records import BUNDLE` | Planned; add immutable records idempotently, reject conflicting IDs/bytes and unsafe paths, never overwrite local observations |
-| `researchwiki records reconcile ATTEMPT` | Planned; repair an understood checkpoint or publication observation from durable evidence; no re-authoring |
+| `researchwiki records recover --json` | Implemented; hand off pending publication journals through existing recovery, without model calls |
+| `researchwiki records verify ATTEMPT --repair-checkpoint --json` | Implemented; repair a missing/stale checkpoint only when it is a verified history prefix |
+| `researchwiki records import BUNDLE` | Deferred; native exports are already standalone archives selectable with `--root`. Add merging/import only for a demonstrated need, preserving original IDs and rejecting conflicts. |
+| `researchwiki records reconcile ATTEMPT` | Deferred; extend existing recovery only for a concrete unresolved case backed by durable evidence. No generic reconciliation engine is required for the first release. |
 
 Do not add a general “replay” command that silently dispatches paid calls. Offline
 reconstruction of stored transformations and explicit new reprocessing are different
@@ -884,129 +898,168 @@ Do not promise automatic full replay of a nondeterministic model. The archive
 reproduces what the engine observed and supports replay of deterministic local
 transformations where their code/configuration is available.
 
-## 19. Implementation stages
+## 19. Implementation status and remaining execution order
 
-### Stage 0 — freeze contract and fixtures (implemented)
+Implementation progress and release acceptance are separate:
 
-Completed 2026-10-23. Immutable payloads, strict version-1 contracts, attempt
-inventory/event/checkpoint history, integrity verification and explicit safe
-checkpoint repair are implemented. See [archive contracts](../docs/ingest-dev-reference.md#implemented-contracts)
-and [validation](../docs/ingest-dev-reference.md#validation).
+| Original stage | Implemented at the review point | Remaining qualification |
+| --- | --- | --- |
+| 0 — archive foundation | Strict schemas, immutable blobs/events, checkpoint repair, concurrent writers and relocation | Keep this architecture; no replacement store or new persistence abstraction |
+| 1 — source/target loss prevention | Original/displaced PDF snapshots, representations, full target replies and parser traces; API/relay and lifecycle/budget integration | Capture is opt-in; supplementary bytes remain outside the initial PDF capture scope |
+| 2 — grading evidence | Full candidate sets, source/check inputs, vectors, support-call records and portable evidence | Fix the standalone grading acceptance fixture; add independent known-format span audits |
+| 3 — full phase lineage | Reconcile/crosslink/author/grade/critic/revision/DEBUG/commit observations; losing drafts, omissions, final page and publication receipts | Fix repeated-invocation completeness; complete meaningful failure/mode acceptance coverage |
+| 4 — operator/historical lifecycle | Inspect/verify/export/recover, read-only historical/local-evidence inventory, consistent SQLite backup | Generic import, historical reconstruction and pruning are deferred; use existing exports/backups now |
+| 5 — rollout | Unit/integration tests and source acceptance harnesses exist | One harness currently fails; current-scope cost and complete installed-mode acceptance remain unproven |
 
-Acceptance: the store verifies independently of corpus databases/caches, rejects
-conflicting or corrupt history, and preserves identities on relocation. Public
-operation/job wire contracts remain unchanged.
+The following order replaces the earlier stage-by-stage expansion. Finish one
+reviewable work packet before adding another feature; do not wait for historical
+salvage to make future capture dependable.
 
-### Stage 1 — stop target-extraction loss (implemented)
+| Delivery boundary | Required evidence |
+| --- | --- |
+| Branch ready for an opt-in merge review | R1, green installed-package CI, unchanged capture-off behavior, and accurate current-scope/verification limits. Keep retention off by default; R2/R3 can follow as small focused changes. |
+| Recommend routine opt-in use | R2/R3 results show acceptable cost, declared input coverage, portable inspection and conservative recovery. |
+| Consider a default-on policy | R4's explicit decision and measured real-use evidence; neither implementation completion nor branch merge changes the default automatically. |
 
-Extraction capture completed 2026-10-23; lifecycle integration completed 2026-10-24.
-Source snapshots, full target answers/candidate traces and API/relay observations
-are integrated with opt-in required capture. Publication guards, displaced-source
-preservation, safe budget settlement and operator recovery shipped with that
-integration. See [extraction capture](../docs/ingest-dev-reference.md#source-ownership-and-representations)
-and the [operator guide](../docs/ingest-retention.md).
+### R1 — close completeness and acceptance gaps (next)
 
-Acceptance: source, request, response and transformations remain inspectable after
-relay cleanup, DB/cache deletion and relocation; unselected candidates survive.
-Capture failures do not cause automatic paid retries. Interrupted attempts remain
-honestly incomplete; receipt recovery does not invent missing terminal history.
+- Add a regression for the reproduced case: one author invocation is captured and
+  a second invocation has an unexplained missing call. Cover the same masking risk
+  in repeated critic/evolve/DEBUG work, distinct commit call kinds, and grading runs
+  where applicable. Reuse existing run/call/dispatch IDs; do not create a new slot
+  for every invocation or build a general workflow engine.
+- Make completion account for each executed invocation and declared conditional
+  call. Account for multiple logical calls and observable retry dispatches within
+  a run as well as distinct model-phase names. A retained sibling cannot satisfy
+  another run's missing obligation.
+  Deliberate skips retain their reasons; unavailable/failed/unknown observations
+  remain distinguishable. Failed scientific work can still have a fully observed
+  failure history; missing capture cannot be converted into successful execution.
+- Persist the evidence needed to audit this after restart/export, rather than
+  relying solely on in-memory sets. Preserve stored historical manifests; a new
+  coverage audit must distinguish producer-reported completeness from what it can
+  independently establish for older records.
+- Repair the isolated grading acceptance fixture to declare its actual scope and
+  unrequested pipeline work explicitly. Do not mark arbitrary missing phases
+  `not_run` merely to satisfy the assertion. Add the failing harness to the local
+  readiness procedure as well as the existing installed CI job.
+- Reconcile documentation with the one actual profile and the current verification
+  limits (§14/§16). Record producer revision only when it identifies the imported
+  engine build; a library checkout SHA is not proof of an installed wheel's build.
+  Unknown revisions remain unknown; no build-provenance framework is needed here.
 
-### Stage 2 — make grading explainable (implemented)
+**Done when:** the mixed-invocation regression cannot report `complete`, legitimate
+omitted paths remain complete for their declared scope, all four retention
+acceptance harnesses pass from source and an installed wheel, and relevant/full
+pytest plus Ruff pass. Use representative branch/failure cases at the owning layer
+rather than multiplying every test by every provider/mode combination.
 
-Completed 2026-10-24. Full ordered evidence sets, exact source spans/check inputs,
-retriever identity, numeric/negation observations, semantic scores/vectors, coverage
-results and optional support-judge calls are retained. See
-[grading capture](../docs/ingest-dev-reference.md#grading-capture) and
-[user-visible evidence limits](../docs/ingest-retention.md#evidence-and-check-limits).
+### R2 — measure the current scope, then remove demonstrated overhead
 
-Acceptance: scores/verdicts trace to their actual claim/context, long passages
-survive without truncation, and portable exports verify after sources/caches are
-removed. Existing scoring/preview limits remain; retrieval candidates and
-classifier observations do not become reviewed scientific labels.
+Build one small repeatable benchmark using existing synthetic PDFs, fixed model
+answers and the current capture-off/capture-required paths. Cover a short/typical/
+long input, multiple author slots, and one revision or rejected attempt. Separate
+cold parsing/index work from warm capture overhead and keep provider latency out
+of the comparison. Include local API and relay responders where transport affects
+capture; new paid calls are not part of this measurement.
 
-### Stage 3 — complete phase and publication lineage
+Report elapsed capture/finalization/verify/export time, bytes by source/text/model/
+evidence/event category, unique versus referenced bytes, peak memory, event count,
+and bytes hashed/history records read. Compare at least two growing attempt sizes
+and repeat timings enough to show ordinary variation. Equal fixtures must preserve
+scientific outputs, call counts and usage accounting.
 
-Partial implementation checkpoint (2026-10-24): reconcile and crosslink inputs/results,
-author/grade/critic/evolve/DEBUG/tournament boundaries, verified prepublication page
-input and commit-time keyword/category calls are retained. Drafts, critiques, checks,
-parent links and selection decisions include losing/rejected revisions. Shared API/relay
-capture retains phase requests and permitted visible replies. `lineage.omissions`
-records conditional phase/call skips with stable reason codes and structured context;
-unexplained missing observations stay unknown. Terminal failures explain why later
-phases were not entered.
-`records show --lineage` exposes portable payloads. See the
-[developer reference](../docs/ingest-dev-reference.md#draft-critique-and-selection-lineage).
+The first suspected bottleneck is `_append` → `_inspect`, not PDF snapshot storage
+or a missing database catalog. Optimize only a measured bottleneck: reduce redundant
+work within the existing archive boundary, reuse already-identical representations,
+and add a count-based regression for the demonstrated scaling problem. Any fast
+path needs explicit concurrency, stale-checkpoint and corruption tests. Preserve
+the immutable event history and public verification behavior; do not silently
+trade corruption detection for an unchecked cache. If the integrity boundary must
+change to avoid repeated full hashing, document and approve that contract in the
+same work packet before implementing it.
 
-The exact canonical Markdown page is now captured once as a content-addressed
-representation before the journal commit point. The staged receipt verifies its
-digest and links to the prepared receipt; the committed receipt links to both the
-staged receipt and the page artifact. A rollback receipt links the attempted page
-when one had been captured. This makes the ingest-time page recoverable independently
-of the mutable, Git-ignored corpus page. `records show --lineage` exposes its text.
+**Done when:** a reproducible result table explains current cost and the chosen
+budget, and either shows it is acceptable or demonstrates a bounded improvement
+without correctness/recovery regressions. No new catalog, background recorder,
+async durability queue, compression format, or automatic quota cleanup is justified
+without those measurements.
 
-Implementation deliverables are present: phase-specific omission reasons, the
-rendered page snapshot/publication bridge, and the operation result recorded after
-post-work. Keep `full-ingest-v1` disabled until the omission matrix, interrupted
-attempts, and post-operation terminal status have acceptance coverage.
+### R3 — finish bounded input and portable audit coverage
 
-Acceptance: losing/rejected drafts and interrupted attempts survive; publication
-status comes from durable commit evidence; post-commit capture failure cannot cause
-paid re-authoring. Enable `full-ingest-v1` only after its declared inventory is covered.
+- Freeze the initial supported scope as primary/displaced PDFs plus the observed
+  representations, model work, grading, drafts and publication page. Supplied
+  supplementary bytes are currently not retained; describe that limit explicitly
+  and never claim complete capture of all supplied inputs. A later raw-supplement
+  snapshot slice can reuse the existing blob/source-role contract, record
+  available-versus-processed status, and precede file cleanup. It is not a reason
+  to add OCR, figure/table extraction, or more model calls to this release.
+- Extend explicit verification with deterministic checks for the known retained
+  representation/evidence formats: declared spans reproduce stored source text,
+  retrieval normalization matches its declared transform, and call/run/parent
+  references resolve. Keep this outside the per-artifact hot path. A hash-consistent
+  but internally invalid span must fail the relevant audit. No generic validator
+  plugin system or semantic-truth verifier is needed.
+- Exercise cleanup, relocation and publication recovery using complete, rejected
+  and interrupted attempts. Use existing `export`, `--root`, checkpoint repair,
+  and `recover`; an exported directory is already a usable independent archive.
+  Retain one exact page blob; record later page edits only when the bytes change.
+- Keep recovery evidence conservative. A recovered commit receipt can prove
+  publication while an interrupted attempt still lacks terminal observations.
+  Explain that state; append a separately identified recovery observation only
+  when durable evidence supports it. Do not synthesize success or add a general
+  `reconcile` command to make an open attempt disappear.
 
-### Stage 4 — historical import and operator lifecycle
+**Done when:** the selected input scope and known text/call references validate in
+a relocated archive without the source DB, corpus, relay mailbox or disposable
+caches; failure after publication still cannot authorize paid re-authoring.
 
-The inventory and database-backup slices are implemented:
-`researchwiki records inventory --legacy --json`
-reads the selected and former machine-global SQLite paths without schema
-bootstrap or mutation. It reports attempt-level iteration/draft/score/critic
-coverage, retained target counters, and rebuildable claim-table hash coverage,
-while labeling that hash data as unbound to historical attempts. The report does
-not expose draft or critic prose. Its `related_evidence` section summarizes the
-selected library's jobs, publication ledgers, mutation journals, relay mailbox
-files, sandbox outputs, grading cache, and ingest runs without exposing their
-contents. Consumed relay payloads are no longer available to inventory.
-`researchwiki records backup --legacy --db-path SOURCE --output NEW_DIR`
-makes a consistent SQLite online-backup bundle
-with a checksum, integrity result, and source/snapshot metadata. See the
-[operator guide](../docs/ingest-retention.md#audit-historical-sqlite-ingest-history)
-and [developer reference](../docs/ingest-dev-reference.md#read-only-historical-sqlite-inventory).
+### R4 — sign off the existing opt-in release
 
-Regression coverage in `tests/test_legacy_ingest_records.py` checks inspection
-without database/store initialization, payload privacy, job-ledger/event reads,
-journal backups under an explicitly selected library, committed WAL data in
-backups, overwrite refusal, and cleanup of incomplete backups. It compares
-source bytes before and after inspection and backup.
+Review R1–R3 results together, including mode parity for API, relay and mixed
+routing, direct/operation/batch/job boundaries, publication failure recovery,
+installed-package CI, and the measured storage/time budget. Existing tests already
+cover many of these; extend concrete gaps rather than rebuild the suite.
 
-Remaining deliverables: per-attempt source/PDF availability and conflicting-version
-assessment, SQLite import tooling, explicit reconstruction observations, full
-import/export validation, storage inventory, backup guidance for external
-job/recovery state, and a conservative cleanup design.
+Run a small separately authorized real-paper sample only after deterministic
+acceptance passes. Judge whether retained observations actually explain a missing
+finding or a check/selection decision; scientific quality is a separate evaluation.
+Use the current user guide, developer reference and this plan; add no parallel
+manual. Document the resolved archive location, required backups and error/retry
+behavior. Retention remains opt-in; a future default switch needs its own reviewed
+results and explicit decision.
 
-Acceptance: old and new observations cannot be confused; unresolved original hashes
-remain unresolved; exports validate on a relocated machine; original DB/history
-records are not destroyed or silently rewritten.
+**Done when:** there is a release decision with evidence and known limits. A green
+pytest result alone, a new profile label, or complete historical import is not that
+decision.
 
-### Stage 5 — profile evaluation and controlled rollout
+### R5 — historical enrichment only after readiness, or a concrete operator need
 
-Deliverables: frozen fixture results, before/after compatibility report, storage/
-latency measurements, readiness diagnostics, operator documentation, and a reviewed
-sample of complete real ingests when separately authorized.
+The current inventory and SQLite backup are sufficient preservation primitives.
+Preserve external job/recovery directories separately and leave active mailboxes
+and journals intact. Add concise backup guidance before inventing a cross-store
+backup transaction.
 
-This is a gate applied per profile as soon as its implementation is ready, not a
-dependency on completing historical Stage 4 or every full-pipeline feature first.
-The extraction profile can pass it after Stage 1; the full profile passes separately
-after Stage 3. Until then capture stays opt-in and the existing default stays off.
+For an explicitly selected subset, assess available source bytes against hashes
+that were actually recorded. Any current PDF compatibility check is a new dated
+observation; claim-table hash rows do not establish an old ingest attempt's source
+identity. Preserve ambiguous snippet matches and unresolved hashes as such.
 
-Acceptance: stage-specific requirements pass for API, relay and mixed routing;
-existing ingestion/publication behavior remains compatible; documented overhead
-and storage budgets are supported by measurements. Report new-run coverage and
-legacy coverage separately.
+If historical import is needed, first keep the verified SQLite snapshot and one
+immutable import receipt linking its digest, origin and original row IDs. Add
+read-only views or per-attempt exports only when an actual review/evaluation needs
+them. Do not duplicate every legacy row into fabricated model-call histories.
+Cross-archive merge must preserve identities, reject conflicting bytes/paths and
+be idempotent; implement it only when standalone native exports are insufficient.
 
-Stage 1 is the first runtime implementation priority. Stages 2/3 enrich the same
-versioned records. Historical work can proceed independently after the inventory
-contract exists; it must not delay loss prevention for new ingests.
+No automatic re-ingest, training-label promotion, archive deletion or garbage
+collector belongs in this packet. Storage diagnostics/dry-run cleanup design can
+follow real archive growth; referenced data remains retained.
 
 ## 20. Verification matrix
+
+This is the target assertion catalogue, not a claim that each row has passed for
+every route. The review evidence above and R1–R4 results determine readiness.
 
 | Scenario | Expected assertion |
 | --- | --- |
@@ -1015,7 +1068,8 @@ contract exists; it must not delay loss prevention for new ingests.
 | Invalid/duplicate/partial JSON | Original visible content and parse/salvage/drop lineage survive unchanged |
 | API, relay, mixed, stub | Same required schema and identity relations; actual route/usage origin and synthetic status remain explicit |
 | Relay validation retry or reused reply | Original/next response lineage survives cleanup without double consumption or invented dispatches |
-| Parallel author slots | Artifacts do not collide or cross attempts; observed event order is consistent |
+| Parallel/repeated phase invocations | Each invocation has accounted-for inputs, calls/skips and outcome; a retained sibling cannot hide an unexplained gap |
+| Pytest versus standalone installed acceptance | Both pass; isolated fixtures declare their actual scope and do not manufacture successful skips |
 | PDF replaced or upgraded | Original and effective source versions coexist; prompts/grades bind to the correct bytes |
 | Long/textless/malformed PDF or missing supplement | Processed/omitted/unavailable content is explicit; no invented spans or silent claim of full coverage |
 | Text normalization/parser change | Old quotes still resolve to old representations; new offsets do not overwrite them |
@@ -1051,32 +1105,36 @@ interface changes. A documentation-only change does not require running ingestio
 
 ## 21. Measurements and release decision
 
-Collect, by capture profile and processing outcome:
+R2 owns the bounded overhead experiment; R4 owns the release decision. Measure the
+actual inventory currently captured under `extraction-v1`, including grading and
+lineage. Measuring only target extraction would understate today's cost.
 
-- Required-artifact completion and missing-artifact reasons.
-- Source/representation/span identity resolution and checksum failures.
-- Response/dispatch ambiguity and recovery outcomes.
-- Raw/valid/duplicate/capped/author-exposed claim counts, with explicit denominators.
-- Evidence-set completeness for each check type.
-- Extra local write latency, peak memory, bytes per source/attempt, and deduplication.
-- Model-call/usage differences against a matching baseline fixture run.
-- Cases where a previously unexplainable omission/check/selection becomes inspectable.
+Keep a compact result table with fixture/engine/config identity, capture mode,
+source size/pages, author/revision count, outcome, timing variation, unique/archive
+bytes by category, memory, event count and hashing/replay work. Report model calls
+and usage separately to prove capture did not add calls. Distinguish:
 
-Do not infer improved scientific precision/recall merely from improved retention.
-Evaluate scientific quality separately against independently reviewed source coverage.
-Choose numeric overhead/storage thresholds from the prototype measurements rather
-than asserting an unmeasured percentage improvement.
+- Source snapshots and deduplication from repeated text/vector/prompt payloads.
+- Ingest overhead from explicit verification/export and terminal slot resolution.
+- Cold parsing/semantic initialization from warm archival work.
+- Successful, rejected and interrupted runs; new-run coverage from legacy coverage.
 
-Release the extraction profile when its records survive the failure, cleanup,
-portability and mode-parity checks. Release full-pipeline capture only after its
-larger inventory meets the same standard. Keep the rollout reversible through an
-explicit policy setting without deleting existing archive data.
+Choose and record numeric operating budgets after measuring the baseline, before
+claiming readiness or changing defaults. If current cost is acceptable, preserve
+the simple implementation. If not, change the measured cause and keep a regression
+that detects its return. Do not promise a performance percentage or storage quota
+from an unmeasured paper sample.
+
+Keep required-artifact coverage, exact span/reference audits, recovery outcomes,
+and one useful diagnosis alongside the cost results. Retention alone does not
+establish scientific precision/recall. A reviewed opt-in release can proceed
+without legacy salvage; a default-on policy is a separate decision.
 
 ## 22. Decisions resolved by review and remaining proof points
 
 | Decision | Implementation direction |
 | --- | --- |
-| First delivery scope | Internal schema/store PR, extraction-observation PR, then lifecycle/opt-in activation PR; no single large rewrite |
+| Delivery sequence | Foundations already exist; R1 correctness, R2 measured cost, R3 bounded scope/portability, R4 release decision, then optional historical work |
 | Initial default | Existing off behavior until the implemented profile passes its rollout gate; selected required mode never silently downgrades |
 | Source ownership | Stable processing snapshots are separate from original move/copy paths; preserve displaced canonical PDFs at promotion |
 | Exact evidence | Store source spans and transformed retrieval/check text separately, with representation/transform versions |
@@ -1086,14 +1144,14 @@ explicit policy setting without deleting existing archive data.
 | Publication integration | Minimal health/snapshot/outcome bridge in Stage 1; full lineage in Stage 3 |
 | Job compatibility | Resolve settings at execution and extend the non-secret configuration identity without rewriting version-1 requests or adding unknown fields |
 | Locks | Corpus guard before archive writes when both needed; no archive lock across corpus acquisition or provider/child calls |
-| Initial tooling | Minimal inspect/verify/export; defer import, catalog, pruning and historical salvage |
+| Operator tooling | Existing inspect/verify/export/recover/inventory/SQLite backup are enough to harden the first release; generic import, catalogs and pruning remain deferred |
 
-Stage 0 freezes the exact implemented internal field spelling, canonical JSON
-encoding and fixture versions. The lifecycle PR chooses profile/configuration setting names
-and their profile-loader integration. Prototype measurements determine storage
-admission/overhead budgets; supported filesystems determine documented durability.
-Any later public wire-schema change needs its own compatibility proposal. These
-proof points do not require a new model or complete historical backfill.
+The contracts and developer reference own current field spelling, canonical JSON
+and fixture versions. Reuse them rather than adding interfaces to match schematic
+design names. The existing profile/configuration is implemented; its scope and
+acceptance still need R1–R4 sign-off. Later wire changes need a compatibility
+proposal. No new model, generic archive framework or complete historical backfill
+is required to finish this work.
 
 ## 23. Turn retained observations into ingestion improvements
 
