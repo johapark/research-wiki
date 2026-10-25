@@ -28,6 +28,7 @@ def exercise(root):
     from researchwiki.records.export import export_attempt
     from researchwiki.records.grading import read_grading
     from researchwiki.records.lifecycle import capture_operation
+    from researchwiki.records.lineage import PHASES, note_phase_omission
 
     root.mkdir()
     shutil.copytree(REPO / "config", root / "config")
@@ -60,6 +61,10 @@ def exercise(root):
                 metadata={"title": "Synthetic", "paper_type": "research"}, sandbox_dir=root / "sandbox",
                 pdf_path=ctx.processing_pdf_path, use_semantic=False, support_classifier=llm_support_classifier)
             assert scores["support_check_complete"] and len(calls) == 1
+            # This fixture calls the grading function directly, without executing
+            # the ingest runner's phases. Declare that deliberate scope explicitly.
+            for phase in PHASES:
+                note_phase_omission(phase, "standalone_grading_fixture")
             owner.finish({"scope": "synthetic-grading-acceptance", "execution": "finished", "outcome": "draft_ready",
                           "publication": "not_published", "projections": "not_applicable"})
             manifest = owner.records.store.read_attempt(ctx.attempt_id)

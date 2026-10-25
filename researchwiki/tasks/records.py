@@ -21,6 +21,8 @@ def _parser():
             sub.add_argument("attempt_id")
         if name == "verify":
             sub.add_argument("--repair-checkpoint", action="store_true")
+            sub.add_argument("--coverage", action="store_true",
+                             help="audit per-invocation/call observations without rewriting producer reports")
         if name == "show":
             sub.add_argument("--lineage", action="store_true", help="include full draft and selection lineage payloads")
             sub.add_argument("--grading", action="store_true", help="include full grading input/evidence/result payloads")
@@ -74,9 +76,13 @@ def _dispatch(args, store):
         if args.repair_checkpoint:
             store.repair_checkpoint(args.attempt_id)
         report = store.verify(args.attempt_id)
-        return {"attempt_id": args.attempt_id, "checkpoint": report.checkpoint,
+        result = {"attempt_id": args.attempt_id, "checkpoint": report.checkpoint,
                 "event_count": report.event_count, "blob_count": report.blob_count,
                 "capture_state": report.manifest.capture_state}
+        if args.coverage:
+            from ..records.coverage import audit_coverage
+            result["coverage"] = audit_coverage(store, report.manifest)
+        return result
     output = export_attempt(store, args.attempt_id, args.output)
     return {"attempt_id": args.attempt_id, "output": str(output)}
 
@@ -118,7 +124,8 @@ def main(argv, *, env_file=None):
                     raise RecordConflict("select an archive with --root or an enabled ingest.retention profile")
             result = {"schema_version": 1, "command": args.command,
                       **_dispatch(args, RecordStore(root)), "error": None}
-        code = 0
+        code = 1 if (args.command == "verify" and args.coverage
+                     and result["coverage"]["status"] == "incomplete") else 0
     except (RecordConflict, ValueError) as exc:
         result, code = {"schema_version": 1, "command": args.command, "error": str(exc)}, 1
     except (EnvironmentFailure, OSError) as exc:

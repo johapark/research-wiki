@@ -55,7 +55,8 @@ class GradingRun:
         self.index_text, self.index_digest = None, None
         self.support_input = None
         self.normalized_sources = {}
-        self.started = self.emit("input", {"boundary": "run_started", "role": role, "iteration": iteration})
+        self.started = self.emit("input", {"boundary": "run_started", "role": role,
+                                          "iteration": iteration, "coverage_version": 1})
         self.parents.append(self.started)
         records.grading_runs.append(self.run_id)
 

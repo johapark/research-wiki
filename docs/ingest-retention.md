@@ -76,12 +76,19 @@ researchwiki records show <attempt-id> --json
 researchwiki records show <attempt-id> --grading --json
 researchwiki records show <attempt-id> --lineage --json
 researchwiki records verify <attempt-id> --json
+researchwiki records verify <attempt-id> --coverage --json
 researchwiki records export <attempt-id> --output /path/to/new-export --json
 researchwiki records --root /path/to/archive verify <attempt-id> --json
 ```
 
 List/show/verify do not initialize an archive or repair records. Verification
 checks event history, identity, payload hashes and checkpoint correspondence.
+`verify --coverage` also checks retained invocation, logical-call and retry-dispatch
+metadata. Its separate `coverage.status` is `complete`, `incomplete` or `limited`;
+an incomplete audit exits 1. Older producers can have limited auditability even
+when their stored `capture_state` is complete; that original report is preserved.
+This checks observation coverage, not scientific correctness or independent
+source-span fidelity.
 `show` includes publication receipts. `--lineage` adds full draft/critique/decision
 payloads; it can be combined with `--grading` for full grading evidence. Exports require a new destination and copy
 only the chosen attempt, its events/checkpoint, archive identity and referenced
@@ -156,6 +163,10 @@ scope when no operation already owns it. Terminal records include the operation'
 post-work result, or explicitly identify the narrower direct-runner scope.
 Duplicate and early exits resolve phases that never executed as `not_run`.
 Executed work whose output was lost remains unknown/incomplete.
+New attempts retain an `attempt.coverage` audit before closure. Each invocation's
+declared calls need observations or explicit omission reasons; another invocation
+cannot cover a missing call or retry outcome. A detected gap follows the same
+publication-preserving reconciliation path as a capture failure.
 
 Publication writes a validated archive binding into the mutation journal. Prepared,
 staged and committed/rolled-back observations are distinct. The final commit or

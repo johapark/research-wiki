@@ -241,7 +241,8 @@ class PhaseRun:
             self.parents.extend(recorder.draft(d) for d in ctx.drafts)
         values = {"iteration": ctx.iteration, "slot": arguments.get("slot"),
                   "temperature": finite_setting(arguments.get("temperature")),
-                  "synthetic": ctx.use_stub, "paper_stem": ctx.paper_stem}
+                  "synthetic": ctx.use_stub, "paper_stem": ctx.paper_stem,
+                  "coverage_version": 1, "expected_calls": sorted(MODEL_PHASES.get(phase, ()))}
         if self.subject is not None:
             values.update(scores=self.subject.scores, claim_details=[asdict(c) for c in self.subject.claim_details])
         if phase == "tournament":

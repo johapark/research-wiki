@@ -12,6 +12,7 @@ from .settings import selected
 from .store import RecordStore, now
 from .grading import grading_requirements
 from .lineage import LineageRecorder, requirements as lineage_requirements
+from .coverage import coverage_requirement, retain_coverage
 
 
 _owner = ContextVar("researchwiki_ingest_capture_owner", default=None)
@@ -36,6 +37,7 @@ class CaptureOwner:
         self.visited = set()
         self.prepared = False
         self.receipt = None
+        self.coverage = None
 
     def configure(self):
         if self.settings is None:
@@ -48,6 +50,10 @@ class CaptureOwner:
     def check(self):
         if self.records is not None:
             self.records.check()
+
+    def check_coverage(self):
+        if self.coverage is not None and self.coverage['status'] != 'complete':
+            raise RecordStoreUnavailable('required invocation coverage is incomplete; inspect the retained audit')
 
     def bind(self, ctx):
         self.configure()
@@ -68,7 +74,8 @@ class CaptureOwner:
                            requirements=extraction_requirements() + (
                                Requirement(slot="source.displaced", kind="source_snapshot", required=False),
                                Requirement(slot="publication.receipt", kind="terminal_result"),
-                               Requirement(slot="attempt.result", kind="terminal_result"))
+                               Requirement(slot="attempt.result", kind="terminal_result"),
+                               coverage_requirement())
                            + grading_requirements(ctx.verify_claim_entailment) + lineage_requirements())
         store = RecordStore.create(self.settings.root)
         store.start_attempt(spec)
@@ -93,7 +100,9 @@ class CaptureOwner:
             records._write(records.store.resolve_slot, records.spec.attempt_id, "grading.response", "unavailable",
                            "visible_verification_answer_unavailable")
         for item in manifest.inventory:
-            if item.slot.startswith("lineage.") or item.status != "pending" or item.slot in ("publication.receipt", "attempt.result"):
+            if item.slot.startswith("lineage.") or item.status != "pending" or item.slot in (
+                "publication.receipt", "attempt.result", "attempt.coverage"
+            ):
                 continue
             ran = "extract" if item.slot == "source.representation" else "target_claims"
             if item.slot.startswith("grading."):
@@ -115,6 +124,7 @@ class CaptureOwner:
             records.artifact("publication.receipt", "terminal_result",
                              {"schema_version": 1, "state": values["publication"], "boundary": "no_publication_transaction"})
         records.artifact("attempt.result", "terminal_result", {"schema_version": 1, **values})
+        self.coverage = retain_coverage(records)
         records._write(records.store.finish_attempt, records.spec.attempt_id, AttemptFinished(
             execution=values["execution"], outcome=values["outcome"], publication=values["publication"],
             projections=values["projections"], reason=values.get("error_code")))
@@ -133,6 +143,7 @@ class CaptureOwner:
                                     or (error.get("code") if isinstance(error, dict) else None)
                                     or (type(execution.error).__name__ if execution.error else None))
             self.finish(values)
+            self.check_coverage()
         except RecordStoreUnavailable as exc:
             from ..operations.results import error_from_exception
             execution.error = exc
@@ -187,6 +198,7 @@ def record_ingestion(fn):
                                       "outcome": None if isinstance(error, KeyboardInterrupt) else outcome,
                                       "publication": publication, "projections": facts.projections if publication == "published" else "not_applicable",
                                       "error_code": type(error).__name__ if error else None})
+                        owner.check_coverage()
                     except RecordStoreUnavailable as exc:
                         exc.publication = publication
                         if error is None:

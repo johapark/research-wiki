@@ -72,6 +72,7 @@ def check_support(
                         "eligible": bool((c[3] or "").strip()),
                         "classifier_index": next(positions) if (c[3] or "").strip() else None} for c in claims],
             "expected_count": len(claims), "eligible_count": len(scored),
+            "model_call_expected": bool(scored) and classify is llm_support_classifier,
             "prompt_context_limit": SUPPORT_CONTEXT_CHARS if classify is llm_support_classifier else None,
             "classifier": {"module": getattr(classify, "__module__", None),
                            "name": getattr(classify, "__qualname__", type(classify).__name__)}})

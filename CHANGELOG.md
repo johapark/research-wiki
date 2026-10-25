@@ -22,6 +22,12 @@ the reasoning behind any line below.
 
 ### Added
 
+- Required ingestion retention now audits each phase/grading invocation, logical
+  model call and retry dispatch before closure. Missing observations cannot be
+  masked by a captured sibling; gaps preserve publication and require
+  reconciliation before replay. `records verify --coverage` independently audits
+  retained metadata, including exported attempts, without rewriting older reports.
+
 - Opt-in ingestion retention now keeps author, critic, evolve and DEBUG model
   inputs/visible replies, every produced draft, grading/critique parent links and
   tournament/revision decisions. `records show --lineage` inspects losing and

@@ -1,11 +1,32 @@
 # Ingestion retention, provenance, and auditability plan
 
-Status: Capture foundations implemented; release readiness remains open. Next: per-invocation completeness and acceptance repair (R1), then measured overhead (R2). Historical import is deferred.
+Status: R1 invocation completeness and acceptance repair implemented and locally validated. Next: measured overhead (R2). Release readiness remains open; retention stays opt-in and historical import is deferred.
 Created: 2026-10-22. Design review: 2026-10-23. Implementation review and reprioritization: 2026-10-24.
 Original code baseline: `0ba18dc162fda2987ae2ba1f8ad7c7b28c0b9750`.
 Implementation reviewed: `feat/ingest-retention` through `2ce8ab5`.
 
-### Implementation review — 2026-10-24
+### R1 checkpoint — 2026-10-25
+
+The two P0 findings below are resolved in the working implementation. New attempts
+persist an `attempt.coverage` audit using existing run/call/dispatch IDs. Expected
+conditional calls, repeated phase/grading invocations and retry outcomes are
+accounted for independently. Missing capture requires reconciliation while
+preserving any known publication. `records verify --coverage` recomputes the audit
+after export without rewriting historical producer reports; undeclared historical
+expectations remain limited. This is a metadata-coverage audit, not a source-span
+or scientific-fidelity audit.
+
+All 21 focused coverage regressions passed, including cases reproduced before the
+fix, real API/relay normalization, explicit skips, rejected retries, repeated
+grading and safe post-publication failures. All four retention acceptance harnesses
+passed from source and an installed wheel (eight runs). Full pytest: **4,387 passed,
+10 skipped**; Ruff and whitespace checks passed. Fixtures used disposable libraries
+and local/mock responders, with no external model calls or developer-corpus writes.
+Cross-platform installed CI remains a merge-review gate; this checkpoint records
+local results only. R2 is next; the integrity/performance and span-audit findings
+remain open.
+
+### Implementation review — 2026-10-24 (historical findings)
 
 Keep the current architecture: immutable content-addressed blobs, attempt events,
 explicit inventory, existing publication journals, and shared API/relay capture.
@@ -806,7 +827,7 @@ The current surface and remaining import/reconciliation work:
 | --- | --- |
 | `researchwiki records list --json` | Implemented; list retained attempts and completeness/profile |
 | `researchwiki records show ATTEMPT --json` | Implemented; inspect source, inventory, calls, checks and lineage without rewriting records |
-| `researchwiki records verify ATTEMPT --json` | Implemented; verify referenced blob bytes, structural event/inventory/checkpoint integrity; payload-level span and invocation audits remain R1/R3 work |
+| `researchwiki records verify ATTEMPT --json` | Implemented; verify referenced blob bytes and structural event/inventory/checkpoint integrity; add `--coverage` for independent invocation/call metadata auditing. Known-format source-span audits remain R3 work |
 | `researchwiki records export ATTEMPT --output NEW_PATH` | Implemented; checksum-verifiable self-contained attempt bundle; refuses an existing destination |
 | `researchwiki records inventory --legacy --json` | Implemented; aggregate historical SQLite rows plus adjacent job, journal, mailbox and local artifact availability without exporting content |
 | `researchwiki records backup --legacy --db-path SOURCE --output NEW_DIR` | Implemented; consistent SQLite online backup with integrity result and checksum manifest; refuses an existing destination |
@@ -906,10 +927,10 @@ Implementation progress and release acceptance are separate:
 | --- | --- | --- |
 | 0 — archive foundation | Strict schemas, immutable blobs/events, checkpoint repair, concurrent writers and relocation | Keep this architecture; no replacement store or new persistence abstraction |
 | 1 — source/target loss prevention | Original/displaced PDF snapshots, representations, full target replies and parser traces; API/relay and lifecycle/budget integration | Capture is opt-in; supplementary bytes remain outside the initial PDF capture scope |
-| 2 — grading evidence | Full candidate sets, source/check inputs, vectors, support-call records and portable evidence | Fix the standalone grading acceptance fixture; add independent known-format span audits |
-| 3 — full phase lineage | Reconcile/crosslink/author/grade/critic/revision/DEBUG/commit observations; losing drafts, omissions, final page and publication receipts | Fix repeated-invocation completeness; complete meaningful failure/mode acceptance coverage |
+| 2 — grading evidence | Full candidate sets, source/check inputs, vectors, support-call records and portable evidence; standalone acceptance repaired in R1 | Add independent known-format span audits |
+| 3 — full phase lineage | Reconcile/crosslink/author/grade/critic/revision/DEBUG/commit observations; losing drafts, omissions, final page and publication receipts; per-invocation coverage audit in R1 | Maintain failure/mode regressions; qualify operating cost and release readiness |
 | 4 — operator/historical lifecycle | Inspect/verify/export/recover, read-only historical/local-evidence inventory, consistent SQLite backup | Generic import, historical reconstruction and pruning are deferred; use existing exports/backups now |
-| 5 — rollout | Unit/integration tests and source acceptance harnesses exist | One harness currently fails; current-scope cost and complete installed-mode acceptance remain unproven |
+| 5 — rollout | Full tests and all four source/installed-wheel retention harnesses pass locally | Cross-platform installed CI, current-scope cost and rollout decision remain open |
 
 The following order replaces the earlier stage-by-stage expansion. Finish one
 reviewable work packet before adding another feature; do not wait for historical
@@ -921,7 +942,7 @@ salvage to make future capture dependable.
 | Recommend routine opt-in use | R2/R3 results show acceptable cost, declared input coverage, portable inspection and conservative recovery. |
 | Consider a default-on policy | R4's explicit decision and measured real-use evidence; neither implementation completion nor branch merge changes the default automatically. |
 
-### R1 — close completeness and acceptance gaps (next)
+### R1 — close completeness and acceptance gaps (implemented; locally validated)
 
 - Add a regression for the reproduced case: one author invocation is captured and
   a second invocation has an unexplained missing call. Cover the same masking risk
@@ -954,7 +975,7 @@ acceptance harnesses pass from source and an installed wheel, and relevant/full
 pytest plus Ruff pass. Use representative branch/failure cases at the owning layer
 rather than multiplying every test by every provider/mode combination.
 
-### R2 — measure the current scope, then remove demonstrated overhead
+### R2 — measure the current scope, then remove demonstrated overhead (next)
 
 Build one small repeatable benchmark using existing synthetic PDFs, fixed model
 answers and the current capture-off/capture-required paths. Cover a short/typical/

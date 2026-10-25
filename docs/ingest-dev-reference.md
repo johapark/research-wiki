@@ -425,11 +425,20 @@ This archive snapshot preserves the ingest-time training text; it is not a claim
 that the draft differs from the published page. The existing mutation journal
 and ledger remain publication authorities.
 
-Stage 3 instrumentation is implemented but acceptance remains open, including
-coverage of repeated phase invocations: a retained phase slot can currently mask
-an unexplained missing call in another invocation. `extraction-v1` is the sole supported
-profile name; no `full-ingest-v1` setting exists. The master plan's R1–R4 queue
-owns completeness hardening, acceptance, measured overhead and release sign-off.
+Before terminal closure, `attempt.coverage` retains a bounded audit using the
+existing run/call/dispatch IDs. Versioned invocation metadata declares expected
+calls; each needs a logical request or an explicit omission in that invocation.
+Each logical call and observed dispatch needs its own response/outcome. Completed
+grading runs also require their own inputs, source representation and evidence.
+Gaps leave the required audit slot unresolved and require reconciliation before
+replay, preserving any known publication. Fully observed failed scientific work
+can still have complete capture.
+
+`records verify --coverage` recomputes this audit from portable payloads. Its
+separate status does not rewrite historical producer reports; producers without
+the new declarations remain limited. This audit does not revalidate source spans.
+`extraction-v1` remains the sole supported profile name. The master plan's R2–R4
+queue owns measured overhead, bounded span audits and release sign-off.
 
 ## Inspection payloads
 
@@ -443,10 +452,11 @@ work without the original source, corpus, database, mailboxes or caches.
 
 ## Validation
 
-The [implementation review](../evaluations/ingest-retention-plan.md)
-records current results and gaps, including the failing standalone grading
-acceptance fixture. The table below describes intended coverage rather than a
-blanket release certificate.
+The [implementation review](../evaluations/ingest-retention-plan.md) records
+results and remaining gaps. The standalone grading fixture explicitly declares
+its unrequested pipeline phases. On 2026-10-25, all four retention harnesses passed
+from source and an installed wheel; pytest passed 4,387 tests with 10 skipped,
+and Ruff passed. This is local evidence, not a cross-platform release certificate.
 
 All checks use disposable synthetic inputs and local responders, with no external
 provider calls or writes to the developer's corpus. They validate retention and
@@ -459,6 +469,7 @@ portability, rather than scientific extraction quality.
 | Lifecycle | `tests/test_ingest_retention_lifecycle.py`; `.github/scripts/retention_acceptance.py` | Real CLI with stub models and a zero-request local sentinel, portable export after corpus/DB deletion, explicit checkpoint repair and publication/capture failure boundaries |
 | Grading | `tests/test_grading_retention.py`; `.github/scripts/grading_acceptance.py` | Long passages, exact offsets, deterministic semantic vector replay, mock API/relay judgments, failure handling and portable inspection after source/cache deletion |
 | Draft lineage | `tests/test_draft_lineage_retention.py`; `.github/scripts/retention_acceptance.py` | API/relay calls, all parallel author slots, losing/revised/DEBUG drafts, critique/grade parents, actual selection decisions, capture failures and portable CLI inspection |
+| Invocation coverage | `tests/test_retention_coverage.py` | Repeated/parallel invocations, conditional calls, API/relay normalization, retry outcomes, grading isolation, publication-preserving failures and portable/legacy audits |
 | Historical/operator state | `tests/test_legacy_ingest_records.py` | No database/store initialization during inspection, payload privacy, selected-library journal backups, job-ledger/event reads, committed WAL backup, overwrite refusal and incomplete-backup cleanup |
 | Core ingestion | `.github/scripts/fresh_install_acceptance.py` | Fresh installed-package ingestion behavior |
 
