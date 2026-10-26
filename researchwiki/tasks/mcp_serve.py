@@ -61,22 +61,32 @@ def _do_search(query: str, limit: int, mode: str) -> list[dict]:
         return [{"error": str(e)}]
 
 
+CLAIM_MODES = ("bm25", "semantic", "hybrid")
+
+
 def _do_claims(query: str | None, by_stem: str | None, k: int,
-               include_context: bool) -> list[dict]:
+               include_context: bool, mode: str = "bm25") -> list[dict]:
     """Grounded-citation search or per-paper claim dump.
 
     Exactly one of `query` / `by_stem` must be provided (matches the CLI's
     argparse constraint). Both parameters live on one tool rather than two
     because the shape of a "claim hit" is identical and MCP clients pick
     the mode by which arg they populate.
+
+    `mode` mirrors `researchwiki claims --mode`, BM25 default included: the
+    retrieval fixtures have not justified promoting hybrid, so a client opts
+    into `semantic` / `hybrid` explicitly when lexical recall falls short.
+    Ignored with `by_stem`, as on the CLI.
     """
-    from ..search import claim_lookup, claims_by_stem
+    from ..search import claim_query, claims_by_stem
 
     if bool(query) == bool(by_stem):
         return [{"error": "pass exactly one of `query` or `by_stem`"}]
+    if mode not in CLAIM_MODES:
+        return [{"error": f"unknown mode {mode!r}; expected one of {', '.join(CLAIM_MODES)}"}]
     if by_stem:
         return claims_by_stem(by_stem, include_context=include_context)
-    return claim_lookup(query, k=k, include_context=include_context)
+    return claim_query(query, k=k, mode=mode, include_context=include_context)
 
 
 def _do_check_grounding(page_path: str, strict: bool) -> dict:
@@ -149,10 +159,11 @@ def build_server():
     def search(query: str, limit: int = 10, mode: str = "auto") -> list[dict]:
         return _do_search(query, limit, mode)
 
-    @server.tool(description="Grounded-citation search over the claims table. Pass `query` for topic search, or `by_stem` to dump one paper's claims.")
+    @server.tool(description="Grounded-citation search over the claims table. Pass `query` for topic search, or `by_stem` to dump one paper's claims. `mode` is `bm25` (default), `semantic`, or `hybrid`; try `hybrid` when the query may paraphrase the claim wording.")
     def claims(query: str | None = None, by_stem: str | None = None,
-               k: int = 5, include_context: bool = False) -> list[dict]:
-        return _do_claims(query, by_stem, k, include_context)
+               k: int = 5, include_context: bool = False,
+               mode: str = "bm25") -> list[dict]:
+        return _do_claims(query, by_stem, k, include_context, mode)
 
     @server.tool(description="Check whether each claim-bearing unit in a wiki page carries a citation. `strict=true` treats the `*(model prior)*` marker as ungrounded.")
     def check_grounding(page_path: str, strict: bool = False) -> dict:
