@@ -97,3 +97,5 @@ phases:
   claim_support:    {role: judge}
   answer:           {role: author, temperature: 0.2, max_tokens: 12000}
   answer_judge:     {role: judge, temperature: 0.0, max_tokens: 6000}
+  synthesis_author: {role: author, temperature: 0.2, max_tokens: 16000}
+  synthesis_support: {role: judge, temperature: 0.0, max_tokens: 10000}
