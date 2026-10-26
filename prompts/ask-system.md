@@ -20,7 +20,8 @@ substantive cross-paper synthesis, where search supplies recall and claims suppl
 precise grounding; do not call both mechanically for every question.
 
 An empty first result is not proof of corpus absence. Try the complementary tool
-and one sensible reformulation. A tool/index error means retrieval is unavailable,
+and one sensible reformulation. Topic `claims` default to keyword (BM25) matching;
+when the question may paraphrase the papers' wording, retry with `mode: "hybrid"`. A tool/index error means retrieval is unavailable,
 not that the wiki has no paper. If a relevant page exists but its claims are too
 thin, say that the PDF needs checking by an agent with PDF access.
 

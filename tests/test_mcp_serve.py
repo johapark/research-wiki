@@ -48,6 +48,79 @@ def test_do_claims_rejects_ambiguous_input():
     assert "error" in mcp_serve._do_claims(None, None, 5, False)[0]
 
 
+def _capture_claim_query(monkeypatch):
+    import researchwiki.search as search_pkg
+
+    calls = []
+
+    def fake_claim_query(query, k=5, *, mode="bm25", include_context=False):
+        calls.append({"query": query, "k": k, "mode": mode,
+                      "include_context": include_context})
+        return [{"claim_slug": "kc-1", "paper_stem": "chen-2023-fake"}]
+
+    monkeypatch.setattr(search_pkg, "claim_query", fake_claim_query)
+    return calls
+
+
+def test_do_claims_defaults_to_bm25_like_the_cli(monkeypatch):
+    calls = _capture_claim_query(monkeypatch)
+    mcp_serve._do_claims("off-target rate", None, 5, False)
+    assert calls == [{"query": "off-target rate", "k": 5, "mode": "bm25",
+                      "include_context": False}]
+
+
+@pytest.mark.parametrize("mode", ["semantic", "hybrid"])
+def test_do_claims_forwards_explicit_mode(monkeypatch, mode):
+    calls = _capture_claim_query(monkeypatch)
+    result = mcp_serve._do_claims("off-target rate", None, 8, True, mode)
+    assert calls == [{"query": "off-target rate", "k": 8, "mode": mode,
+                      "include_context": True}]
+    assert result[0]["claim_slug"] == "kc-1"
+
+
+def test_do_claims_rejects_unknown_mode(monkeypatch):
+    """Bad mode → error dict naming the valid choices, not a ValueError
+    escaping into the MCP transport."""
+    calls = _capture_claim_query(monkeypatch)
+    result = mcp_serve._do_claims("off-target rate", None, 5, False, "auto")
+    assert "error" in result[0]
+    assert "hybrid" in result[0]["error"]
+    assert calls == []
+
+
+def test_claims_tool_exposes_mode_parameter(server):
+    tools = {t.name: t for t in asyncio.run(server.list_tools())}
+    props = tools["claims"].inputSchema["properties"]
+    assert props["mode"]["default"] == "bm25"
+
+
+def test_do_search_hybrid_mode_returns_fused_hits(monkeypatch):
+    """When both indexes are built, `auto` resolves to hybrid and the
+    handler must reach the real fusion entry point, not a missing alias."""
+    from researchwiki.search import hybrid as hybrid_mod
+    from researchwiki.tasks import search as search_task
+
+    hit = hybrid_mod.HybridHit(
+        key="cgt/chen-2023-fake", stem="chen-2023-fake", category="cgt",
+        page_type="paper", title="Fake", rrf_score=0.03,
+        bm25_rank=1, bm25_score=4.2, semantic_rank=2, semantic_score=0.71,
+    )
+    calls = []
+
+    def fake_hybrid_query(text, limit=10):
+        calls.append((text, limit))
+        return [hit]
+
+    monkeypatch.setattr(search_task, "_resolve_mode", lambda mode: "hybrid")
+    monkeypatch.setattr(hybrid_mod, "hybrid_query", fake_hybrid_query)
+
+    result = mcp_serve._do_search("prime editing", 7, "auto")
+
+    assert calls == [("prime editing", 7)]
+    assert result[0]["key"] == "cgt/chen-2023-fake"
+    assert result[0]["rrf_score"] == 0.03
+
+
 def test_do_check_grounding_missing_file(tmp_path):
     assert "error" in mcp_serve._do_check_grounding(str(tmp_path / "nope.md"), False)
 

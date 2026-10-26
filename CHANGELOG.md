@@ -32,6 +32,17 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- The MCP `search` tool no longer raises `AttributeError` when `auto` or
+  `hybrid` mode resolves to hybrid retrieval — that is, whenever both the
+  Tantivy and semantic page indexes are built. The handler called a
+  nonexistent `hybrid.query`; it now calls `hybrid_query`, the same entry
+  point the `search` CLI uses.
+- The MCP `claims` tool takes the same `mode` (`bm25` default, `semantic`,
+  `hybrid`) as `researchwiki claims --mode`. It was hard-wired to the lexical
+  lookup, so MCP clients could not reach the semantic claim retrieval the CLI
+  has offered since 0.5.0. An unknown mode returns an error entry rather than
+  raising into the transport. `prompts/ask-system.md` tells clients to retry
+  with `hybrid` when lexical recall falls short.
 - `remove --json --apply` emits one JSON document carrying the real outcome
   (`applied`, `removed_files`, `backlinks_removed`, `db_rows_deleted`,
   `edges_deleted`, `warnings`). It previously printed the plan with a
