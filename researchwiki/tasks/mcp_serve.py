@@ -49,7 +49,7 @@ def _do_search(query: str, limit: int, mode: str) -> list[dict]:
     resolved = search_task._resolve_mode(mode)
     if resolved == "hybrid":
         from ..search import hybrid as hybrid_mod
-        hits = hybrid_mod.query(query, limit=limit)
+        hits = hybrid_mod.hybrid_query(query, limit=limit)
         return [search_task._hybrid_as_dict(h) for h in hits]
     # Semantic-only mode returns a different hit shape and is rarely useful
     # standalone (hybrid supersedes it). Fall through to BM25 for a

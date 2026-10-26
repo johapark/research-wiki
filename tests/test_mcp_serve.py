@@ -48,6 +48,33 @@ def test_do_claims_rejects_ambiguous_input():
     assert "error" in mcp_serve._do_claims(None, None, 5, False)[0]
 
 
+def test_do_search_hybrid_mode_returns_fused_hits(monkeypatch):
+    """When both indexes are built, `auto` resolves to hybrid and the
+    handler must reach the real fusion entry point, not a missing alias."""
+    from researchwiki.search import hybrid as hybrid_mod
+    from researchwiki.tasks import search as search_task
+
+    hit = hybrid_mod.HybridHit(
+        key="cgt/chen-2023-fake", stem="chen-2023-fake", category="cgt",
+        page_type="paper", title="Fake", rrf_score=0.03,
+        bm25_rank=1, bm25_score=4.2, semantic_rank=2, semantic_score=0.71,
+    )
+    calls = []
+
+    def fake_hybrid_query(text, limit=10):
+        calls.append((text, limit))
+        return [hit]
+
+    monkeypatch.setattr(search_task, "_resolve_mode", lambda mode: "hybrid")
+    monkeypatch.setattr(hybrid_mod, "hybrid_query", fake_hybrid_query)
+
+    result = mcp_serve._do_search("prime editing", 7, "auto")
+
+    assert calls == [("prime editing", 7)]
+    assert result[0]["key"] == "cgt/chen-2023-fake"
+    assert result[0]["rrf_score"] == 0.03
+
+
 def test_do_check_grounding_missing_file(tmp_path):
     assert "error" in mcp_serve._do_check_grounding(str(tmp_path / "nope.md"), False)
 

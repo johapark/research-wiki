@@ -32,6 +32,11 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- The MCP `search` tool no longer raises `AttributeError` when `auto` or
+  `hybrid` mode resolves to hybrid retrieval — that is, whenever both the
+  Tantivy and semantic page indexes are built. The handler called a
+  nonexistent `hybrid.query`; it now calls `hybrid_query`, the same entry
+  point the `search` CLI uses.
 - `remove --json --apply` emits one JSON document carrying the real outcome
   (`applied`, `removed_files`, `backlinks_removed`, `db_rows_deleted`,
   `edges_deleted`, `warnings`). It previously printed the plan with a
