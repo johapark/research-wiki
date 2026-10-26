@@ -136,8 +136,6 @@ _DEBT: dict[str, int] = {
     # Three lines: a deferred import (term_claims imports from here, so a
     # top-level one closes the cycle) and the two-line member filter.
     "researchwiki/concepts/candidates.py": 656,
-    # Retrieval benchmark: fixture loading, scoring and reporting in one file.
-    "researchwiki/benchmark/retrieval.py": 644,
     # Backfill targets (hook / keywords / doi) share only a work-list idiom.
     "researchwiki/tasks/backfill.py": 606,
     # Lint's emitters (human text, `--json`). Grows by one block per new check,

@@ -40,6 +40,73 @@ real-world queries. The harness preflights their anchors: if their source papers
 are not present in a checkout, it reports the fixture as unavailable rather than
 misreporting retrieval quality as zero.
 
+## Comparing BGE and Harrier
+
+Install the optional modern-model dependencies, then compare against the current
+corpus without changing the production search indexes or claim grader:
+
+```bash
+pip install -e '.[harrier]'
+researchwiki benchmark-retrieval --candidate-embedding harrier-270m \
+  --out output/embedding-comparison/harrier-270m.json
+researchwiki benchmark-retrieval --candidate-embedding harrier-0.6b \
+  --out output/embedding-comparison/harrier-0.6b.json
+```
+
+Aliases resolve to `BAAI/bge-small-en-v1.5`,
+`microsoft/harrier-oss-v1-270m`, and `microsoft/harrier-oss-v1-0.6b`.
+Both Harrier checkpoints use their packaged `web_search_query` prompt for
+queries, unprompted documents, packaged last-token pooling, and normalized
+vectors. An explicit `--candidate-query-prefix` replaces the automatic prompt.
+The existing single-fixture A/B command accepts these aliases too.
+An optional live text query uses the same model and isolated cache:
+
+```bash
+researchwiki search "adaptive retrieval with reflection tokens" \
+  --embedding harrier-270m --mode hybrid --json
+```
+
+`search --embedding` defaults to a 2,048-token cap and CPU float32. It affects
+only that text query; ordinary search and claim grading keep their existing
+defaults. Use `--embedding-max-seq-length N` to change the cap. See-Also stays
+on the default backend. A first query may build the selected model's page cache.
+
+The suite runs BM25, semantic, and hybrid retrieval on the same available
+fixtures. Its JSON records skipped expected anchors, inactive negatives,
+per-fixture ranking changes, corpus and fixture fingerprints, model revision,
+dimensions, dtype, context limit, parameter bytes, cache reuse, warm query
+encoding median/p95, and document-sample throughput. Warm timings exclude model
+loading, corpus embedding, and search. Build durations are labelled as new
+encoding or cache reuse so they cannot be mistaken for comparable throughput.
+
+Inference defaults to CPU and float32 for both models. Use `--dtype auto` to
+retain a checkpoint's native dtype; CPU bfloat16 can be slower on some hosts.
+Harrier batches default to 8 and BGE to 32; `--batch-size N` overrides both.
+Each model retains its native context limit. A second run with
+`--max-seq-length 512` caps both to compare under the same token limit (the
+tokenizers still differ). `--device`, `--cache-folder`, `--timing-repeats`,
+`--fixtures`, and `--backends` control the run explicitly. No LLM calls occur.
+For a practical CPU run over research pages, `--max-seq-length 2048` keeps
+BGE at its native 512-token limit and caps Harrier at 2,048 tokens.
+Bookkeeping pages (`meta` and `dashboard`, including the full log and catalogue)
+are excluded from both lexical and semantic page results.
+
+Benchmark vectors live in separate atomic `.retrieval-cache-*/` bundles. Their
+signatures include the full model ID, resolved revision, dtype, context limit,
+document prefix, and every current claim/page input. A page edit or claim
+addition/deletion invalidates its cache. Legacy matrix/JSON pairs are ignored.
+If only the context cap changes, known-model vectors can be reused after
+tokenization verifies that every document fits both caps without truncation.
+Current BGE production vectors may seed the baseline read-only when their text
+hashes and default representation match; altered contexts and instructions
+cannot reuse them. The suite refuses a corpus change between comparison arms.
+
+Eight additional corpus-native fixtures cover late interaction, reflection
+tokens, off-target enumeration, scientific novelty detection, long-read
+alignment, human pangenomes, single-cell integration, and genome language
+models. They need the corresponding papers ingested locally; a fresh clone
+reports them as unavailable rather than inventing misses.
+
 ## When to add a retrieval fixture
 
 - **Before changing the embedding.** Curate ~10 fixtures spanning the query

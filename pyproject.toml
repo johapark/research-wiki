@@ -60,6 +60,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Optional retrieval benchmarks; production grading keeps BGE-small.
+# Harrier's Gemma 3 / Qwen 3 backbones require a recent transformers release.
+harrier = [
+    "torch>=2.4",
+    "transformers>=4.57.6",
+    "sentence-transformers>=5.1",
+]
 dev = [
     "pytest>=7.0",
     "ruff>=0.9",

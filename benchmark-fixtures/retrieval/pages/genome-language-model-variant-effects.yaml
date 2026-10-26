@@ -1,0 +1,12 @@
+fixture_id: genome-language-model-variant-effects
+fixture_type: pages
+query: "Evo 2 genome language model across all domains of life for zero shot coding and noncoding variant effect prediction"
+k: 5
+notes: "Corpus-native fixture grounded in the Evo 2 page."
+expected_pages:
+  - paper_stem: brixi-2026-genome-modelling-and-design-across-all-domains
+    importance: critical
+    rationale: "Describes Evo 2 training and zero-shot coding and noncoding variant predictions."
+must_not_appear:
+  - paper_stem: liao-2023-a-draft-human-pangenome-reference
+    rationale: "A pangenome assembly resource, rather than the Evo 2 genome language model."

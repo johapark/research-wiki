@@ -833,10 +833,18 @@ researchwiki benchmark-fixture --list
 researchwiki benchmark-fixture <retrieval-fixture> --retrieval-backend bm25
 researchwiki benchmark-fixture <retrieval-fixture> --retrieval-backend semantic
 researchwiki benchmark-fixture <retrieval-fixture> --retrieval-backend hybrid
+researchwiki benchmark-retrieval --candidate-embedding harrier-270m --out output/embedding-comparison/harrier-270m.json
+researchwiki benchmark-retrieval --candidate-embedding harrier-0.6b --out output/embedding-comparison/harrier-0.6b.json
 ```
 
-The suite currently has four portable fixtures anchored to bundled OA papers
-and ten corpus-native fixtures that preserve recurring real queries. Before
+The suite has portable fixtures anchored to bundled OA papers and corpus-native
+fixtures that preserve recurring queries across AI, genomics, CRISPR, and
+single-cell methods. The multi-fixture `benchmark-retrieval` comparison uses
+separate, corpus-validated embedding caches and records warm timing, dtype,
+context length, cache reuse, and exact model revisions. Harrier query
+instructions are applied automatically; production BGE grading is unchanged.
+See [the retrieval benchmark guide](./benchmark-fixtures/retrieval/README.md#comparing-bge-and-harrier)
+for dependencies and comparison controls. Before
 scoring, the harness resolves every expected anchor against the current wiki.
 If any expected anchor is missing, it reports the fixture as `unavailable` and
 exits 2 instead of recording a false zero-quality result. Missing negative

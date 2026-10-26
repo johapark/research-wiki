@@ -1,0 +1,12 @@
+fixture_id: haplotype-human-pangenome-reference
+fixture_type: pages
+query: "draft human pangenome reference built from haplotype resolved diploid assemblies adding polymorphic sequences beyond GRCh38"
+k: 5
+notes: "Corpus-native fixture grounded in the HPRC draft human pangenome page."
+expected_pages:
+  - paper_stem: liao-2023-a-draft-human-pangenome-reference
+    importance: critical
+    rationale: "Reports the haplotype assemblies and polymorphic sequence additions forming the draft reference."
+must_not_appear:
+  - paper_stem: brixi-2026-genome-modelling-and-design-across-all-domains
+    rationale: "Genome language-model training and design, rather than constructing the HPRC reference."

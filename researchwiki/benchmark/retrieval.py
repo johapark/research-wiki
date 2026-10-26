@@ -18,20 +18,20 @@ sentence-transformers model.
 """
 from __future__ import annotations
 
-import json
 import math
-import sqlite3
-import time
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 from typing import Literal
 
 import numpy as np
 
-from ..db import get_connection
-from ..paths import wiki_root
 from .fixture import Importance, RetrievalFixture
 from ..log import log
+from .retrieval_embeddings import (
+    EmbeddingUnavailable,
+    _embed_with,
+    _load_or_build_claim_cache,
+    _load_or_build_page_cache,
+)
 
 
 SemanticBackend = Literal["bm25", "semantic", "hybrid"]
@@ -453,238 +453,6 @@ def summarize(scores: list[RetrievalScore], embedding_label: str, backend: str) 
 
 
 # ---------------------------------------------------------------------------
-# Embedding bridge
-# ---------------------------------------------------------------------------
-#
-# Two parallel concerns: (1) loading sentence-transformers models by name,
-# bypassing the framework's default-only singleton; (2) a per-model on-disk
-# cache so repeated A/B runs don't re-embed.
-
-_MODEL_CACHE: dict[str, object] = {}
-
-
-def _model_slug(model_name: str) -> str:
-    """Disk-safe slug for a model id — strip the org prefix.
-    `BAAI/bge-small-en-v1.5` → `bge-small-en-v1.5`."""
-    return model_name.split("/", 1)[-1]
-
-
-def cache_dir_for(model_name: str) -> Path:
-    """Per-model retrieval cache directory under the wiki root.
-
-    Sharing the framework default `.semantic-cache/` across models would
-    silently overwrite vectors when the model changes. Per-model dirs
-    let A/B runs use both caches concurrently."""
-    return wiki_root() / f".retrieval-cache-{_model_slug(model_name)}"
-
-
-def _load_model(model_name: str, *, trust_remote_code: bool = False):
-    """Lazy-load a sentence-transformers model by name. Per-name singleton
-    so repeat calls reuse — `trust_remote_code` only affects the FIRST load
-    of a given model (once a model is in cache, subsequent calls reuse it).
-    Returns None on failure.
-
-    `trust_remote_code=True` is required by some models (Nomic family) that
-    ship custom modeling code in the HF repo. Off by default — opt in only
-    for trusted model providers."""
-    if model_name in _MODEL_CACHE:
-        return _MODEL_CACHE[model_name]
-    try:
-        from sentence_transformers import SentenceTransformer  # type: ignore
-    except ImportError as e:
-        log(f"sentence-transformers not installed: {e}", tag="retrieval")
-        return None
-    try:
-        model = SentenceTransformer(
-            model_name, device="cpu", trust_remote_code=trust_remote_code,
-        )
-    except Exception as e:
-        log(f"failed to load model {model_name!r}: {e}", tag="retrieval")
-        return None
-    _MODEL_CACHE[model_name] = model
-    return model
-
-
-def _embed_with(
-    texts: list[str],
-    model_name: str,
-    *,
-    trust_remote_code: bool = False,
-    prefix: str = "",
-) -> np.ndarray | None:
-    """Embed `texts` with the named model. If `prefix` is non-empty, prepend
-    it to every text — used for instruction-tuned embeddings (Nomic, E5,
-    Instructor, etc.) that distinguish indexing vs querying via prefixes."""
-    model = _load_model(model_name, trust_remote_code=trust_remote_code)
-    if model is None:
-        return None
-    if not texts:
-        return np.zeros((0, 0), dtype=np.float32)
-    if prefix:
-        texts = [prefix + t for t in texts]
-    embs = model.encode(
-        texts,
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-        show_progress_bar=False,
-    )
-    return embs.astype(np.float32, copy=False)
-
-
-# Per-model claim cache layout under cache_dir_for(model):
-#   claims.npy        float32, shape (N, dim), L2-normalized
-#   claims_meta.json  {model, dim, built_at, rows: [{paper_stem, section, position, text}, ...]}
-
-def _claim_cache_paths(model_name: str) -> tuple[Path, Path]:
-    d = cache_dir_for(model_name)
-    return d / "claims.npy", d / "claims_meta.json"
-
-
-def _all_db_claims() -> list[dict]:
-    """Pull every non-cross-ref claim from the state DB."""
-    conn = get_connection()
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = conn.execute(
-            "SELECT paper_stem, section, position, text FROM claims "
-            "WHERE is_cross_ref = 0 ORDER BY paper_stem, section, position"
-        ).fetchall()
-    finally:
-        conn.close()
-    return [dict(r) for r in rows]
-
-
-def _load_or_build_claim_cache(
-    model_name: str,
-    *,
-    trust_remote_code: bool = False,
-    doc_prefix: str = "",
-) -> tuple[np.ndarray, list[dict]] | None:
-    """Load claims embeddings from disk or build them. The cache meta records
-    `doc_prefix`; if the requested prefix differs from what's on disk, rebuild
-    — embeddings must match the prefix used at index time."""
-    npy, meta = _claim_cache_paths(model_name)
-    if npy.exists() and meta.exists():
-        try:
-            meta_d = json.loads(meta.read_text(encoding="utf-8"))
-            cached_prefix = meta_d.get("doc_prefix", "")
-            arr = np.load(npy)
-            rows = meta_d.get("rows", [])
-            if (
-                arr.shape[0] == len(rows)
-                and len(rows) > 0
-                and cached_prefix == doc_prefix
-            ):
-                return arr, rows
-            if cached_prefix != doc_prefix:
-                log(
-                    f"doc_prefix changed for {model_name} "
-                    f"({cached_prefix!r} → {doc_prefix!r}); rebuilding cache", tag="retrieval"
-                )
-        except Exception:
-            pass  # rebuild
-    rows = _all_db_claims()
-    if not rows:
-        log("claims table is empty — run `researchwiki db rebuild` first", tag="retrieval")
-        return None
-    texts = [r["text"] for r in rows]
-    arr = _embed_with(
-        texts, model_name,
-        trust_remote_code=trust_remote_code, prefix=doc_prefix,
-    )
-    if arr is None or arr.shape[0] != len(rows):
-        return None
-    cache_dir_for(model_name).mkdir(parents=True, exist_ok=True)
-    np.save(npy, arr)
-    meta.write_text(json.dumps({
-        "model": model_name,
-        "dim": int(arr.shape[1]),
-        "built_at": int(time.time()),
-        "doc_prefix": doc_prefix,
-        "rows": rows,
-    }, indent=2), encoding="utf-8")
-    return arr, rows
-
-
-# Per-model page cache layout — mirrors the framework's `.semantic-cache/`
-# but parameterized by model. Same fields as `pages_meta.json` in
-# index.pages_semantic so we could share the loader if needed later.
-
-def _page_cache_paths(model_name: str) -> tuple[Path, Path]:
-    d = cache_dir_for(model_name)
-    return d / "pages.npy", d / "pages_meta.json"
-
-
-def _load_or_build_page_cache(
-    model_name: str,
-    *,
-    trust_remote_code: bool = False,
-    doc_prefix: str = "",
-) -> tuple[np.ndarray, list[dict]] | None:
-    npy, meta = _page_cache_paths(model_name)
-    if npy.exists() and meta.exists():
-        try:
-            meta_d = json.loads(meta.read_text(encoding="utf-8"))
-            cached_prefix = meta_d.get("doc_prefix", "")
-            arr = np.load(npy)
-            rows = meta_d.get("rows", [])
-            if (
-                arr.shape[0] == len(rows)
-                and len(rows) > 0
-                and cached_prefix == doc_prefix
-            ):
-                return arr, rows
-            if cached_prefix != doc_prefix:
-                log(
-                    f"doc_prefix changed for {model_name} "
-                    f"({cached_prefix!r} → {doc_prefix!r}); rebuilding cache", tag="retrieval"
-                )
-        except Exception:
-            pass  # rebuild
-
-    # Reuse the framework's page-text builder so the candidate cache
-    # embeds the same fields the default semantic index does.
-    from ..index.pages_semantic import page_index_text
-    from ..wiki import read_pages
-
-    pages = read_pages()
-    rows: list[dict] = []
-    texts: list[str] = []
-    for p in pages:
-        text = page_index_text(p)
-        if not text.strip():
-            continue
-        rows.append({
-            "key": p.key,
-            "stem": p.stem,
-            "category": p.category,
-            "page_type": p.page_type,
-            "title": p.fm.get("title", ""),
-        })
-        texts.append(text)
-
-    if not rows:
-        log("no indexable wiki pages", tag="retrieval")
-        return None
-    arr = _embed_with(
-        texts, model_name,
-        trust_remote_code=trust_remote_code, prefix=doc_prefix,
-    )
-    if arr is None or arr.shape[0] != len(rows):
-        return None
-    cache_dir_for(model_name).mkdir(parents=True, exist_ok=True)
-    np.save(npy, arr)
-    meta.write_text(json.dumps({
-        "model": model_name,
-        "dim": int(arr.shape[1]),
-        "built_at": int(time.time()),
-        "doc_prefix": doc_prefix,
-        "rows": rows,
-    }, indent=2), encoding="utf-8")
-    return arr, rows
-
-
-# ---------------------------------------------------------------------------
 # BM25-side: keyword retrieval over claim text + page text
 # ---------------------------------------------------------------------------
 #
@@ -712,16 +480,14 @@ def _bm25_pages(query: str, k: int) -> list[RetrievedPage]:
     """Keyword retrieval over wiki pages via the existing Tantivy index."""
     try:
         from ..index.pages_bm25 import TantivySearchBackend
-    except Exception as e:
-        log(f"BM25 page index unavailable: {e}", tag="retrieval")
-        return []
-    try:
-        backend = TantivySearchBackend()
-        hits = backend.query(query, limit=k)
-    except Exception as e:
-        log(f"tantivy query failed: {e}", tag="retrieval")
-        return []
-    return [RetrievedPage(paper_stem=h.key, score=float(h.score)) for h in hits]
+    except ImportError as exc:
+        raise EmbeddingUnavailable(f"BM25 dependency unavailable: {exc}") from exc
+    from ..wiki import read_pages
+    excluded = {page.key for page in read_pages() if page.page_type in ("meta", "dashboard")}
+    backend = TantivySearchBackend()
+    hits = backend.query(query, limit=k + len(excluded))
+    return [RetrievedPage(paper_stem=h.key, score=float(h.score))
+            for h in hits if h.key not in excluded][:k]
 
 
 # ---------------------------------------------------------------------------
@@ -756,12 +522,12 @@ def retrieve_claims(
         model_name, trust_remote_code=trust_remote_code, doc_prefix=doc_prefix,
     )
     if cache is None:
-        return []
+        raise EmbeddingUnavailable(f"cannot build claim embeddings for {model_name}")
     arr, rows = cache
 
     q_emb = _embed_with(
         [fixture.query], model_name,
-        trust_remote_code=trust_remote_code, prefix=query_prefix,
+        trust_remote_code=trust_remote_code, prefix=query_prefix, role="query",
     )
     if q_emb is None or q_emb.shape[0] == 0 or q_emb.shape[1] != arr.shape[1]:
         if q_emb is not None and q_emb.shape[1] != arr.shape[1]:
@@ -769,7 +535,7 @@ def retrieve_claims(
                 f"dim mismatch (query {q_emb.shape[1]} vs cache {arr.shape[1]}); "
                 f"rebuilding cache may be needed", tag="retrieval"
             )
-        return []
+        raise EmbeddingUnavailable(f"invalid query embedding for {model_name}")
     sims = arr @ q_emb[0]                      # (N,)
     order = np.argsort(-sims)
 
@@ -807,15 +573,15 @@ def retrieve_pages(
         model_name, trust_remote_code=trust_remote_code, doc_prefix=doc_prefix,
     )
     if cache is None:
-        return []
+        raise EmbeddingUnavailable(f"cannot build page embeddings for {model_name}")
     arr, rows = cache
 
     q_emb = _embed_with(
         [fixture.query], model_name,
-        trust_remote_code=trust_remote_code, prefix=query_prefix,
+        trust_remote_code=trust_remote_code, prefix=query_prefix, role="query",
     )
     if q_emb is None or q_emb.shape[0] == 0 or q_emb.shape[1] != arr.shape[1]:
-        return []
+        raise EmbeddingUnavailable(f"invalid query embedding for {model_name}")
     sims = arr @ q_emb[0]
     order = np.argsort(-sims)
     semantic_hits = [

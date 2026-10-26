@@ -1,0 +1,12 @@
+fixture_id: long-read-spliced-alignment
+fixture_type: pages
+query: "general purpose minimizer chaining aligner for noisy long genomic reads spliced RNA cDNA and assembly contigs"
+k: 5
+notes: "Corpus-native fixture grounded in the minimap2 page."
+expected_pages:
+  - paper_stem: li-2018-minimap2-pairwise-alignment-for-nucleotide
+    importance: critical
+    rationale: "The page describes one aligner covering genomic reads, spliced RNA/cDNA, and assemblies."
+must_not_appear:
+  - paper_stem: bae-2014-cas-offinder-a-fast-and-versatile
+    rationale: "CRISPR candidate-site enumeration with PAM constraints, rather than read alignment."
