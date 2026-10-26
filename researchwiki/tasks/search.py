@@ -157,6 +157,11 @@ def main(argv: list[str]) -> int:
             parser.error("--embedding requires --mode auto, semantic, or hybrid")
         if args.embedding_max_seq_length < 1:
             parser.error("--embedding-max-seq-length must be positive")
+        # The comparison encoders rank the whole page cache and have no scope
+        # filter, so honoring --scope-file here would mean silently returning
+        # out-of-scope pages. Refuse rather than leak past the boundary.
+        if args.scope_file is not None:
+            parser.error("--embedding does not support --scope-file")
         from ..search.model_query import query_with_model
         depth = max(args.limit, 12) if args.llm_rerank else args.limit
         hits = query_with_model(args.query, args.embedding, mode=args.mode, limit=depth,

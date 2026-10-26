@@ -31,3 +31,17 @@ def test_search_embedding_option_uses_the_model_path_without_changing_default_ro
     assert search.main(["query", "--embedding", "harrier-270m", "--mode", "semantic", "--json"]) == 1
     assert calls[0][0] == ("query", "harrier-270m")
     assert capsys.readouterr().out.strip() == "[]"
+
+
+def test_search_embedding_refuses_a_scope_it_cannot_enforce(monkeypatch, tmp_path, capsys):
+    """The comparison encoders rank the whole page cache, so a scoped query
+    must fail loudly instead of returning pages outside the scope."""
+    import pytest
+
+    monkeypatch.setattr(model_query, "query_with_model",
+                        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("unscoped query ran")))
+    with pytest.raises(SystemExit) as exc:
+        search.main(["query", "--embedding", "harrier-270m", "--mode", "semantic",
+                     "--scope-file", str(tmp_path / "scope.json")])
+    assert exc.value.code == 2
+    assert "--scope-file" in capsys.readouterr().err
