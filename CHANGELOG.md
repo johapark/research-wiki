@@ -22,6 +22,64 @@ the reasoning behind any line below.
 
 ### Added
 
+- Generic version 1 evidence selections constrain page, claim, PDF, hybrid,
+  See-Also, and reranker retrieval before top-K/context construction. CLI
+  `--scope-file` inputs and MCP `scope_file` parameters are independent of
+  project storage or commercial packages. Empty scopes stay empty; source
+  snapshots detect changed bytes; fallbacks retain selection. Synthesis evidence
+  and bibliography export support narrowed scopes. Unscoped contracts remain.
+- Community `jobs submit`, `run`, `list`, `show`, `events`, `reconcile`, `retry`,
+  and `cancel` commands expose the existing durable supervisor. Queueing and
+  retry remain separate from foreground execution; cancellation is queued-only.
+  Explicit library selection works outside the checkout, and profiles load
+  only in workers. Version 1 JSON envelopes keep stdout parseable while native
+  diagnostics and relay handoffs stay on stderr. Read-only inspection does not
+  refresh ownership or mutate records; existing ingest/batch commands remain.
+- Durable local ingestion jobs provide idempotent submission, atomic versioned
+  manifests, private event/diagnostic files, isolated workers, polling, queued
+  cancellation, and explicit retry of known-unpublished work. Workers select
+  their own library/profile, keep relay handoffs visible, and fence terminal
+  writes by owner/generation under an OS lease. Jobs survive database/index
+  rebuilds; source and configuration identity changes are recorded on retry.
+  Worker loss initially stays interrupted with unknown publication and blocked
+  replay until explicit reconciliation. The job-control CLI follows separately.
+- Explicit `JobSupervisor.reconcile_job()` resolves interrupted publication in
+  an isolated library/profile process under the worker lease and corpus lock.
+  Private versioned publication receipts survive mutation-journal cleanup and
+  derived-state deletion. Confirmed rollback permits a fresh explicit retry;
+  confirmed commit preserves publication, gate/check evidence, and repair-first
+  guidance. Local database, index, and claim-grade repair never repeats provider
+  calls or optional model hooks. Missing/unsupported proof remains unknown;
+  changed/missing canonical artifacts require review rather than replacement.
+- Versioned ingestion application contracts distinguish published content,
+  reviewable drafts, unknown publication, pending maintenance, and individual
+  check results. Optional model progress observation supports direct API calls,
+  chat-relay, and mixed per-phase routing, including parallel draft calls.
+  Structured relay handoffs preserve existing foreground messages, retries,
+  cache reuse, timeout recovery, and actual responder-model provenance.
+- Single-PDF `add` / `agent ingest` accepts `--events-file` for model/relay
+  JSONL progress and `--result-file` for a versioned terminal result. Reports
+  require new paths outside canonical content, preserve human output and exit
+  codes, and distinguish unknown publication/maintenance from success. Batch
+  report routing remains deferred.
+- A synchronous `researchwiki.operations.ingest(request, event_sink=...)`
+  operation now owns single-PDF validation, provider preflight, mutation
+  recovery, runner execution, and post-publication hooks. The foreground CLI
+  uses that same operation and retains receipts, exit codes, and relay
+  handoffs. Unresolved mutation recovery blocks new ingestion. Optional-hook
+  failures preserve published outcomes and appear as partial post-work;
+  projection status and runner-owned memory evolution remain conservative when
+  their owners provide no completion evidence.
+- Ingestion events now use schema version 2 for operation/attempt/phase
+  lifecycle, parallel draft slots, gate outcomes, canonical publication, and
+  maintenance results. Version 1 model events remain readable; request/result
+  schemas and relay mailbox protocols remain at version 1. Publication comes
+  from the file transaction's commit point, and mutation journals carry
+  request/attempt/job correlation. Known publication survives maintenance or
+  event-delivery failures without inviting a repeated paid ingest. Required
+  claim-grade persistence reports unavailable storage or missing rows; commentary
+  remains excluded from the citable claims DB.
+  durable jobs/application service are not included in this first increment.
 - `benchmark-retrieval` compares BGE-small with Harrier-OSS-V1 270M or 0.6B
   on available claim/page fixtures, recording ranking changes, warm query
   latency, document throughput, and model/corpus provenance. Harrier query
@@ -44,6 +102,9 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Mutation cleanup removes its journal before deleting backups, after any
+  required publication-evidence handoff. An unlink failure therefore retains
+  the backups needed by recovery instead of stranding a journal without them.
 - Retrieval benchmark caches validate corpus contents, model identity,
   revision, context limit, dtype, and document instructions. Stale vectors
   and failed encoders can no longer produce misleading comparison scores.
@@ -960,7 +1021,6 @@ the reasoning behind any line below.
   callers had disagreed (`lint` walks every `*.md`; `status` holds
   `read_pages()`, which drops a file with no `---` fence), and it keeps
   `status` off the ~20 ms `lint` package import for one predicate.
-
 
 - **`WORKFLOW.md` gains *Bottom-up discovery — when the wiki proposes the page*.**
   Documents the four proposal tiers and, more importantly, carries the calibration

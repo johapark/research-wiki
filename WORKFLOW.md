@@ -296,6 +296,27 @@ update pages, DB rows, and search indexes incrementally; a routine full rebuild
 after every ingest is unnecessary. Run `status` afterward and follow reported
 index warnings or review queues.
 
+### Durable single-paper jobs
+
+For explicit queue ownership and process-loss reconciliation, use the
+Community `jobs` commands alongside the existing foreground/batch workflows:
+
+```bash
+researchwiki jobs submit inbox/paper.pdf --library-root "$PWD" --request-id paper-001 --json
+researchwiki jobs run JOB_ID --library-root "$PWD" --json
+researchwiki jobs events JOB_ID --library-root "$PWD" --after-sequence 0 --json
+researchwiki jobs reconcile JOB_ID --library-root "$PWD" --json
+```
+
+Replace `JOB_ID` with the submission response's `job.job_id`. Submit/retry only
+enqueue; run starts an isolated foreground worker. Inspection reads durable
+state without writing it. Ctrl+C interrupts the owned worker and retains the
+available state; reconcile before retrying. Cancel applies only to queued work.
+Profiles are selected at submission and loaded in the worker, so library
+selection and read-only inspection do not depend on the caller's `.env`.
+See the [job command guide](./docs/jobs.md) for typed request/options files,
+profile selection, machine-readable results, and command-specific exit codes.
+
 ### 3. Inspect the new wiki page
 
 `wiki/compbio/kim-2026-structural-motif-search-across-the-protein.md`:
@@ -1218,11 +1239,19 @@ up. Not everything outside `wiki/` is disposable.
   published content. Recovery reads current canonical files, performs no model
   calls, and leaves semantic search unavailable until normal indexing refreshes
   it. Follow the recovery procedure rather than deleting journals as a cache.
+- **Machine-local ingestion jobs** live under
+  `~/.local/share/researchwiki/repos/<library-key>/jobs/` by default. Manifests,
+  publication ledgers, operation checkpoints, and diagnostic/event files survive
+  database/index rebuilds. They are recovery state, not disposable caches.
+  `JobSupervisor.reconcile_job()` resolves interrupted publication and repairs
+  projections without replaying provider calls. Missing proof stays unknown;
+  original event logs and filenames cannot substitute for it. Preserve this
+  directory when retaining job history and crash-recovery evidence.
 
 With source PDFs, wiki pages, and the framework you can regenerate local search
 indexes and grades. External metadata may need refetching; judgments may require
 new model calls. Telemetry, discovery receipts, unapplied proposals, and rollback
-history are not recoverable from Markdown alone. Back up credentials and custom
+history and durable job evidence are not recoverable from Markdown alone. Back up credentials and custom
 configuration securely too, and keep live SQLite databases out of sync folders.
 
 ---

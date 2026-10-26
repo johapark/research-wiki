@@ -35,6 +35,10 @@ from ..fsatomic import write_text_atomic
 from ..mutation import corpus_lock, mutation as _mutation
 from ..paths import inbox_dir, papers_dir, wiki_dir
 from ..provenance import specific_author_model
+from ..operations.lifecycle import (
+    canonical_committed as _canonical_committed, maintenance as _maintenance,
+    publication_details as _publication_details,
+)
 from .category_selection import suggest_category_for_page as _suggest_category
 from .commentary import gate_reason as commentary_gate_reason
 
@@ -776,8 +780,11 @@ def promote_to_wiki(
         with _mutation(
             touched,
             operation="promote",
-            details={"stem": stem, "category": category, "repair_projections": True},
+            details=_publication_details(attempt_id, stem, category),
         ) as snap:
+            from ..ingest_ledger import prepare, set_artifacts
+
+            prepare(snap)
             # Classify against the old page before replacing it. The journal
             # restores the PDF if any later file operation fails.
             try:
@@ -808,10 +815,14 @@ def promote_to_wiki(
                 candidates=candidates, page_path=page_path, attempt_id=attempt_id,
                 hook=hook, short_name=short_name,
             )
+            set_artifacts(snap, res, stem)
             snap.mark_committed()
+            _canonical_committed(res, stem)
             try:
                 snap.reconcile()
+                _maintenance("database", "completed")
             except Exception as exc:
+                _maintenance("database", "failed")
                 res.warnings.append(f"projection repair pending; journal retained: {exc}")
 
     return res

@@ -186,12 +186,17 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as e:
         print(f"researchwiki: {e}", file=sys.stderr)
         return 1
-    clear_loader_metadata()
-    try:
-        _load_dotenv(env_file)
-    except EnvironmentFailure as e:
-        print(f"researchwiki: {e}", file=sys.stderr)
-        return 2
+    # Jobs select their checkout explicitly and load profiles only in workers.
+    # Preserve provenance so child_environment can remove profile-owned values;
+    # an unrelated caller CWD's .env must not affect queue inspection or routing.
+    job_command = bool(argv and argv[0] == "jobs")
+    if not job_command:
+        clear_loader_metadata()
+        try:
+            _load_dotenv(env_file)
+        except EnvironmentFailure as e:
+            print(f"researchwiki: {e}", file=sys.stderr)
+            return 2
     tasks = _discover_tasks()
     if not argv:
         _build_parser(tasks).print_help(sys.stderr)
@@ -229,13 +234,16 @@ def main(argv: list[str] | None = None) -> int:
     # `init` is exempt — it's the one command meant for a not-yet-a-wiki dir.
     # The task itself still verifies the clone assets before writing anything;
     # exemption here means "missing wiki inside a checkout", not "any cwd".
-    if command != "init" and not (Path.cwd() / "wiki").is_dir():
+    # Jobs validate their explicit --library-root instead of the caller's CWD.
+    if command not in {"init", "jobs"} and not (Path.cwd() / "wiki").is_dir():
         print(f"researchwiki {command}: no wiki/ directory under {Path.cwd()} — "
               "run from the cloned repository root; if it is not initialized, "
               "run `researchwiki init` there.",
               file=sys.stderr)
         return 2
     try:
+        if command == "jobs":
+            return int(module.main(argv[1:], env_file=env_file) or 0)
         return int(module.main(argv[1:]) or 0)
     except SystemExit as e:
         # argparse exits 2 for every usage error — bad flag, missing required

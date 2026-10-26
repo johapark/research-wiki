@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ..operations.lifecycle import memory_completed, observed_phase
+
 import time
 import shutil
 import tempfile
@@ -267,6 +269,7 @@ def warn_thin_extraction(sections: dict, full_text: str | None = None) -> None:
             "section of the draft with extra care", tag="agent")
 
 
+@observed_phase("reconcile")
 def phase_reconcile(ctx, conn):
     t0 = time.monotonic()
     meta = phases.reconcile_metadata(
@@ -292,6 +295,7 @@ def phase_reconcile(ctx, conn):
     return meta, iteration_id
 
 
+@observed_phase("extract")
 def phase_extract(ctx, conn):
     t0 = time.monotonic()
     sections, full_text = phases.extract_sections(ctx.pdf_path)
@@ -310,6 +314,7 @@ def phase_extract(ctx, conn):
     return sections, full_text
 
 
+@observed_phase("target_claims")
 def phase_target_claims(ctx, conn):
     from .phases.target_claims import extract_target_claims
     t0 = time.monotonic()
@@ -448,6 +453,20 @@ def run_entailment_check(ctx, conn, cleaned_text: str) -> None:
                 tag="agent")
 
 
+def _memory_status(result):
+    if not isinstance(result, dict):
+        return "unknown"
+    if "error" in result:
+        return "failed"
+    if result.get("skipped"):
+        return "partial"
+    if not all(key in result for key in ("n_above_threshold", "n_judged", "n_cached_skipped", "written")):
+        return "unknown"
+    missed = result["n_above_threshold"] - result["n_judged"] - result["n_cached_skipped"]
+    return "partial" if missed > 0 else "completed"
+
+
+@observed_phase("memory_evolve")
 def run_post_promote_memory_evolution(ctx, conn, *, source_key: str) -> None:
     """Re-arm the budget for optional memory evolution, then pause it again.
 
@@ -469,8 +488,10 @@ def run_post_promote_memory_evolution(ctx, conn, *, source_key: str) -> None:
         ctx.budget_tracker.resume()
     try:
         ctx.next_iter()
-        phases.evolve_memory(ctx, conn, source_key=source_key)
+        result = phases.evolve_memory(ctx, conn, source_key=source_key)
+        memory_completed(_memory_status(result))
     except BudgetExhausted as exc:
+        memory_completed("partial")
         if ctx.budget_tracker is not None:
             ctx.budget_tracker.suspend()
         ctx.next_iter()
@@ -484,6 +505,7 @@ def run_post_promote_memory_evolution(ctx, conn, *, source_key: str) -> None:
         )
         log(f"evolve   → skipped ({exc})", tag="agent")
     except EnvironmentFailure as exc:
+        memory_completed("partial")
         if ctx.budget_tracker is not None:
             ctx.budget_tracker.suspend()
         ctx.next_iter()

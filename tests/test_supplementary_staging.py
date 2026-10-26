@@ -135,7 +135,7 @@ def _supplementary_handler_types():
     import ast
     import pathlib
 
-    tree = ast.parse(pathlib.Path("researchwiki/agents/runner.py").read_text())
+    tree = ast.parse(pathlib.Path("researchwiki/agents/publication.py").read_text())
     for node in ast.walk(tree):
         if not isinstance(node, ast.Try):
             continue
@@ -143,7 +143,7 @@ def _supplementary_handler_types():
         if "stage_supplementary" in calls:
             handler, = node.handlers
             return set(ast.unparse(handler.type).strip("()").replace(" ", "").split(","))
-    raise AssertionError("post-promote supplementary loop not found in runner.py")
+    raise AssertionError("post-promote supplementary loop not found in publication.py")
 
 
 @pytest.mark.parametrize("exc_name", ["OSError", "ValueError", "EnvironmentFailure"])

@@ -23,15 +23,15 @@ from pathlib import Path
 
 from ..db.connection import get_connection
 from ..db.iterations import write_iteration, update_paper_stem
-from ..errors import EnvironmentFailure
 from ..grade import coherence
 from . import fitness, model_config, phases
 from .context import Context, PromoteFailed, ReconcileFailed, StemRenameRefused
 from .commit_support import promotion_decision_reason, update_indexes_after_promotion
-from .budget import BudgetExhausted, activate
+from .budget import BudgetExhausted
+from ..operations.observation import activate_ingest_scope, submit_observed
 from .runner_support import (
     finalize_attempt_timing, handle_budget_exhausted,
-    keyword_body_gaps,
+    keyword_body_gaps as _keyword_body_gaps,
     make_budget_tracker, phase_extract as _phase_extract,
     phase_reconcile as _phase_reconcile,
     phase_target_claims as _phase_target_claims,
@@ -48,14 +48,14 @@ from .runner_support import (
 from .relay import set_relay_identity
 from ..fsatomic import write_text_atomic
 from ..log import log
+from ..operations.lifecycle import gate_evaluated, observed_attempt, observed_phase
+from .publication import finish_publication
 from ..provenance import specific_author_model
 
-
-def _keyword_body_gaps(keywords: list[str], body_text: str) -> list[str]:
-    """Compatibility shim for callers that imported the former local helper."""
-    return keyword_body_gaps(keywords, body_text)
+__all__ = ["run_ingest", "_keyword_body_gaps"]
 
 
+@observed_attempt
 def run_ingest(
     pdf_path: str | Path,
     *,
@@ -79,6 +79,7 @@ def run_ingest(
     max_cost_usd: float | None = None,
     max_wall_seconds: float | None = None,
     run_memory_evolve: bool = False,
+    event_sink=None,
 ) -> Context:
     """Drive a single ingest attempt end-to-end.
 
@@ -132,8 +133,8 @@ def run_ingest(
     # transaction view. Each write_iteration commits its own row, which is
     # what we want — append-only, durable as soon as the row is written.
     attempt_t0 = time.monotonic()
+    budget_scope = activate_ingest_scope(ctx.budget_tracker, event_sink, attempt_id=ctx.attempt_id)
     conn = get_connection()
-    budget_scope = activate(ctx.budget_tracker)
     budget_scope.__enter__()
     try:
         # Phase 1: reconcile
@@ -268,7 +269,7 @@ def run_ingest(
 
         with ThreadPoolExecutor(max_workers=n_drafts) as pool:
             futures = [
-                pool.submit(_author_one, slot, iter_no, t)
+                submit_observed(pool, _author_one, slot, iter_no, t)
                 for (slot, t), iter_no in zip(author_inputs, author_iter_ids)
             ]
             # Place results back in slot order so ctx.drafts[i] corresponds
@@ -362,6 +363,7 @@ def run_ingest(
     return ctx
 
 
+@observed_phase("crosslinks")
 def _phase_crosslinks(ctx: Context, conn) -> list:
     """Wrapper for the crosslink-candidates phase. Persists one row.
 
@@ -429,6 +431,7 @@ def _phase_crosslinks(ctx: Context, conn) -> list:
     return cands
 
 
+@observed_phase("author")
 def _phase_author(ctx: Context, conn, temperature: float, slot: int = 0):
     """Wrapper for one author call. Returns a Draft (with iteration_id filled).
 
@@ -468,6 +471,7 @@ def _phase_author(ctx: Context, conn, temperature: float, slot: int = 0):
     return draft
 
 
+@observed_phase("grade")
 def _phase_grade(ctx: Context, conn, draft) -> None:
     """Wrapper for grading one draft. Updates draft.scores + claim_details in place.
 
@@ -520,6 +524,7 @@ def _phase_grade(ctx: Context, conn, draft) -> None:
     )
 
 
+@observed_phase("tournament")
 def _phase_tournament(ctx: Context, conn):
     """Wrapper for tournament phase. Picks the highest-scored draft."""
     t0 = time.monotonic()
@@ -540,6 +545,7 @@ def _phase_tournament(ctx: Context, conn):
     return winner
 
 
+@observed_phase("critic")
 def _phase_critic(ctx: Context, conn, draft):
     """Wrapper for critic phase. Persists one row, returns CritiqueOutput
     (with cost fields the runner uses for the print line)."""
@@ -577,6 +583,7 @@ def _phase_critic(ctx: Context, conn, draft):
     return critique
 
 
+@observed_phase("evolve")
 def _phase_evolve(ctx: Context, conn, prior_draft, critique):
     """Wrapper for evolve phase. Returns a new Draft (graded by next phase)."""
     t0 = time.monotonic()
@@ -634,6 +641,7 @@ def _phase_evolve(ctx: Context, conn, prior_draft, critique):
 _is_strict_improvement = fitness.is_strict_improvement
 
 
+@observed_phase("debug")
 def _phase_debug(
     ctx: Context, conn,
     cleaned_text: str, n_kc: int, gate, verification,
@@ -739,6 +747,7 @@ def _phase_debug(
     return cleaned_text, n_kc, new_gate, verification
 
 
+@observed_phase("commit")
 def _phase_commit(ctx: Context, conn) -> Path:
     """Commit phase: cross-link verification → promote-or-sandbox decision.
 
@@ -844,6 +853,8 @@ def _phase_commit(ctx: Context, conn) -> Path:
                 ],
                 warnings=gate.warnings,
             )
+
+    gate_evaluated(ctx, gate)
 
     # Surface non-blocking warnings (e.g. drafter hallucinated wikilinks
     # that verify already stripped) regardless of which path we take.
@@ -1022,63 +1033,11 @@ def _phase_commit(ctx: Context, conn) -> Path:
             for w in result.warnings:
                 log(f"           ⚠ {w}", tag="agent")
 
-        # Stage supplementary files now that the wiki page is on disk:
-        # copy each into papers/{stem}.supp/ (an inbox/ source is moved,
-        # so it doesn't linger as backlog), normalize the filename, and
-        # append an entry to the page's `supplementary:` YAML block.
-        # Failures on individual files are surfaced as warnings but
-        # don't abort the run — the primary page is already committed.
-        if ctx.supplementary:
-            from ..supplementary import stage_supplementary, insert_supplementary_entry
-            for sp in ctx.supplementary:
-                try:
-                    staged = stage_supplementary(ctx.paper_stem, sp)
-                    insert_supplementary_entry(
-                        result.wiki_path,
-                        staged["filename"], staged["kind"],
-                    )
-                    origin = " (moved out of inbox/)" if staged["consumed"] else ""
-                    log(f"supp     → papers/{ctx.paper_stem}.supp/"
-                          f"{staged['filename']} ({staged['kind']}){origin}", tag="agent")
-                except (OSError, ValueError, EnvironmentFailure) as e:
-                    # OSError, not just its FileNotFound/FileExists subclasses:
-                    # `stage_supplementary` calls mkdir and copy2, which raise
-                    # plain PermissionError/OSError on a full disk, a read-only
-                    # mount or a synced-folder hiccup, and `insert_supplementary_
-                    # entry` writes the page and syncs the DB. By this point the
-                    # page, PDF move, back-links, index bullet and log entry have
-                    # all landed, so raising here would make the worker exit 2 —
-                    # which `_should_retry` treats as retryable, and with the PDF
-                    # already out of inbox/ `--resume` then files a complete,
-                    # twice-gated paper as unresumable. House rule 2 in errors.py:
-                    # an attachment is optional work and records a skip.
-                    log(f"supp     ⚠ skipped {sp}: {type(e).__name__}: {e}", tag="agent")
-
-        # Update only the new/edited pages. Parallel ingests serialize in the
-        # index layer; failures remain recoverable derived-cache warnings.
-        index_t0 = time.monotonic()
-        update_indexes_after_promotion(result)
-        record_timed_subphase(
-            ctx, conn, role="index_update", started=index_t0,
-            reason="incremental page and claim indexes", writer=write_iteration,
+        finish_publication(
+            ctx, conn, result, indexer=update_indexes_after_promotion,
+            grader=phases.persist_grades, memory=run_post_promote_memory_evolution,
+            writer=write_iteration,
         )
-
-        # Coverage grading: score the just-committed page's claims against
-        # its source PDF and write the per-claim signal back into the DB.
-        # Without this, the `claims` table's grader columns stay NULL and
-        # the read-side surfaces (claim-id lookup, weak-page surfacing,
-        # synthesis grounding) have no signal to consume.
-        ctx.next_iter()
-        phases.persist_grades(ctx, conn)
-
-        # Synthesis maintenance is model-backed corpus enrichment, so it is
-        # opt-in on the ingest hot path. Required canonical-page grading above
-        # always finishes first. The helper re-arms this ingest's budget only
-        # around the optional work.
-        if ctx.run_memory_evolve:
-            run_post_promote_memory_evolution(
-                ctx, conn, source_key=f"{result.category}/{ctx.paper_stem}"
-            )
 
         # Warnings can be added after promotion itself (supplementary staging,
         # incremental indexing), so assemble the durable commit reason only

@@ -38,8 +38,9 @@ def _key(hit) -> str:
     return hit.key if hasattr(hit, "key") else str(hit["key"])
 
 
-def _prompt(query: str, hits: list) -> str:
-    pages = {page.key: page for page in read_pages()}
+def _prompt(query: str, hits: list, *, scope=None) -> str:
+    pages = {page.key: page for page in read_pages()
+             if scope is None or scope.allows(page.stem, page.page_type)}
     from .tools import claims_by_stem
 
     parts = [f"# Query\n{query}", "", "# Candidates"]
@@ -52,7 +53,7 @@ def _prompt(query: str, hits: list) -> str:
         title = page.str_field("title")
         summary = extract_section(page.body, "Summary").strip()[:900]
         claims = [
-            claim for claim in claims_by_stem(page.stem)
+            claim for claim in claims_by_stem(page.stem, **({"scope": scope} if scope is not None else {}))
             if claim.get("section") in {"key_contributions", "results"}
         ]
         claims.sort(
@@ -95,8 +96,12 @@ def _parse_order(text: str, allowed: list[str]) -> list[str] | None:
     return cleaned or None
 
 
-def rerank_hits(query: str, hits: list) -> RerankResult:
+def rerank_hits(query: str, hits: list, *, scope=None) -> RerankResult:
     """Rerank at most twelve candidates, falling back unchanged on bad output."""
+    if scope is not None:
+        scope.check_root()
+        hits = [h for h in hits if scope.allows(_key(h).rsplit('/', 1)[-1],
+                h.page_type if hasattr(h, "page_type") else h.get("page_type", ""))]
     candidates = list(hits[:MAX_CANDIDATES])
     if len(candidates) < 2:
         return RerankResult(candidates, {}, False)
@@ -108,7 +113,7 @@ def rerank_hits(query: str, hits: list) -> RerankResult:
             # A bounded ordering task, not source-fidelity adjudication; keep it
             # on the inexpensive classifier role rather than the ingest judge.
             phase="classifier",
-            prompt=_prompt(query, candidates),
+            prompt=_prompt(query, candidates, **({"scope": scope} if scope is not None else {})),
             system=_SYSTEM,
             max_tokens=300,
             temperature=0.0,

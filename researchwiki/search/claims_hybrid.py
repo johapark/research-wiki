@@ -12,6 +12,7 @@ import sqlite3
 import numpy as np
 
 from ..db import get_connection
+from ..evidence import EvidenceScope
 from ..index import claim_embeddings
 from ..index.embeddings import embed_texts
 from .tools import claim_lookup
@@ -22,19 +23,21 @@ RRF_K = 60
 PER_RANKER_DEPTH = 50
 
 
-def _rows(*, include_context: bool) -> list[dict]:
+def _rows(*, include_context: bool, scope: EvidenceScope | None = None) -> list[dict]:
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     try:
+        clause, params = scope.sql() if scope is not None else ("", [])
         db_rows = conn.execute(
-            """
+            f"""
             SELECT paper_stem, section, position, text, claim_slug,
                    semantic_score, bm25_top1, bm25_top1_chunk_id,
                    supporting_text, supporting_provenance, last_graded_at, source_pdf_sha256, numeric_unmatched
             FROM claims
             WHERE is_cross_ref = 0
+            {clause}
             ORDER BY paper_stem, section, position
-            """
+            """, params,
         ).fetchall()
         db_rows = current_rows(conn, db_rows)
     finally:
@@ -63,11 +66,14 @@ def _rows(*, include_context: bool) -> list[dict]:
 
 def semantic_claim_lookup(
     query: str, k: int = 5, *, include_context: bool = False,
+    scope: EvidenceScope | None = None,
 ) -> list[dict]:
     """Return claims ranked by query-to-claim cosine similarity."""
-    if not query.strip() or k <= 0:
+    if scope is not None:
+        scope.check_root()
+    if not query.strip() or k <= 0 or (scope is not None and not scope.stems):
         return []
-    rows = _rows(include_context=include_context)
+    rows = _rows(include_context=include_context, **({"scope": scope} if scope is not None else {}))
     if not rows:
         return []
     vectors = claim_embeddings.get_claim_embeddings(rows)
@@ -90,13 +96,15 @@ def semantic_claim_lookup(
 
 def hybrid_claim_lookup(
     query: str, k: int = 5, *, include_context: bool = False,
+    scope: EvidenceScope | None = None,
 ) -> list[dict]:
     """Fuse lexical and semantic claim rankings with reciprocal rank fusion."""
     if k <= 0:
         return []
     depth = max(k, PER_RANKER_DEPTH)
-    lexical = claim_lookup(query, k=depth, include_context=include_context)
-    semantic = semantic_claim_lookup(query, k=depth, include_context=include_context)
+    opts = {"scope": scope} if scope is not None else {}
+    lexical = claim_lookup(query, k=depth, include_context=include_context, **opts)
+    semantic = semantic_claim_lookup(query, k=depth, include_context=include_context, **opts)
     if not semantic:
         return lexical[:k]
     if not lexical:
@@ -136,13 +144,15 @@ def claim_query(
     *,
     mode: str = "bm25",
     include_context: bool = False,
+    scope: EvidenceScope | None = None,
 ) -> list[dict]:
     """Unified claim retriever with graceful semantic-to-lexical fallback."""
+    opts = {"scope": scope} if scope is not None else {}
     if mode == "bm25":
-        return claim_lookup(query, k=k, include_context=include_context)
+        return claim_lookup(query, k=k, include_context=include_context, **opts)
     if mode == "semantic":
-        hits = semantic_claim_lookup(query, k=k, include_context=include_context)
-        return hits or claim_lookup(query, k=k, include_context=include_context)
+        hits = semantic_claim_lookup(query, k=k, include_context=include_context, **opts)
+        return hits or claim_lookup(query, k=k, include_context=include_context, **opts)
     if mode == "hybrid":
-        return hybrid_claim_lookup(query, k=k, include_context=include_context)
+        return hybrid_claim_lookup(query, k=k, include_context=include_context, **opts)
     raise ValueError(f"unknown claim retrieval mode: {mode}")

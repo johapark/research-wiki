@@ -32,10 +32,11 @@ from ..agents.runner import (
     StemRenameRefused,
     run_ingest,
 )
-from ..agents.budget import BudgetExhausted, activate
+from ..agents.budget import BudgetExhausted
 from ..db.iterations import read_attempt
 from ..errors import EnvironmentFailure
 from ..log import log
+from ..operations import ContractError
 
 
 _BATCH_INCOMPATIBLE_FLAGS = (
@@ -166,38 +167,17 @@ def _batch_passthrough_args(args) -> list[str]:
     return out
 
 
-def _drain_pending_mutations() -> None:
-    """Roll back any mutation interrupted by an earlier crash, before starting.
-
-    Runs on the write paths only. A read-only command must never mutate, so
-    `status` reports pending journals instead (see `mutation.pending_journals`).
-    """
-    try:
-        from ..mutation import recover_pending
-
-        for note in recover_pending():
-            print(f"researchwiki: recovery — {note}", file=sys.stderr)
-    except Exception as e:  # recovery must never block the run it precedes
-        print(f"researchwiki: recovery pass failed: {e}", file=sys.stderr)
-
-
-def _run_budgeted_post_hook(ctx, label: str, fn):
-    """Run optional post-promotion model work under this ingest's budget."""
-    tracker = ctx.budget_tracker
-    if tracker is not None:
-        tracker.resume()
-    try:
-        with activate(tracker):
-            return fn()
-    except BudgetExhausted as exc:
-        log(f"{label} skipped — ingest budget exhausted: {exc}", tag="agent")
-        return None
-    finally:
-        if tracker is not None:
-            tracker.suspend()
+def _drain_pending_mutations():
+    from ..operations.runtime import recover_ingest_mutations
+    return recover_ingest_mutations()
 
 
 def _cmd_ingest(args) -> int:
+    from ._ingest_observation import run_with_reports
+    return run_with_reports(args, _execute_ingest, prog=_prog())
+
+
+def _execute_ingest(args) -> int:
     # --resume takes over completely: the batch dir's plan.json is the
     # source of truth for subcommand + passthrough flags.
     from . import _ingest_batch
@@ -238,17 +218,6 @@ def _cmd_ingest(args) -> int:
     # dedup still happens inside `new_batch`, *after* the batch-mode decision
     # below reads the raw argv count.
     _ingest_batch._resolve_inputs(args.pdfs)
-
-    # Now the environment. Fail before extraction and reconcile, not in the
-    # author phase an hour of PDF work later. `--stub` never reaches a
-    # provider, so it is exempt. `--resume` returned above without this check
-    # on purpose: plan.json owns the original `--stub` flag, which this frame
-    # can't see, and each resumed worker is itself a `researchwiki agent
-    # ingest` that preflights here.
-    if not args.stub:
-        from ..agents.llm import preflight_providers
-
-        preflight_providers()
 
     # Resolve n_drafts once, before batch reconstruction or single-PDF run:
     # CLI `-n` wins; else the models config's `ingest.n_drafts`; else 1 (single
@@ -291,6 +260,9 @@ def _cmd_ingest(args) -> int:
                 file=sys.stderr,
             )
             return 1
+        if not args.stub:
+            from ..agents.llm import preflight_providers
+            preflight_providers()
         workers = _ingest_batch.resolve_batch_workers(args.workers, stub=args.stub)
         return _ingest_batch.new_batch(
             args.pdfs,
@@ -300,51 +272,43 @@ def _cmd_ingest(args) -> int:
             workers_explicit=args.workers is not None,
         )
 
-    # Single-PDF path — unchanged from before.
-    pdf = args.pdfs[0]
-    promote_mode = "auto"
     if args.auto_promote and args.force_sandbox:
-        print(
-            f"{_prog()}: --auto-promote and --force-sandbox are mutually exclusive",
-            file=sys.stderr,
-        )
+        print(f"{_prog()}: --auto-promote and --force-sandbox are mutually exclusive", file=sys.stderr)
         return 1
-    if args.auto_promote:
-        promote_mode = "always"
-    elif args.force_sandbox:
-        promote_mode = "never"
+    return _single_ingest(args)
 
-    _drain_pending_mutations()
 
+def _single_ingest(args) -> int:
+    from ..operations.ingest import execute_ingest
+    from ._ingest_observation import request_from_args
+
+    observer = getattr(args, "_observation", None)
     try:
-        ctx = run_ingest(
-            pdf,
-            use_stub=args.stub,
-            use_semantic=not args.no_semantic,
-            verify_claim_entailment=args.verify_claim_entailment,
-            n_drafts=args.n_drafts,
-            max_evolve=args.max_evolve,
-            promote_mode=promote_mode,
-            doi_override=args.doi,
-            title_override=args.title,
-            year_override=args.year,
-            authors_override=(
-                [a.strip() for a in args.authors.split(";") if a.strip()]
-                if args.authors
-                else None
-            ),
-            author_prompt_override=args.author_prompt_file,
-            supplementary=(
-                [Path(s) for s in args.supplementary] if args.supplementary else None
-            ),
-            use_llm_reconcile=args.llm_reconcile,
-            allow_rename=args.allow_rename,
-            max_model_calls=args.max_model_calls,
-            max_tokens=args.max_tokens,
-            max_cost_usd=args.max_cost_usd,
-            max_wall_seconds=args.max_wall_seconds,
-            run_memory_evolve=args.memory_evolve,
-        )
+        request = observer.request if observer else request_from_args(args)
+    except ContractError as exc:
+        print(f"{_prog()}: {exc}", file=sys.stderr)
+        return 1
+    if observer:
+        observer.started = True
+    execution = execute_ingest(
+        request, runner=run_ingest, recover=_drain_pending_mutations,
+        event_sink=observer.recorder if observer else None,
+    )
+    args._ingest_execution = execution
+    if observer:
+        observer.execution = execution
+    for note in execution.recovery_notes:
+        print(f"researchwiki: recovery — {note}", file=sys.stderr)
+    if (execution.error is not None and execution.result.publication == "published"
+            and not isinstance(execution.error, KeyboardInterrupt)):
+        return _published_with_pending_work(execution.result)
+    try:
+        if execution.error is not None:
+            raise execution.error
+        ctx = execution.context
+    except (ContractError, FileNotFoundError) as e:
+        print(f"{_prog()}: {e}", file=sys.stderr)
+        return 1
     except BudgetExhausted as e:
         print(f"{_prog()}: {e}", file=sys.stderr)
         partial = getattr(e, "partial_path", None)
@@ -477,25 +441,29 @@ def _cmd_ingest(args) -> int:
     return _finish_ingest(ctx, args)
 
 
+def _published_with_pending_work(result) -> int:
+    """A known commit needs repair, not the batch driver's paid-work retry."""
+    print("✓ Paper added")
+    print(f"  Page:   {result.page_path}")
+    print(f"  PDF:    {result.pdf_path}")
+    print(f"  ⚠ Post-publication work interrupted ({result.error.code}); canonical content preserved")
+    print("  Repair: researchwiki db rebuild; researchwiki reindex")
+    print(f"          researchwiki grade paper {result.paper_stem}")
+    if result.attempt_id:
+        print(f"  Trace:  researchwiki agent trace {result.attempt_id}")
+    return 0
+
+
 def _finish_ingest(ctx, args) -> int:
     """Report the result and run post-promotion work for a single PDF."""
     print()
     _print_ingest_receipt(ctx)
 
-    # Local reverse review runs for every promoted paper, independently of
-    # model-backed --memory-evolve. A post-promotion failure must remain visible
-    # without turning a completed ingest into an apparent retryable failure.
-    if ctx.outcome == "promoted" and ctx.committed_path and not args.stub:
+    execution = args._ingest_execution
+    post = execution.post_work
+    impact = post.impact
+    if impact is not None:
         from .. import impact_review
-
-        source_key = f"{ctx.committed_path.parent.name}/{ctx.paper_stem}"
-        try:
-            impact = impact_review.scan(source_key)
-        except Exception as exc:
-            try:
-                impact = impact_review.record_unscanned(source_key, str(exc))
-            except Exception:
-                impact = {"state": "unscanned", "error": str(exc), "candidates": []}
         review_state = ("skipped" if impact["state"] == "skipped" else
                         "unscanned" if impact["state"] != "complete" else
                         "pending" if impact_review.unresolved_count(impact) else "reviewed")
@@ -510,41 +478,16 @@ def _finish_ingest(ctx, args) -> int:
             for row in impact["candidates"][:5]:
                 print(f"    → {row['target']} ({row['type']}, "
                       f"semantic={row['semantic_score']:.2f})")
-
-    # Post-commit hooks — skip when the ingest refused to promote (duplicate PDF,
-    # sandbox, etc.). committed_path is None in those cases and the hooks would
-    # crash on the None path since they all take an os.PathLike.
-    if (
-        not args.no_cross_link
-        and not args.stub
-        and ctx.paper_stem
-        and ctx.committed_path
-        and ctx.outcome == "promoted"
-    ):
-        # Claim-grounded cross-linking is OPT-IN (--claim-overlap). It spends an
-        # LLM judge call per candidate pair and confirms a link for roughly one
-        # paper in ten, so paying it on every ingest buys little; the stem lands
-        # in the claim_overlap_runs backlog instead and `status` surfaces the
-        # count once enough accumulate to be worth one batch.
-        if args.claim_overlap:
-            from . import claim_overlap
-
-            _run_budgeted_post_hook(
-                ctx, "claim-overlap",
-                lambda: claim_overlap.run_after_ingest(
-                    ctx.paper_stem, ctx.committed_path
-                ),
-            )
-        if args.contradiction_alert:
-            # Any claim in the new paper that disagrees with a graded existing
-            # claim surfaces as `⚠ contradicts [[stem#slug]]`. This analysis is
-            # model-backed and therefore opt-in on the ingest hot path.
-            from ..claim_graph.alert import alert_after_ingest
-
-            _run_budgeted_post_hook(
-                ctx, "contradiction-alert",
-                lambda: alert_after_ingest(ctx.paper_stem, ctx.committed_path),
-            )
+    overlap = post.hooks.get("claim-overlap")
+    if overlap is not None:
+        from .claim_overlap import print_ingest_result
+        print_ingest_result(overlap)
+    alert = post.hooks.get("contradiction-alert")
+    if alert is not None:
+        from ..claim_graph.alert import print_ingest_alerts
+        print_ingest_alerts(alert)
+    for warning in post.warnings:
+        print(f"  ⚠ {warning}")
 
     # Saturation check. If this paper landed in wiki/other/ and pushed the
     # bucket over threshold, surface the suggest-splits nudge once. The
@@ -681,6 +624,14 @@ def build_parser() -> argparse.ArgumentParser:
         "you a checkpoint dir for a serial run. Default: 4 for API "
         "providers and for --stub, 1 when a phase this command reaches "
         "uses chat-relay.",
+    )
+    p_ingest.add_argument(
+        "--events-file", metavar="PATH", default=None,
+        help="Write versioned model/relay progress JSONL to a new file (single PDF only).",
+    )
+    p_ingest.add_argument(
+        "--result-file", metavar="PATH", default=None,
+        help="Write a versioned terminal result to a new file (single PDF only).",
     )
     p_ingest.add_argument(
         "--resume",

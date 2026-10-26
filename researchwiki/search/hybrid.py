@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..index import pages_semantic as semantic_pages
+from ..evidence import EvidenceScope
 from ..index.pages_bm25 import TantivySearchBackend
 from ..index.types import SearchBackendUnavailable, SearchHit
 
@@ -146,27 +147,28 @@ def _empty_slot(key: str) -> dict:
 
 # ---------- public entry points ----------
 
-def hybrid_query(text: str, limit: int = 10) -> list[HybridHit]:
+def hybrid_query(text: str, limit: int = 10, *, scope: EvidenceScope | None = None) -> list[HybridHit]:
     """Free-form text → top-`limit` fused results.
 
     Pulls `PER_RANKER_DEPTH` from each side, fuses, returns top-`limit`.
     """
     bm25_hits: list[SearchHit] = []
     sem_hits: list[semantic_pages.PageHit] = []
+    opts = {"scope": scope} if scope is not None else {}
 
     try:
         backend = TantivySearchBackend()
-        bm25_hits = backend.query(text, limit=PER_RANKER_DEPTH)
+        bm25_hits = backend.query(text, limit=max(limit, PER_RANKER_DEPTH), **opts)
     except SearchBackendUnavailable:
         bm25_hits = []
 
     if semantic_pages.index_exists():
-        sem_hits = semantic_pages.query_text(text, k=PER_RANKER_DEPTH)
+        sem_hits = semantic_pages.query_text(text, k=max(limit, PER_RANKER_DEPTH), **opts)
 
     return _fuse(bm25_hits, sem_hits, k=limit)
 
 
-def hybrid_more_like(key: str, limit: int = 10) -> list[HybridHit]:
+def hybrid_more_like(key: str, limit: int = 10, *, scope: EvidenceScope | None = None) -> list[HybridHit]:
     """Seed page (category/stem) → top-`limit` fused See-Also.
 
     BM25 side uses Tantivy's `more_like` (title+summary as query). Semantic
@@ -175,14 +177,15 @@ def hybrid_more_like(key: str, limit: int = 10) -> list[HybridHit]:
     """
     bm25_hits: list[SearchHit] = []
     sem_hits: list[semantic_pages.PageHit] = []
+    opts = {"scope": scope} if scope is not None else {}
 
     try:
         backend = TantivySearchBackend()
-        bm25_hits = backend.more_like(key, limit=PER_RANKER_DEPTH)
+        bm25_hits = backend.more_like(key, limit=max(limit, PER_RANKER_DEPTH), **opts)
     except SearchBackendUnavailable:
         bm25_hits = []
 
     if semantic_pages.index_exists():
-        sem_hits = semantic_pages.query_stem(key, k=PER_RANKER_DEPTH)
+        sem_hits = semantic_pages.query_stem(key, k=max(limit, PER_RANKER_DEPTH), **opts)
 
     return _fuse(bm25_hits, sem_hits, k=limit)

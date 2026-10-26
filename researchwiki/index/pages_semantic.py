@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from . import embeddings as semantic
+from ..evidence import EvidenceScope
 from ..paths import semantic_cache_dir
 from ..wiki import Page, extract_section, read_pages, strip_non_prose
 from ..log import log
@@ -569,7 +570,8 @@ def index_exists() -> bool:
 
 def query_text(text: str, k: int = 8,
                page_types: tuple[str, ...] | None = None,
-               exclude_keys: frozenset[str] = frozenset()) -> list[PageHit]:
+               exclude_keys: frozenset[str] = frozenset(), *,
+               scope: EvidenceScope | None = None) -> list[PageHit]:
     """Top-k pages most similar to free-form `text`.
 
     `page_types` filters by `type:` frontmatter (e.g. `("synthesis",)` for
@@ -577,7 +579,9 @@ def query_text(text: str, k: int = 8,
     `exclude_keys` drops specific `category/stem` keys (e.g. the seed page
     itself when called via `query_stem`).
     """
-    loaded = _load()
+    if k <= 0:
+        return []
+    loaded = _scoped_load(scope)
     if loaded is None:
         return []
     arr, rows = loaded
@@ -612,13 +616,16 @@ def query_text(text: str, k: int = 8,
 
 
 def query_stem(key: str, k: int = 8,
-               page_types: tuple[str, ...] | None = None) -> list[PageHit]:
+               page_types: tuple[str, ...] | None = None, *,
+               scope: EvidenceScope | None = None) -> list[PageHit]:
     """Top-k neighbors of an existing page identified by `category/stem`.
 
     The seed page is excluded from the result. Returns `[]` if the seed isn't
     indexed (e.g., empty page or built before the page was added).
     """
-    loaded = _load()
+    if k <= 0 or (scope is not None and not scope.allows(key.rsplit('/', 1)[-1])):
+        return []
+    loaded = _scoped_load(scope)
     if loaded is None:
         return []
     arr, rows = loaded
@@ -656,3 +663,16 @@ def query_stem(key: str, k: int = 8,
         if len(out) >= k:
             break
     return out
+
+
+def _scoped_load(scope):
+    if scope is not None:
+        scope.check_root()
+        if not scope.stems:
+            return None
+    loaded = _load()
+    if loaded is None or scope is None:
+        return loaded
+    arr, rows = loaded
+    keep = [i for i, row in enumerate(rows) if scope.allows(row["stem"], row["page_type"])]
+    return arr[keep], [rows[i] for i in keep]

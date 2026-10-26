@@ -239,15 +239,20 @@ class Snapshot:
     def discard(self) -> None:
         """Post-commit cleanup: drop the copies and the journal.
 
-        Best-effort by contract. It runs *after* the commit point, so failing here
-        leaves some bytes in `.mutation/` — untidy, never incorrect, and never a
-        reason to undo work that already landed.
+        Job publication evidence must be archived first; a failed handoff keeps
+        the journal and propagates as pending maintenance. Filesystem cleanup
+        itself is best-effort. Neither failure undoes a committed mutation.
         """
         if not self.enabled:
             return
+        from .ingest_ledger import archive
+        archive(self._journal_document(_COMMITTED if self.committed else _ACTIVE), committed=self.committed)
         try:
-            shutil.rmtree(self.backup_dir, ignore_errors=True)
+            # Remove the journal first. If unlink fails, retain its backups;
+            # if the process then dies, recovery must still be able to undo an
+            # active transaction. A leftover unreferenced backup is harmless.
             self.journal_path.unlink(missing_ok=True)
+            shutil.rmtree(self.backup_dir, ignore_errors=True)
         except OSError as exc:
             log(f"WARN: could not clean up journal {self.journal_path.name}: {exc}",
                 tag="mutation")
@@ -261,6 +266,8 @@ class Snapshot:
         """
         self.attempts += 1
         self._persist(_ACTIVE)
+        from .ingest_ledger import require_backups
+        require_backups(self._journal_document(_ACTIVE))
         _undo_each(self.entries)
         for hook in reversed(self._undo_hooks):
             try:
@@ -436,9 +443,9 @@ def _removable_backup_dir(raw: object) -> Path | None:
 
 
 def _clean_up(journal_path: Path, backup_dir: Path | None) -> None:
+    journal_path.unlink(missing_ok=True)
     if backup_dir is not None:
         shutil.rmtree(backup_dir, ignore_errors=True)
-    journal_path.unlink(missing_ok=True)
 
 
 def _transaction_lock_resource() -> Path:
@@ -499,6 +506,8 @@ def _recover_pending_locked() -> list[str]:
 
         if document.get("status") == _COMMITTED:
             try:
+                from .ingest_ledger import archive
+                archive(document, committed=not document.get("details", {}).get("ingest_rolled_back", False))
                 from .projections import reconcile
                 entries = [BackedUpPath.from_journal_record(r)
                            for r in document.get("entries", [])]
@@ -528,6 +537,8 @@ def _recover_pending_locked() -> list[str]:
         write_json_atomic(journal_path,
                           {k: v for k, v in document.items() if k != "journal_path"})
         try:
+            from .ingest_ledger import require_backups
+            require_backups(document)
             _undo_each(entries)
         except Exception as exc:
             notes.append(f"rollback of {operation} failed (attempt {this_attempt}): {exc}")
@@ -535,9 +546,13 @@ def _recover_pending_locked() -> list[str]:
         # Restored files are now canonical. Never replay their backups after a
         # maintenance failure: a later mutation may publish newer content.
         document["status"] = _COMMITTED
+        if "ingest_ledger" in document.get("details", {}):
+            document["details"]["ingest_rolled_back"] = True
         write_json_atomic(journal_path,
                           {k: v for k, v in document.items() if k != "journal_path"})
         try:
+            from .ingest_ledger import archive
+            archive(document, committed=False)
             from .projections import reconcile
             reconcile(entries, operation, document.get("details", {}))
         except Exception as exc:

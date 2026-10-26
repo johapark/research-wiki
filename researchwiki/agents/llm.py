@@ -56,6 +56,8 @@ from . import model_config
 from .provider_errors import friendly_provider_error
 from ..errors import EnvironmentFailure
 from ..provenance import specific_author_model
+from ..operations.events import EventRecorder, ModelCallObserver
+from ..operations.observation import current_recorder
 
 
 # --- Client-side rate limiting -------------------------------------------
@@ -936,6 +938,7 @@ def call(
     disable_thinking: bool = False,
     schema: dict | None = None,
     reasoning_effort: str | None = None,
+    event_sink: EventRecorder | None = None,
 ) -> LLMResponse:
     """Dispatch to the right provider, resolving config from phase or kwargs.
 
@@ -972,6 +975,8 @@ def call(
     silently ignore. Resolution: explicit kwarg → cfg.reasoning_effort
     (when phase=) → None.
     """
+    # Observation is explicit and per call; mixed API/relay phase routing and
+    # existing budget/provider semantics are unchanged.
     rpm: int | None = None
     if phase is not None:
         cfg = model_config.for_phase(phase)
@@ -1068,6 +1073,9 @@ def call(
             free=call_is_free,
         )
 
+    event_sink = event_sink if event_sink is not None else current_recorder()
+    observer = ModelCallObserver(event_sink, phase=phase, provider=p, model=model)
+    observer.started()
     try:
         # The reservation already exists, so even an exceptional throttle
         # implementation must settle it through the same failure path.
@@ -1111,6 +1119,7 @@ def call(
                 phase=phase,
                 fresh=bool(os.environ.get("RW_RELAY_FRESH")),
                 schema=schema,
+                **({"event_sink": event_sink, "call_id": observer.call_id} if event_sink else {}),
             )
         else:
             raise ValueError(
@@ -1118,7 +1127,8 @@ def call(
                 "'anthropic', 'openai-compatible' / 'lmstudio' / 'openai', "
                 "'chat-relay'."
             )
-    except Exception:
+    except Exception as exc:
+        observer.failed(exc)
         if tracker is not None and reservation is not None:
             tracker.fail(reservation)
         raise
@@ -1131,4 +1141,5 @@ def call(
             cache_read_tokens=response.cache_read_tokens,
             cache_write_tokens=response.cache_write_tokens,
         )
+    observer.finished(response)
     return response

@@ -219,6 +219,146 @@ print(f'{cfg.provider}/{cfg.model}')
     run_python(root, anthropic_env, probe)
 
 
+def verify_job_lifecycle(root: Path, env: dict[str, str], source: Path) -> None:
+    """Queue restart/cancel and a real isolated worker through the public API."""
+    run_python(root, env, f"""
+import os, tempfile
+from pathlib import Path
+from researchwiki.jobs import JobConflict, JobSupervisor
+from researchwiki.operations import IngestOptions, IngestRequest
+root = Path.cwd().resolve()
+profile = root / 'job-acceptance.env'
+profile.write_text('RW_MODELS_CONFIG=' + str(root / 'config/models.acceptance.yaml') + '\\n'
+                   + 'RESEARCHWIKI_DB_PATH=' + str(root / 'state.db') + '\\n')
+profile.chmod(0o600)
+options = IngestOptions(use_stub=True, use_semantic=False, use_llm_reconcile=False, n_drafts=1,
+                        title='Alpha Acceptance Pipelines for Reliable Research', year=2026,
+                        authors=('Ada Lovelace', 'Alan Turing'))
+environment = dict(os.environ)
+for key in ('RW_MODELS_CONFIG', 'RW_LLM_PROVIDER', 'RW_LLM_BASE_URL', 'ANTHROPIC_BASE_URL'):
+    environment.pop(key, None)
+with tempfile.TemporaryDirectory(prefix='researchwiki-job-store-') as runtime:
+    supervisor = JobSupervisor(root, store_root=runtime, environment=environment)
+    def request(identity):
+        return IngestRequest(request_id=identity, library_root=str(root), source_pdf={str(source)!r},
+                             provider_profile=str(profile), options=options)
+    queued = supervisor.submit_ingest(request('acceptance-queued'))
+    restarted = JobSupervisor(root, store_root=runtime, environment=environment)
+    assert restarted.get_job(queued.job_id).execution == 'queued'
+    assert restarted.submit_ingest(request('acceptance-queued')).job_id == queued.job_id
+    assert restarted.cancel_queued_job(queued.job_id).execution == 'cancelled'
+    job = restarted.submit_ingest(request('acceptance-worker'))
+    handle = restarted.start_job(job.job_id)
+    try:
+        result = restarted.wait(handle, timeout=45)
+    finally:
+        if handle.process.poll() is None:
+            handle.process.kill()
+            handle.process.wait()
+    assert result.execution == 'finished', result
+    assert result.result.outcome == 'already_present', result
+    assert result.identity is not None and result.result.job_id == job.job_id
+    assert restarted.read_events(job.job_id)[-1].kind == 'operation_finished'
+    assert restarted.reconcile_job(job.job_id, timeout=30) == result
+    try:
+        restarted.retry_job(job.job_id)
+    except JobConflict:
+        pass
+    else:
+        raise AssertionError('published job must not repeat ingestion')
+    # Exercise installed reconciliation of a durable pre-publication start.
+    # Process-kill coverage around the native commit point lives in pytest.
+    from researchwiki.ingest_ledger import begin
+    abandoned = restarted.submit_ingest(request('acceptance-abandoned'))
+    running = restarted.store.claim(abandoned.job_id, 'exited-acceptance-owner')
+    begin(restarted.store.ledger_binding(running))
+    recovered = restarted.reconcile_job(abandoned.job_id, timeout=30)
+    assert recovered.execution == 'finished' and recovered.result.publication == 'not_published'
+    retry = restarted.retry_job(abandoned.job_id)
+    assert retry.parent_job_id == abandoned.job_id
+    restarted.cancel_queued_job(retry.job_id)
+""")
+
+
+def verify_jobs_cli(root: Path, env: dict[str, str], source: Path) -> None:
+    """Exercise the installed Community adapter, including JSON and queue-only controls."""
+    options = root / 'reports/job-options.json'
+    options.write_text(json.dumps(dict(use_stub=True, use_semantic=False, use_llm_reconcile=False,
+                                      n_drafts=1, title='Alpha Acceptance Pipelines for Reliable Research',
+                                      year=2026, authors=['Ada Lovelace', 'Alan Turing'])))
+    with tempfile.TemporaryDirectory(prefix='researchwiki-jobs-cli-') as runtime:
+        common = ['--library-root', str(root), '--store-root', runtime, '--json']
+
+        def command(*args, expected=(0,)):
+            proc = run_cli(root, env, 'jobs', *args, *common, expected=expected)
+            payload = json.loads(proc.stdout)
+            assert payload['schema_version'] == 1
+            return payload
+
+        submitted = command('submit', str(source), '--request-id', 'acceptance-cli',
+                            '--options-file', str(options))
+        job = submitted['job']
+        assert job['execution'] == 'queued'
+        assert command('submit', str(source), '--request-id', 'acceptance-cli',
+                       '--options-file', str(options))['job'] == job
+        assert len(command('list', '--state', 'queued')['jobs']) == 1
+        assert command('show', job['job_id'])['job'] == job
+        terminal = command('run', job['job_id'])['job']
+        assert terminal['result']['outcome'] == 'already_present'
+        events = command('events', job['job_id'])
+        assert events['events'][-1]['kind'] == 'operation_finished'
+        assert command('events', job['job_id'], '--after-sequence', str(events['next_sequence']))['events'] == []
+        assert command('reconcile', job['job_id'])['job'] == terminal
+        assert command('retry', job['job_id'], expected=(1,))['error']['code'] == 'invalid_request'
+        queued = command('submit', str(source), '--request-id', 'acceptance-cli-cancel')['job']
+        assert command('cancel', queued['job_id'])['job']['execution'] == 'cancelled'
+        # An abandoned start is explicitly reconciled, then retried only as a
+        # new queued record. Nothing here starts that retry's model work.
+        abandoned = command('submit', str(source), '--request-id', 'acceptance-cli-recover')['job']
+        run_python(root, env, f"""
+from researchwiki.ingest_ledger import begin
+from researchwiki.jobs import JobStore
+store = JobStore({str(root)!r}, store_root={runtime!r})
+record = store.claim({abandoned['job_id']!r}, 'exited-cli-acceptance-owner')
+begin(store.ledger_binding(record))
+""")
+        recovered = command('reconcile', abandoned['job_id'])['job']
+        assert recovered['result']['publication'] == 'not_published'
+        retry = command('retry', abandoned['job_id'])['job']
+        assert retry['execution'] == 'queued' and retry['parent_job_id'] == abandoned['job_id']
+        command('cancel', retry['job_id'])
+
+
+def verify_scoped_cli(root: Path, env: dict[str, str], included: str, excluded: str) -> None:
+    run_python(root, env, f"""
+from researchwiki.evidence import EvidenceScope
+from researchwiki.fsatomic import write_json_atomic
+from pathlib import Path
+scope = EvidenceScope({{ {included!r} }}, library_root=str(Path.cwd()))
+write_json_atomic(Path("scope.json"), {{**scope.to_dict(), "fingerprint": scope.fingerprint}})
+write_json_atomic(Path("empty-scope.json"), EvidenceScope(frozenset()).to_dict())
+""")
+    scoped = run_cli(root, env, "search", "acceptance", "--scope-file", "scope.json",
+                     "--mode", "bm25", "--see-also", "--limit", "1", "--json")
+    assert [hit["stem"] for hit in json.loads(scoped.stdout)["results"]] == [included]
+    empty = run_cli(root, env, "search", "acceptance", "--scope-file", "empty-scope.json",
+                    "--mode", "bm25", "--json", expected=(1,))
+    assert json.loads(empty.stdout)["results"] == []
+    passages = run_cli(root, env, "pdf-search", included, "acceptance", "--scope-file", "scope.json", "--json")
+    assert json.loads(passages.stdout)["results"]
+    outside = run_cli(root, env, "pdf-search", excluded, "acceptance", "--scope-file", "scope.json",
+                      "--json", expected=(1,))
+    assert json.loads(outside.stdout)["results"] == []
+    bibliography = run_cli(root, env, "export", "--scope-file", "scope.json", "--format", "csl-json")
+    assert [record["id"] for record in json.loads(bibliography.stdout)] == [included]
+    run_cli(root, env, "synthesize", "--title", "Scoped acceptance map", "--scope-file", "scope.json",
+            "--topic-seed", "acceptance")
+    snapshot = json.loads((root / ".ingest/synthesis/scoped-acceptance-map/scope.json").read_text())
+    assert snapshot["stems"] == [included]
+    # Community remains independent of the commercial project package.
+    run_python(root, env, "import importlib.util; assert importlib.util.find_spec('researchwiki.projects') is None")
+
+
 def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
     run_cli(root, env, "init", "--scaffold-only")
     for rel in (
@@ -268,6 +408,10 @@ def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
         "2026",
         "--authors",
         "Ada Lovelace;Alan Turing",
+        "--events-file",
+        str(root / "reports/single-events.jsonl"),
+        "--result-file",
+        str(root / "reports/single-result.json"),
     )
     single_stem = "lovelace-2026-alpha-acceptance-pipelines-for-reliable"
     assert single.is_file(), "an external source PDF should be copied, not consumed"
@@ -280,6 +424,15 @@ def acceptance_lifecycle(root: Path, env: dict[str, str]) -> None:
     assert "Claims:" in added.stdout and "indexed" in added.stdout
     assert "Trace:  researchwiki agent trace" in added.stdout
     assert (root / ".tantivy-index").is_dir()
+    result = json.loads((root / "reports/single-result.json").read_text())
+    events = [json.loads(line) for line in (root / "reports/single-events.jsonl").read_text().splitlines()]
+    assert result["publication"] == "published" and result["outcome"] == "published"
+    assert result["projections"] in ("current", "maintenance_pending")
+    assert all(event["schema_version"] == 2 for event in events)
+    assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
+    assert [event["kind"] for event in events].count("publication_committed") == 1
+    assert events[-1]["kind"] == "operation_finished" and events[-1]["publication"] == "published"
+    assert events[-1]["projections"] == result["projections"]
     claims = run_python(
         root,
         env,
@@ -303,6 +456,30 @@ finally:
     # yield zero claim bullets. What this acceptance pins is that the receipt's
     # count comes from the real claims DB and agrees with its indexed state.
     assert f"Claims: {int(claims.stdout.strip())} indexed" in added.stdout
+    verify_job_lifecycle(root, env, single)
+    verify_jobs_cli(root, env, single)
+
+    # Application callers use the same operation as the CLI, without terminal
+    # parsing. Re-adding these bytes must return the existing canonical paper.
+    run_python(root, env, f"""
+from pathlib import Path
+from researchwiki.operations import IngestOptions, IngestRequest, IngestResult, ingest
+request = IngestRequest(
+    request_id="acceptance-application", library_root=str(Path.cwd().resolve()),
+    source_pdf={str(single)!r},
+    options=IngestOptions(
+        use_stub=True, use_semantic=False, use_llm_reconcile=False, n_drafts=1,
+        title="Alpha Acceptance Pipelines for Reliable Research", year=2026,
+        authors=("Ada Lovelace", "Alan Turing"),
+    ),
+)
+result = ingest(request)
+assert result.outcome == "already_present", result
+assert result.paper_stem == {single_stem!r}, result
+assert result.publication == "published" and result.post_work == "not_requested"
+assert Path(result.pdf_path).read_bytes() == Path(request.source_pdf).read_bytes()
+assert IngestResult.from_dict(result.to_dict()) == result
+""")
 
     batch_ok = root / "inbox" / "batch-ok.pdf"
     batch_retry = root / "inbox" / "batch-retry.pdf"
@@ -448,6 +625,7 @@ finally:
         root, env, "search", "resumable", "--mode", "bm25", "--json"
     )
     assert any(hit["stem"] == hopper_stem for hit in json.loads(recovered.stdout))
+    verify_scoped_cli(root, env, single_stem, hopper_stem)
 
 
 def main() -> int:

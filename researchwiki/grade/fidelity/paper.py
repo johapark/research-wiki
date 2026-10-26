@@ -210,13 +210,14 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
 
 
 def _persist_scores(stem: str, scored: list[ClaimScore], *, embed_model: str | None,
-                    pdf_digest: str | None = None) -> None:
+                    pdf_digest: str | None = None, strict: bool = False) -> None:
     """Update grader-output columns on existing claims rows.
 
     The rows themselves come from `db rebuild`. We don't INSERT here — if
     a claim row is missing, that means the DB hasn't been rebuilt since the
-    page was edited; let `db verify` flag it. Better to skip than to fork
-    the source of truth.
+    page was edited. Default callers leave that for `db verify`; strict
+    commit-time maintenance raises and rolls back the batch instead of claiming
+    that grades were persisted. Neither mode invents a missing claim row.
 
     `embed_model` records which bi-encoder produced the semantic_score so the
     regression task can detect cross-model comparisons (semantic scores are
@@ -238,12 +239,14 @@ def _persist_scores(stem: str, scored: list[ClaimScore], *, embed_model: str | N
         try:
             conn = _db_connection()
         except Exception:
+            if strict:
+                raise
             return
         now = int(_time.time())
         try:
             with conn:
                 for s in scored:
-                    conn.execute(
+                    cursor = conn.execute(
                         """
                         UPDATE claims
                         SET bm25_top1 = ?,
@@ -278,6 +281,8 @@ def _persist_scores(stem: str, scored: list[ClaimScore], *, embed_model: str | N
                             s.text,
                         ),
                     )
+                    if strict and cursor.rowcount != 1:
+                        raise RuntimeError(f"Claim row missing while persisting grades: {stem}")
         finally:
             conn.close()
 
@@ -302,6 +307,7 @@ def grade_page(
     persist: bool = True,
     pdf_path: Path | str | None = None,
     include_salience: bool = True,
+    require_persistence: bool = False,
 ) -> PaperFidelityReport:
     """Run coverage grader on a wiki page.
 
@@ -322,6 +328,9 @@ def grade_page(
                (PDF-anchor recall — does the page capture the lead-in
                sentences and figure captions of the source PDF?). Disable to
                skip the second pass when only fidelity matters.
+      require_persistence: commit-time maintenance requires a canonical DB
+               update for every scored claim; unavailable storage or a missing
+               row raises instead of silently skipping persistence.
     """
     if page_path is not None:
         path = Path(page_path)
@@ -394,7 +403,9 @@ def grade_page(
         raise RuntimeError(f"PDF changed while grading: {resolved_pdf}")
     if persist and page_path is None and _DB_AVAILABLE:
         _persist_scores(stem, scored, embed_model=semantic_mod.DEFAULT_MODEL if semantic else None,
-                        pdf_digest=pdf_digest)
+                        pdf_digest=pdf_digest, strict=require_persistence)
+    elif require_persistence:
+        raise RuntimeError("Canonical claim-grade persistence is unavailable")
 
     return PaperFidelityReport(
         stem=stem,

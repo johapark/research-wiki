@@ -78,6 +78,25 @@ def test_do_claims_forwards_explicit_mode(monkeypatch, mode):
     assert result[0]["claim_slug"] == "kc-1"
 
 
+def test_do_claims_forwards_mode_and_scope_together(monkeypatch, tmp_path):
+    """`mode` and `scope_file` reach `claim_query` together, so a scoped
+    MCP client can still opt into hybrid retrieval."""
+    import researchwiki.search as search_pkg
+
+    seen = {}
+
+    def fake_claim_query(query, k=5, *, mode="bm25", include_context=False, scope=None):
+        seen.update(mode=mode, scope=scope)
+        return []
+
+    sentinel = object()
+    monkeypatch.setattr(search_pkg, "claim_query", fake_claim_query)
+    monkeypatch.setattr(mcp_serve, "_scope_options", lambda path: {"scope": sentinel})
+    mcp_serve._do_claims("off-target rate", None, 5, False, "hybrid",
+                         scope_file=str(tmp_path / "scope.json"))
+    assert seen == {"mode": "hybrid", "scope": sentinel}
+
+
 def test_do_claims_rejects_unknown_mode(monkeypatch):
     """Bad mode → error dict naming the valid choices, not a ValueError
     escaping into the MCP transport."""
