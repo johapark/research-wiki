@@ -1,0 +1,10 @@
+fixture_id: anchor-based-single-cell-integration
+fixture_type: pages
+query: "Seurat v3 anchors for single cell dataset integration and label transfer using canonical correlation mutual nearest neighbors"
+k: 5
+notes: "Corpus-native fixture grounded in the Seurat v3 page."
+expected_pages:
+  - paper_stem: stuart-2019-comprehensive-integration-of-single-cell-data
+    importance: critical
+    rationale: "Introduces scored cross-dataset anchors for integration and reference mapping."
+must_not_appear: []

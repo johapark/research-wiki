@@ -129,6 +129,11 @@ def main(argv: list[str]) -> int:
                              "both indexes exist, else falls back gracefully.")
     parser.add_argument("--limit", type=int, default=10,
                         help="Max results to return (default: 10)")
+    parser.add_argument("--embedding", metavar="MODEL",
+                        help="Optional text-query encoder: harrier-270m, harrier-0.6b, or a model ID. "
+                             "Uses a separate cache; the default encoder is unchanged.")
+    parser.add_argument("--embedding-max-seq-length", type=int, default=2048,
+                        help="Token cap for --embedding (default: 2048)")
     parser.add_argument("--see-also", action="store_true",
                         help="For each keyword hit, also show 2 related pages.")
     parser.add_argument(
@@ -143,6 +148,19 @@ def main(argv: list[str]) -> int:
         parser.error("specify exactly one of: positional query, or --like CATEGORY/STEM")
     if args.llm_rerank and args.like:
         parser.error("--llm-rerank currently supports text queries, not --like")
+    if args.embedding:
+        if args.like or args.see_also:
+            parser.error("--embedding supports text queries; omit it for --like or --see-also")
+        if args.mode == "bm25":
+            parser.error("--embedding requires --mode auto, semantic, or hybrid")
+        if args.embedding_max_seq_length < 1:
+            parser.error("--embedding-max-seq-length must be positive")
+        from ..search.model_query import query_with_model
+        depth = max(args.limit, 12) if args.llm_rerank else args.limit
+        hits = query_with_model(args.query, args.embedding, mode=args.mode, limit=depth,
+                                max_seq_length=args.embedding_max_seq_length)
+        hits = _maybe_rerank(args, hits)
+        return _emit_hits(hits, args, header=f"# Search results for: {args.query!r} ({args.embedding})")
 
     mode = _resolve_mode(args.mode)
 

@@ -1,0 +1,24 @@
+fixture_id: degenerate-pam-off-target-enumeration
+fixture_type: claims
+query: "enumerating CRISPR off-target sites with unlimited mismatches degenerate PAM patterns and OpenCL CPU GPU execution"
+k: 10
+notes: "Corpus-native fixture grounded in the Cas-OFFinder page; distinguishes enumeration from editing measurement."
+expected_claims:
+  - paper_stem: bae-2014-cas-offinder-a-fast-and-versatile
+    section: key_contributions
+    position: 0
+    importance: critical
+    rationale: "Mismatch enumeration has no mismatch-count cap."
+  - paper_stem: bae-2014-cas-offinder-a-fast-and-versatile
+    section: key_contributions
+    position: 1
+    importance: critical
+    rationale: "Mixed-base PAM patterns are supported."
+  - paper_stem: bae-2014-cas-offinder-a-fast-and-versatile
+    section: key_contributions
+    position: 2
+    importance: high
+    rationale: "OpenCL supports heterogeneous execution."
+must_not_appear:
+  - paper_stem: assa-2024-quantifying-allele-specific-crispr-editing-activity
+    rationale: "Quantifies allele-specific editing from amplicon reads rather than enumerating genome-wide candidate sites."

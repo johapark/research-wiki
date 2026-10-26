@@ -1,0 +1,19 @@
+fixture_id: idea-level-retriever-distillation
+fixture_type: claims
+query: "scientific novelty detection using retriever distillation from rephrased partial incremental ideas and RAG cross-checking"
+k: 10
+notes: "Corpus-native fixture grounded in the scientific novelty detection page."
+expected_claims:
+  - paper_stem: liu-2025-harnessing-large-language-models-for-scientific
+    section: key_contributions
+    position: 1
+    importance: critical
+    rationale: "Uses synthesized idea variants for retriever knowledge distillation."
+  - paper_stem: liu-2025-harnessing-large-language-models-for-scientific
+    section: key_contributions
+    position: 4
+    importance: critical
+    rationale: "Combines retrieval, LLM cross-checking, and a decision tree for novelty decisions."
+must_not_appear:
+  - paper_stem: khattab-2020-colbert-efficient-and-effective-passage
+    rationale: "Late-interaction passage retrieval, rather than idea-level novelty detection."

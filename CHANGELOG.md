@@ -20,6 +20,18 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- `benchmark-retrieval` compares BGE-small with Harrier-OSS-V1 270M or 0.6B
+  on available claim/page fixtures, recording ranking changes, warm query
+  latency, document throughput, and model/corpus provenance. Harrier query
+  instructions are automatic; the default production grader remains BGE.
+  The optional `[harrier]` extra supplies modern-model dependencies. Eight
+  corpus-native fixtures expand coverage across AI and biological methods.
+- `search --embedding harrier-270m|harrier-0.6b` uses the selected encoder
+  for a text query with the same isolated cache as the benchmark. Ordinary
+  search and claim grading keep their existing defaults.
+
 ### Changed
 
 - Ingest batches record input, author-prompt, model-routing and framework
@@ -32,6 +44,9 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Retrieval benchmark caches validate corpus contents, model identity,
+  revision, context limit, dtype, and document instructions. Stale vectors
+  and failed encoders can no longer produce misleading comparison scores.
 - The MCP `search` tool no longer raises `AttributeError` when `auto` or
   `hybrid` mode resolves to hybrid retrieval — that is, whenever both the
   Tantivy and semantic page indexes are built. The handler called a

@@ -1,0 +1,19 @@
+fixture_id: late-interaction-maxsim
+fixture_type: claims
+query: "independent BERT query and document encoding with late interaction MaxSim and full collection retrieval"
+k: 10
+notes: "Corpus-native fixture grounded in the ColBERT page; expected positions must resolve before scoring."
+expected_claims:
+  - paper_stem: khattab-2020-colbert-efficient-and-effective-passage
+    section: key_contributions
+    position: 0
+    importance: critical
+    rationale: "Defines independent encoding and deferred MaxSim interaction."
+  - paper_stem: khattab-2020-colbert-efficient-and-effective-passage
+    section: key_contributions
+    position: 4
+    importance: critical
+    rationale: "Extends late interaction to retrieval from full collections."
+must_not_appear:
+  - paper_stem: liu-2025-harnessing-large-language-models-for-scientific
+    rationale: "Idea-level retriever distillation, rather than ColBERT's late interaction."

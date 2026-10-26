@@ -32,6 +32,7 @@ from ..log import log
 
 DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_DEVICE = "cpu"   # explicit — escaping MPS is the whole point
+_AUTOMATIC_OFFLINE_MODE = False
 
 
 def _maybe_enable_offline_mode() -> None:
@@ -49,6 +50,7 @@ def _maybe_enable_offline_mode() -> None:
 
     Respects an existing `HF_HUB_OFFLINE` value (don't override the user).
     """
+    global _AUTOMATIC_OFFLINE_MODE
     if "HF_HUB_OFFLINE" in os.environ:
         return
     hf_home = Path(os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface")))
@@ -56,6 +58,7 @@ def _maybe_enable_offline_mode() -> None:
     model_dir = hf_home / "hub" / f"models--{DEFAULT_MODEL.replace('/', '--')}"
     if model_dir.exists():
         os.environ["HF_HUB_OFFLINE"] = "1"
+        _AUTOMATIC_OFFLINE_MODE = True
 
 
 _maybe_enable_offline_mode()
