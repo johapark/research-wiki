@@ -286,10 +286,8 @@ existing behavior. Applications can supply versioned selections without adding a
 project database or commercial dependency to the engine. See the
 [evidence-scope guide](./docs/evidence-scopes.md).
 
-`researchwiki answer "question" --scope-file selection.json` adds bounded answer
-generation with mandatory PDF, citation, numeric, and model support checks. API
-and chat-relay use the same operation. `--json` returns a versioned provenance
-receipt; no answer is saved automatically. See the [answer guide](./docs/answers.md).
+Research Q&A is handled by the chat agent using the existing search, claims, and
+PDF-reading tools, following the grounding rules in [CLAUDE.md](./CLAUDE.md).
 
 `researchwiki compose "question" --title "Title" --scope-file selection.json`
 authors a complete theme-based synthesis with mandatory page and support checks.

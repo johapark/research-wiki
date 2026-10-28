@@ -8,9 +8,9 @@ import json
 import re
 from typing import Literal
 
-from ..answers.contracts import Evidence, Statement
+from .evidence_records import Evidence
 from ..evidence import EvidenceScope, validate_stem
-from ..grade.generated import ModelProvenance
+from ..grade.generated import ModelProvenance, validate_prose
 from ..operations._wire import WireModel
 from .document import Draft
 
@@ -98,8 +98,7 @@ class SynthesisReceipt:
         for value, limit in ((self.title, 180), (self.question, 1500)):
             if not isinstance(value, str) or not 1 <= len(value.strip()) <= limit:
                 raise ValueError("invalid synthesis title/question")
-            Statement(text=value, evidence_id="e0", support="not_checked",
-                      anchor_support="not_applicable", numeric_drift=())
+            validate_prose(value)
             if any(c in value for c in "\r\n[]<>`*#"):
                 raise ValueError("synthesis title/question must be plain text")
         if not isinstance(self.scope, EvidenceScope) or (self.scope.stems and not self.scope.source_revisions):

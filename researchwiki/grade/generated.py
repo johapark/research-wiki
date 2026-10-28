@@ -2,10 +2,19 @@
 from dataclasses import dataclass
 
 import json
+import re
 
 from ..agents import llm, model_config
 from ..operations._wire import WireModel, nonempty
 from ..provenance import specific_author_model
+
+
+def validate_prose(text):
+    """Validate model prose while leaving Markdown and citations to the renderer."""
+    nonempty(text, "prose")
+    if (len(text) > 1500 or any(c in text for c in "\r\n[]<>`*#")
+            or re.search(r"https?://|www\.", text, re.I)):
+        raise ValueError("prose must be bounded plain text without links or markup")
 
 
 def strict_json(text):
@@ -17,6 +26,16 @@ def strict_json(text):
             result[key] = value
         return result
     return json.loads(text, object_pairs_hook=unique)
+
+
+def response_system(system, schema):
+    """Expose the output contract to API models as well as schema-aware relays.
+
+    llm.call's schema argument is enforced only by chat-relay. API providers
+    otherwise see no schema, so the contract must also travel in instructions.
+    Local decoding and source checks remain mandatory for every response.
+    """
+    return system + '\nReturn only JSON conforming to this response schema:\n' + json.dumps(schema)
 
 
 def preflight(phases):

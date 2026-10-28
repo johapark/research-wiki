@@ -2,7 +2,7 @@
 from dataclasses import replace
 from pathlib import Path
 
-from ..answers.retrieval import retrieve
+from .retrieval import retrieve
 from ..errors import EnvironmentFailure
 from .receipt import Source
 

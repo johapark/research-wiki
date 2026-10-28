@@ -54,9 +54,12 @@ Before a document is verified:
 
 Outlook is strictly sourced in this automated workflow. The existing manual
 authoring procedure's labelled inference/model-prior options remain available
-outside this operation. A model judge can err; real-paper accuracy and editorial
-quality evaluation remain release work. Synthetic tests check transport and gate
-enforcement, not the quality of a real model's scientific review.
+outside this operation. A model judge can err. The
+[v0.6.0 real-paper evaluation](../benchmark-fixtures/generated-content/EVALUATION-2026-10-28.md)
+is complete, but both positive synthesis cases were rejected for source support
+and editorial quality, so the evaluation's release threshold is not met.
+Synthetic tests check transport and gate enforcement, not the quality of a real
+model's scientific review.
 
 ## Providers and provenance
 

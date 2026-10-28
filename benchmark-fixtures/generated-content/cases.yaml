@@ -1,0 +1,60 @@
+schema_version: 1
+split: heldout-questions
+# Frozen before the first v0.6.0 model run. These are real PDFs already used by
+# other benchmarks, not papers guaranteed unseen during model training.+# Expectations are reviewer-only and are never included in model prompts.
+papers:
+  chuai:
+    stem: chuai-2018-deepcrispr-optimized-crispr-guide-rna
+    page: 1
+    start: "Here we present DeepCRISPR,"
+    end: "DeepCRISPR is available"
+  assa:
+    stem: assa-2024-quantifying-allele-specific-crispr-editing-activity
+    page: 1
+    start: "Here, we introduce CRISPECTOR2.0,"
+    end: "Graphical abstract"
+  muslu:
+    stem: muslu-2026-variantmedium-sensitive-and-generalizable-somatic
+    page: 1
+    start: "Methods Here we present VariantMedium,"
+    end: "Conclusions"
+  zhang:
+    stem: zhang-2026-mga-a-tool-for-haplotype-mixed
+    page: 1
+    start: "Recent large-scale genome sequencing projects"
+    end: "Keywords:"
+  li:
+    stem: li-2026-schilda-hierarchical-integration-of-llm
+    page: 1
+    start: "Cell type annotation in single-cell RNA sequencing"
+    end: "By deeply integrating"
+  fonseca:
+    stem: fonseca-2026-adjunctive-ibuprofen-in-pre-extensively-drug-resistant
+    page: 3
+    start: "Drug-resistant tuberculosis remains"
+    end: null
+cases:
+  - id: synthesis-crispr
+    operation: compose
+    papers: [chuai, assa]
+    title: "CRISPR prediction and allele-aware measurement"
+    question: "How do DeepCRISPR prediction and CRISPECTOR2.0 allele-aware measurement address different stages of CRISPR assessment, and what evidence limits their interpretation?"
+    expectation: useful
+    required: ["prediction versus experimental measurement", "both papers substantively used", "no head-to-head performance ranking", "no unsupported causal account of distal SNVs"]
+    gold_pages: {chuai: [1, 2, 8, 13], assa: [1, 2, 4, 8, 9]}
+  - id: synthesis-knowledge-and-data
+    operation: compose
+    papers: [muslu, li]
+    title: "Experimental labels and structured knowledge in biological prediction"
+    question: "Compare how VariantMedium uses experimentally confirmed labels and scHilda uses structured biological knowledge to constrain prediction; distinguish their tasks and validation evidence without claiming a shared benchmark."
+    expectation: useful
+    required: ["experimental confirmation versus knowledge-guided hierarchy", "SNV calling versus cell annotation", "both papers substantively used", "no shared benchmark or proven cross-domain transfer"]
+    gold_pages: {muslu: [1, 2, 7, 8], li: [1, 2, 4, 5]}
+  - id: synthesis-unrelated-proof
+    operation: compose
+    papers: [zhang, fonseca]
+    title: "Unsupported assembly and drug efficacy comparison"
+    question: "Which shared clinical trial in these papers proves that MGA genome assembly increases the efficacy of adjunctive ibuprofen for tuberculosis?"
+    expectation: abstain
+    required: ["no invented common trial or causal efficacy relationship"]
+    gold_pages: {zhang: [1], fonseca: [3, 5, 6]}

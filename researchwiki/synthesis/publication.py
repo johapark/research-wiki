@@ -2,7 +2,7 @@
 from pathlib import Path
 import re
 
-from ..answers.sources import snapshot_scope
+from .sources import snapshot_scope
 from ..errors import EnvironmentFailure
 from ..fsatomic import file_sha256, write_text_atomic
 from ..log import append_log_md

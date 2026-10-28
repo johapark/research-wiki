@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from researchwiki.agents import llm
-from researchwiki.answers.sources import snapshot_scope
+from researchwiki.synthesis.sources import snapshot_scope
 from researchwiki.db import upsert_page
 from researchwiki.errors import EnvironmentFailure
 from researchwiki.evidence import EvidenceScope
@@ -96,10 +96,12 @@ def test_support_and_editorial_failure_reject_draft(corpus, monkeypatch, verdict
 
 def test_claim_anchors_require_separate_support_and_render_durable_links(corpus, monkeypatch):
     def edit(data):
-        # For this fixture each paper has a single anchored claim plus a PDF hit.
+        packet = json.loads(calls[0]['prompt'])
+        anchors = [next(e['evidence_id'] for e in packet['evidence']
+                        if e['stem'] == stem and e['claim_text']) for stem in ('alpha', 'beta')]
         for unit in [data['draft']['hook'], *(s['paragraphs'][0] for s in data['draft']['sections']),
                      data['draft']['themes'][0]['title'], *data['draft']['themes'][0]['paragraphs']]:
-            unit['evidence_ids'] = ['e0', 'e2']
+            unit['evidence_ids'] = anchors
         return data
     calls = models(monkeypatch, author_edit=edit)
     result = make(corpus)

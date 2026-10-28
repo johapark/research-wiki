@@ -189,8 +189,6 @@ _FALLBACK_PHASES: dict[str, dict] = {
     "reconcile":         {"role": "extractor"},
     "target_claims":     {"role": "judge", "temperature": 0.0, "max_tokens": 4000},
     "claim_support":     {"role": "judge"},
-    "answer":            {"role": "author", "temperature": 0.2, "max_tokens": 2500},
-    "answer_judge":      {"role": "judge", "temperature": 0.0, "max_tokens": 2500},
     "synthesis_author":  {"role": "author", "temperature": 0.2, "max_tokens": 10000},
     "synthesis_support": {"role": "judge", "temperature": 0.0, "max_tokens": 6000},
 }

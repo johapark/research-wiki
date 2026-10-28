@@ -1,0 +1,918 @@
+{
+  "schema_version": 1,
+  "reviewer_kind": "agent",
+  "review_date": "2026-10-28",
+  "policy": "historical-policy-2026-10-28.md",
+  "primary_run": "v0.6.0-final",
+  "limitations": [
+    "Single run per code revision; small smoke suite.",
+    "Existing benchmark papers, not guaranteed unseen during training.",
+    "Author/judge report gpt-6.1-sol; agent review may be correlated.",
+    "Minimal quoted routing pages exercise PDF fallback, not full graded-claim ingestion.",
+    "Later number-format diagnostics are reported separately, not pooled into primary yield."
+  ],
+  "runs": [
+    {
+      "framework_version": "0.6.0",
+      "fixture_sha256": "b51c7bc077569d91dd42d068a4d9957090d14d8010b651182f9624eb5351ee19",
+      "pdf_sha256": {
+        "chuai": "da06e848ed7368244c93e8983b7d71d033a17cdcf4335b7b39fd85f02a32d72f",
+        "assa": "533ed01b536b0f68adcdff6fe43c69a0fbe4e3b80296e6a6dba5e3837b0be203",
+        "muslu": "c042f965d157f4b9d4c7630ad102262dcda48a547607214297ad8c50fc6169e5",
+        "zhang": "abdacdee6b5dc6b75fe398dc5d4557bd14d34b16eaddf4b04f71e3cd818fcdf0",
+        "li": "049ca66c42c8cb07a5bfcd6f80910a0dcb22b370e702bc1619e1c25dfafdee86",
+        "fonseca": "7298a9e00b1097bf01805ef81964624e338a32b27dc491d151b9eb7fc78ebc8e"
+      },
+      "routing": {
+        "answer": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        },
+        "answer_judge": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        },
+        "synthesis_author": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        },
+        "synthesis_support": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        }
+      },
+      "results": [
+        {
+          "id": "answer-deepcrispr",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "rejected",
+          "reason": "Judge response failed validation: invalid model response fields",
+          "receipt_sha256": "60522cdf38ceb7af0ab1f829ce7952207fefb906a40b8757f144c1762a78a3c6",
+          "elapsed_seconds": 11.54
+        },
+        {
+          "id": "answer-crispector",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "rejected",
+          "reason": "Judge response failed validation: invalid model response fields",
+          "receipt_sha256": "a3ccbfad1914be155202e868952f6ea1aa6ce7bb4e920bedf876d874e9bb53ee",
+          "elapsed_seconds": 7.287
+        },
+        {
+          "id": "answer-variantmedium-counts",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "rejected",
+          "reason": "Judge response failed validation: invalid model response fields",
+          "receipt_sha256": "0f6465c500f29a734eaff9927b75870c0cd4ec8cc485f4570426df1f73a6b744",
+          "elapsed_seconds": 11.997
+        },
+        {
+          "id": "answer-mga-scope",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "rejected",
+          "reason": "Judge response failed validation: invalid model response fields",
+          "receipt_sha256": "8d22b72cc37a461e43161e85db4f13cb8d7536d25ea6c0c069fd96bfe61f5db5",
+          "elapsed_seconds": 8.803
+        },
+        {
+          "id": "answer-schilda",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "rejected",
+          "reason": "Judge response failed validation: invalid model response fields",
+          "receipt_sha256": "54bc8ff33a6d0e181f04740711416be8de1528a4ab445e4a2876f5c46309958f",
+          "elapsed_seconds": 7.476
+        },
+        {
+          "id": "answer-ibuprofen-false-premise",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "rejected",
+          "reason": "Judge response failed validation: invalid model response fields",
+          "receipt_sha256": "702fdc5f99db9f08bef670777909c7390a26b2e4f7db6dbf29f1fe13a6ed17e9",
+          "elapsed_seconds": 9.214
+        },
+        {
+          "id": "answer-unrelated",
+          "operation": "answer",
+          "expectation": "abstain",
+          "status": "insufficient_evidence",
+          "reason": "The retrieved passages do not answer this question.",
+          "receipt_sha256": "5042b01dbfa340890d0041d0ea31f41101aee3cd2253dc117590ff358c5f7dc2",
+          "elapsed_seconds": 1.211
+        },
+        {
+          "id": "answer-invented-result",
+          "operation": "answer",
+          "expectation": "abstain",
+          "status": "insufficient_evidence",
+          "reason": "The retrieved passages do not answer this question.",
+          "receipt_sha256": "cbc18cb0e7978ca510eca5e6f076e4e1334cda297f5821e93ebbcaee665e6094",
+          "elapsed_seconds": 1.029
+        },
+        {
+          "id": "synthesis-crispr",
+          "operation": "compose",
+          "expectation": "useful",
+          "status": "insufficient_evidence",
+          "reason": "The source evidence does not support a complete synthesis.",
+          "receipt_sha256": "4a6f2d002ea064c2cd6876ff27c0785d7de4a320c3015bbedc5eb1d6fd1945b9",
+          "elapsed_seconds": 5.628
+        },
+        {
+          "id": "synthesis-knowledge-and-data",
+          "operation": "compose",
+          "expectation": "useful",
+          "status": "insufficient_evidence",
+          "reason": "The source evidence does not support a complete synthesis.",
+          "receipt_sha256": "e9115cd458922d424f4db9b91c63218572273c82918f8f70de70e8fafb48a0cd",
+          "elapsed_seconds": 5.452
+        },
+        {
+          "id": "synthesis-unrelated-proof",
+          "operation": "compose",
+          "expectation": "abstain",
+          "status": "insufficient_evidence",
+          "reason": "The source evidence does not support a complete synthesis.",
+          "receipt_sha256": "a0d5692bf857f7531a6a649ea5cd17f816ef01fc97ca6b704d92fccf113e6b82",
+          "elapsed_seconds": 1.608
+        }
+      ],
+      "run_id": "v0.6.0-initial"
+    },
+    {
+      "framework_version": "0.6.0",
+      "fixture_sha256": "b51c7bc077569d91dd42d068a4d9957090d14d8010b651182f9624eb5351ee19",
+      "pdf_sha256": {
+        "chuai": "da06e848ed7368244c93e8983b7d71d033a17cdcf4335b7b39fd85f02a32d72f",
+        "assa": "533ed01b536b0f68adcdff6fe43c69a0fbe4e3b80296e6a6dba5e3837b0be203",
+        "muslu": "c042f965d157f4b9d4c7630ad102262dcda48a547607214297ad8c50fc6169e5",
+        "zhang": "abdacdee6b5dc6b75fe398dc5d4557bd14d34b16eaddf4b04f71e3cd818fcdf0",
+        "li": "049ca66c42c8cb07a5bfcd6f80910a0dcb22b370e702bc1619e1c25dfafdee86",
+        "fonseca": "7298a9e00b1097bf01805ef81964624e338a32b27dc491d151b9eb7fc78ebc8e"
+      },
+      "routing": {
+        "answer": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        },
+        "answer_judge": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        },
+        "synthesis_author": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        },
+        "synthesis_support": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        }
+      },
+      "results": [
+        {
+          "id": "answer-deepcrispr",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "d59df654ae06bd468654106f162975feabb2bade4e1eb0ec6d811f6f4019f59b",
+          "elapsed_seconds": 12.147
+        },
+        {
+          "id": "answer-crispector",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "fb687db1c2fe22893367d0e37ee33334443eb9d1f3abf5281b9b46b52ed3cbb7",
+          "elapsed_seconds": 8.781
+        },
+        {
+          "id": "answer-variantmedium-counts",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "1584f8e6062ef59b7ec3baa9f3b72601d90dc369a4345e4e2459538e55b7b64e",
+          "elapsed_seconds": 9.488
+        },
+        {
+          "id": "answer-mga-scope",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "b1b408ee8d390ea07036338e8778549a745ce63fd26935f23fddfb838a49dc17",
+          "elapsed_seconds": 7.097
+        },
+        {
+          "id": "answer-schilda",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "afd2d937722816a000b788d8bce11066b232382a376a1df94efaec3299adaabe",
+          "elapsed_seconds": 7.876
+        },
+        {
+          "id": "answer-ibuprofen-false-premise",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "a5d701345ba6a637a2c002cce735b7198d6249a71daca877ba3f03ca1def2964",
+          "elapsed_seconds": 6.032
+        },
+        {
+          "id": "answer-unrelated",
+          "operation": "answer",
+          "expectation": "abstain",
+          "status": "insufficient_evidence",
+          "reason": "The retrieved passages do not answer this question.",
+          "receipt_sha256": "26b5821a82d7db7e50576061cd0fc76000b0801b49fb2dccab983d9c49e79f83",
+          "elapsed_seconds": 1.544
+        },
+        {
+          "id": "answer-invented-result",
+          "operation": "answer",
+          "expectation": "abstain",
+          "status": "insufficient_evidence",
+          "reason": "The retrieved passages do not answer this question.",
+          "receipt_sha256": "731ccb8742904f96c676890ba939674aafad8cea7d67fa52d7b034c22b4aa466",
+          "elapsed_seconds": 0.818
+        },
+        {
+          "id": "synthesis-crispr",
+          "operation": "compose",
+          "expectation": "useful",
+          "status": "rejected",
+          "reason": "Synthesis support or editorial/coverage review failed.",
+          "receipt_sha256": "63a83a24d374c04239adc86d6daca492d0530392649fd87131528fb1b4f9130f",
+          "elapsed_seconds": 49.259
+        },
+        {
+          "id": "synthesis-knowledge-and-data",
+          "operation": "compose",
+          "expectation": "useful",
+          "status": "rejected",
+          "reason": "Synthesis support or editorial/coverage review failed.",
+          "receipt_sha256": "00c4b8981335a8d084fedf10d010285b65a443bf385dbcf9ed251aed954476c6",
+          "elapsed_seconds": 46.73
+        },
+        {
+          "id": "synthesis-unrelated-proof",
+          "operation": "compose",
+          "expectation": "abstain",
+          "status": "insufficient_evidence",
+          "reason": "The source evidence does not support a complete synthesis.",
+          "receipt_sha256": "87706336fe9823c0550b73185ac64b27d79baf9ead1c3b2480dc8353f243c67e",
+          "elapsed_seconds": 1.024
+        }
+      ],
+      "run_id": "v0.6.0-corrected",
+      "source_manifest_sha256": "5fc0642dd25bfef0415eb2c05d68c7028383367072dd2c67f7628d51cae61168"
+    },
+    {
+      "framework_version": "0.6.0",
+      "fixture_sha256": "b51c7bc077569d91dd42d068a4d9957090d14d8010b651182f9624eb5351ee19",
+      "pdf_sha256": {
+        "chuai": "da06e848ed7368244c93e8983b7d71d033a17cdcf4335b7b39fd85f02a32d72f",
+        "assa": "533ed01b536b0f68adcdff6fe43c69a0fbe4e3b80296e6a6dba5e3837b0be203",
+        "muslu": "c042f965d157f4b9d4c7630ad102262dcda48a547607214297ad8c50fc6169e5",
+        "zhang": "abdacdee6b5dc6b75fe398dc5d4557bd14d34b16eaddf4b04f71e3cd818fcdf0",
+        "li": "049ca66c42c8cb07a5bfcd6f80910a0dcb22b370e702bc1619e1c25dfafdee86",
+        "fonseca": "7298a9e00b1097bf01805ef81964624e338a32b27dc491d151b9eb7fc78ebc8e"
+      },
+      "routing": {
+        "answer": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        },
+        "answer_judge": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        },
+        "synthesis_author": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        },
+        "synthesis_support": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        }
+      },
+      "results": [
+        {
+          "id": "answer-deepcrispr",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "c46eab258de155f4a35ff588771db0cc1b37f318acd41213ca987e978a20b072",
+          "elapsed_seconds": 9.216
+        },
+        {
+          "id": "answer-crispector",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "37b287b25180695abc7ab01fcc980f72eafa58201ee50b035ffa017da93c5eef",
+          "elapsed_seconds": 7.26
+        },
+        {
+          "id": "answer-variantmedium-counts",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "d21e880ab4849bbf780defd1099aae3b7cb2fa888e7427832a877da06d4a7298",
+          "elapsed_seconds": 8.723
+        },
+        {
+          "id": "answer-mga-scope",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "0f1eff05d3bc5baa16d9c961693c859aaa6b12d734a72810a705e93c716f4cc6",
+          "elapsed_seconds": 5.872
+        },
+        {
+          "id": "answer-schilda",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "b8d6d061f05dd6f0e9da96814c7bc873bfe69acc7464457224c5b0a1c85a1d66",
+          "elapsed_seconds": 7.045
+        },
+        {
+          "id": "answer-ibuprofen-false-premise",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "rejected",
+          "reason": "A numeric statement is absent from its cited evidence.",
+          "receipt_sha256": "5451f9f5b1784fe44c0b237161f5aca8cc080708ce7cf27054165996446424ea",
+          "elapsed_seconds": 3.522
+        },
+        {
+          "id": "answer-unrelated",
+          "operation": "answer",
+          "expectation": "abstain",
+          "status": "insufficient_evidence",
+          "reason": "The retrieved passages do not answer this question.",
+          "receipt_sha256": "a40d291bed75541378b21981d64b7f333a1c709accf06d97a3c9604489d5696b",
+          "elapsed_seconds": 1.421
+        },
+        {
+          "id": "answer-invented-result",
+          "operation": "answer",
+          "expectation": "abstain",
+          "status": "insufficient_evidence",
+          "reason": "The retrieved passages do not answer this question.",
+          "receipt_sha256": "0a87c7e0bba379c47a07a8ece5bd27f9fa63a32b64b170af37f825d028228559",
+          "elapsed_seconds": 1.791
+        },
+        {
+          "id": "synthesis-crispr",
+          "operation": "compose",
+          "expectation": "useful",
+          "status": "rejected",
+          "reason": "Synthesis support or editorial/coverage review failed.",
+          "receipt_sha256": "190d122512c8620b75a898cf4f071ab4a58ee3b20e4a44274204e9583976035c",
+          "elapsed_seconds": 48.243
+        },
+        {
+          "id": "synthesis-knowledge-and-data",
+          "operation": "compose",
+          "expectation": "useful",
+          "status": "rejected",
+          "reason": "Synthesis support or editorial/coverage review failed.",
+          "receipt_sha256": "9496a1bbec10371e7093491078e81a8a8b31c5be60ff4e90b53d42ac23606f19",
+          "elapsed_seconds": 40.967
+        },
+        {
+          "id": "synthesis-unrelated-proof",
+          "operation": "compose",
+          "expectation": "abstain",
+          "status": "insufficient_evidence",
+          "reason": "The source evidence does not support a complete synthesis.",
+          "receipt_sha256": "08ab6bf992bff50579644d16713ce419706f0d388c4038aecb7a05e2300e5833",
+          "elapsed_seconds": 1.524
+        }
+      ],
+      "run_id": "v0.6.0-final",
+      "source_manifest_sha256": "95727fdf76c50209550fd3c3cd96f4ce365b56298469de6959ec5fc4bc8698fc"
+    },
+    {
+      "framework_version": "0.6.0",
+      "fixture_sha256": "b51c7bc077569d91dd42d068a4d9957090d14d8010b651182f9624eb5351ee19",
+      "pdf_sha256": {
+        "chuai": "da06e848ed7368244c93e8983b7d71d033a17cdcf4335b7b39fd85f02a32d72f",
+        "assa": "533ed01b536b0f68adcdff6fe43c69a0fbe4e3b80296e6a6dba5e3837b0be203",
+        "muslu": "c042f965d157f4b9d4c7630ad102262dcda48a547607214297ad8c50fc6169e5",
+        "zhang": "abdacdee6b5dc6b75fe398dc5d4557bd14d34b16eaddf4b04f71e3cd818fcdf0",
+        "li": "049ca66c42c8cb07a5bfcd6f80910a0dcb22b370e702bc1619e1c25dfafdee86",
+        "fonseca": "7298a9e00b1097bf01805ef81964624e338a32b27dc491d151b9eb7fc78ebc8e"
+      },
+      "routing": {
+        "answer": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        },
+        "answer_judge": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        },
+        "synthesis_author": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        },
+        "synthesis_support": {
+          "provider": "openai-compatible",
+          "model": "gpt-6.1-sol"
+        }
+      },
+      "results": [
+        {
+          "id": "answer-variantmedium-counts",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "c7657b73b7aaba6042e9ede634d69bc057c67fedf17d449a0ed0b1bdd017255f",
+          "elapsed_seconds": 12.753
+        },
+        {
+          "id": "answer-ibuprofen-false-premise",
+          "operation": "answer",
+          "expectation": "useful",
+          "status": "verified",
+          "reason": "Every statement passed citation, numeric, and model support checks; retrieval is bounded.",
+          "receipt_sha256": "3052fe0fb95fd13a64311130a4eb9f23311e84645b52e2e2fb806a766c4773fd",
+          "elapsed_seconds": 5.768
+        }
+      ],
+      "run_id": "v0.6.0-number-format",
+      "source_manifest_sha256": "c3918cbbbf095b43c356923bd61100d494e7bf28a234d94e0e9ac830103b7519"
+    }
+  ],
+  "cases": [
+    {
+      "id": "answer-deepcrispr",
+      "pipeline_status": "verified",
+      "requirements": [
+        {
+          "criterion": "on-target and off-target prediction",
+          "passed": true
+        },
+        {
+          "criterion": "sequence and epigenetic features",
+          "passed": true
+        }
+      ],
+      "review_reason": "All emitted statements match the cited passages and source PDF; the required distinctions are present.",
+      "useful_or_correct_restraint": true,
+      "unit_reviews": [
+        {
+          "unit_index": 0,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 1,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 2,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 3,
+          "verdict": "supported"
+        }
+      ],
+      "editorial_scores": null
+    },
+    {
+      "id": "answer-crispector",
+      "pipeline_status": "verified",
+      "requirements": [
+        {
+          "criterion": "de novo sample-specific SNVs",
+          "passed": true
+        },
+        {
+          "criterion": "statistical allele calling",
+          "passed": true
+        },
+        {
+          "criterion": "measurement rather than a priori prediction",
+          "passed": true
+        }
+      ],
+      "review_reason": "All emitted statements match the cited passages and source PDF; the required distinctions are present.",
+      "useful_or_correct_restraint": true,
+      "unit_reviews": [
+        {
+          "unit_index": 0,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 1,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 2,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 3,
+          "verdict": "supported"
+        }
+      ],
+      "editorial_scores": null
+    },
+    {
+      "id": "answer-variantmedium-counts",
+      "pipeline_status": "verified",
+      "requirements": [
+        {
+          "criterion": "tree-based classifier and 3D DenseNet",
+          "passed": true
+        },
+        {
+          "criterion": "336,839 variants from 2,956 samples",
+          "passed": true
+        },
+        {
+          "criterion": "118,887 independent evaluation variants",
+          "passed": true
+        }
+      ],
+      "review_reason": "All emitted statements match the cited passages and source PDF; the required distinctions are present.",
+      "useful_or_correct_restraint": true,
+      "unit_reviews": [
+        {
+          "unit_index": 0,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 1,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 2,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 3,
+          "verdict": "supported"
+        }
+      ],
+      "editorial_scores": null
+    },
+    {
+      "id": "answer-mga-scope",
+      "pipeline_status": "verified",
+      "requirements": [
+        {
+          "criterion": "haplotype-mixed mosaic",
+          "passed": true
+        },
+        {
+          "criterion": "HiFi reads alone",
+          "passed": true
+        },
+        {
+          "criterion": "no claim of separately reconstructed phased haplomes",
+          "passed": true
+        }
+      ],
+      "review_reason": "All emitted statements match the cited passages and source PDF; the required distinctions are present.",
+      "useful_or_correct_restraint": true,
+      "unit_reviews": [
+        {
+          "unit_index": 0,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 1,
+          "verdict": "supported"
+        }
+      ],
+      "editorial_scores": null
+    },
+    {
+      "id": "answer-schilda",
+      "pipeline_status": "verified",
+      "requirements": [
+        {
+          "criterion": "global knowledge for major lineages",
+          "passed": true
+        },
+        {
+          "criterion": "focused lineage subgraphs for subtypes",
+          "passed": true
+        }
+      ],
+      "review_reason": "All emitted statements match the cited passages and source PDF; the required distinctions are present.",
+      "useful_or_correct_restraint": true,
+      "unit_reviews": [
+        {
+          "unit_index": 0,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 1,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 2,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 3,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 4,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 5,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 6,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 7,
+          "verdict": "supported"
+        }
+      ],
+      "editorial_scores": null
+    },
+    {
+      "id": "answer-ibuprofen-false-premise",
+      "pipeline_status": "rejected",
+      "requirements": [
+        {
+          "criterion": "no demonstrated clinical benefit",
+          "passed": true
+        },
+        {
+          "criterion": "400 mg daily for 2 months",
+          "passed": true
+        },
+        {
+          "criterion": "28 participants, 14 per group",
+          "passed": true
+        },
+        {
+          "criterion": "exploratory pilot rather than conclusive efficacy evidence",
+          "passed": false
+        }
+      ],
+      "review_reason": "The four statements are scientifically supported by PDF p.3. One expresses the spelled-out Twenty-eight as 28 and fails literal numeric validation; no verified output is emitted. The draft also omits the explicit exploratory-pilot qualification.",
+      "useful_or_correct_restraint": false,
+      "unit_reviews": [
+        {
+          "unit_index": 0,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 1,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 2,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 3,
+          "verdict": "supported"
+        }
+      ],
+      "editorial_scores": null
+    },
+    {
+      "id": "answer-unrelated",
+      "pipeline_status": "insufficient_evidence",
+      "requirements": [
+        {
+          "criterion": "no invented drug or clinical result from an assembly paper",
+          "passed": true
+        }
+      ],
+      "review_reason": "No statements or synthesis are emitted; the unrelated/unsupported premise is appropriately declined.",
+      "useful_or_correct_restraint": true,
+      "unit_reviews": [],
+      "editorial_scores": null
+    },
+    {
+      "id": "answer-invented-result",
+      "pipeline_status": "insufficient_evidence",
+      "requirements": [
+        {
+          "criterion": "no invented clinical cure rate or randomized trial",
+          "passed": true
+        }
+      ],
+      "review_reason": "No statements or synthesis are emitted; the unrelated/unsupported premise is appropriately declined.",
+      "useful_or_correct_restraint": true,
+      "unit_reviews": [],
+      "editorial_scores": null
+    },
+    {
+      "id": "synthesis-crispr",
+      "pipeline_status": "rejected",
+      "requirements": [
+        {
+          "criterion": "prediction versus experimental measurement",
+          "passed": true
+        },
+        {
+          "criterion": "both papers substantively used",
+          "passed": true
+        },
+        {
+          "criterion": "no head-to-head performance ranking",
+          "passed": true
+        },
+        {
+          "criterion": "no unsupported causal account of distal SNVs",
+          "passed": true
+        }
+      ],
+      "review_reason": "Background unit 2 adds the guide-directed role without citing a passage that establishes it. The fact appears elsewhere in PDF p.1, but is only partially grounded by this unit's selected evidence. Other authored units are supported. Themes connect prediction and measurement, but repeat the stage distinction and causal boundary across sections.",
+      "useful_or_correct_restraint": false,
+      "unit_reviews": [
+        {
+          "unit_index": 0,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 1,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 2,
+          "verdict": "partial"
+        },
+        {
+          "unit_index": 3,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 4,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 5,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 6,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 7,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 8,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 9,
+          "verdict": "supported"
+        }
+      ],
+      "editorial_scores": {
+        "theme_organization": 1,
+        "cross_paper_reasoning": 2,
+        "coverage": 2,
+        "boundaries": 2
+      }
+    },
+    {
+      "id": "synthesis-knowledge-and-data",
+      "pipeline_status": "rejected",
+      "requirements": [
+        {
+          "criterion": "experimental confirmation versus knowledge-guided hierarchy",
+          "passed": true
+        },
+        {
+          "criterion": "SNV calling versus cell annotation",
+          "passed": true
+        },
+        {
+          "criterion": "both papers substantively used",
+          "passed": true
+        },
+        {
+          "criterion": "no shared benchmark or proven cross-domain transfer",
+          "passed": true
+        }
+      ],
+      "review_reason": "Background unit 2 names single-cell RNA sequencing without citing the abstract passage that establishes this setting (e2); its selected scHilda passage does not state it. Other authored units are supported. Tasks and validation remain distinct, but sections and themes repeat supervision versus knowledge-guided reasoning.",
+      "useful_or_correct_restraint": false,
+      "unit_reviews": [
+        {
+          "unit_index": 0,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 1,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 2,
+          "verdict": "partial"
+        },
+        {
+          "unit_index": 3,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 4,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 5,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 6,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 7,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 8,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 9,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 10,
+          "verdict": "supported"
+        },
+        {
+          "unit_index": 11,
+          "verdict": "supported"
+        }
+      ],
+      "editorial_scores": {
+        "theme_organization": 1,
+        "cross_paper_reasoning": 2,
+        "coverage": 2,
+        "boundaries": 2
+      }
+    },
+    {
+      "id": "synthesis-unrelated-proof",
+      "pipeline_status": "insufficient_evidence",
+      "requirements": [
+        {
+          "criterion": "no invented common trial or causal efficacy relationship",
+          "passed": true
+        }
+      ],
+      "review_reason": "No statements or synthesis are emitted; the unrelated/unsupported premise is appropriately declined.",
+      "useful_or_correct_restraint": true,
+      "unit_reviews": [],
+      "editorial_scores": null
+    }
+  ],
+  "number_format_diagnostics": [
+    {
+      "id": "answer-variantmedium-counts",
+      "pipeline_status": "verified",
+      "supported_units": 5,
+      "total_units": 5,
+      "reason": "All aggregate counts and model components match PDF pp.1-2; the additional PCAWG patient count is in the cited dataset overview."
+    },
+    {
+      "id": "answer-ibuprofen-false-premise",
+      "pipeline_status": "verified",
+      "supported_units": 6,
+      "total_units": 6,
+      "required_distinctions_complete": false,
+      "reason": "Dose, duration, both n=14 arms, follow-up and absence of observed benefit are supported on PDF p.3. Output omits the total and explicit exploratory-pilot qualification, so this diagnostic is not counted as clearing the frozen useful-answer criterion."
+    }
+  ],
+  "scope_note": "Historical answer/synthesis evaluation before the answer operation was withdrawn. Current active evaluation is synthesis-only."
+}

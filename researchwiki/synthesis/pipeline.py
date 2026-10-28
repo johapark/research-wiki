@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 import json
 
 from ..agents import llm
-from ..answers.sources import snapshot_scope
-from ..grade.generated import preflight, strict_json
+from .sources import snapshot_scope
+from ..grade.generated import preflight, response_system, strict_json
 from .document import authored_draft
 from .evidence import gather, sources_for
 from .gates import page_gates
@@ -29,7 +29,7 @@ def compose(title, question, scope):
     if len({e.stem for e in result.evidence}) < 2:
         return replace(result, reason='The bounded retrieval did not find evidence from two papers.')
     preflight(('synthesis_author', 'synthesis_support'))
-    response = llm.call(phase='synthesis_author', system=AUTHOR_SYSTEM, schema=AUTHOR_SCHEMA,
+    response = llm.call(phase='synthesis_author', system=response_system(AUTHOR_SYSTEM, AUTHOR_SCHEMA), schema=AUTHOR_SCHEMA,
                         prompt=json.dumps({'title': title, 'question': question,
                                            'sources': [s.to_dict() for s in result.sources],
                                            'evidence': [e.to_dict() for e in result.evidence]}))
@@ -59,7 +59,7 @@ def compose(title, question, scope):
         snapshot_scope(scope)
         return replace(result, reason='Synthesis page structure/grounding/fidelity gates failed or graded zero claims.')
     items, positions = judge_items(draft, result.evidence)
-    response = llm.call(phase='synthesis_support', system=JUDGE_SYSTEM, schema=JUDGE_SCHEMA,
+    response = llm.call(phase='synthesis_support', system=response_system(JUDGE_SYSTEM, JUDGE_SCHEMA), schema=JUDGE_SCHEMA,
                         prompt=json.dumps({'question': question, 'draft': draft.to_dict(),
                                            'evidence': [e.to_dict() for e in result.evidence], 'items': items}))
     try:

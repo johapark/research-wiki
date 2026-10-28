@@ -20,6 +20,13 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-28
+
+> **License change:** this release switches the framework from MIT to PolyForm
+> Noncommercial 1.0.0. Commercial use requires a separate license from the
+> copyright holder. Copies previously distributed under MIT retain their MIT
+> permissions; bundled benchmark PDFs retain their CC-BY-4.0 licenses.
+
 ### Added
 
 - `compose` authors a complete scoped synthesis with numeric checks, mandatory
@@ -49,7 +56,7 @@ the reasoning behind any line below.
   writes by owner/generation under an OS lease. Jobs survive database/index
   rebuilds; source and configuration identity changes are recorded on retry.
   Worker loss initially stays interrupted with unknown publication and blocked
-  replay until explicit reconciliation. The job-control CLI follows separately.
+  replay until explicit reconciliation.
 - Explicit `JobSupervisor.reconcile_job()` resolves interrupted publication in
   an isolated library/profile process under the worker lease and corpus lock.
   Private versioned publication receipts survive mutation-journal cleanup and
@@ -86,7 +93,6 @@ the reasoning behind any line below.
   event-delivery failures without inviting a repeated paid ingest. Required
   claim-grade persistence reports unavailable storage or missing rows; commentary
   remains excluded from the citable claims DB.
-  durable jobs/application service are not included in this first increment.
 - `benchmark-retrieval` compares BGE-small with Harrier-OSS-V1 270M or 0.6B
   on available claim/page fixtures, recording ranking changes, warm query
   latency, document throughput, and model/corpus provenance. Harrier query
@@ -99,6 +105,9 @@ the reasoning behind any line below.
 
 ### Changed
 
+- Agent execution guidance reuses explicit authorization only within the same
+  endpoint, data, and task scope, checks effective per-phase routing, and keeps
+  personal endpoint authorization outside the shared repository.
 - The framework license changes from MIT to PolyForm Noncommercial 1.0.0.
   Commercial use requires a separate license from the copyright holder.
   Previously distributed MIT copies retain their permissions; bundled
@@ -112,8 +121,23 @@ the reasoning behind any line below.
   digest-path batches do not. Legacy checkpoints remain resumable with an
   explicit provenance warning.
 
+### Removed
+
+- The unreleased automated `answer` command and module are withdrawn. Research
+  Q&A uses the chat agent and existing search, claims, and PDF tools. Synthesis
+  retains its source validation, evidence records, and bounded PDF retrieval.
+
 ### Fixed
 
+- Generated synthesis prompts include their response schemas in the
+  model instructions, since API transports do not enforce the relay-only schema
+  argument. Local decoding and support checks still enforce the response contract.
+- Bounded synthesis retrieval retains verbatim abstract context alongside
+  specific PDF passages, within the existing passage limits. A single narrow
+  keyword match previously omitted task descriptions and aggregate counts.
+  Real-paper evaluation cases, provenance receipts, and an agent-reviewed
+  accuracy/editorial report document the corrections and remaining synthesis
+  failures; the positive synthesis release threshold is not yet met.
 - Mutation cleanup removes its journal before deleting backups, after any
   required publication-evidence handoff. An unlink failure therefore retains
   the backups needed by recovery instead of stranding a journal without them.
@@ -2633,7 +2657,8 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/johapark/research-wiki/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/johapark/research-wiki/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/johapark/research-wiki/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/johapark/research-wiki/compare/v0.5.0...v0.5.1

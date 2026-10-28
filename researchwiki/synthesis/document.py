@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Literal
 
-from ..answers.contracts import Statement
+from ..grade.generated import validate_prose
 from ..evidence import validate_stem
 from ..operations._wire import WireModel, nonempty
 
@@ -33,8 +33,7 @@ class Clause(WireModel):
 
     def __post_init__(self):
         super().__post_init__()
-        Statement(text=self.text, evidence_id="e0", support=self.support,
-                  anchor_support=self.anchor_support, numeric_drift=self.numeric_drift)
+        validate_prose(self.text)
         if not 1 <= len(self.evidence_ids) <= 8 or len(set(self.evidence_ids)) != len(self.evidence_ids):
             raise ValueError("each synthesis unit needs one to eight unique evidence IDs")
 
