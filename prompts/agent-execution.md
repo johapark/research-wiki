@@ -4,6 +4,14 @@ Trigger: API-backed ingest in a network-restricted chat session, DNS/host-resolu
 
 The chat agent owns command execution and recovery. Keep running `researchwiki` through the session's tools; asking the human to run the workflow in Terminal is not the default remedy.
 
+## Reusing user authorization
+
+Reuse explicit user authorization for the same endpoint, data, and task scope without asking again. Check the effective provider and endpoint for each model-request phase, including profile and environment overrides, before applying that authorization. A configured endpoint or private IP address alone does not establish authorization. Platform execution permissions and approval decisions still apply.
+
+Keep endpoint-specific personal authorization in the user's local agent instructions, outside the shared repository. Store endpoint configuration in a gitignored `.env` profile or local model config; configuration alone does not record consent.
+
+## Execution and recovery
+
 1. **Check execution permissions before starting workers.** API-backed ingest needs access to the configured model endpoint and the structured metadata APIs it uses. Inspect the session's advertised network and filesystem permissions, execution-tool documentation, and relevant diagnostics. Environment markers are clues, not proof of the permissions of a particular subprocess. When the current context cannot perform the authorized task, use the agent platform's supported permission or approval mechanism. Existing user authorization persists; follow any additional requirement imposed by the platform, tool, or reviewer.
 2. **Diagnose DNS in the actual execution context.** Compare hostname resolution and resolver visibility in the restricted and approved contexts, using diagnostics appropriate to the operating system and runtime. A sandbox, container, or remote runner reporting no DNS configuration does not prove the host lacks DNS settings. If the host environment resolves names but the session does not, report that difference and investigate the runner's restrictions. Establish whether both environments use the same machine and network before comparing their results. Do not advise changing system DNS, patch application networking, pin provider IPs, or introduce DNS shims merely from a restricted-context lookup failure.
 3. **Respect approval decisions.** If the platform, tool, or reviewer rejects network access or data transmission, explain the rejection and obtain the authorization it requires. Do not use direct DNS, IP-address routing, proxy changes, or another transport to bypass the rejection. If approved execution still cannot resolve hosts, report the remaining runtime limitation and establish its cause before proposing a workaround. If the platform offers no permitted execution path, report that concrete blocker rather than inventing an escalation option.
