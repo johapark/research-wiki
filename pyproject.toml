@@ -12,7 +12,8 @@ dynamic = ["version"]
 description = "A self-refining markdown wiki for research papers — LLM-authored, claim-graded against source PDFs."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
 authors = [
     {name = "Joha Park"},
 ]

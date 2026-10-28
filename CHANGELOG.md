@@ -99,6 +99,11 @@ the reasoning behind any line below.
 
 ### Changed
 
+- The framework license changes from MIT to PolyForm Noncommercial 1.0.0.
+  Commercial use requires a separate license from the copyright holder.
+  Previously distributed MIT copies retain their permissions; bundled
+  benchmark PDFs retain their CC-BY-4.0 licenses.
+
 - Ingest batches record input, author-prompt, model-routing and framework
   fingerprints in `plan.json`. Resume refuses drift before dispatch or
   checkpoint changes; restore the original workflow or start a new batch with

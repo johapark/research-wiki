@@ -271,6 +271,7 @@ no package-index presence to keep in sync.
 
 ## Licensing
 
-Contributions are accepted under the [MIT License](./LICENSE), the project's
-license. See the README's License section for the CC-BY-4.0 carve-out covering
-bundled benchmark PDFs.
+Contributions are accepted under [PolyForm Noncommercial 1.0.0](./LICENSE),
+the project's license. Commercial use requires a separate license from the
+copyright holder. See the README's License section for the CC-BY-4.0 carve-out
+covering bundled benchmark PDFs.

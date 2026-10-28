@@ -309,7 +309,9 @@ recovery procedures, see [WORKFLOW.md](./WORKFLOW.md).
 
 ## License
 
-The framework is [MIT licensed](./LICENSE). PDFs under `benchmark-fixtures/pdfs/` are redistributed under CC-BY-4.0 with attribution in [`benchmark-fixtures/LICENSES.md`](./benchmark-fixtures/LICENSES.md). Your own PDFs remain under their original terms and are never included in the repository.
+The framework is licensed under [PolyForm Noncommercial 1.0.0](./LICENSE), which permits noncommercial use, modification, and redistribution. Commercial use requires a separate license from the copyright holder. Copies previously distributed under MIT retain their MIT permissions.
+
+PDFs under `benchmark-fixtures/pdfs/` are redistributed under CC-BY-4.0 with attribution in [`benchmark-fixtures/LICENSES.md`](./benchmark-fixtures/LICENSES.md). Your own PDFs remain under their original terms and are never included in the repository.
 
 ## Inspiration
 
