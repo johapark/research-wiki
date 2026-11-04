@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from itertools import permutations
 
 import pytest
 
@@ -68,14 +69,15 @@ def _ax(aid, title="t", journal_doi=None, abstract="arxiv abstract", authors=("C
 
 def _label(app, brand="Zolgensma", generic="ONASEMNOGENE ABEPARVOVEC-XIOI", **kw):
     """An openFDA label record as `openfda.parse_label` emits it."""
+    set_id = kw.get("set_id", f"set-{app}")
     rec = {k: None for k in S.openfda.LABEL_FIELDS}
-    rec.update(set_id=kw.get("set_id", f"set-{app}"), spl_id=f"spl-{app}",
+    rec.update(set_id=set_id, spl_id=f"spl-{app}",
                effective_date=kw.get("date", "2026-06-16"), brand_names=[brand],
                generic_names=[generic], manufacturer="Novartis Gene Therapies",
                application_numbers=kw.get("apps", [app]), product_type="HUMAN PRESCRIPTION DRUG",
                routes=["INTRAVENOUS"], pharm_classes=[], has_boxed_warning=True,
                indications=kw.get("indications", "1 INDICATIONS AND USAGE for SMA."),
-               url=f"https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid=set-{app}")
+               url=f"https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid={set_id}")
     return rec
 
 
@@ -519,6 +521,77 @@ def test_two_labels_under_one_application_merge(wiki, monkeypatch):
     assert row["sources"] == ["fda-label"]
     assert row["regulatory"]["set_id"] == "original"
     assert row["regulatory"]["application_numbers"] == ["BLA125694", "NDA000001"]
+
+
+@pytest.mark.parametrize(("date", "indications"), [
+    ("2026-09-01", "Current indication."),
+    (None, ""),
+])
+def test_merged_fda_labels_keep_the_first_record_snapshot(wiki, monkeypatch, date, indications):
+    current = _label("BLA125694", set_id="current", date=date, indications=indications)
+    older = _label("BLA125694", brand="Older brand", set_id="older", date="2024-01-01",
+                   indications="A longer, different indication from the older label.")
+    scored_texts = []
+    monkeypatch.setattr(R, "score_candidates",
+                        lambda cands, trig: scored_texts.extend(c.score_text for c in cands) or True)
+    _sources(monkeypatch, labels=[current, older])
+    snap = S.run("q", sources=["fda-label"], today=TODAY)
+    [row] = snap["regulatory"]
+    expected = S.from_fda_label(current)
+    assert row["title"] == expected.title
+    assert row["abstract"] == indications
+    assert row["publication_date"] == date
+    assert row["year"] == expected.year
+    assert row["regulatory"] == expected.regulatory
+    assert scored_texts == [expected.score_text]
+    terminal = C.render(snap, sort="fit", abstracts=True)
+    assert current["url"] in terminal
+    assert older["url"] not in terminal
+    assert older["indications"] not in terminal
+
+
+@pytest.mark.parametrize("order", list(permutations(range(3))))
+def test_fda_bridge_merges_every_existing_group(wiki, monkeypatch, order):
+    labels = [
+        _label("NDA000001", set_id="one", indications="One."),
+        _label("NDA000002", set_id="two", indications="Two, a longer indication."),
+        _label("NDA000001", set_id="bridge", apps=["NDA000001", "NDA000002"],
+               indications="Bridge, the longest indication across these labels."),
+    ]
+    ordered = [labels[i] for i in order]
+    _sources(monkeypatch, labels=ordered)
+    snap = S.run("q", sources=["fda-label"], today=TODAY)
+    [row] = snap["regulatory"]
+    expected = S.from_fda_label(ordered[0])
+    assert row["key"] == expected.key
+    assert row["title"] == expected.title
+    assert row["abstract"] == expected.abstract
+    assert row["regulatory"]["set_id"] == ordered[0]["set_id"]
+    assert row["regulatory"]["url"] == ordered[0]["url"]
+    assert set(row["regulatory"]["application_numbers"]) == {"NDA000001", "NDA000002"}
+    assert snap["counts"]["returned"] == 3
+    assert snap["counts"]["merged"] == 1
+
+
+@pytest.mark.parametrize("hidden_by", ["decline", "wiki"])
+@pytest.mark.parametrize("application", ["NDA000001", "NDA000002", "NDA000003", "NDA000004"])
+def test_fda_bridge_aliases_stay_merged_and_hidden(wiki, monkeypatch, hidden_by, application):
+    _sources(monkeypatch, labels=[
+        _label("NDA000001", set_id="one"),
+        _label("NDA000002", set_id="two", apps=["NDA000002", "NDA000003"]),
+        _label("NDA000001", set_id="bridge", apps=["NDA000001", "NDA000002"]),
+        _label("NDA000003", set_id="later", apps=["NDA000003", "NDA000004"]),
+        _label("NDA000005", set_id="unrelated"),
+    ])
+    if hidden_by == "decline":
+        R.add_decline(f"fda:{application}", "already reviewed", source="search")
+    else:
+        _page(wiki, "references/held-label", title="Held label", type="guidance",
+              document_id=application)
+    snap = S.run("q", sources=["fda-label"], today=TODAY)
+    assert [r["key"] for r in snap["regulatory"]] == ["fda:nda000005"]
+    assert snap["counts"]["merged"] == 2
+    assert snap["counts"]["declined" if hidden_by == "decline" else "in_wiki"] == 1
 
 
 def test_label_without_an_application_number_is_not_a_lead(wiki, monkeypatch):

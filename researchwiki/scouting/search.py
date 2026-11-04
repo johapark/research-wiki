@@ -528,6 +528,30 @@ def page_work_sig(page: Page) -> WorkSig:
                    any(is_preprint_doi(d) for d in dois))
 
 
+def _merge_details(match: Lead, lead: Lead) -> None:
+    """Add aliases while retaining a regulatory lead's complete source record."""
+    for source in lead.sources:
+        if source not in match.sources:
+            match.sources.append(source)
+    for key, value in lead.ids.items():
+        match.ids.setdefault(key, value)
+    if match.regulatory is not None and lead.regulatory is not None:
+        # Text, date, URL and scoring input must all describe the same record,
+        # including when the first record has no date or indications text.
+        apps = list(match.regulatory.get("application_numbers") or [])
+        apps += [a for a in lead.regulatory.get("application_numbers") or [] if a not in apps]
+        match.regulatory["application_numbers"] = apps
+        return
+    if len(lead.abstract) > len(match.abstract):
+        match.abstract = lead.abstract
+    match.retracted = match.retracted or lead.retracted
+    if not match.authors:
+        match.authors = lead.authors
+    match.first_surname = match.first_surname or lead.first_surname
+    match.publication_date = match.publication_date or lead.publication_date
+    match.year = match.year or lead.year
+
+
 def merge(leads: list[Lead]) -> list[Lead]:
     """One lead per work: a shared identifier, or a corroborated title.
 
@@ -537,13 +561,24 @@ def merge(leads: list[Lead]) -> list[Lead]:
     one, through the same normalized title *and* `same_work_by_title`. Trials
     always carry an NCT id and FDA records an application number, so they
     merge on it alone: two labels filed under one BLA become one lead.
+    A label naming several applications joins every matching FDA group,
+    retaining the earliest lead's complete source record and all aliases.
     """
     out: list[Lead] = []
     by_key: dict[str, Lead] = {}
     by_title: dict[str, list[Lead]] = {}
     for lead in leads:
         title = R._norm_title(lead.title) if lead.kind == "paper" else ""
-        match = next((by_key[k] for k in lead.alias_keys() if k in by_key), None)
+        matches = {id(by_key[k]): by_key[k] for k in lead.alias_keys() if k in by_key}
+        match = next(iter(matches.values()), None)
+        if lead.kind == "regulatory" and len(matches) > 1:
+            # Preserve source order, not the arbitrary iteration order of aliases.
+            groups = [m for m in out if id(m) in matches]
+            match = groups[0]
+            for duplicate in groups[1:]:
+                _merge_details(match, duplicate)
+            absorbed = {id(m) for m in groups[1:]}
+            out[:] = [m for m in out if id(m) not in absorbed]
         if match is None and title:
             sig = lead.work_sig()
             match = next((m for m in by_title.get(title, ())
@@ -552,24 +587,8 @@ def merge(leads: list[Lead]) -> list[Lead]:
             out.append(lead)
             match = lead
         else:
-            for s in lead.sources:
-                if s not in match.sources:
-                    match.sources.append(s)
-            for k, v in lead.ids.items():
-                match.ids.setdefault(k, v)
-            if len(lead.abstract) > len(match.abstract):
-                match.abstract = lead.abstract
-            match.retracted = match.retracted or lead.retracted
-            if not match.authors:
-                match.authors = lead.authors
-            match.first_surname = match.first_surname or lead.first_surname
-            match.publication_date = match.publication_date or lead.publication_date
-            match.year = match.year or lead.year
-            if match.regulatory is not None and lead.regulatory is not None:
-                apps = list(match.regulatory.get("application_numbers") or [])
-                apps += [a for a in lead.regulatory.get("application_numbers") or []
-                         if a not in apps]
-                match.regulatory["application_numbers"] = apps
+            _merge_details(match, lead)
+        # Also redirect every absorbed FDA group's aliases to the surviving lead.
         for k in match.alias_keys():
             by_key[k] = match
         if title:

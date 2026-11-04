@@ -43,6 +43,10 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- FDA search merges retain one label's indications, date, URL and scoring
+  text together. Labels carrying multiple application numbers consolidate all
+  matching groups, so duplicate leads cannot survive a decline or wiki match.
+
 - Ingest repairs retain custom author instructions and request every existing
   page section. EVOLVE and DEBUG reject newly missed critical target IDs before
   comparing aggregate quality. Specific repairs reuse the graded PDF's chunk
