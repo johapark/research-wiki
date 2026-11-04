@@ -218,16 +218,40 @@ def tournament_key(draft) -> tuple[float, float, float, float, float, float]:
     )
 
 
+def new_critical_misses(new_scores: dict, prior_scores: dict) -> set[str]:
+    """New exact critical misses in one attempt's fixed target evaluation.
+
+    Missing legacy records are unknown, rather than an empty set. The runner
+    reuses one target packet throughout the attempt; matching positive counts
+    and successful extraction are additional checks against incomparable data.
+    This protects exact misses, not every match-to-partial change.
+    """
+    sets = []
+    for scores in (new_scores, prior_scores):
+        if (scores.get("target_claim_extraction_status") != "extracted"
+                or not scores.get("n_target_claims")
+                or scores.get("target_claim_score") is None
+                or not isinstance(scores.get("missed_target_claims"), list)):
+            return set()
+        misses = scores["missed_target_claims"]
+        if any(not isinstance(m, dict) or not m.get("id") for m in misses):
+            return set()
+        sets.append({m["id"] for m in misses if m.get("importance") == "critical"})
+    if new_scores["n_target_claims"] != prior_scores["n_target_claims"]:
+        return set()
+    return sets[0] - sets[1]
+
+
 def is_strict_improvement(new_draft, prior_winner) -> bool:
     """Generic / DEBUG fitness: replace the winner only on a strict gain on the
-    primary signal. A drift increase is an up-front veto; combined quality then
+    primary signal. Drift increases and new critical misses veto first; quality then
     decides, with reduced drift and BM25 as tie-breakers. Avoids cycles where a
     revision is different-but-not-better.
     """
     a, b = new_draft.scores, prior_winner.scores
     a_drift = a.get("n_drift") or 0
     b_drift = b.get("n_drift") or 0
-    if a_drift > b_drift:
+    if a_drift > b_drift or new_critical_misses(a, b):
         return False
     qa, qb = combined_quality(a), combined_quality(b)
     if qa is not None and qb is not None:
@@ -248,15 +272,15 @@ def is_evolve_improvement(new_draft, prior_winner) -> bool:
     rewrites one weak claim, the page-level combined score can stay flat (one
     claim out of many) while the floor rises — the strict rule discards that,
     defeating the loop's purpose. We credit a floor gain (> FLOOR_MARGIN) only
-    after the primary is a tie and drift hasn't worsened, so a revision can
-    never be accepted while making the primary or drift worse.
+    after the primary is a tie and integrity hasn't worsened, so a revision can
+    never be accepted while making the primary, drift or critical omissions worse.
     """
     a, b = new_draft.scores, prior_winner.scores
     # Integrity is a constraint, not a score axis: no gain in prose quality
     # can compensate for introducing an unsupported number.
     a_drift = a.get("n_drift") or 0
     b_drift = b.get("n_drift") or 0
-    if a_drift > b_drift:
+    if a_drift > b_drift or new_critical_misses(a, b):
         return False
     qa, qb = combined_quality(a), combined_quality(b)
     if qa is not None and qb is not None:

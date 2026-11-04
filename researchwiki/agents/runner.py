@@ -38,7 +38,7 @@ from .runner_support import (
     find_exact_duplicate as _find_exact_duplicate,
     finish_exact_duplicate,
     prepare_keywords,
-    record_revision_decision,
+    record_revision_decision, revision_inputs, make_revision_draft,
     run_entailment_check,
     run_post_promote_memory_evolution,
     record_timed_subphase,
@@ -343,7 +343,7 @@ def run_ingest(
                 ctx.winner = evolved
                 log(f"swap    → evolved beats prior winner; promoted", tag="agent")
             else:
-                log(f"keep    → evolved did not improve (mean/floor/drift); reverting", tag="agent")
+                log(f"keep    → evolved failed quality/floor/integrity comparison; reverting", tag="agent")
                 break
 
         # Phase 6: commit — write the winning draft to sandbox
@@ -592,26 +592,10 @@ def _phase_evolve(ctx: Context, conn, prior_draft, critique):
         critique=critique,
         metadata=ctx.metadata,
         sections=ctx.sections,
-        pdf_full_text=getattr(ctx, "pdf_full_text", None),
+        **revision_inputs(ctx),
         use_stub=ctx.use_stub,
     )
-    new_draft = phases.Draft(
-        text=out.text,
-        model=out.model,
-        temperature=out.temperature,
-        input_tokens=out.input_tokens,
-        output_tokens=out.output_tokens,
-        cache_read_tokens=getattr(out, "cache_read_tokens", 0),
-        cache_write_tokens=getattr(out, "cache_write_tokens", 0),
-        # Inherit the author's catalog trailer. The evolve prompt is built from
-        # `draft.text`, which `split_gloss_trailer` already stripped, so the
-        # revision has no trailer of its own to parse — and a fresh Draft would
-        # silently default both fields to '', losing them the moment the runner
-        # swaps the winner. Inheriting is sound because evolve keeps claims the
-        # critic did not flag essentially unchanged, so the gloss still holds.
-        handle=prior_draft.handle,
-        hook=prior_draft.hook,
-    )
+    new_draft = make_revision_draft(out, prior_draft)
     iter_id = write_iteration(
         attempt_id=ctx.attempt_id,
         paper_stem=ctx.paper_stem,
@@ -626,6 +610,7 @@ def _phase_evolve(ctx: Context, conn, prior_draft, critique):
         model_used=new_draft.model,
         temperature=new_draft.temperature,
         **usage_costs(new_draft),
+        gate_metrics=getattr(out, "evidence_metrics", {}),
         duration_ms=int((time.monotonic() - t0) * 1000),
         conn=conn,
     )
@@ -667,23 +652,10 @@ def _phase_debug(
         gate_reasons=gate.reasons,
         metadata=ctx.metadata,
         sections=ctx.sections,
-        pdf_full_text=getattr(ctx, "pdf_full_text", None),
+        **revision_inputs(ctx),
         use_stub=ctx.use_stub,
     )
-    new_draft = phases.Draft(
-        text=out.text,
-        model=out.model,
-        temperature=out.temperature,
-        input_tokens=out.input_tokens,
-        output_tokens=out.output_tokens,
-        cache_read_tokens=getattr(out, "cache_read_tokens", 0),
-        cache_write_tokens=getattr(out, "cache_write_tokens", 0),
-        # Same trailer inheritance as `_phase_evolve` — DEBUG repairs structure
-        # (drift, KC count), never the headline finding, so the author's handle
-        # and hook survive the repair.
-        handle=ctx.winner.handle,
-        hook=ctx.winner.hook,
-    )
+    new_draft = make_revision_draft(out, ctx.winner)
     iter_id = write_iteration(
         attempt_id=ctx.attempt_id,
         paper_stem=ctx.paper_stem,
@@ -698,6 +670,7 @@ def _phase_debug(
         model_used=new_draft.model,
         temperature=new_draft.temperature,
         **usage_costs(new_draft),
+        gate_metrics=getattr(out, "evidence_metrics", {}),
         duration_ms=int((time.monotonic() - t0) * 1000),
         conn=conn,
     )

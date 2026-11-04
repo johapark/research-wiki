@@ -167,10 +167,13 @@ researchwiki/db/state.db
 turboquant-single-cell-phase0-plan.md
 .agent-runs/
 
-# Internal maintainer-only artifacts (design notes, backfill/calibration
-# helpers). Present in the working tree for the author's use; not shipped
+# Internal maintainer-only utilities (backfill/calibration helpers).
+# Present in the working tree for the author's use; not shipped
 # in the public repo.
 internal/
+
+# Local development documents — plans, design notes, and supporting receipts.
+/dev
 
 # Local state DB — repo-root fallback path (some tools open it here
 # before resolving the canonical ~/.local/share/researchwiki/state.db).

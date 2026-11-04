@@ -20,6 +20,14 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Fixed
+
+- Ingest repairs retain custom author instructions and request every existing
+  page section. EVOLVE and DEBUG reject newly missed critical target IDs before
+  comparing aggregate quality. Specific repairs reuse the graded PDF's chunk
+  index for bounded evidence with provenance; incomplete packets retain the
+  broad source fallback. Passing first drafts incur no extra retrieval or calls.
+
 ## [0.6.0] - 2026-10-28
 
 > **License change:** this release switches the framework from MIT to PolyForm

@@ -27,6 +27,31 @@ def usage_costs(result) -> dict[str, int]:
     }
 
 
+def revision_inputs(ctx) -> dict:
+    """Repairs share the author's instructions and the grader's exact PDF."""
+    return {
+        "pdf_full_text": getattr(ctx, "pdf_full_text", None),
+        "system_prompt_override": getattr(ctx, "author_prompt_override", None),
+        "stem": ctx.paper_stem,
+        "pdf_path": getattr(ctx, "pdf_path", None),
+    }
+
+
+def make_revision_draft(out, prior):
+    """Inherit the catalog trailer stripped from the prior draft's body.
+
+    Both repairs receive the stripped body. They must retain the author's
+    handle and hook when the runner replaces the winner with their output.
+    """
+    return phases.Draft(
+        text=out.text, model=out.model, temperature=out.temperature,
+        input_tokens=out.input_tokens, output_tokens=out.output_tokens,
+        cache_read_tokens=getattr(out, "cache_read_tokens", 0),
+        cache_write_tokens=getattr(out, "cache_write_tokens", 0),
+        handle=prior.handle, hook=prior.hook,
+    )
+
+
 def make_budget_tracker(*, max_model_calls=None, max_tokens=None,
                         max_cost_usd=None, max_wall_seconds=None):
     limits = IngestBudget(max_model_calls, max_tokens, max_cost_usd, max_wall_seconds)
@@ -66,14 +91,19 @@ def record_revision_decision(ctx, conn, draft, *, operator: str,
                              accepted: bool, writer=write_iteration) -> None:
     """Append the keep/reject verdict instead of rewriting the draft event."""
     ctx.next_iter()
+    lost = sorted(fitness.new_critical_misses(draft.scores, ctx.winner.scores))
+    reason = f"operator={operator}; fitness={'improved' if accepted else 'not improved'}"
+    if lost:
+        reason += f"; new critical misses={','.join(lost)}"
     writer(
         attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,
         pdf_filename=ctx.pdf_filename, iteration=ctx.iteration, role="tournament",
         parent_iteration_id=draft.iteration_id,
         grader_scores=draft.scores,
         decision="kept" if accepted else "discarded",
-        decision_reason=f"operator={operator}; fitness={'improved' if accepted else 'not improved'}",
-        gate_metrics={"revision_accepted": accepted, "operator": operator}, conn=conn,
+        decision_reason=reason,
+        gate_metrics={"revision_accepted": accepted, "operator": operator,
+                      "new_critical_misses": lost}, conn=conn,
     )
 
 

@@ -113,8 +113,17 @@ drift, and commentary detection can keep a draft in `.agent-output/`. With
 results also block automatic promotion; provider failures remain errors to fix
 before retrying. `--force-sandbox` deliberately avoids publication.
 `--auto-promote` bypasses failed gates and is a reviewed override, not a repair.
-Revisions receive the full previous draft and source evidence; an increase in
-numeric drift vetoes an evolved draft even if its other scores improve.
+Revisions receive the full previous draft and the same author system prompt,
+including any custom override, and preserve all existing sections. Specific
+repairs reuse the graded PDF's chunk index: up to four queries, two complete
+chunks per issue, a deduplicated 12,000-character packet with provenance, and
+up to 4,000 characters of supplementary context. Missing evidence, excess
+issues, and structural expansion retain the broad source fallback. This adds
+no model calls and no retrieval on a passing first draft. Revision audit rows
+record the evidence route, size, query count, and local time. Both EVOLVE and
+DEBUG reject increased numeric drift or newly missed critical target IDs,
+even if aggregate quality improves; legacy scores lacking comparable target
+evaluation retain the prior comparison rule.
 
 ---
 

@@ -13,11 +13,16 @@ in response to critic notes — distinct from the "memory evolution" step
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from ...grade.salience import anchor_is_substantive
 from .. import llm, prompt_lib
 from .draft import Draft
 from .grade import ClaimDetail
+from .revision_evidence import (
+    broad_revision_evidence as _build_revision_evidence,
+    build_repair_evidence, repair_issues,
+)
 
 
 # ---------- critic ----------
@@ -248,6 +253,7 @@ class EvolveOutput:
     output_tokens: int
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    evidence_metrics: dict = field(default_factory=dict)
 
 
 def evolve(
@@ -257,18 +263,26 @@ def evolve(
     metadata: dict,
     sections: dict,
     pdf_full_text: str | None = None,
+    system_prompt_override: str | None = None,
+    stem: str | None = None,
+    pdf_path: Path | str | None = None,
     use_stub: bool = False,
 ) -> EvolveOutput:
     """Evolve phase — produce a revised draft addressing the critic's notes."""
+    evidence = build_repair_evidence(
+        sections=sections, pdf_full_text=pdf_full_text, stem=stem, pdf_path=pdf_path,
+        issues=repair_issues(critique.coverage_gaps, critique.weak_claims),
+    )
     prompt = _build_evolve_prompt(
         draft.text, critique.notes, metadata, sections,
         pdf_full_text=pdf_full_text,
+        revision_evidence=evidence.text,
     )
     paper_type = (metadata or {}).get("paper_type")
     resp = llm.call(
         phase="evolve",
         prompt=prompt,
-        system=prompt_lib.load_author_system(paper_type),
+        system=prompt_lib.load_author_system(paper_type, override_path=system_prompt_override),
         use_stub=use_stub,
     )
     return EvolveOutput(
@@ -279,45 +293,8 @@ def evolve(
         output_tokens=resp.output_tokens,
         cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
         cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
+        evidence_metrics=evidence.metrics,
     )
-
-
-def _build_revision_evidence(sections: dict, pdf_full_text: str | None) -> str:
-    """Source context shared by EVOLVE and DEBUG.
-
-    Revision used to receive three short section slices even when the authoring
-    phase had fallen back to a document-stratified full-text sample. That made
-    the reviser blind to both the evidence it needed and late draft sections it
-    was instructed to preserve. Keep the curated anchors, then apply the same
-    section-health-aware full-text fallback used by authoring.
-    """
-    parts: list[str] = []
-    for key, label, budget in (
-        ("introduction", "Introduction", 1500),
-        ("methods", "Methods", 2500),
-        ("results", "Results", 2500),
-        ("discussion", "Discussion", 1500),
-        ("figure_captions", "Figure / Table captions", 4000),
-        ("extended_data", "Extended Data captions", 4000),
-    ):
-        excerpt = (sections.get(key) or "").strip()
-        if excerpt:
-            parts.extend([f"## {label}", excerpt[:budget], ""])
-
-    if pdf_full_text:
-        from ...pdf.sections import assess_section_health, stratified_text_sample
-
-        budget = 30_000
-        health = assess_section_health(pdf_full_text, sections)
-        if health.healthy:
-            body = pdf_full_text[:budget]
-            label = "Full PDF text (supplementary context)"
-        else:
-            body = stratified_text_sample(pdf_full_text, budget)
-            label = "Full PDF text (document-stratified fallback)"
-        parts.extend([f"## {label}", body, ""])
-
-    return "\n".join(parts).rstrip()
 
 
 def _build_evolve_prompt(
@@ -327,6 +304,7 @@ def _build_evolve_prompt(
     sections: dict,
     *,
     pdf_full_text: str | None = None,
+    revision_evidence: str | None = None,
 ) -> str:
     return "\n".join([
         "# Prior draft (passed tournament but the critic flagged issues)",
@@ -336,11 +314,12 @@ def _build_evolve_prompt(
         critic_notes,
         "",
         "# PDF excerpts (use these to ground revisions)",
-        _build_revision_evidence(sections, pdf_full_text),
+        (revision_evidence if revision_evidence is not None
+         else _build_revision_evidence(sections, pdf_full_text)),
         "",
         "---",
         "",
-        "Output the FULL revised draft — Summary, Key Contributions, Results — "
+        "Output the FULL revised draft with all existing sections, including any custom sections, "
         "addressing each critic note. Keep claims the critic did not flag "
         "essentially unchanged. Format identical to the prior draft.",
     ])
@@ -361,6 +340,7 @@ class DebugOutput:
     issues_addressed: list[str]   # issue codes the prompt tried to fix
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    evidence_metrics: dict = field(default_factory=dict)
 
 
 # Mapping from gate-rejection text → structured issue code.
@@ -392,6 +372,9 @@ def debug(
     metadata: dict,
     sections: dict,
     pdf_full_text: str | None = None,
+    system_prompt_override: str | None = None,
+    stem: str | None = None,
+    pdf_path: Path | str | None = None,
     use_stub: bool = False,
 ) -> DebugOutput:
     """DEBUG phase — repair a draft that failed structural gate checks.
@@ -421,6 +404,11 @@ def debug(
                     f"{', '.join(cd.numeric_unmatched)}"
                 )
 
+    evidence = build_repair_evidence(
+        sections=sections, pdf_full_text=pdf_full_text, stem=stem, pdf_path=pdf_path,
+        issues=repair_issues([], [c for c in draft.claim_details if c.numeric_unmatched]),
+        broad_required=any(issue != "drift" for issue in issues),
+    )
     prompt = _build_debug_prompt(
         prior_draft=draft.text,
         issues=issues,
@@ -428,12 +416,13 @@ def debug(
         drift_details=drift_details,
         sections=sections,
         pdf_full_text=pdf_full_text,
+        revision_evidence=evidence.text,
     )
     paper_type = (metadata or {}).get("paper_type")
     resp = llm.call(
         phase="debug",
         prompt=prompt,
-        system=prompt_lib.load_author_system(paper_type),
+        system=prompt_lib.load_author_system(paper_type, override_path=system_prompt_override),
         use_stub=use_stub,
     )
     return DebugOutput(
@@ -445,6 +434,7 @@ def debug(
         issues_addressed=issues,
         cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
         cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
+        evidence_metrics=evidence.metrics,
     )
 
 
@@ -456,6 +446,7 @@ def _build_debug_prompt(
     drift_details: list[str],
     sections: dict,
     pdf_full_text: str | None = None,
+    revision_evidence: str | None = None,
 ) -> str:
     instructions: list[str] = []
     if "drift" in issues:
@@ -495,12 +486,12 @@ def _build_debug_prompt(
         *instructions,
         "",
         "# PDF excerpts (use these to ground repairs — verbatim numbers only)",
-        _build_revision_evidence(sections, pdf_full_text),
+        (revision_evidence if revision_evidence is not None
+         else _build_revision_evidence(sections, pdf_full_text)),
         "",
         "---",
         "",
-        "Output the FULL repaired draft — Summary, Key Contributions, "
-        "Methodology and Architecture, Results, Limitations, Related Papers — "
+        "Output the FULL repaired draft with all existing sections, including any custom sections, "
         "fixing only the listed issues. Leave sections that the gate did NOT "
         "flag essentially unchanged. Do not invent facts. Format identical to "
         "the prior draft.",
