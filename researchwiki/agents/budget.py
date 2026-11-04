@@ -63,6 +63,7 @@ class BudgetTracker:
         self.calls = 0
         self.tokens = 0
         self.cost_usd = 0.0
+        self.cost_unknown = False
         self.reserved_tokens = 0
         self.reserved_cost_usd = 0.0
         self.suspended = False
@@ -77,6 +78,11 @@ class BudgetTracker:
         with self._lock:
             self.suspended = False
 
+    def mark_cost_unavailable(self) -> None:
+        """Retain unknown image-call pricing without reporting free work."""
+        with self._lock:
+            self.cost_unknown = True
+
     def snapshot(self) -> dict:
         with self._lock:
             return self._snapshot_unlocked()
@@ -85,7 +91,7 @@ class BudgetTracker:
         return {
             "model_calls": self.calls,
             "tokens": self.tokens,
-            "estimated_cost_usd": round(self.cost_usd, 8),
+            "estimated_cost_usd": None if self.cost_unknown else round(self.cost_usd, 8),
             "reserved_tokens": self.reserved_tokens,
             "reserved_cost_usd": round(self.reserved_cost_usd, 8),
             "wall_seconds": round(time.monotonic() - self.started, 3),
@@ -103,9 +109,9 @@ class BudgetTracker:
 
     def reserve_call(
         self, *, model: str, provider: str, prompt_chars: int, max_tokens: int,
-        free: bool | None = None,
+        free: bool | None = None, image_tokens: int = 0,
     ) -> _Reservation:
-        estimated_input = max(1, prompt_chars // 4)
+        estimated_input = max(1, prompt_chars // 4) + max(0, image_tokens)
         reserved_tokens = estimated_input + max(0, max_tokens)
         # The dispatch layer passes whether its *resolved* endpoint is
         # unmetered. Direct tracker callers retain the historical LM Studio

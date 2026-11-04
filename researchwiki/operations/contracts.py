@@ -29,6 +29,7 @@ RetryPolicy = Literal[
 class IngestOptions(WireModel):
     use_stub: bool = False
     use_semantic: bool = True
+    visual_inspection: bool = False
     verify_claim_entailment: bool = False
     n_drafts: int | None = None  # None preserves phase-config default resolution
     max_evolve: int = 1

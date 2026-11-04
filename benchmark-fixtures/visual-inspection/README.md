@@ -8,8 +8,9 @@ identities and changes. The Python utilities retain the framework's license.
 
 Reference answers were checked by the active coding assistant against PDF
 renders. **Independent human adjudication is pending.** These are diagnostic
-fixtures, not a representative estimate of corpus performance. No model
-performance has been measured. Visual ingest remains optional and off by default.
+fixtures, not a representative estimate of corpus performance. Report model
+identity, usage and latency with any evaluation. Visual ingest remains optional
+and off by default.
 
 ## Cases
 
@@ -55,7 +56,7 @@ restraint.
   [nomination expectations](reference/nomination-expectations.json),
   [mask transformations](reference/transformations.json) and
   [annotation notes](reference/REVIEW.md). Never send these to the candidate model.
-- `build.py`: rebuilds the data from the two bundled, hash-verified PDFs.
+- `build.py`: rebuilds the data from the six bundled, hash-verified PDFs.
 - `benchmark.py`: offline integrity validation, packet preparation and scoring;
   it has no network or model transport.
 

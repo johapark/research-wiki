@@ -267,6 +267,7 @@ def evolve(
     stem: str | None = None,
     pdf_path: Path | str | None = None,
     use_stub: bool = False,
+    visual_evidence: tuple[str, ...] = (),
 ) -> EvolveOutput:
     """Evolve phase — produce a revised draft addressing the critic's notes."""
     evidence = build_repair_evidence(
@@ -276,7 +277,7 @@ def evolve(
     prompt = _build_evolve_prompt(
         draft.text, critique.notes, metadata, sections,
         pdf_full_text=pdf_full_text,
-        revision_evidence=evidence.text,
+        revision_evidence=evidence.text + ("\n\nIndependent PDF prose corroborating inspected visuals:\n" + "\n".join(visual_evidence) if visual_evidence else ""),
     )
     paper_type = (metadata or {}).get("paper_type")
     resp = llm.call(
@@ -376,6 +377,7 @@ def debug(
     stem: str | None = None,
     pdf_path: Path | str | None = None,
     use_stub: bool = False,
+    visual_evidence: tuple[str, ...] = (),
 ) -> DebugOutput:
     """DEBUG phase — repair a draft that failed structural gate checks.
 
@@ -416,7 +418,7 @@ def debug(
         drift_details=drift_details,
         sections=sections,
         pdf_full_text=pdf_full_text,
-        revision_evidence=evidence.text,
+        revision_evidence=evidence.text + ("\n\nIndependent PDF prose corroborating inspected visuals:\n" + "\n".join(visual_evidence) if visual_evidence else ""),
     )
     paper_type = (metadata or {}).get("paper_type")
     resp = llm.call(

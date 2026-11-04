@@ -50,7 +50,7 @@ from ..fsatomic import write_text_atomic
 from ..log import log
 from ..operations.lifecycle import gate_evaluated, observed_attempt, observed_phase
 from .publication import finish_publication
-from ..provenance import specific_author_model
+from .visual_support import phase_visual_inspect, final_publication_gate, visual_commit_metrics
 
 __all__ = ["run_ingest", "_keyword_body_gaps"]
 
@@ -62,6 +62,7 @@ def run_ingest(
     use_stub: bool = False,
     use_semantic: bool = True,
     verify_claim_entailment: bool = False,
+    visual_inspection: bool = False,
     n_drafts: int = 1,
     max_evolve: int = 1,
     max_debug: int = 1,
@@ -96,6 +97,7 @@ def run_ingest(
         use_stub=use_stub,
         use_semantic=use_semantic,
         verify_claim_entailment=verify_claim_entailment,
+        visual_inspection=visual_inspection,
         max_evolve=max_evolve,
         max_debug=max_debug,
         promote_mode=promote_mode,
@@ -230,6 +232,9 @@ def run_ingest(
             log("target-claims ⚠ zero PDF-side claims extracted — nothing to "
                 "cross-check the draft's claims against beyond retrieval",
                 tag="agent")
+
+        if ctx.visual_inspection:
+            phase_visual_inspect(ctx, conn)
 
         # Phase 2.5: crosslink candidates (verified surface for Related Papers)
         ctx.next_iter()
@@ -491,6 +496,8 @@ def _phase_grade(ctx: Context, conn, draft) -> None:
         target_claims=ctx.target_claims,
     )
     coh = coherence.score_coherence(draft.text, page_type="paper")
+    if getattr(ctx, "visual_result", None) is not None:
+        scores["visual_coverage"] = ctx.visual_result.metrics()
     scores["coherence_score"] = coh.score
     scores["coherence_violations"] = coh.violations
     draft.scores = scores
@@ -807,25 +814,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
                 promoted=True, reasons=gate.reasons, warnings=gate.warnings,
             )
 
-    # `promote_to_wiki` refuses a page it cannot attribute, so no mode —
-    # `--auto-promote` included — can land one. Decide that here, where the
-    # sandbox branch keeps the paid draft for review and the run exits 1 as a
-    # review outcome. Reaching promote instead raised PromoteFailed: exit 2,
-    # which batch `--resume` retries by re-running the whole paid pipeline into
-    # the same refusal. Preflight normally stops a config like this before the
-    # first call; this catches what it cannot see.
-    if gate.promoted:
-        winner_model = ctx.winner.model if ctx.winner else None
-        if not specific_author_model(winner_model):
-            gate = promote_mod.GateResult(
-                promoted=False,
-                reasons=[
-                    f"author_model: winning draft's model {winner_model!r} is "
-                    "not an exact model id, so the page cannot record which "
-                    "model authored it"
-                ],
-                warnings=gate.warnings,
-            )
+    gate = final_publication_gate(ctx, gate)
 
     gate_evaluated(ctx, gate)
 
@@ -1075,6 +1064,7 @@ def _phase_commit(ctx: Context, conn) -> Path:
         decision_reason=decision_reason,
         duration_ms=int((time.monotonic() - t0) * 1000),
         gate_metrics={
+            **visual_commit_metrics(ctx),
             "promoted": decision == "committed-to-wiki",
             "sandboxed": decision == "committed-to-sandbox",
             "gate_failures": len(gate.reasons),

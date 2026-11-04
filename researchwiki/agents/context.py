@@ -101,6 +101,7 @@ class Context:
     pdf_filename: str
     use_stub: bool = False
     use_semantic: bool = True
+    visual_inspection: bool = False
     verify_claim_entailment: bool = False  # opt-in per-claim entailment veto (grade.support)
     max_evolve: int = 1
     promote_mode: str = "auto"           # 'auto' | 'always' | 'never' (force-sandbox)
@@ -127,6 +128,11 @@ class Context:
     # Also the real PDF-side claim count. A `claims_count` field sat here until
     # 2026-08-10; it counted markdown bullets in typeset prose and was never read.
     target_claims: object | None = None # L3 output: TargetClaimsOutput; None when phase skipped or failed
+    source_pages: list[str] = field(default_factory=list)
+    visual_inventory: list = field(default_factory=list)
+    visual_source_sections: dict = field(default_factory=dict)
+    visual_source_hash: str | None = None
+    visual_result: object | None = None
     crosslink_candidates: list = field(default_factory=list)   # list[phases.CrosslinkCandidate]
     drafts: list[phases.Draft] = field(default_factory=list)
     winner: phases.Draft | None = None

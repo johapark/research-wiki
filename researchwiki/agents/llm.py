@@ -101,6 +101,7 @@ class LLMResponse:
     output_tokens: int
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    usage_known: bool = True
 
 
 def response_usage(response) -> dict:
@@ -276,6 +277,8 @@ def missing_provider_credentials(*, phases: tuple[str, ...] | None = None) -> li
     _validated_anthropic_base_url()
     providers: set[str] = set()
     for name in model_config.list_phases() if phases is None else phases:
+        if phases is None and name == "visual_inspect":
+            continue  # optional route must not require credentials when disabled
         try:
             providers.add(
                 model_config.canonical_provider_id(
@@ -939,6 +942,9 @@ def call(
     schema: dict | None = None,
     reasoning_effort: str | None = None,
     event_sink: EventRecorder | None = None,
+    images: list | None = None,
+    deadline_seconds: float = 30,
+    request_state: dict | None = None,
 ) -> LLMResponse:
     """Dispatch to the right provider, resolving config from phase or kwargs.
 
@@ -1026,6 +1032,14 @@ def call(
     # forgo the cache discount. Only call_anthropic receives cache_prefix
     # separately (as its own cached block).
     _np_prompt = f"{cache_prefix}\n\n{prompt}" if cache_prefix else prompt
+
+    if images:
+        from .llm_images import dispatch_images
+        return dispatch_images(model=model, provider=provider, prompt=_np_prompt, system=system,
+            temperature=temperature, max_tokens=max_tokens, reasoning_effort=reasoning_effort,
+            rpm=rpm, images=images, phase=phase, use_stub=use_stub, event_sink=event_sink,
+            deadline_seconds=deadline_seconds,
+            configured_bound=cfg.image_token_bound if phase is not None else None, request_state=request_state)
 
     if use_stub:
         return call_stub(

@@ -106,7 +106,7 @@ class ModelCallObserver:
     def finished(self, response) -> None:
         if self.recorder is None:
             return
-        usage = UsageReport() if self.provider == "chat-relay" else UsageReport(
+        usage = UsageReport() if self.provider == "chat-relay" or not getattr(response, "usage_known", True) else UsageReport(
             status="reported", input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
         )

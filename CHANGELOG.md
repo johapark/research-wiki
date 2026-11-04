@@ -22,6 +22,12 @@ the reasoning behind any line below.
 
 ### Added
 
+- Opt-in `agent ingest --visual-inspection`: bounded figure/table nominations,
+  conservative page selection and one OpenAI-compatible image request, with
+  shared ingest budgets, cached readings and separate coverage receipts.
+  Critical visual-only evidence stays gated for source-image review; the
+  default remains off.
+
 - Portable visual-inspection benchmark with 14 inspection cases, 84 answer
   checks and three nomination cases from six CC-BY-4.0 papers. Includes a
   six-case smoke suite, rendered images, separate reference answers, offline

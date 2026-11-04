@@ -52,6 +52,7 @@ def runner_options(options) -> dict:
     return {
         'use_stub': options.use_stub, 'use_semantic': options.use_semantic,
         'verify_claim_entailment': options.verify_claim_entailment,
+        'visual_inspection': options.visual_inspection,
         'n_drafts': drafts, 'max_evolve': options.max_evolve, 'max_debug': options.max_debug,
         'promote_mode': options.promotion,
         'doi_override': options.doi, 'title_override': options.title,

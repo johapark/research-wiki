@@ -132,6 +132,8 @@ def _batch_passthrough_args(args) -> list[str]:
         out.append("--stub")
     if args.no_semantic:
         out.append("--no-semantic")
+    if getattr(args, "visual_inspection", False):
+        out.append("--visual-inspection")
     if args.verify_claim_entailment:
         out.append("--verify-claim-entailment")
     if args.no_cross_link:
@@ -263,6 +265,9 @@ def _execute_ingest(args) -> int:
         if not args.stub:
             from ..agents.llm import preflight_providers
             preflight_providers()
+            if getattr(args, "visual_inspection", False):
+                from ..agents.llm_images import preflight_visual_provider
+                preflight_visual_provider()
         workers = _ingest_batch.resolve_batch_workers(args.workers, stub=args.stub)
         return _ingest_batch.new_batch(
             args.pdfs,
@@ -659,6 +664,8 @@ def build_parser() -> argparse.ArgumentParser:
         "ranking (BM25 + numeric drift + negation only — "
         "faster, less reliable)",
     )
+    p_ingest.add_argument("--visual-inspection", action="store_true",
+                          help="Selectively inspect figures/tables (off by default).")
     p_ingest.add_argument(
         "--verify-claim-entailment",
         action="store_true",

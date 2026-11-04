@@ -135,6 +135,7 @@ class ModelConfig:
     # free-tier configs (Gemini/Gemma) stay under their RPM ceiling instead of
     # bursting into 429s. None = unthrottled. See llm._throttle.
     rpm: int | None = None
+    image_token_bound: int | None = None  # conservative per-image input tokens
 
 
 # Hardcoded zero-config defaults — used only when the implicit
@@ -187,6 +188,7 @@ _FALLBACK_PHASES: dict[str, dict] = {
     "cross_paper_judge": {"role": "judge", "temperature": 0.0, "max_tokens": 400},
     "claim_overlap_judge": {"role": "judge", "temperature": 0.0, "max_tokens": 400},
     "reconcile":         {"role": "extractor"},
+    "visual_inspect":    {"role": "judge", "temperature": 0.0, "max_tokens": 1200},
     "target_claims":     {"role": "judge", "temperature": 0.0, "max_tokens": 4000},
     "claim_support":     {"role": "judge"},
     "synthesis_author":  {"role": "author", "temperature": 0.2, "max_tokens": 10000},
@@ -196,7 +198,7 @@ _FALLBACK_PHASES: dict[str, dict] = {
 
 _MODEL_TOP_LEVEL_KEYS = frozenset({"base_url", "roles", "phases", "ingest"})
 _ROLE_FIELDS = frozenset({
-    "provider", "model", "temperature", "max_tokens", "reasoning_effort", "rpm",
+    "provider", "model", "temperature", "max_tokens", "reasoning_effort", "rpm", "image_token_bound",
 })
 _PHASE_FIELDS = _ROLE_FIELDS | {"role"}
 _INGEST_FIELDS = frozenset({"n_drafts", "target_claims_max_chars"})
@@ -297,6 +299,8 @@ def _validate_routing_fields(
             raise _schema_error(path, f"{label}.temperature must be a finite number")
     if "max_tokens" in fields:
         _validate_positive_int(path, f"{label}.max_tokens", fields["max_tokens"])
+    if fields.get("image_token_bound") is not None:
+        _validate_positive_int(path, f"{label}.image_token_bound", fields["image_token_bound"])
     if fields.get("rpm") is not None:
         _validate_positive_int(path, f"{label}.rpm", fields["rpm"])
     effort = fields.get("reasoning_effort")
@@ -439,6 +443,7 @@ def _load_routing_snapshot(
             max_tokens=int(fields.get("max_tokens", 2000)),
             reasoning_effort=str(re_raw) if re_raw is not None else None,
             rpm=int(rpm_raw) if rpm_raw is not None else None,
+            image_token_bound=fields.get("image_token_bound"),
         )
 
     yaml_phases: dict[str, dict] = {}
@@ -755,6 +760,7 @@ def for_phase(name: str) -> ModelConfig:
         max_tokens=int(spec.get("max_tokens", base.max_tokens)),
         reasoning_effort=re_val,
         rpm=rpm_val,
+        image_token_bound=spec.get("image_token_bound", base.image_token_bound),
     )
     # Env-var override applied last — wins over config/models.yaml. Used by
     # subscription users to flip every phase to chat-relay without editing

@@ -70,3 +70,4 @@ persisted_phase_roles:
   - short_name
   - target_claims
   - tournament
+  - visual_inspect

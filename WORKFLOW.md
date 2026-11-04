@@ -153,6 +153,52 @@ researchwiki agent ingest inbox/*.pdf                          # ≥2 PDFs — a
 researchwiki agent ingest --resume .ingest/batch-<ts>/         # resume after a crash / Ctrl-C
 ```
 
+To inspect selected figures and tables, opt in for that invocation:
+
+```bash
+researchwiki agent ingest inbox/paper.pdf --visual-inspection
+```
+
+Visual inspection is **off by default**. Configuring `visual_inspect` does not
+turn it on. The existing target-claims call nominates at most three questions
+from a caption inventory; a Results reference supplies a fallback when needed.
+The runner checks labeled locations and sends at most two full pages at 110 DPI,
+three million total pixels, and a maximum 4:1 page aspect ratio, in one OpenAI-compatible image request. It caps the
+completion at 1,200 tokens and the inspection at 30 seconds, including throttle
+and parsing. There are no HTTP retries, parameter renegotiations, or redirects.
+Clean text cases need no image request. Unlabeled appended plates remain
+unresolved; the runner does not guess their identity from nearby artwork.
+
+Route `phases.visual_inspect` to an image-capable OpenAI-compatible model; by
+default it inherits `judge`. Anthropic and chat-relay image transports are not
+supported in this first version. A custom model can supply a conservative
+`image_token_bound` (input tokens **per image**); an unknown model without a bound
+is declined before sending under a strict token/cost budget. Only known
+GPT-4o/4.1 families have built-in accounting bounds; proxy aliases need an
+explicit bound even when their image transport works. All existing total
+ingest budgets apply. Missing usage remains unknown and retains the conservative
+budget reservation; unknown pricing is not treated as zero cost.
+
+Visual transcripts remain separate from PDF text, retrieval indexes and claims.
+Only a complete observation independently matching an exact readable prose
+sentence explicitly naming the inspected figure/table can enrich the fixed
+drafting/repair packet. Ambiguous table associations
+and visual-only findings require source-image review. Unresolved critical
+visuals or incomplete selection/inspection block publication, including
+`--auto-promote`; the draft remains in `.agent-output/`. Read the source-hash-bound
+`<stem>-<attempt>.visual.json` receipt there for selected/unselected references,
+observations, coverage gaps and usage. This version does not accept durable human
+review approvals or automatically certify visual-only claims.
+
+Successful readings are cached under `.figures-cache/inspection/`, keyed by
+source bytes, rendering, questions/context, model/provider/endpoint digest and
+policy. A cache hit sends no model request. Failures are not cached. Iteration
+role `visual_inspect`, commit metadata, `--events-file` / `--result-file`, and
+`researchwiki insights` expose coverage separately from text fidelity. The flag
+is forwarded to batch workers; mode, model and budget changes are detected on
+resume. For diagnostic evaluation, see the redistributable
+[visual benchmark](benchmark-fixtures/visual-inspection/README.md).
+
 Passing multiple PDFs to a single invocation enters crash-safe batch mode.
 API-backed providers — and `--stub`, which reaches no provider at all — default
 to four parallel workers; chat-relay defaults to one visible worker because it
