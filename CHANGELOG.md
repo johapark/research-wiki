@@ -20,6 +20,14 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- Portable visual-inspection benchmark with 14 inspection cases, 84 answer
+  checks and three nomination cases from six CC-BY-4.0 papers. Includes a
+  six-case smoke suite, rendered images, separate reference answers, offline
+  packet preparation/scoring, source hashes and attribution. Reference answers
+  are source-checked; independent human adjudication is pending.
+
 ### Fixed
 
 - Ingest repairs retain custom author instructions and request every existing

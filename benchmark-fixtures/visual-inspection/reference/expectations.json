@@ -1,0 +1,1748 @@
+{
+  "v01": {
+    "answers": [
+      {
+        "question_id": "human_mga_elapsed",
+        "value": "31:37:28",
+        "unit": "h:mm:ss",
+        "status": "observed",
+        "region": "Table 3: Elapsed time, HUMAN/MGA",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p17",
+            "pdf_page": 17,
+            "ref_id": "table:3"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p17"
+        ]
+      },
+      {
+        "question_id": "human_hifiasm_elapsed",
+        "value": "20:40:26",
+        "unit": "h:mm:ss",
+        "status": "observed",
+        "region": "Table 3: Elapsed time, HUMAN/hifiasm",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p17",
+            "pdf_page": 17,
+            "ref_id": "table:3"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p17"
+        ]
+      },
+      {
+        "question_id": "human_mga_memory",
+        "value": 206528,
+        "unit": "Mb",
+        "status": "observed",
+        "region": "Table 3: Memory (Mb), HUMAN/MGA",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p17",
+            "pdf_page": 17,
+            "ref_id": "table:3"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p17"
+        ]
+      },
+      {
+        "question_id": "human_hifiasm_memory",
+        "value": 393431,
+        "unit": "Mb",
+        "status": "observed",
+        "region": "Table 3: Memory (Mb), HUMAN/hifiasm",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p17",
+            "pdf_page": 17,
+            "ref_id": "table:3"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p17"
+        ]
+      },
+      {
+        "question_id": "threads",
+        "value": 50,
+        "unit": "threads",
+        "status": "observed",
+        "region": "Table 3 caption",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p17",
+            "pdf_page": 17,
+            "ref_id": "table:3"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p17"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Treating elapsed time as seconds",
+      "Silently rewriting the printed memory unit Mb as GB or MB"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v02": {
+    "answers": [
+      {
+        "question_id": "human_mga_n50",
+        "value": 143.4,
+        "unit": "Mb",
+        "status": "observed",
+        "region": "Table 2: HUMAN/MGA, N50",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p10",
+            "pdf_page": 10,
+            "ref_id": "table:2"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p10"
+        ]
+      },
+      {
+        "question_id": "human_hifiasm_n50",
+        "value": 95.4,
+        "unit": "Mb",
+        "status": "observed",
+        "region": "Table 2: HUMAN/hifiasm, N50",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p10",
+            "pdf_page": 10,
+            "ref_id": "table:2"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p10"
+        ]
+      },
+      {
+        "question_id": "sheep_mga_n50",
+        "value": 105.2,
+        "unit": "Mb",
+        "status": "observed",
+        "region": "Table 2: SHEEP/MGA, N50",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p10",
+            "pdf_page": 10,
+            "ref_id": "table:2"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p10"
+        ]
+      },
+      {
+        "question_id": "sheep_hifiasm_n50",
+        "value": 112.5,
+        "unit": "Mb",
+        "status": "observed",
+        "region": "Table 2: SHEEP/hifiasm, N50",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p10",
+            "pdf_page": 10,
+            "ref_id": "table:2"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p10"
+        ]
+      },
+      {
+        "question_id": "sheep_best_n50",
+        "value": "hifiasm",
+        "unit": null,
+        "status": "observed",
+        "region": "Table 2: SHEEP N50 comparison",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p10",
+            "pdf_page": 10,
+            "ref_id": "table:2"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p10"
+        ]
+      },
+      {
+        "question_id": "sheep_mga_phase_switch",
+        "value": null,
+        "unit": "%",
+        "status": "not_shown",
+        "region": "Table 2: SHEEP/MGA, Phase-switch rate",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p10",
+            "pdf_page": 10,
+            "ref_id": "table:2"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p10"
+        ]
+      },
+      {
+        "question_id": "sheep_hifiasm_phase_switch",
+        "value": null,
+        "unit": "%",
+        "status": "not_shown",
+        "region": "Table 2: SHEEP/hifiasm, Phase-switch rate",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p10",
+            "pdf_page": 10,
+            "ref_id": "table:2"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p10"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "MGA has the largest N50 for every dataset",
+      "A dash is a measured zero phase-switch rate"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v08": {
+    "answers": [
+      {
+        "question_id": "m2_control",
+        "value": "3/11",
+        "unit": null,
+        "status": "observed",
+        "region": "Page 35: Negative sputum culture at M2 / Control",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p35",
+            "pdf_page": 35,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p35"
+        ]
+      },
+      {
+        "question_id": "m2_ibuprofen",
+        "value": "1/11",
+        "unit": null,
+        "status": "observed",
+        "region": "Page 35: same row / Ibuprofen",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p35",
+            "pdf_page": 35,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p35"
+        ]
+      },
+      {
+        "question_id": "m2_rd",
+        "value": -0.18,
+        "unit": "proportion",
+        "status": "observed",
+        "region": "Page 35: same row / Risk Difference",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p35",
+            "pdf_page": 35,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p35"
+        ]
+      },
+      {
+        "question_id": "m2_ci_low",
+        "value": -0.48,
+        "unit": "proportion",
+        "status": "observed",
+        "region": "Page 35: same row / 95% CI",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p35",
+            "pdf_page": 35,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p35"
+        ]
+      },
+      {
+        "question_id": "m2_ci_high",
+        "value": 0.15,
+        "unit": "proportion",
+        "status": "observed",
+        "region": "Page 35: same row / 95% CI",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p35",
+            "pdf_page": 35,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p35"
+        ]
+      },
+      {
+        "question_id": "m2_ci_excludes_zero",
+        "value": false,
+        "unit": null,
+        "status": "observed",
+        "region": "Page 35: first forest interval and zero line",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p35",
+            "pdf_page": 35,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p35"
+        ]
+      },
+      {
+        "question_id": "outcome_n_equals_enrolled_n",
+        "value": false,
+        "unit": null,
+        "status": "observed",
+        "region": "Page 29 caption n=14 per arm versus page 35 outcome n=11",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p29",
+            "pdf_page": 29,
+            "ref_id": "fig:2"
+          },
+          {
+            "image_id": "clinical-p35",
+            "pdf_page": 35,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p29",
+          "clinical-p35"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Changing the displayed negative RD to a positive value from prose",
+      "Inventing CI bounds from nearby narrative",
+      "Using n=14 in place of the visible n=11 outcome denominators"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v09": {
+    "answers": [
+      {
+        "question_id": "control_median",
+        "value": 4,
+        "unit": "months",
+        "status": "observed",
+        "region": "Page 36: Ctrl median at tick 4",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p36",
+            "pdf_page": 36,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p36"
+        ]
+      },
+      {
+        "question_id": "ibuprofen_median",
+        "value": 4,
+        "unit": "months",
+        "status": "observed",
+        "region": "Page 36: Ibu median at tick 4",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p36",
+            "pdf_page": 36,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p36"
+        ]
+      },
+      {
+        "question_id": "p_value",
+        "value": 0.92,
+        "unit": null,
+        "status": "observed",
+        "region": "Page 29: Figure 3 caption",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p29",
+            "pdf_page": 29,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p29"
+        ]
+      },
+      {
+        "question_id": "control_n",
+        "value": 11,
+        "unit": "participants",
+        "status": "observed",
+        "region": "Page 29: Ctrl n=11",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p29",
+            "pdf_page": 29,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p29"
+        ]
+      },
+      {
+        "question_id": "ibuprofen_n",
+        "value": 11,
+        "unit": "participants",
+        "status": "observed",
+        "region": "Page 29: Ibu n=11",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p29",
+            "pdf_page": 29,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p29"
+        ]
+      },
+      {
+        "question_id": "whisker_type",
+        "value": "min_max",
+        "unit": null,
+        "status": "observed",
+        "region": "Page 29: Figure 3 caption, minimum/maximum observed values",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p29",
+            "pdf_page": 29,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p29"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Whiskers are 95% confidence intervals",
+      "Claiming the ibuprofen median is lower"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v11": {
+    "answers": [
+      {
+        "question_id": "sheep_mga_n50",
+        "value": null,
+        "unit": "Mb",
+        "status": "unreadable",
+        "region": "Table 2: masked SHEEP/MGA N50 cell",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p10-masked",
+            "pdf_page": 10,
+            "ref_id": "table:2"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p10-masked"
+        ]
+      },
+      {
+        "question_id": "sheep_hifiasm_n50",
+        "value": 112.5,
+        "unit": "Mb",
+        "status": "observed",
+        "region": "Table 2: SHEEP/hifiasm N50 cell",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "mga-p10-masked",
+            "pdf_page": 10,
+            "ref_id": "table:2"
+          }
+        ],
+        "required_image_ids": [
+          "mga-p10-masked"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Reconstructing a hidden value from memory",
+      "Abstaining from the unmasked readable comparator"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v12": {
+    "answers": [
+      {
+        "question_id": "m2_rd",
+        "value": null,
+        "unit": "proportion",
+        "status": "not_shown",
+        "region": "Page 29 contains captions; the forest plate is absent",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p29",
+            "pdf_page": 29,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p29"
+        ]
+      },
+      {
+        "question_id": "m2_ci_low",
+        "value": null,
+        "unit": "proportion",
+        "status": "not_shown",
+        "region": "Page 29 contains no forest values",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p29",
+            "pdf_page": 29,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p29"
+        ]
+      },
+      {
+        "question_id": "m2_ci_high",
+        "value": null,
+        "unit": "proportion",
+        "status": "not_shown",
+        "region": "Page 29 contains no forest values",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p29",
+            "pdf_page": 29,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p29"
+        ]
+      },
+      {
+        "question_id": "total_enrolled",
+        "value": 28,
+        "unit": "participants",
+        "status": "observed",
+        "region": "Page 29: Figure 2 caption, total n=28",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "clinical-p29",
+            "pdf_page": 29,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "clinical-p29"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Inventing values from a forest plot that was not supplied",
+      "Claiming the caption page contains the actual forest plate"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v13": {
+    "answers": [
+      {
+        "question_id": "tangermeme_time",
+        "value": 1.61,
+        "unit": "s",
+        "status": "observed",
+        "region": "Figure 1c: Tangermeme bar label and Time (s) axis",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      },
+      {
+        "question_id": "seqpro_time",
+        "value": 4.7,
+        "unit": "s",
+        "status": "observed",
+        "region": "Figure 1c: SeqPro bar label",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      },
+      {
+        "question_id": "crested_time",
+        "value": 6.26,
+        "unit": "s",
+        "status": "observed",
+        "region": "Figure 1c: CREsted bar label",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      },
+      {
+        "question_id": "grelu_time",
+        "value": 23.2,
+        "unit": "s",
+        "status": "observed",
+        "region": "Figure 1c: gReLU bar label",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      },
+      {
+        "question_id": "selene_time",
+        "value": 34.7,
+        "unit": "s",
+        "status": "observed",
+        "region": "Figure 1c: Selene SDK bar label",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      },
+      {
+        "question_id": "chrombpnet_time",
+        "value": 48.1,
+        "unit": "s",
+        "status": "observed",
+        "region": "Figure 1c: ChromBPNet bar label",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      },
+      {
+        "question_id": "fastest_tool",
+        "value": "Tangermeme",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 1c: six labeled bars",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      },
+      {
+        "question_id": "timing_runs",
+        "value": 10,
+        "unit": "runs",
+        "status": "observed",
+        "region": "Figure 1 caption: timings averaged across ten runs",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Swapping toolkit timing labels",
+      "Treating seconds as milliseconds",
+      "Using panel-d twenty runs for panel-c timings"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v14": {
+    "answers": [
+      {
+        "question_id": "divergence_axis_scale",
+        "value": "logarithmic",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 1d: powers-of-ten y-axis ticks",
+        "critical": true,
+        "accepted_values": [
+          "log",
+          "log10"
+        ],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      },
+      {
+        "question_id": "captum_profile_exact_median",
+        "value": null,
+        "unit": null,
+        "status": "not_shown",
+        "region": "Figure 1d: box has no numeric median label",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      },
+      {
+        "question_id": "captum_profile_larger",
+        "value": true,
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 1d: two profile-head box plots",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      },
+      {
+        "question_id": "divergence_runs",
+        "value": 20,
+        "unit": "runs",
+        "status": "observed",
+        "region": "Figure 1 caption: convergence deltas from twenty runs",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      },
+      {
+        "question_id": "ablation_after_color",
+        "value": "purple",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 1b: Ablation row Predictions legend",
+        "critical": true,
+        "accepted_values": [
+          "violet"
+        ],
+        "allowed_evidence": [
+          {
+            "image_id": "tangermeme-p2",
+            "pdf_page": 2,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "tangermeme-p2"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Digitizing an exact unlabeled divergence median",
+      "Treating logarithmic tick spacing as linear",
+      "Reusing the marginalization row's blue After color for ablation"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v15": {
+    "answers": [
+      {
+        "question_id": "svm_rejection_zheng68k_f1",
+        "value": 0.92,
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 1A: first classifier row, Zheng 68K column",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "cellbench-p5",
+            "pdf_page": 5,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "cellbench-p5"
+        ]
+      },
+      {
+        "question_id": "svm_rejection_zheng68k_unlabeled",
+        "value": 61.8,
+        "unit": "%",
+        "status": "observed",
+        "region": "Figure 1B: first classifier row, Zheng 68K column",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "cellbench-p5",
+            "pdf_page": 5,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "cellbench-p5"
+        ]
+      },
+      {
+        "question_id": "scpred_zheng68k_f1",
+        "value": 1,
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 1A: scPred row, Zheng 68K column",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "cellbench-p5",
+            "pdf_page": 5,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "cellbench-p5"
+        ]
+      },
+      {
+        "question_id": "scpred_zheng68k_unlabeled",
+        "value": 41,
+        "unit": "%",
+        "status": "observed",
+        "region": "Figure 1B: scPred row, Zheng 68K column",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "cellbench-p5",
+            "pdf_page": 5,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "cellbench-p5"
+        ]
+      },
+      {
+        "question_id": "scina_baron_mouse_f1",
+        "value": null,
+        "unit": null,
+        "status": "not_shown",
+        "region": "Figure 1A: gray SCINA/Baron Mouse cell",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "cellbench-p5",
+            "pdf_page": 5,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "cellbench-p5"
+        ]
+      },
+      {
+        "question_id": "gray_cell_meaning",
+        "value": "not_tested",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 1 caption: gray boxes indicate method could not be tested",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "cellbench-p5",
+            "pdf_page": 5,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "cellbench-p5"
+        ]
+      },
+      {
+        "question_id": "higher_f1_is_full_labeling",
+        "value": false,
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 1A scPred F1=1 and Figure 1B scPred unlabeled=41%",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "cellbench-p5",
+            "pdf_page": 5,
+            "ref_id": "fig:1"
+          }
+        ],
+        "required_image_ids": [
+          "cellbench-p5"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Reading panel-B percentages as F1-scores",
+      "Treating gray cells as zero",
+      "Claiming F1=1 implies every cell is labeled"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v16": {
+    "answers": [
+      {
+        "question_id": "lowest_complexity_dataset",
+        "value": "Xin",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 2B: first and shortest bar",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "cellbench-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "cellbench-p7"
+        ]
+      },
+      {
+        "question_id": "highest_complexity_dataset",
+        "value": "Zheng 68K",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 2B: final and tallest bar",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "cellbench-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "cellbench-p7"
+        ]
+      },
+      {
+        "question_id": "gray_encoding",
+        "value": "cell_populations",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 2: Cell populations colorbar and caption",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "cellbench-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "cellbench-p7"
+        ]
+      },
+      {
+        "question_id": "xin_exact_complexity",
+        "value": null,
+        "unit": null,
+        "status": "not_shown",
+        "region": "Figure 2B: Xin bar has no numeric data label",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "cellbench-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "cellbench-p7"
+        ]
+      },
+      {
+        "question_id": "panel_a_metric",
+        "value": "Median F1-score",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 2A: y-axis label",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "cellbench-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "cellbench-p7"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Inventing the Xin complexity value by interpolation",
+      "Treating darker fill as higher F1-score"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v17": {
+    "answers": [
+      {
+        "question_id": "deepcrispr_roc_auc",
+        "value": 0.981,
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 3a: ROC curve legend, DeepCRISPR",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p9",
+            "pdf_page": 9,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p9"
+        ]
+      },
+      {
+        "question_id": "cfd_roc_auc",
+        "value": 0.929,
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 3a: ROC curve legend, CFD",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p9",
+            "pdf_page": 9,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p9"
+        ]
+      },
+      {
+        "question_id": "deepcrispr_pr_auc",
+        "value": 0.497,
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 3b: PR curve legend, DeepCRISPR",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p9",
+            "pdf_page": 9,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p9"
+        ]
+      },
+      {
+        "question_id": "cfd_pr_auc",
+        "value": 0.247,
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 3b: PR curve legend, CFD",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p9",
+            "pdf_page": 9,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p9"
+        ]
+      },
+      {
+        "question_id": "roc_x_axis",
+        "value": "False Positive Rate",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 3a: ROC curve x axis",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p9",
+            "pdf_page": 9,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p9"
+        ]
+      },
+      {
+        "question_id": "roc_y_axis",
+        "value": "True Positive Rate",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 3a: ROC curve y axis",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p9",
+            "pdf_page": 9,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p9"
+        ]
+      },
+      {
+        "question_id": "pr_x_axis",
+        "value": "Recall",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 3b: PR curve x axis",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p9",
+            "pdf_page": 9,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p9"
+        ]
+      },
+      {
+        "question_id": "pr_y_axis",
+        "value": "Precision",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 3b: PR curve y axis",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p9",
+            "pdf_page": 9,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p9"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Substituting ROC-AUC for PR-AUC",
+      "Swapping precision and recall axes",
+      "Using the on-target Figure 2 AUC in this off-target Figure 3 case"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v18": {
+    "answers": [
+      {
+        "question_id": "independent_top_method",
+        "value": "DeepCRISPR",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 2g: tallest blue bar",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p6",
+            "pdf_page": 6,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p6"
+        ]
+      },
+      {
+        "question_id": "independent_second_method",
+        "value": "CRISPRater",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 2g: second-tallest dark red bar",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p6",
+            "pdf_page": 6,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p6"
+        ]
+      },
+      {
+        "question_id": "independent_exact_correlation",
+        "value": null,
+        "unit": null,
+        "status": "not_shown",
+        "region": "Figure 2g: DeepCRISPR bar has no numeric data label",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p6",
+            "pdf_page": 6,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p6"
+        ]
+      },
+      {
+        "question_id": "independent_metric",
+        "value": "Spearman Correlation",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 2g: y-axis label",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p6",
+            "pdf_page": 6,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p6"
+        ]
+      },
+      {
+        "question_id": "training_x_axis",
+        "value": "Epoch",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 2c: training-curve x axis",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p6",
+            "pdf_page": 6,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p6"
+        ]
+      },
+      {
+        "question_id": "training_y_axis",
+        "value": "Loss",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 2c: training-curve y axis",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "deepcrispr-p6",
+            "pdf_page": 6,
+            "ref_id": "fig:2"
+          }
+        ],
+        "required_image_ids": [
+          "deepcrispr-p6"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Guessing an exact Spearman correlation from an unlabeled bar",
+      "Substituting a nearby ROC-AUC value for Spearman correlation",
+      "Swapping loss and epoch axes"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v19": {
+    "answers": [
+      {
+        "question_id": "dot_color_encodes",
+        "value": "ranking",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 3: Ranking color legend and caption",
+        "critical": true,
+        "accepted_values": [
+          "rank"
+        ],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p7"
+        ]
+      },
+      {
+        "question_id": "dot_size_encodes",
+        "value": "accuracy",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 3: Accuracy size legend and caption",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p7"
+        ]
+      },
+      {
+        "question_id": "red_rank",
+        "value": 1,
+        "unit": "rank",
+        "status": "observed",
+        "region": "Figure 3: red Ranking legend entry",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p7"
+        ]
+      },
+      {
+        "question_id": "light_green_rank",
+        "value": 10,
+        "unit": "rank",
+        "status": "observed",
+        "region": "Figure 3: lightest-green Ranking legend entry",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p7"
+        ]
+      },
+      {
+        "question_id": "scannotate_pbmc10xv2_rank",
+        "value": 1,
+        "unit": "rank",
+        "status": "observed",
+        "region": "Figure 3: bottom row, first dataset column",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p7"
+        ]
+      },
+      {
+        "question_id": "scannotate_pbmc10xv3_rank",
+        "value": 2,
+        "unit": "rank",
+        "status": "observed",
+        "region": "Figure 3: bottom row, second dataset column",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p7"
+        ]
+      },
+      {
+        "question_id": "scannotate_mtg_rank",
+        "value": 5,
+        "unit": "rank",
+        "status": "observed",
+        "region": "Figure 3: bottom row, MTG column, yellow dot",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p7"
+        ]
+      },
+      {
+        "question_id": "scannotate_pbmc10xv2_exact_accuracy",
+        "value": null,
+        "unit": null,
+        "status": "not_shown",
+        "region": "Figure 3: dot has no exact accuracy label",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p7",
+            "pdf_page": 7,
+            "ref_id": "fig:3"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p7"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Treating dot color as accuracy",
+      "Treating rank 10 as best",
+      "Inferring an exact accuracy from dot size",
+      "Using Figure 4's cross-platform dot grid in this Figure 3 case"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  },
+  "v20": {
+    "answers": [
+      {
+        "question_id": "black_annotation",
+        "value": false,
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 6: black square labeled False",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p8",
+            "pdf_page": 8,
+            "ref_id": "fig:6"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p8"
+        ]
+      },
+      {
+        "question_id": "light_gray_annotation",
+        "value": true,
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 6: light-gray square labeled True",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p8",
+            "pdf_page": 8,
+            "ref_id": "fig:6"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p8"
+        ]
+      },
+      {
+        "question_id": "displayed_methods",
+        "value": 6,
+        "unit": "methods",
+        "status": "observed",
+        "region": "Figure 6: six labeled method rows",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p8",
+            "pdf_page": 8,
+            "ref_id": "fig:6"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p8"
+        ]
+      },
+      {
+        "question_id": "column_represents",
+        "value": "cell",
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 6: Cell x-axis label and accompanying description",
+        "critical": true,
+        "accepted_values": [
+          "a cell"
+        ],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p8",
+            "pdf_page": 8,
+            "ref_id": "fig:6"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p8"
+        ]
+      },
+      {
+        "question_id": "all_pbmc_cells_displayed",
+        "value": false,
+        "unit": null,
+        "status": "observed",
+        "region": "Figure 6 caption: cells inconsistently annotated by the top six methods",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p8",
+            "pdf_page": 8,
+            "ref_id": "fig:6"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p8"
+        ]
+      },
+      {
+        "question_id": "scannotate_exact_black_count",
+        "value": null,
+        "unit": "cells",
+        "status": "not_shown",
+        "region": "Figure 6: scAnnotate row has no printed count",
+        "critical": true,
+        "accepted_values": [],
+        "allowed_evidence": [
+          {
+            "image_id": "scannotate-p8",
+            "pdf_page": 8,
+            "ref_id": "fig:6"
+          }
+        ],
+        "required_image_ids": [
+          "scannotate-p8"
+        ]
+      }
+    ],
+    "forbidden_claims": [
+      "Reversing the True/False legend",
+      "Using the selected-cell total as the whole-dataset denominator",
+      "Guessing a row-specific count from black pixel widths"
+    ],
+    "review": "active-assistant source-image review; independent human adjudication pending"
+  }
+}

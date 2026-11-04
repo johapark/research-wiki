@@ -1,0 +1,35 @@
+{
+  "mga-p10-masked": {
+    "kind": "controlled_occlusion",
+    "masked_boxes_pdf": [
+      [
+        319.7336120605469,
+        474.5330505371094,
+        335.37359619140625,
+        479.9010314941406
+      ],
+      [
+        343.9416198730469,
+        453.4370422363281,
+        359.58160400390625,
+        458.8050231933594
+      ]
+    ],
+    "masked_boxes_pixels": [
+      [
+        484,
+        471,
+        517,
+        488
+      ],
+      [
+        521,
+        503,
+        554,
+        520
+      ]
+    ],
+    "original_value": "105.2",
+    "note": "White masks cover the SHEEP MGA N50 cell and matching reference-haplome N50. Other cells are untouched."
+  }
+}

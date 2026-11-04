@@ -6,7 +6,7 @@ pinned. This file covers what those cannot: that real PDFs parse, that caption
 detection survives the bundled venue typesetting styles, and that a render
 produces a decodable PNG of the right shape.
 
-The six PDFs under `benchmark-fixtures/pdfs/` are tracked in git and CC-BY-4.0
+The six original PDFs tested here under `benchmark-fixtures/pdfs/` are tracked in git and CC-BY-4.0
 (see `benchmark-fixtures/LICENSES.md`), so this runs in any clone — unlike
 `papers/`, which is gitignored and commonly a symlink into a personal vault.
 They were added for ingest benchmarking; nothing else was using them as a test

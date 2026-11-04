@@ -1,0 +1,40 @@
+{
+  "n01": {
+    "required_refs": [],
+    "allowed_refs": [],
+    "max_requests": 0,
+    "reason": "The exact source excerpt states four months in both groups; inspection adds no information for this question."
+  },
+  "n02": {
+    "required_refs": [
+      "table:2"
+    ],
+    "allowed_refs": [
+      "table:2"
+    ],
+    "max_requests": 1,
+    "allowed_reasons": [
+      "table_alignment",
+      "missing_detail",
+      "visual_evidence"
+    ],
+    "reason": "Caption alone supplies neither dataset-specific values nor row bindings."
+  },
+  "n03": {
+    "required_refs": [
+      "fig:2",
+      "fig:3"
+    ],
+    "allowed_refs": [
+      "fig:2",
+      "fig:3"
+    ],
+    "max_requests": 2,
+    "allowed_reasons": [
+      "missing_detail",
+      "visual_evidence"
+    ],
+    "requires_local_artwork_resolution": true,
+    "reason": "Only caption titles are supplied; page 29 is not an artwork location."
+  }
+}
