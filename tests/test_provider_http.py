@@ -111,6 +111,46 @@ def test_400_is_retried_by_default_but_rejected_fast_when_opted_in(monkeypatch):
     assert len(calls) == 1
 
 
+def test_reject_when_fails_fast_on_a_named_status_and_keeps_retrying_others(monkeypatch):
+    """openFDA answers a Lucene syntax error with HTTP 500: a bad query, exit 1."""
+    calls = []
+    monkeypatch.setattr(_http.time, "sleep", lambda *_: None)
+
+    def predicate(status, body):
+        return status == "500" and "parse_exception" in body
+
+    monkeypatch.setattr(_http.subprocess, "run",
+                        lambda *a, **k: calls.append(1) or _Proc('{"parse_exception"}\n500'))
+    with pytest.raises(_http.ProviderRequestRejected, match=r"HTTP 500.*parse_exception"):
+        _http.curl_json("https://example.test", provider="test", retries=3,
+                        reject_when=predicate)
+    assert len(calls) == 1
+    calls.clear()
+    monkeypatch.setattr(_http.subprocess, "run",
+                        lambda *a, **k: calls.append(1) or _Proc("overloaded\n500"))
+    with pytest.raises(StructuredProviderUnavailable, match="500"):
+        _http.curl_json("https://example.test", provider="test", retries=2,
+                        reject_when=predicate)
+    assert len(calls) == 2
+    calls.clear()
+    monkeypatch.setattr(_http.subprocess, "run",
+                        lambda *a, **k: calls.append(1) or _Proc("parse_exception\n500"))
+    with pytest.raises(StructuredProviderUnavailable):
+        _http.curl_json("https://example.test", provider="test", retries=2)
+    assert len(calls) == 2
+
+
+def test_reject_when_never_sees_a_200_or_a_404(monkeypatch):
+    seen = []
+    monkeypatch.setattr(_http.subprocess, "run", lambda *a, **k: _Proc("{}\n200"))
+    _http.curl_json("https://example.test", provider="test",
+                    reject_when=lambda status, body: seen.append(status) or True)
+    monkeypatch.setattr(_http.subprocess, "run", lambda *a, **k: _Proc("{}\n404"))
+    assert _http.curl_json("https://example.test", provider="test",
+                           reject_when=lambda status, body: seen.append(status) or True) == {}
+    assert seen == []
+
+
 def test_curl_body_returns_text_and_none_on_404(monkeypatch):
     monkeypatch.setattr(_http.subprocess, "run", lambda *a, **k: _Proc("<feed/>\n200"))
     assert _http.curl_body("https://example.test", provider="test") == "<feed/>"

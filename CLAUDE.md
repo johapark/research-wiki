@@ -27,9 +27,10 @@ Original PDF (immutable) → wiki/{category}/*.md (the single LLM-authored page)
    | Europe PMC REST | bioRxiv/medRxiv keyword search; open-access status + PDF links | `scout search`, `scout search fetch` |
    | bioRxiv/medRxiv | preprint ↔ journal pairing, version, licence | `preprint-check`, `scout search fetch` |
    | ClinicalTrials.gov v2 | trial search (registry record incl. brief summary) | `scout search --source clinicaltrials` |
+   | openFDA | approved drug/biologic labels (BLA/NDA), device PMA + 510(k)/De Novo search | `scout search --source fda` |
    | ORCID Public API | author identity, affiliation | `orcid-lookup` |
 
-   **Metadata vs prose.** Structured fields (ids, dates, DOIs, `pubtype`, licence, trial status/phase) may inform *decisions* and YAML. Prose fields — abstracts, S2 `tldr`, trial summaries, retraction notices, ORCID biographies — are for triage: read them to decide what to ingest, never paraphrase them into the wiki. Two narrow, recorded exceptions on an ingested paper's own page: the S2 `abstract` as fallback source for a PDF that won't text-extract (`abstract_source: semantic-scholar` + `pdf_extraction_note:`), and the S2 `tldr` as a draft seed verified against the PDF (`tldr_source: semantic-scholar`).
+   **Metadata vs prose.** Structured fields (ids, dates, DOIs, `pubtype`, licence, trial status/phase) may inform *decisions* and YAML. Prose fields — abstracts, S2 `tldr`, trial summaries, FDA label indications and approval statements, retraction notices, ORCID biographies — are for triage: read them to decide what to ingest, never paraphrase them into the wiki. Two narrow, recorded exceptions on an ingested paper's own page: the S2 `abstract` as fallback source for a PDF that won't text-extract (`abstract_source: semantic-scholar` + `pdf_extraction_note:`), and the S2 `tldr` as a draft seed verified against the PDF (`tldr_source: semantic-scholar`).
 
    **Open-access PDFs.** `researchwiki scout search fetch <key>` downloads a PDF into `inbox/` when structured metadata says it is openly available — this is how Rule 3's PDF *arrives*, and it then goes through the normal ingest gates. Never route around a paywall or a bot challenge. See [`prompts/scout-search.md`](./prompts/scout-search.md).
 
@@ -567,7 +568,7 @@ CLI wrappers around PubMed / bioRxiv / ORCID. Usage, YAML-recording rules, and w
 
 ### Literature search — `scout search`
 
-`researchwiki scout search "<query>"` queries PubMed, arXiv, bioRxiv/medRxiv (via Europe PMC) and — with `--source clinicaltrials` — ClinicalTrials.gov, drops what the wiki holds or you declined, and ranks the rest like `scout recent`. Every hit is a **discovery-only lead**; `scout search fetch <key>…` downloads open-access PDFs into `inbox/` for `agent ingest`. Trigger: the user asks to search the literature / find papers on a topic, or to download a lead. Read [`prompts/scout-search.md`](./prompts/scout-search.md) before running it.
+`researchwiki scout search "<query>"` queries PubMed, arXiv, bioRxiv/medRxiv (via Europe PMC) and, opt-in, ClinicalTrials.gov (`--source clinicaltrials`) and openFDA labels and device approvals (`--source fda`), drops what the wiki holds or you declined, and ranks the rest like `scout recent`. Every hit is a **discovery-only lead**; `scout search fetch <key>…` downloads open-access PDFs into `inbox/` for `agent ingest` (trials and FDA records are never fetched). Trigger: the user asks to search the literature / find papers on a topic, or to download a lead. Read [`prompts/scout-search.md`](./prompts/scout-search.md) before running it.
 
 ### Agent output — prefer `--json`
 

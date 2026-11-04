@@ -1153,7 +1153,8 @@ It reads structured metadata only and does not validate every existing
 a deprecated compatibility alias.
 
 `scout search "<query>"` is the keyword counterpart: it queries PubMed, arXiv,
-bioRxiv/medRxiv (via Europe PMC) and, opt-in, ClinicalTrials.gov through the
+bioRxiv/medRxiv (via Europe PMC) and, opt-in, ClinicalTrials.gov and openFDA
+(approved drug/biologic labels, device PMA and 510(k)/De Novo) through the
 same `researchwiki` API wrappers, merges duplicates across sources, drops what the
 wiki holds or you declined, and ranks the rest against the corpus the way
 `scout recent` does. Every result is a discovery-only lead. `scout search fetch

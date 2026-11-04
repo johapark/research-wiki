@@ -66,7 +66,44 @@ def _ax(aid, title="t", journal_doi=None, abstract="arxiv abstract", authors=("C
             "journal_ref": "", "abstract": abstract}
 
 
-def _sources(monkeypatch, *, pubmed=(), arxiv=(), preprints=(), trials=(), fail=None):
+def _label(app, brand="Zolgensma", generic="ONASEMNOGENE ABEPARVOVEC-XIOI", **kw):
+    """An openFDA label record as `openfda.parse_label` emits it."""
+    rec = {k: None for k in S.openfda.LABEL_FIELDS}
+    rec.update(set_id=kw.get("set_id", f"set-{app}"), spl_id=f"spl-{app}",
+               effective_date=kw.get("date", "2026-06-16"), brand_names=[brand],
+               generic_names=[generic], manufacturer="Novartis Gene Therapies",
+               application_numbers=kw.get("apps", [app]), product_type="HUMAN PRESCRIPTION DRUG",
+               routes=["INTRAVENOUS"], pharm_classes=[], has_boxed_warning=True,
+               indications=kw.get("indications", "1 INDICATIONS AND USAGE for SMA."),
+               url=f"https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid=set-{app}")
+    return rec
+
+
+def _pma(number, name="FoundationOne CDx", **kw):
+    rec = {k: None for k in S.openfda.PMA_FIELDS}
+    rec.update(pma_number=number, trade_name=name, generic_name="NGS oncology panel",
+               applicant="Foundation Medicine, Inc.", decision_date=kw.get("date", "2017-11-30"),
+               decision_code="APPR", advisory_committee="Pathology", device_class="3",
+               ao_statement=kw.get("ao", "Approval for the device."),
+               url=f"https://www.accessdata.fda.gov/x?id={number}")
+    return rec
+
+
+def _k510(number, name="CellDx-Tissue", **kw):
+    rec = {k: None for k in S.openfda.K510_FIELDS}
+    de_novo = number.startswith("DEN")
+    rec.update(k_number=number, device_name=name, applicant="Datar", decision_date="2026-05-12",
+               decision_code="DENG" if de_novo else "SESE",
+               decision_description="Substantially Equivalent", clearance_type="Traditional",
+               advisory_committee="Pathology", device_class="2", is_de_novo=de_novo,
+               url=f"https://www.accessdata.fda.gov/x?ID={number}")
+    return rec
+
+
+def _sources(monkeypatch, *, pubmed=(), arxiv=(), preprints=(), trials=(),
+             labels=(), pma=(), k510=(), fail=None):
+    """Fake every provider. Each one is replaced, even when given no rows, so a
+    test that asks for every source can never reach the network."""
     def make(name, rows):
         def call(query, **kw):
             if fail and name in fail:
@@ -77,6 +114,10 @@ def _sources(monkeypatch, *, pubmed=(), arxiv=(), preprints=(), trials=(), fail=
     monkeypatch.setattr(S.arxiv, "search", make("arxiv", arxiv))
     monkeypatch.setattr(S.europepmc, "search_preprints", make("preprints", preprints))
     monkeypatch.setattr(S.clinicaltrials, "search", make("clinicaltrials", trials))
+    fda = {"fda-label": make("fda-label", labels), "fda-pma": make("fda-pma", pma),
+           "fda-510k": make("fda-510k", k510)}
+    monkeypatch.setattr(S, "_FDA_RUNNERS", {
+        name: (fda[name], convert) for name, (_, convert) in S._FDA_RUNNERS.items()})
 
 
 # ---------- merge and filter ----------
@@ -337,6 +378,15 @@ def test_one_unavailable_source_still_prints_the_others_then_exits_2(wiki, monke
     assert "arxiv unavailable" in captured.err
 
 
+def test_fda_source_failure_keeps_the_other_fda_sources_and_exits_2(wiki, monkeypatch, capsys):
+    _sources(monkeypatch, labels=[_label("BLA125694")], k510=[_k510("K260235")],
+             fail={"fda-pma": StructuredProviderUnavailable("openfda API unavailable (HTTP 503)")})
+    assert cli.main(["scout", "search", "q", "--source", "fda", "--json"]) == 2
+    snap = json.loads(capsys.readouterr().out)
+    assert snap["sources"]["fda-pma"]["status"] == "unavailable"
+    assert {r["key"] for r in snap["regulatory"]} == {"fda:bla125694", "fda:k260235"}
+
+
 def test_rejected_query_exits_1(wiki, monkeypatch, capsys):
     _sources(monkeypatch, fail={"clinicaltrials": ProviderRequestRejected("HTTP 400: bad")})
     assert C.main(["q", "--source", "clinicaltrials", "--json"]) == 1
@@ -407,15 +457,126 @@ def test_search_declines_share_the_ledger_but_not_s2_negative_seeds(wiki, capsys
     ("PMID:123", "pmid:123"),
     ("pmcid:123", "pmcid:pmc123"),
     ("NCT:NCT01234567", "nct:nct01234567"),
+    ("fda:BLA125694", "fda:bla125694"),
+    ("FDA:p170019", "fda:p170019"),
+    ("fda:DEN210014", "fda:den210014"),
+    ("fda:K260235", "fda:k260235"),
 ])
 def test_search_key_forms_normalize(raw, key):
     assert R.normalize_key(raw) == key
 
 
-@pytest.mark.parametrize("raw", ["123", "pmid:", "nct:nct123", "arxiv:", "pmcid:abc"])
+@pytest.mark.parametrize("raw", ["123", "pmid:", "nct:nct123", "arxiv:", "pmcid:abc",
+                                 "fda:125694", "fda:xyz", "fda:anda061905", "fda:bla12345"])
 def test_bare_or_malformed_search_keys_are_refused(raw):
     with pytest.raises(R.DeclineKeyError, match="not a DOI"):
         R.normalize_key(raw)
+
+
+# ---------- FDA records ----------
+
+def test_fda_records_are_their_own_kind_of_lead(wiki, monkeypatch):
+    _sources(monkeypatch, pubmed=[_pm("1", doi="10.1234/a", title="paper")],
+             labels=[_label("BLA125694")], pma=[_pma("P170019")], k510=[_k510("DEN210014")])
+    snap = S.run("q", sources=["pubmed", *S.FDA_SOURCES], today=TODAY)
+    assert [r["key"] for r in snap["leads"]] == ["10.1234/a"]
+    rows = {r["key"]: r for r in snap["regulatory"]}
+    assert set(rows) == {"fda:bla125694", "fda:p170019", "fda:den210014"}
+    assert snap["counts"]["regulatory"] == 3 and snap["counts"]["papers"] == 1
+    label = rows["fda:bla125694"]
+    assert label["kind"] == "regulatory" and label["fetch_key"] is None
+    assert label["title"] == "Zolgensma (onasemnogene abeparvovec-xioi)"
+    assert label["authors"] == []  # the manufacturer never feeds surname matching
+    assert label["regulatory"]["manufacturer"] == "Novartis Gene Therapies"
+    assert label["abstract"] == "1 INDICATIONS AND USAGE for SMA."
+    assert "indications" not in label["regulatory"]
+    assert rows["fda:den210014"]["venue"] == "FDA De Novo"
+    assert rows["fda:p170019"]["abstract"] == "Approval for the device."
+
+
+def test_fda_records_are_scored_apart_from_papers(wiki, monkeypatch):
+    calls = []
+    monkeypatch.setattr(R, "score_candidates",
+                        lambda cands, trig: calls.append([c.kind for c in cands]) or True)
+    _sources(monkeypatch, pubmed=[_pm("1", doi="10.1234/a")], labels=[_label("BLA125694")])
+    S.run("q", sources=["pubmed", "fda-label"], today=TODAY)
+    assert calls == [["paper"], [], ["regulatory"]]
+
+
+def test_unscored_fda_group_marks_the_snapshot_unscored(wiki, monkeypatch):
+    monkeypatch.setattr(R, "score_candidates",
+                        lambda cands, trig: not any(c.kind == "regulatory" for c in cands))
+    _sources(monkeypatch, pubmed=[_pm("1", doi="10.1234/a")], labels=[_label("BLA125694")])
+    assert S.run("q", sources=["pubmed", "fda-label"], today=TODAY)["scored"] is False
+
+
+def test_two_labels_under_one_application_merge(wiki, monkeypatch):
+    _sources(monkeypatch, labels=[
+        _label("BLA125694", set_id="original"),
+        _label("BLA125694", set_id="repackager", apps=["BLA125694", "NDA000001"]),
+    ])
+    [row] = S.run("q", sources=["fda-label"], today=TODAY)["regulatory"]
+    assert row["sources"] == ["fda-label"]
+    assert row["regulatory"]["set_id"] == "original"
+    assert row["regulatory"]["application_numbers"] == ["BLA125694", "NDA000001"]
+
+
+def test_label_without_an_application_number_is_not_a_lead(wiki, monkeypatch):
+    _sources(monkeypatch, labels=[_label("BLA125694", apps=[])])
+    assert S.run("q", sources=["fda-label"], today=TODAY)["regulatory"] == []
+
+
+def test_fda_records_held_by_a_reference_page_or_declined_never_resurface(wiki, monkeypatch):
+    _page(wiki, "references/novartis-2026-zolgensma-label", title="Zolgensma label",
+          type="guidance", document_id="BLA125694 (Zolgensma USPI)")
+    R.add_decline("fda:P170019", "not our assay", source="search")
+    _sources(monkeypatch,
+             labels=[_label("BLA125694"), _label("BLA125856", brand="Itvisma",
+                                                 apps=["BLA125856", "NDA000002"])],
+             pma=[_pma("P170019")])
+    R.add_decline("fda:nda000002", "dup", source="search")
+    snap = S.run("q", sources=list(S.FDA_SOURCES), today=TODAY)
+    assert snap["regulatory"] == []
+    assert snap["counts"]["in_wiki"] == 1 and snap["counts"]["declined"] == 2
+
+
+def test_fda_group_expands_to_every_fda_source(wiki, monkeypatch, capsys):
+    _sources(monkeypatch, labels=[_label("BLA125694")])
+    assert C.main(["q", "--source", "fda", "--source", "fda-label", "--json"]) == 0
+    snap = json.loads(capsys.readouterr().out)
+    assert snap["sources_requested"] == ["fda-label", "fda-pma", "fda-510k"]
+
+
+def test_terminal_shows_fda_records_with_their_url(wiki, monkeypatch, capsys):
+    _sources(monkeypatch, labels=[_label("BLA125694", indications="FOR-SMA")],
+             k510=[_k510("K260235")])
+    assert C.main(["q", "--source", "fda", "--abstracts"]) == 0
+    out = capsys.readouterr().out
+    assert "## FDA (2)" in out
+    assert "BLA125694 · Novartis Gene Therapies" in out and "boxed warning" in out
+    assert "open: https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid=set-BLA125694" in out
+    assert "510(k) K260235 · Datar · Substantially Equivalent 2026-05-12" in out
+    assert "indications (fda-label, verbatim): FOR-SMA" in out
+    assert "FDA records are not fetched" in out
+    assert "fetch as" not in out
+
+
+def test_source_view_lists_every_paper_source(wiki, monkeypatch):
+    """The source view used to slice `SOURCES[:-1]`, assuming trials came last."""
+    _sources(monkeypatch, pubmed=[_pm("1", doi="10.1234/a")], arxiv=[_ax("2401.00001")],
+             preprints=[{"doi": "10.1101/2026.01.01.000001", "server": "medrxiv", "title": "m",
+                         "authors": ["X Y"], "first_author_surname": "Y",
+                         "pub_date": "2026-09-01", "year": 2026, "abstract": ""}],
+             labels=[_label("BLA125694")])
+    snap = S.run("q", sources=["pubmed", "arxiv", "medrxiv", "fda-label"], today=TODAY)
+    out = C.render(snap, sort="source")
+    for heading in ("## pubmed (1)", "## arxiv (1)", "## medrxiv (1)", "## FDA (1)"):
+        assert heading in out
+
+
+def test_unknown_source_is_a_bug_not_a_silent_trial_search():
+    with pytest.raises(ValueError, match="unknown scout-search source"):
+        S._run_source("nope", "q", limit=1, since=None, max_age_days=1)
 
 
 # ---------- fetch ----------
@@ -455,11 +616,13 @@ def test_fetch_refuses_closed_access_trials_and_ingested_papers(wiki, downloads,
     monkeypatch.setattr(F.europepmc, "oa_status", lambda key: {
         "is_open_access": False, "license": None, "pmid": "1", "pmcid": None,
         "doi": "10.1234/closed", "pdf_urls": []})
-    assert C.main(["fetch", "10.1234/closed", "nct:NCT01234567", "arxiv:2401.00001", "--json"]) == 1
+    assert C.main(["fetch", "10.1234/closed", "nct:NCT01234567", "arxiv:2401.00001",
+                   "fda:BLA125694", "--json"]) == 1
     report = json.loads(capsys.readouterr().out)
     reasons = {e["key"]: e["reason"] for e in report["skipped"]}
     assert reasons["10.1234/closed"] == "not open access per Europe PMC"
     assert "trial" in reasons["nct:nct01234567"]
+    assert "regulatory documents" in reasons["fda:bla125694"]
     assert reasons["10.48550/arxiv.2401.00001"] == "already in the wiki"
     assert downloads == []
 

@@ -1,4 +1,4 @@
-"""Keyword literature search across PubMed, arXiv, bioRxiv/medRxiv, ClinicalTrials.gov.
+"""Keyword literature search across PubMed, arXiv, bioRxiv/medRxiv, ClinicalTrials.gov, openFDA.
 
 ✅ Use when: "is there anything on <topic> I don't have?" — a query, not a
    seed set. Complements `scout recent` (S2 recommendations near existing
@@ -9,8 +9,9 @@
 
 **Rule 1.** Searching is discovery, not grounding: Rule 1 governs what may
 *support* a claim, and nothing here does. Each record keeps the source's
-verbatim abstract (papers) or brief summary (trials) because that is what a
-person reads to decide whether to ingest; it is embedded locally for ranking,
+verbatim abstract (papers), brief summary (trials), or Indications section /
+approval statement (FDA records) because that is what a person reads to decide
+whether to ingest; it is embedded locally for ranking,
 stored in the snapshot and `--json`, and printed in the terminal on
 `--abstracts`. It never reaches page authoring, the claims DB, or a model
 prompt — that takes the ingested PDF.
@@ -23,8 +24,13 @@ still answer. The CLI exits 2 after printing them.
 
 **Ranking reuses `scout recent`'s scorer** (`recent.score_candidates`): fit to
 the nearest wiki paper pages, and matches against synthesis/idea "What would
-update this page" triggers and open proposals. Papers and trials are scored in
-separate calls so trials cannot take a paper's per-trigger slot.
+update this page" triggers and open proposals. Papers, trials and FDA records
+are scored in separate calls so neither of the others can take a paper's
+per-trigger slot.
+
+**FDA records are a third kind of lead** (`kind: "regulatory"`): a product
+label, a PMA, or a 510(k)/De Novo clearance. Like a trial it has no PDF to
+fetch and merges on its own identifier (`fda:<application number>`) only.
 """
 
 from __future__ import annotations
@@ -38,7 +44,7 @@ from ..fsatomic import read_json, write_json_atomic
 from ..log import log
 from ..metadata_sanity import UNUSABLE_SURNAMES, YEAR_TOLERANCE, is_preprint_doi
 from ..paths import web_cache_dir
-from ..providers import arxiv, clinicaltrials, europepmc, pubmed
+from ..providers import arxiv, clinicaltrials, europepmc, openfda, pubmed
 from ..providers._http import ProviderRequestRejected, StructuredProviderUnavailable
 from ..stems import strip_diacritics
 from ..wiki import Page, read_pages
@@ -46,13 +52,20 @@ from . import recent as R
 
 LOG_TAG = "scout-search"
 SCHEMA_VERSION = 1
-SOURCES = ("pubmed", "arxiv", "biorxiv", "medrxiv", "clinicaltrials")
-DEFAULT_SOURCES = ("pubmed", "arxiv", "biorxiv", "medrxiv")
+PAPER_SOURCES = ("pubmed", "arxiv", "biorxiv", "medrxiv")
+FDA_SOURCES = ("fda-label", "fda-pma", "fda-510k")
+SOURCES = (*PAPER_SOURCES, "clinicaltrials", *FDA_SOURCES)
+DEFAULT_SOURCES = PAPER_SOURCES
+#: `--source` shorthands, expanded before the run so the snapshot's
+#: `sources_requested` names the real sources.
+SOURCE_GROUPS = {"fda": FDA_SOURCES}
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 PREPRINT_DOI_PREFIXES = ("10.1101/", "10.64898/")
 _PREPRINT_SOURCES = frozenset({"arxiv", "biorxiv", "medrxiv"})
 _NCT_RE = re.compile(r"\bNCT\d{8}\b", re.IGNORECASE)
+#: FDA application numbers a reference page may record in `document_id`.
+_FDA_APP_RE = re.compile(r"\b(?:BLA|NDA|DEN|P|K)\d{6}\b", re.IGNORECASE)
 
 
 # ---------- same work, by title ----------
@@ -152,9 +165,10 @@ def same_work_by_title(a: WorkSig, b: WorkSig) -> bool:
 
 @dataclass
 class Lead:
-    kind: str                         # "paper" | "trial"
+    kind: str                         # "paper" | "trial" | "regulatory"
     sources: list[str]
-    ids: dict[str, str]               # doi, journal_doi, pmid, pmcid, arxiv_id, nct_id, server, version
+    ids: dict[str, str]               # doi, journal_doi, pmid, pmcid, arxiv_id, nct_id,
+                                      # fda_application, server, version
     title: str
     authors: list[str] = field(default_factory=list)
     venue: str = ""
@@ -162,12 +176,14 @@ class Lead:
     year: int | None = None
     retracted: bool = False
     trial: dict | None = None
+    regulatory: dict | None = None
     fit: float | None = None
     nearest: list[dict] = field(default_factory=list)
     triggers: list[dict] = field(default_factory=list)
     first_seen: str | None = None
-    #: Verbatim abstract (papers). `score_text` is the embedding input and is
-    #: not serialized; for a trial it is title + conditions + interventions.
+    #: Verbatim abstract (papers), brief summary (trials), Indications or
+    #: approval statement (FDA). `score_text` is the embedding input and is not
+    #: serialized; for a trial it is title + conditions + interventions.
     abstract: str = field(default="", repr=False)
     #: The first author's surname as the source recorded it, when it records
     #: one separately (PubMed, Europe PMC). Otherwise parsed from `authors[0]`.
@@ -184,7 +200,9 @@ class Lead:
             return f"pmid:{ids['pmid']}"
         if ids.get("pmcid"):
             return f"pmcid:{ids['pmcid'].lower()}"
-        return f"nct:{ids['nct_id'].lower()}"
+        if ids.get("nct_id"):
+            return f"nct:{ids['nct_id'].lower()}"
+        return f"fda:{ids['fda_application'].lower()}"
 
     @property
     def fetch_key(self) -> str | None:
@@ -194,7 +212,7 @@ class Lead:
         the PDF that can actually be downloaded is the arXiv one.
         """
         ids = self.ids
-        if self.kind == "trial":
+        if self.kind != "paper":
             return None
         if ids.get("arxiv_id"):
             return f"10.48550/arxiv.{ids['arxiv_id'].lower()}"
@@ -220,7 +238,20 @@ class Lead:
             keys.add(f"pmcid:{ids['pmcid'].lower()}")
         if ids.get("nct_id"):
             keys.add(f"nct:{ids['nct_id'].lower()}")
+        for number in self.fda_applications():
+            keys.add(f"fda:{number}")
         return keys
+
+    def fda_applications(self) -> set[str]:
+        """Every FDA application number this lead is filed under, lowercased.
+
+        One label can list several (a combination product, a relabel), and a
+        lead merged from two labels keeps them all.
+        """
+        numbers = {self.ids["fda_application"].lower()} if self.ids.get("fda_application") else set()
+        if self.regulatory:
+            numbers |= {n.lower() for n in self.regulatory.get("application_numbers") or []}
+        return numbers
 
     def dois(self) -> set[str]:
         return {k for k in self.alias_keys() if k.startswith("10.")}
@@ -260,6 +291,8 @@ class Lead:
         }
         if self.trial is not None:
             out["trial"] = self.trial
+        if self.regulatory is not None:
+            out["regulatory"] = self.regulatory
         return out
 
 
@@ -323,6 +356,78 @@ def from_trial(r: dict) -> Lead:
     )
 
 
+def _name(primary: list[str] | str, generic: list[str] | str) -> str:
+    """`Zolgensma (onasemnogene abeparvovec-xioi)`: brand first, generic in brackets."""
+    first = primary[0] if isinstance(primary, list) and primary else primary or ""
+    second = generic[0] if isinstance(generic, list) and generic else generic or ""
+    if first and second and first.lower() != second.lower():
+        return f"{first} ({second.lower() if second.isupper() else second})"
+    return first or second
+
+
+def from_fda_label(r: dict) -> Lead | None:
+    """None when the label names no BLA/NDA: such a lead could not be keyed."""
+    apps = list(r.get("application_numbers") or [])
+    if not apps:
+        return None
+    reg = {"record_type": "label", **{k: r.get(k) for k in openfda.LABEL_FIELDS
+                                      if k != "indications"}}
+    return Lead(
+        kind="regulatory", sources=["fda-label"], ids=_ids(fda_application=apps[0].lower()),
+        title=_name(r.get("brand_names") or [], r.get("generic_names") or []),
+        venue="FDA label", publication_date=r.get("effective_date") or None,
+        year=_year_of(r.get("effective_date")), regulatory=reg,
+        abstract=r.get("indications") or "",
+        score_text="\n".join(x for x in (
+            _name(r.get("brand_names") or [], r.get("generic_names") or []),
+            "; ".join(r.get("pharm_classes") or []), r.get("product_type"),
+            r.get("indications"),
+        ) if x),
+    )
+
+
+def from_fda_pma(r: dict) -> Lead | None:
+    if not r.get("pma_number"):
+        return None
+    reg = {"record_type": "pma", **{k: r.get(k) for k in openfda.PMA_FIELDS if k != "ao_statement"},
+           "application_numbers": [r["pma_number"]]}
+    return Lead(
+        kind="regulatory", sources=["fda-pma"], ids=_ids(fda_application=r["pma_number"].lower()),
+        title=_name(r.get("trade_name") or "", r.get("generic_name") or ""),
+        venue="FDA PMA", publication_date=r.get("decision_date") or None,
+        year=_year_of(r.get("decision_date")), regulatory=reg,
+        abstract=r.get("ao_statement") or "",
+        score_text="\n".join(x for x in (
+            r.get("trade_name"), r.get("generic_name"), r.get("advisory_committee"),
+            r.get("ao_statement"),
+        ) if x),
+    )
+
+
+def from_fda_510k(r: dict) -> Lead | None:
+    if not r.get("k_number"):
+        return None
+    reg = {"record_type": "de_novo" if r.get("is_de_novo") else "510k",
+           **{k: r.get(k) for k in openfda.K510_FIELDS}, "application_numbers": [r["k_number"]]}
+    return Lead(
+        kind="regulatory", sources=["fda-510k"], ids=_ids(fda_application=r["k_number"].lower()),
+        title=r.get("device_name") or "",
+        venue="FDA De Novo" if r.get("is_de_novo") else "FDA 510(k)",
+        publication_date=r.get("decision_date") or None,
+        year=_year_of(r.get("decision_date")), regulatory=reg,
+        score_text="\n".join(x for x in (
+            r.get("device_name"), r.get("advisory_committee"), r.get("decision_description"),
+        ) if x),
+    )
+
+
+_FDA_RUNNERS = {
+    "fda-label": (openfda.search_labels, from_fda_label),
+    "fda-pma": (openfda.search_pma, from_fda_pma),
+    "fda-510k": (openfda.search_510k, from_fda_510k),
+}
+
+
 # ---------- per-source runs ----------
 
 def _run_source(source: str, query: str, *, limit: int,
@@ -339,8 +444,15 @@ def _run_source(source: str, query: str, *, limit: int,
         return [from_preprint(r) for r in europepmc.search_preprints(
             query, servers=[source], limit=limit, since=since, max_age_days=max_age_days)
             if r.get("doi")]
-    return [from_trial(r) for r in clinicaltrials.search(query, limit=limit, since=since,
-                                                         max_age_days=max_age_days)]
+    if source == "clinicaltrials":
+        return [from_trial(r) for r in clinicaltrials.search(query, limit=limit, since=since,
+                                                             max_age_days=max_age_days)]
+    if source in _FDA_RUNNERS:
+        search, convert = _FDA_RUNNERS[source]
+        leads = (convert(r) for r in search(query, limit=limit, since=since,
+                                            max_age_days=max_age_days))
+        return [lead for lead in leads if lead is not None]
+    raise ValueError(f"unknown scout-search source {source!r}")
 
 
 def gather(query: str, sources: list[str], *, limit: int, since: _dt.date | None,
@@ -423,7 +535,8 @@ def merge(leads: list[Lead]) -> list[Lead]:
     their sources and fill identifiers it lacked. A journal paper on PubMed and
     its arXiv preprint merge through the arXiv entry's `journal_doi`; without
     one, through the same normalized title *and* `same_work_by_title`. Trials
-    always carry an NCT id, so they merge on it alone.
+    always carry an NCT id and FDA records an application number, so they
+    merge on it alone: two labels filed under one BLA become one lead.
     """
     out: list[Lead] = []
     by_key: dict[str, Lead] = {}
@@ -452,6 +565,11 @@ def merge(leads: list[Lead]) -> list[Lead]:
             match.first_surname = match.first_surname or lead.first_surname
             match.publication_date = match.publication_date or lead.publication_date
             match.year = match.year or lead.year
+            if match.regulatory is not None and lead.regulatory is not None:
+                apps = list(match.regulatory.get("application_numbers") or [])
+                apps += [a for a in lead.regulatory.get("application_numbers") or []
+                         if a not in apps]
+                match.regulatory["application_numbers"] = apps
         for k in match.alias_keys():
             by_key[k] = match
         if title:
@@ -466,6 +584,7 @@ class WikiIndex:
     dois: set[str]
     titles: dict[str, list[WorkSig]]
     ncts: set[str]
+    fda_apps: set[str] = field(default_factory=set)
 
     @classmethod
     def from_pages(cls, pages: list[Page]) -> "WikiIndex":
@@ -477,7 +596,9 @@ class WikiIndex:
                 titles.setdefault(title, []).append(page_work_sig(p))
         ncts = {m.lower() for p in pages
                 for m in _NCT_RE.findall(p.str_field("document_id"))}
-        return cls(dois, titles, ncts)
+        fda_apps = {m.lower() for p in pages
+                    for m in _FDA_APP_RE.findall(p.str_field("document_id"))}
+        return cls(dois, titles, ncts, fda_apps)
 
     def holds(self, lead: Lead) -> bool:
         """Held under a shared DOI, or a title the page's own record corroborates.
@@ -488,6 +609,8 @@ class WikiIndex:
         """
         if lead.kind == "trial":
             return (lead.ids.get("nct_id") or "").lower() in self.ncts
+        if lead.kind == "regulatory":
+            return bool(lead.fda_applications() & self.fda_apps)
         if lead.dois() & self.dois:
             return True
         sig = lead.work_sig()
@@ -556,15 +679,18 @@ def run(
                                  declined=set(declines), cutoff=since)
     papers = [x for x in leads if x.kind == "paper"]
     trials = [x for x in leads if x.kind == "trial"]
+    regulatory = [x for x in leads if x.kind == "regulatory"]
     triggers = R.collect_triggers(pages)
-    scored_papers = R.score_candidates(papers, triggers)
-    scored = R.score_candidates(trials, triggers) and scored_papers
+    # One call per kind, every call made: `a and b` would skip scoring b.
+    scored = all([R.score_candidates(group, triggers)
+                  for group in (papers, trials, regulatory)])
     if leads and not scored:
         log("WARN: page index or embedding model unavailable — leads are unranked "
             "and unmatched; run `researchwiki reindex`", tag=LOG_TAG)
     mark_first_seen(leads, today)
     updates, rest = R.rank(papers)
     trial_updates, trial_rest = R.rank(trials)
+    fda_updates, fda_rest = R.rank(regulatory)
     snapshot = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": _dt.datetime.now().replace(microsecond=0).isoformat(),
@@ -574,12 +700,14 @@ def run(
         "since": since.isoformat() if since else None,
         "sources": status,
         "counts": {"returned": len(raw), "merged": len(merged), **counts,
-                   "papers": len(papers), "trials": len(trials)},
+                   "papers": len(papers), "trials": len(trials),
+                   "regulatory": len(regulatory)},
         "scored": scored,
         "triggers_indexed": len(triggers),
         "page_matches": [x.to_dict() for x in updates],
         "leads": [x.to_dict() for x in rest],
         "trials": [x.to_dict() for x in trial_updates + trial_rest],
+        "regulatory": [x.to_dict() for x in fda_updates + fda_rest],
     }
     digest = hashlib.md5(
         "|".join([query, ",".join(sources), snapshot["since"] or ""]).encode()
