@@ -4,7 +4,7 @@
 Citation mode uses only structured Semantic Scholar metadata. Recent mode asks
 Semantic Scholar for newly published papers near a seed set and ranks them
 locally, with no model calls. Search mode runs a keyword query against PubMed,
-arXiv, bioRxiv/medRxiv (via Europe PMC) and ClinicalTrials.gov, ranks the
+arXiv, bioRxiv/medRxiv (via Europe PMC), ClinicalTrials.gov and openFDA, ranks the
 leads the same way, and `scout search fetch` downloads open-access PDFs into
 `inbox/`. Web mode is an agent-handoff protocol: the CLI itself performs no
 search and quarantines only a minimal source receipt as discovery-only.

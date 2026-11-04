@@ -12,7 +12,15 @@ import json
 
 import pytest
 
-from researchwiki.providers import _http, arxiv, biorxiv, clinicaltrials, europepmc, pubmed
+from researchwiki.providers import (
+    _http,
+    arxiv,
+    biorxiv,
+    clinicaltrials,
+    europepmc,
+    openfda,
+    pubmed,
+)
 from researchwiki.providers._http import ProviderRequestRejected, StructuredProviderUnavailable
 
 EFETCH = """<?xml version="1.0" ?>
@@ -79,7 +87,7 @@ ATOM_ERROR = """<?xml version="1.0" encoding="UTF-8"?>
 
 @pytest.fixture
 def cache(tmp_path, monkeypatch):
-    for mod in (pubmed, arxiv, europepmc, clinicaltrials):
+    for mod in (pubmed, arxiv, europepmc, clinicaltrials, openfda):
         monkeypatch.setattr(mod, "web_cache_dir", lambda: tmp_path)
         monkeypatch.setattr(mod.time, "sleep", lambda *_: None)
     return tmp_path
@@ -287,5 +295,150 @@ def test_search_transports_opt_into_fail_fast_400(monkeypatch):
     monkeypatch.setattr(clinicaltrials, "curl_json", fake)
     europepmc._curl_json("https://x.test")
     clinicaltrials._curl_json("https://x.test")
-    assert seen == {"europepmc": True, "clinicaltrials": True}
+    monkeypatch.setattr(openfda, "curl_json", fake)
+    openfda._curl_json("https://x.test")
+    assert seen == {"europepmc": True, "clinicaltrials": True, "openfda": True}
     assert _http.curl_json.__kwdefaults__["reject_400"] is False
+
+
+# ---------- openFDA ----------
+
+#: Trimmed from real responses (probed 2026-11-04). The label keeps one long
+#: section the parser must drop, so the "no label prose on disk" test has teeth.
+LABEL = {
+    "set_id": "68cd4f06-70e1-40d8-bedb-609ec0afa471",
+    "id": "a1b2c3",
+    "effective_time": "20260616",
+    "boxed_warning": ["WARNING: SERIOUS LIVER INJURY"],
+    "indications_and_usage": ["1 INDICATIONS AND USAGE  ZOLGENSMA is an adeno-associated "
+                              "virus vector-based gene therapy\n indicated for SMA."],
+    "clinical_studies": ["LONG-CLINICAL-STUDIES-SECTION"],
+    "openfda": {"application_number": ["BLA125694", "ANDA061905"],
+                "brand_name": ["Zolgensma"],
+                "generic_name": ["ONASEMNOGENE ABEPARVOVEC-XIOI"],
+                "manufacturer_name": ["Novartis Gene Therapies, Inc."],
+                "product_type": ["HUMAN PRESCRIPTION DRUG"],
+                "route": ["INTRAVENOUS"],
+                "pharm_class_epc": ["Adeno-associated Virus Vector-based Gene Therapy [EPC]"]},
+}
+PMA = {
+    "pma_number": "P170019", "supplement_number": "", "applicant": "Foundation Medicine, Inc.",
+    "trade_name": "FoundationOne CDx",
+    "generic_name": "Next generation sequencing oncology panel",
+    "product_code": "PQP", "advisory_committee_description": "Pathology",
+    "expedited_review_flag": "Y", "decision_date": "2017-11-30", "decision_code": "APPR",
+    "ao_statement": "Approval for the FoundationOne CDx (F1CDx).  This device is NGS-based.",
+    "street_1": "400 Summer St.", "openfda": {"device_class": "3"},
+}
+K510 = {
+    "k_number": "DEN210014", "device_name": "EaseVRx", "applicant": "Appliedvr, Inc.",
+    "decision_date": "2021-11-16", "decision_code": "DENG", "decision_description": "Unknown",
+    "clearance_type": "Direct", "advisory_committee_description": "Neurology",
+    "product_code": "QRA", "contact": "a person", "openfda": {"device_class": "2"},
+}
+
+
+def test_label_parse_is_the_declared_schema_without_long_sections():
+    rec = openfda.parse_label(LABEL)
+    assert set(rec) == set(openfda.LABEL_FIELDS)
+    assert rec["application_numbers"] == ["BLA125694"]  # an ANDA is never a lead's identity
+    assert rec["effective_date"] == "2026-06-16"
+    assert rec["has_boxed_warning"] is True
+    assert rec["indications"].startswith("1 INDICATIONS AND USAGE ZOLGENSMA is an")
+    assert "\n" not in rec["indications"]
+    assert rec["url"] == ("https://dailymed.nlm.nih.gov/dailymed/lookup.cfm"
+                          "?setid=68cd4f06-70e1-40d8-bedb-609ec0afa471")
+    assert "LONG-CLINICAL-STUDIES-SECTION" not in json.dumps(rec)
+
+
+def test_device_parses_are_their_declared_schemas():
+    pma = openfda.parse_pma(PMA)
+    assert set(pma) == set(openfda.PMA_FIELDS)
+    assert pma["expedited_review"] is True and pma["device_class"] == "3"
+    assert pma["ao_statement"] == "Approval for the FoundationOne CDx (F1CDx). This device is NGS-based."
+    assert pma["url"].endswith("pma.cfm?id=P170019")
+    assert "Summer" not in json.dumps(pma)
+    k = openfda.parse_510k(K510)
+    assert set(k) == set(openfda.K510_FIELDS)
+    assert k["is_de_novo"] is True and k["url"].endswith("denovo.cfm?ID=DEN210014")
+    assert "a person" not in json.dumps(k)
+    assert openfda.parse_510k({**K510, "k_number": "K260235"})["url"].endswith("pmn.cfm?ID=K260235")
+
+
+def test_cp1252_artefacts_in_names_are_repaired():
+    """openFDA stores `™` as U+0099; a terminal would print a control character."""
+    assert openfda.parse_510k({**K510, "device_name": "Oncomine \x99 Dx"})["device_name"] == "Oncomine ™ Dx"
+    assert openfda.parse_pma({**PMA, "trade_name": "Signatera\x99 CDx\x81"})["trade_name"] == "Signatera™ CDx"
+
+
+@pytest.mark.parametrize(("query", "expected"), [
+    ("prime editing", '("prime" AND "editing")'),
+    ('"gene therapy" sickle', '("gene therapy" AND "sickle")'),
+    ("car-t OR tcr", '("car-t" OR "tcr")'),
+    ('(car-t OR "chimeric antigen receptor") persistence',
+     '(( "car-t" OR "chimeric antigen receptor" ) AND "persistence")'),
+    ('indications_and_usage:"sickle cell"', '(indications_and_usage:"sickle cell")'),
+    ("openfda.brand_name:Kymriah", "(openfda.brand_name:Kymriah)"),
+    ("Kymriah: tisagenlecleucel", '("Kymriah:" AND "tisagenlecleucel")'),
+])
+def test_openfda_query_building(query, expected):
+    assert openfda.build_query(query) == expected
+
+
+def test_label_words_are_scoped_to_what_the_product_is_for():
+    """A bare word matches anywhere in ~110 KB of label prose; scope it."""
+    q = openfda.build_query("aav OR crispr", fields=("a", "b"))
+    assert q == '((a:"aav" OR b:"aav") OR (a:"crispr" OR b:"crispr"))'
+    assert openfda.build_query('indications_and_usage:"x" y', fields=("a",)) == \
+        '(indications_and_usage:"x" y)'  # field syntax: the user scoped it already
+
+
+def test_openfda_filters_and_window_stay_outside_the_users_or():
+    import datetime as dt
+    label = openfda.build_query("a OR b", filters=openfda.LABEL_FILTER, date_field="effective_time",
+                                since=dt.date(2025, 1, 2), today=dt.date(2026, 11, 4))
+    assert label == ('("a" OR "b") AND openfda.application_number:(BLA* OR NDA*) '
+                     "AND effective_time:[20250102 TO 20261104]")
+    device = openfda.build_query("ngs", filters=openfda.PMA_FILTER, date_field="decision_date",
+                                 since=dt.date(2025, 1, 2), today=dt.date(2026, 11, 4))
+    assert device == '("ngs") AND supplement_number:"" AND decision_date:[2025-01-02 TO 2026-11-04]'
+
+
+def test_openfda_search_caches_parsed_records_and_hides_the_key(cache, monkeypatch):
+    monkeypatch.setenv("OPENFDA_API_KEY", "sekrit-fda")
+    seen = []
+
+    def fake(url, *, secret_query=None, retries=3):
+        seen.append((url, secret_query))
+        return {"meta": {}, "results": [LABEL]}
+
+    monkeypatch.setattr(openfda, "_curl_json", fake)
+    [rec] = openfda.search_labels("gene therapy", limit=5)
+    assert rec["set_id"] == LABEL["set_id"]
+    [(url, secret)] = seen
+    assert "sekrit" not in url and secret == {"api_key": "sekrit-fda"}
+    assert "limit=5" in url and "drug/label.json" in url
+    assert "sort=effective_time%3Adesc" in url  # openFDA has no relevance order
+    assert "indications_and_usage%3A%22gene%22" in url
+    on_disk = "".join(p.read_text(encoding="utf-8") for p in cache.rglob("openfda__*.json"))
+    assert on_disk and "LONG-CLINICAL-STUDIES-SECTION" not in on_disk
+    assert not any("sekrit" in p.name for p in cache.rglob("*"))
+    assert openfda.search_labels("gene therapy", limit=5) == [rec]  # served from cache
+    assert len(seen) == 1
+
+
+def test_openfda_no_match_404_is_zero_results(cache, monkeypatch):
+    monkeypatch.setattr(openfda, "_curl_json", lambda url, **kw: {})
+    assert openfda.search_pma("nothing") == []
+    assert openfda.search_510k("nothing") == []
+
+
+@pytest.mark.parametrize(("status", "body", "rejected"), [
+    ("500", json.dumps({"error": {"code": "SERVER_ERROR",
+                                  "details": "[parse_exception] parse_exception: EOF"}}), True),
+    ("500", json.dumps({"error": {"code": "SERVER_ERROR", "message": "overloaded"}}), False),
+    ("500", "<html>gateway</html>", False),
+    ("503", json.dumps({"error": {"details": "parse_exception"}}), False),
+])
+def test_openfda_parse_error_is_a_rejected_query(status, body, rejected):
+    assert openfda._parse_error(status, body) is rejected

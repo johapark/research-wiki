@@ -16,6 +16,10 @@ Two more distinctions arrived with keyword search (`scout search`):
   a query parameter would otherwise be visible to `ps`, echoed by the `fetch`
   log line, and baked into a readable cache filename. `secret_query` parameters
   travel in a curl config read from stdin; everything else sees the bare URL.
+- **Some APIs reject a bad query with another status.** openFDA answers a
+  Lucene syntax error with HTTP 500 and a `parse_exception` body. Its caller
+  passes `reject_when(status, body)` to recognize that refusal and fail fast,
+  without treating every 500 from that server as the user's fault.
 
 `curl_download` is the one binary path: open-access PDFs into `inbox/`. It
 follows redirects by hand so every hop's host is checked against an allowlist
@@ -119,6 +123,7 @@ def _request(
     secret_query: Mapping[str, str] | None,
     parse: Callable[[str], T],
     reject_400: bool = False,
+    reject_when: Callable[[str, str], bool] | None = None,
 ) -> T | None:
     """GET `url`; `parse(body)` the 200 response. None on 404.
 
@@ -129,6 +134,10 @@ def _request(
     `ProviderRequestRejected` and report the query as rejected, while the
     older DOI/ORCID lookups have no handler for it and keep the
     retry-then-unavailable behaviour they always had.
+
+    `reject_when(status, body)` names any other response that means "this
+    request is malformed": it raises `ProviderRequestRejected` at once instead
+    of retrying. It sees every non-200, non-404 status.
     """
     shown = redact(url)
     last_problem = "unknown transport failure"
@@ -166,10 +175,11 @@ def _request(
         status = status.strip()
         if status == "404":
             return None
-        if status == "400" and reject_400:
+        if (status == "400" and reject_400) or (
+                status != "200" and reject_when is not None and reject_when(status, body)):
             snippet = " ".join(body.split())[:200]
             raise ProviderRequestRejected(
-                f"{provider} rejected the request (HTTP 400){': ' + snippet if snippet else ''}"
+                f"{provider} rejected the request (HTTP {status}){': ' + snippet if snippet else ''}"
             )
         if status != "200":
             last_problem = f"HTTP {status or 'unknown'}"
@@ -204,11 +214,12 @@ def curl_json(
     headers: Iterable[str] = (),
     secret_query: Mapping[str, str] | None = None,
     reject_400: bool = False,
+    reject_when: Callable[[str, str], bool] | None = None,
 ) -> dict:
     """GET JSON via curl, preserving not-found vs unavailable semantics."""
     data = _request(url, provider=provider, retries=retries, headers=headers,
                     secret_query=secret_query, parse=_json_object,
-                    reject_400=reject_400)
+                    reject_400=reject_400, reject_when=reject_when)
     return {} if data is None else data
 
 
@@ -220,11 +231,12 @@ def curl_body(
     headers: Iterable[str] = (),
     secret_query: Mapping[str, str] | None = None,
     reject_400: bool = False,
+    reject_when: Callable[[str, str], bool] | None = None,
 ) -> str | None:
     """GET a text body (Atom, XML) via curl. None on 404."""
     return _request(url, provider=provider, retries=retries, headers=headers,
                     secret_query=secret_query, parse=lambda body: body,
-                    reject_400=reject_400)
+                    reject_400=reject_400, reject_when=reject_when)
 
 
 def _host(url: str) -> str:

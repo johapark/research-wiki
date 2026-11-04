@@ -20,6 +20,30 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- `scout search --source fda` searches openFDA: approved drug and biologic
+  labels (BLA/NDA only, so CBER cell and gene therapies are included and OTC,
+  unapproved and generic-only labels are not), original PMA device approvals,
+  and 510(k) clearances including De Novo grants (`fda-label`, `fda-pma`,
+  `fda-510k` individually). Each record is a third kind of lead,
+  `regulatory`, in its own `## FDA` section and `regulatory` key in `--json`,
+  scored apart from papers and trials. Its triage text is the verbatim label
+  Indications or PMA approval statement; manufacturer, application numbers,
+  boxed-warning flag, device class and decision ride along, with a DailyMed or
+  accessdata.fda.gov URL. Keys are `fda:<application number>` and work with
+  `--decline`. Labels sharing any application number merge into one lead that
+  keeps the first label's text, date, URL and scoring input together and
+  answers to every number, so a decline or wiki match on any of them hides
+  it. A reference page whose `document_id:` names the number hides
+  the lead. `fetch` refuses FDA keys, since a label is not a paper. openFDA
+  ORs space-separated terms and has no relevance order, so plain words are
+  ANDed and scoped to what the record is about, and results are newest first.
+  A Lucene syntax error (openFDA's HTTP 500 `parse_exception`) is a rejected
+  query, exit 1, not an outage. `OPENFDA_API_KEY` is optional and is handled
+  like `NCBI_API_KEY`. The `--json` additions (`regulatory`,
+  `counts.regulatory`) are additive.
+
 ### Fixed
 
 - Ingest repairs retain custom author instructions and request every existing

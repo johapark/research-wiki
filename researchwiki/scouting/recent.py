@@ -584,6 +584,8 @@ _PREFIXED_KEY_RES = (
     re.compile(r"pmid:\d{1,9}"),
     re.compile(r"pmcid:pmc\d{1,9}"),
     re.compile(r"nct:nct\d{8}"),
+    # An FDA application number: drug/biologic label (BLA/NDA), PMA, 510(k), De Novo.
+    re.compile(r"fda:(?:bla|nda|den|p|k)\d{6}"),
 )
 _ARXIV_KEY_RE = re.compile(
     r"(?:arxiv:|https?://(?:www\.|export\.)?arxiv\.org/(?:abs|pdf)/)"
@@ -606,7 +608,9 @@ def normalize_key(value: str) -> str:
     DOI, a decline that reports success and does nothing.
 
     The declines ledger is shared with `scout search`, so its key forms are
-    accepted too: `pmid:<n>`, `pmcid:pmc<n>`, `nct:nct<8 digits>`, and arXiv
+    accepted too: `pmid:<n>`, `pmcid:pmc<n>`, `nct:nct<8 digits>`, FDA
+    application numbers (`fda:bla125694`, `fda:p170019`, `fda:k260235`,
+    `fda:den210014`), and arXiv
     spellings (`arxiv:2401.01234v2`, `arxiv.org/abs/…`), which become the
     paper's `10.48550/arxiv.<id>` DOI. A bare number is never accepted — it
     names no database.
@@ -634,7 +638,7 @@ def normalize_key(value: str) -> str:
         return low
     raise DeclineKeyError(
         f"{value!r} is not a DOI, a Semantic Scholar paper URL, s2:<paper-id>, "
-        "arxiv:<id>, pmid:<n>, pmcid:PMC<n>, or nct:NCT<n>"
+        "arxiv:<id>, pmid:<n>, pmcid:PMC<n>, nct:NCT<n>, or fda:<BLA|NDA|P|K|DEN><6 digits>"
     )
 
 
