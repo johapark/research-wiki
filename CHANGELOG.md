@@ -32,7 +32,10 @@ the reasoning behind any line below.
   Indications or PMA approval statement; manufacturer, application numbers,
   boxed-warning flag, device class and decision ride along, with a DailyMed or
   accessdata.fda.gov URL. Keys are `fda:<application number>` and work with
-  `--decline`. A reference page whose `document_id:` names the number hides
+  `--decline`. Labels sharing any application number merge into one lead that
+  keeps the first label's text, date, URL and scoring input together and
+  answers to every number, so a decline or wiki match on any of them hides
+  it. A reference page whose `document_id:` names the number hides
   the lead. `fetch` refuses FDA keys, since a label is not a paper. openFDA
   ORs space-separated terms and has no relevance order, so plain words are
   ANDed and scoped to what the record is about, and results are newest first.
@@ -42,10 +45,6 @@ the reasoning behind any line below.
   `counts.regulatory`) are additive.
 
 ### Fixed
-
-- FDA search merges retain one label's indications, date, URL and scoring
-  text together. Labels carrying multiple application numbers consolidate all
-  matching groups, so duplicate leads cannot survive a decline or wiki match.
 
 - Ingest repairs retain custom author instructions and request every existing
   page section. EVOLVE and DEBUG reject newly missed critical target IDs before
