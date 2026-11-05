@@ -1182,6 +1182,9 @@ def call(
             output_tokens=response.output_tokens,
             cache_read_tokens=response.cache_read_tokens,
             cache_write_tokens=response.cache_write_tokens,
+            # A relay answer is unmetered ($0, per WORKFLOW.md); its model label
+            # is never priced, which must not read as an unpriced served model.
+            **({"free": True} if p == "chat-relay" else {}),
         )
     observer.finished(response)
     return response

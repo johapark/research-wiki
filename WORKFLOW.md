@@ -199,7 +199,8 @@ than becoming a review veto. Read the source-hash-bound
 `<stem>-<attempt>.visual.json` receipt there for selected/unselected references,
 observations, coverage gaps and usage. Receipts retain the served model name;
 when its cloud pricing is missing, cost stays unknown and the budget retains the
-conservative cost charge while settling known token usage. This version does not
+conservative cost charge while settling known token usage (chat-relay answers are
+unmetered and settle free). This version does not
 accept durable human review approvals or automatically certify visual-only claims.
 
 Successful readings are cached under `.figures-cache/inspection/`, keyed by

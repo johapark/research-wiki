@@ -40,7 +40,10 @@ the reasoning behind any line below.
   paraphrases cannot clear critical review gates. Missing references named by
   critical target claims remain blocking beside located Results visuals.
   Receipts preserve the served model; unpriced cloud responses retain a
-  conservative budget charge and report unknown cost.
+  conservative budget charge and report unknown cost. Chat-relay answers
+  still settle free, so they do not exhaust `--max-cost-usd`.
+- Numeric drift checks read a middle-dot decimal in the source PDF
+  (`96·5%`) as its point form, so a page writing `96.5%` no longer drifts.
 
 - Ingest repairs retain custom author instructions and request every existing
   page section. EVOLVE and DEBUG reject newly missed critical target IDs before

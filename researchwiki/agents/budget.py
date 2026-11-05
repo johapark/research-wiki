@@ -177,6 +177,10 @@ class BudgetTracker:
         # A router may return an unpriced served model after we reserved using
         # a priced request alias. Keep the conservative cost charge while
         # settling known token usage, and expose the missing price as unknown.
+        # Only a metered call can miss a price. Unmetered work settles free:
+        # local endpoints via the reservation, and chat-relay via `free=True`
+        # from the dispatch layer, since its "chat-relay:<via>" label names the
+        # responding agent, not a served model.
         cost_unavailable = not unmetered and model_config.rate_for(model) is None
         if unmetered:
             actual_cost = 0.0

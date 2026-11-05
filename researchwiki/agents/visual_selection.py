@@ -15,8 +15,10 @@ PRIORITIES = ('critical', 'high', 'normal')
 # and "stable 24 h" from reading as Table 3 / Table 24; the series prefix is
 # captured so a "Supplementary Fig. 2" or "Extended Data Fig. 2" mention is
 # never mistaken for main Figure 2 (or vice versa). Target-claim locations also
-# use the documented "ED Fig." shorthand.
-_SERIES = r'(?:(\b(?:Extended\s+Data|ED\.?|Supplementary(?:\s+Data)?))\s+)?'
+# use the documented "ED Fig." shorthand. That shorthand is case-sensitive and
+# takes no period: "...discharged from the ED. Table 2 lists..." ends a
+# sentence on the emergency department and must stay main Table 2.
+_SERIES = r'(?:(\b(?:Extended\s+Data|(?-i:ED)|Supplementary(?:\s+Data)?))\s+)?'
 _MENTION_RE = re.compile(_SERIES + r'\b(Fig(?:ure)?s?|Tables?)\b\.?\s*(\d+)(?:[a-z])?\b', re.I)
 
 

@@ -100,7 +100,7 @@ def test_missing_critical_claim_reference_stays_blocking(inspection, monkeypatch
     assert not publication_gate(result).promoted
 
 
-@pytest.mark.parametrize('label', ['Extended Data Fig.', 'ED Fig.', 'ED. Fig.'])
+@pytest.mark.parametrize('label', ['Extended Data Fig.', 'ED Fig.'])
 def test_located_extended_data_reference_does_not_create_missing_main_gap(tmp_path, monkeypatch, label):
     monkeypatch.setattr(llm, 'call', lambda **kw: pytest.fail('incomplete selection sends no request'))
     pdf = tmp_path / 'source.pdf'
@@ -175,3 +175,45 @@ def test_inspection_receipts_and_cache_keep_served_model(inspection, monkeypatch
     else:
         assert cold.estimated_cost_usd is None
     assert warm.cache_hit and warm.estimated_cost_usd == 0 and len(calls) == 1
+
+
+def test_sentence_ending_on_ed_abbreviation_is_not_extended_data():
+    """"ED" as emergency department ending a sentence must stay main Table 2."""
+    from researchwiki.agents.visual_selection import mentioned_refs, missing_result_refs, build_inventory
+    prose = 'Most patients were discharged from the ED. Table 2 lists the admission outcomes.'
+    assert mentioned_refs(prose) == {'table:2'}
+    inventory = build_inventory(['Table 2. Admission outcomes'], {'results': prose})
+    assert inventory[0].main_result
+    assert missing_result_refs({'results': prose}, inventory) == []
+
+
+def test_chat_relay_calls_settle_free_under_a_cost_budget(monkeypatch):
+    """A relay label is never priced; that must not exhaust a dollar budget."""
+    cfg = model_config.ModelConfig('chat-relay', 'gpt-5.6-luna', 0, 8000)
+    monkeypatch.setattr(model_config, 'for_phase', lambda *a: cfg)
+    monkeypatch.setattr(llm, 'call_chat_relay',
+                        lambda **kw: llm.LLMResponse('ok', 'chat-relay:claude-code', 0, 10000, 2000))
+    tracker = BudgetTracker(IngestBudget(max_cost_usd=0.05))
+    with activate(tracker):
+        for _ in range(20):
+            llm.call(phase='target_claims', prompt='x' * 40000)
+    snapshot = tracker.snapshot()
+    assert snapshot['estimated_cost_usd'] == 0 and snapshot['reserved_cost_usd'] == pytest.approx(0)
+
+
+@pytest.mark.parametrize('page, drift', [
+    ('Survival was 96.5% (95% CI 94.1–98.0).', []),   # extractor's point form
+    ('Survival was 96·5% (95% CI 94·1–98·0).', []),   # copied as printed
+    ('Survival was 97.5%.', ['97.5']),                 # a wrong value still drifts
+])
+def test_middle_dot_decimals_in_the_pdf_match_point_decimals(page, drift):
+    """Target claims rewrite `96·5%` as `96.5%`; that must not drift."""
+    from researchwiki.grade.primitives import check_numerics
+    pdf = 'Overall survival at 12 months was 96·5% (95% CI 94·1–98·0); 10 withdrew.'
+    assert check_numerics(page, pdf, pdf)[1] == drift
+
+
+def test_dot_operator_multiplication_is_not_read_as_a_decimal():
+    from researchwiki.grade.primitives import check_numerics
+    pdf = 'Cells were seeded at 2⋅10 per well.'
+    assert check_numerics('Seeded at 2.10 per well.', pdf, pdf)[1] == ['2.10']
