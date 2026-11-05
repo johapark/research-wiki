@@ -267,7 +267,8 @@ def _execute_ingest(args) -> int:
             preflight_providers()
             if getattr(args, "visual_inspection", False):
                 from ..agents.llm_images import preflight_visual_provider
-                preflight_visual_provider()
+                preflight_visual_provider(max_tokens=getattr(args, "max_tokens", None),
+                                          max_cost_usd=getattr(args, "max_cost_usd", None))
         workers = _ingest_batch.resolve_batch_workers(args.workers, stub=args.stub)
         return _ingest_batch.new_batch(
             args.pdfs,

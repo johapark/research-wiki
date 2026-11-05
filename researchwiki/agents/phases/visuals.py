@@ -11,25 +11,28 @@ import time
 import pypdfium2
 from filelock import FileLock
 
+from ...errors import EnvironmentFailure
 from ...fsatomic import file_sha256, _write_text_atomic_unlocked
-from ...pdf.figures import ARTWORK_FLOOR
+from ...pdf.figures import ARTWORK_FLOOR, page_artwork_fraction
 from ...pdf.render import render_page
 from .. import llm, model_config
 from ..llm_images import ImageInput
-from ..visual_evidence import parse_observations
+from ..visual_evidence import candidate_quotes, parse_observations
 from ..visual_selection import choose_requests, missing_result_refs
 
-POLICY_VERSION = 'visual-v1-review-only-unless-verbatim-prose'
+POLICY_VERSION = 'visual-v2-review-only-unless-offered-prose'
 SYSTEM = """Inspect only the supplied source pages and specified reference/questions.
 Verify the requested label is on the image. Do not guess a plate's identity.
 Report visible labels, units, conditions, qualifications and uncertainty. Do not
 invent exact values from unlabeled plots, significance, statistics or causality.
 Return JSON only: {"observations":[{"ref_id":"fig:2","page":2,"answered":true,
 "observation":"...","visible_labels":"...","units_conditions":"...",
-"uncertainty":"...","source_quote":"..."}]}.
-Use answered=false for absent, ambiguous or unreadable evidence. source_quote may
-be an exact complete independently supplied prose sentence supporting the WHOLE
-observation including association/qualifications; otherwise use an empty string.
+"uncertainty":"","source_quote":"..."}]}.
+Use answered=false for absent, ambiguous or unreadable evidence. uncertainty is
+an empty string when there is none. source_quote: copy one sentence verbatim from
+prose_candidates[ref_id] when that sentence states the whole observation including
+association/qualifications, and state no value in observation that the sentence
+does not; otherwise use an empty string.
 No self-certification: visual-only observations require source-image review.
 """
 
@@ -68,20 +71,6 @@ class VisualResult:
             'visual_cost_usd': self.estimated_cost_usd}
 
 
-def _artwork(page) -> float:
-    width, height = page.get_size()
-    total = 0.0
-    for obj in page.get_objects(max_depth=8):
-        if obj.type not in (pypdfium2.raw.FPDF_PAGEOBJ_PATH, pypdfium2.raw.FPDF_PAGEOBJ_IMAGE):
-            continue
-        try:
-            left, bottom, right, top = obj.get_bounds()
-            total += max(0, right-left) * max(0, top-bottom)
-        except Exception:
-            continue
-    return min(1, total / (width * height)) if width * height else 0
-
-
 def resolve_page(doc, entry) -> int | None:
     """Check only labeled candidates; never seek an unlabeled appended plate."""
     ref = entry.source
@@ -92,7 +81,7 @@ def resolve_page(doc, entry) -> int | None:
     for number in candidates:
         page = doc[number - 1]
         try:
-            if ref.kind == 'Table' or _artwork(page) >= ARTWORK_FLOOR:
+            if ref.kind == 'Table' or page_artwork_fraction(page) >= ARTWORK_FLOOR:
                 artwork.append(number)
         finally:
             page.close()
@@ -174,11 +163,22 @@ def inspect_visuals(*, pdf_path: Path, pages: list[str], sections: dict, invento
                           source_sha256=expected_source_hash or '')
     requests = choose_requests(inventory, getattr(target_claims, 'visual_requests', []),
                                getattr(target_claims, 'claims', []))
-    result.unresolved.extend({'request': {'ref_id': ref, 'priority': 'critical'},
+    # An unlocated Results reference is a recorded gap. It blocks publication
+    # only when nothing Results-cited was located, i.e. when the main-result
+    # slot would otherwise go uninspected; beside a located main result it is
+    # a review warning in the receipt.
+    gap_priority = 'high' if any(entry.main_result for entry in inventory) else 'critical'
+    result.unresolved.extend({'request': {'ref_id': ref, 'priority': gap_priority},
                               'reason': 'missing_caption_location'}
                              for ref in missing_result_refs(sections, inventory))
     result.unselected = [entry.ref_id for entry in inventory
                          if entry.ref_id not in {req.ref_id for req in requests}]
+    if requests and result.selection_status != 'complete':
+        # The publication gate already vetoes an incomplete selection, so a
+        # paid image request could not change the outcome. Record the review.
+        result.unresolved.extend({'request': req.to_dict(), 'reason': 'selection_incomplete'}
+                                 for req in requests)
+        requests = []
     if not requests:
         if result.unresolved and not result.source_sha256:
             result.source_sha256 = file_sha256(pdf_path)
@@ -187,7 +187,8 @@ def inspect_visuals(*, pdf_path: Path, pages: list[str], sections: dict, invento
     result.model = cfg.model
     result.source_sha256 = file_sha256(pdf_path)
     if expected_source_hash is not None and result.source_sha256 != expected_source_hash:
-        raise ValueError("PDF source changed after text extraction")
+        # Same condition and class as phase_extract's check: exit 2, not a bug.
+        raise EnvironmentFailure('PDF source changed after text extraction; re-run the ingest')
     cache_dir = cache_dir or Path('.figures-cache') / 'inspection'
     cache_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -200,19 +201,25 @@ def inspect_visuals(*, pdf_path: Path, pages: list[str], sections: dict, invento
     result.preparation_ms = int((time.monotonic() - started) * 1000)
     if not images:
         return _finish_coverage(result)
-    context = {}
+    # Keyed by reference, not page: two references on one page each keep
+    # their own caption window.
+    context, candidates = {}, {}
     for item in result.selected:
+        ref_id = item['request']['ref_id']
         text = pages[item['page'] - 1]
         offset = text.find(item.get('caption', ''))
         start = max(0, offset - 1000) if offset >= 0 else 0
-        context[str(item['page'])] = text[start:start + 2400]
-    prompt = json.dumps({'selected': result.selected, 'source_context': context}, ensure_ascii=False)
+        context[ref_id] = text[start:start + 2400]
+        candidates[ref_id] = candidate_quotes(sections, ref_id)
+    prompt = json.dumps({'selected': result.selected, 'source_context': context,
+                         'prose_candidates': candidates}, ensure_ascii=False)
     endpoint = '(stub)' if use_stub else llm.resolve_openai_endpoint().url
     identity = {'pdf': result.source_sha256, 'selected': result.selected, 'context': context,
+                'prose_candidates': candidates,
                 'model_config': asdict(cfg), 'completion_cap': min(1200, cfg.max_tokens),
                 'endpoint_sha256': hashlib.sha256(endpoint.encode()).hexdigest(),
                 'image_sha256': [hashlib.sha256(image.data).hexdigest() for image in images],
-                'system': SYSTEM, 'policy': POLICY_VERSION, 'schema_version': 1, 'stub': use_stub}
+                'system': SYSTEM, 'policy': POLICY_VERSION, 'schema_version': 2, 'stub': use_stub}
     result.cache_key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     receipt = cache_dir / f'{result.cache_key}.json'
     # The cache lock is inside its ignored namespace, with a bounded wait.
@@ -255,6 +262,10 @@ def inspect_visuals(*, pdf_path: Path, pages: list[str], sections: dict, invento
                         'usage': {'input_tokens': result.input_tokens, 'output_tokens': result.output_tokens,
                                   'known': result.usage_known}, 'policy': POLICY_VERSION}
                     _write_text_atomic_unlocked(receipt, json.dumps(cached_record, indent=2))
+    except EnvironmentFailure:
+        # House rule 1 (errors.py): a provider/environment fault propagates as
+        # exit 2 so batch --resume retries it, instead of becoming a review veto.
+        raise
     except Exception as exc:
         result.request_count = request_state.get("outbound_requests", 0)
         result.request_ms = int((time.monotonic() - t0) * 1000) if "t0" in locals() else 0

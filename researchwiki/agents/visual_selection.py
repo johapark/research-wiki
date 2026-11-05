@@ -5,10 +5,42 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass
 import re
 
-from ..pdf.figures import FigureRef, locate_in_texts
+from ..pdf.figures import FigureRef, is_caption_line, locate_in_texts
 
 REASONS = ('missing_detail', 'table_alignment', 'visual_evidence', 'conflict')
 PRIORITIES = ('critical', 'high', 'normal')
+
+
+# A figure/table mention in prose. The leading word boundary keeps "notable 3"
+# and "stable 24 h" from reading as Table 3 / Table 24; the series prefix is
+# captured so a "Supplementary Fig. 2" or "Extended Data Fig. 2" mention is
+# never mistaken for main Figure 2 (or vice versa).
+_SERIES = r'(?:(Extended\s+Data|Supplementary(?:\s+Data)?)\s+)?'
+_MENTION_RE = re.compile(_SERIES + r'\b(Fig(?:ure)?s?|Tables?)\b\.?\s*(\d+)(?:[a-z])?\b', re.I)
+
+
+def ref_id_for(kind: str, number: int, extended: bool) -> str:
+    return ('ed' if extended else '') + ('table' if kind.lower().startswith('table') else 'fig') + f':{number}'
+
+
+def mentioned_refs(text: str) -> set[str]:
+    """Main and Extended Data ref IDs named in `text`; Supplementary is excluded."""
+    found = set()
+    for match in _MENTION_RE.finditer(text or ''):
+        series = (match[1] or '').lower()
+        if series.startswith('supplementary'):
+            continue  # exhaustive supplementary inspection is outside this phase
+        found.add(ref_id_for(match[2], int(match[3]), bool(series)))
+    return found
+
+
+def mentions(text: str, ref_id: str) -> bool:
+    return ref_id in mentioned_refs(text)
+
+
+def _prose_only(text: str) -> str:
+    """Drop caption lines: a Results caption alone isn't a prose dependency."""
+    return '\n'.join(line for line in text.splitlines() if not is_caption_line(line))
 
 
 @dataclass(frozen=True)
@@ -33,17 +65,11 @@ def build_inventory(pages: list[str], sections: dict) -> list[VisualEntry]:
     results = sections.get('results') or ''
     if not isinstance(results, str):
         results = str(results)
+    cited = mentioned_refs(_prose_only(results))
     entries = []
     for ref in locate_in_texts(pages):
-        prefix = ('ed' if ref.extended else '') + ('table' if ref.kind == 'Table' else 'fig')
-        label = rf"{'Tables?' if ref.kind == 'Table' else r'Fig(?:ure)?s?'}\.?\s*{ref.number}(?:[a-z])?\b"
-        if ref.extended:
-            label = r'Extended\s+Data\s+' + label
-        # Exclude caption lines: a Results caption alone isn't a prose dependency.
-        prose = '\n'.join(line for line in results.splitlines()
-                          if not re.match(r'^\s*(?:Extended Data )?(?:Fig|Table)', line))
-        entries.append(VisualEntry(f'{prefix}:{ref.number}', ref,
-                                  bool(re.search(label, prose, re.I))))
+        ref_id = ref_id_for(ref.kind, ref.number, ref.extended)
+        entries.append(VisualEntry(ref_id, ref, ref_id in cited))
     return sorted(entries, key=lambda e: (not e.main_result, e.source.extended,
                                          e.source.page, e.ref_id))
 
@@ -120,14 +146,12 @@ def parse_requests(data: dict, entries: list[VisualEntry]) -> tuple[list[VisualR
 def choose_requests(entries: list[VisualEntry], nominated: list[VisualRequest],
                     claims: list | None = None) -> list[VisualRequest]:
     """Main-results fallback occupies a slot even if nominations overlook it."""
+    claim_refs = [(PRIORITIES.index(claim.importance),
+                   mentioned_refs(claim.location + ' ' + claim.content))
+                  for claim in claims or [] if claim.importance in PRIORITIES]
+
     def relevance(entry):
-        ref = entry.source
-        label = rf"{'Tables?' if ref.kind == 'Table' else r'Fig(?:ure)?s?'}\.?\s*{ref.number}(?:[a-z])?\b"
-        if ref.extended:
-            label = r'Extended\s+Data\s+' + label
-        weights = [PRIORITIES.index(claim.importance) for claim in claims or []
-                   if claim.importance in PRIORITIES and
-                   re.search(label, claim.location + ' ' + claim.content, re.I)]
+        weights = [weight for weight, refs in claim_refs if entry.ref_id in refs]
         return min(weights) if weights else 3
     candidates = [entry for entry in entries if entry.main_result or relevance(entry) == 0]
     main = min(candidates, key=lambda entry: (relevance(entry), entry.source.page, entry.ref_id), default=None)
@@ -158,10 +182,4 @@ def missing_result_refs(sections: dict, inventory: list[VisualEntry]) -> list[st
     if not isinstance(results, str):
         return []
     known = {entry.ref_id for entry in inventory}
-    mentioned = set()
-    for match in re.finditer(r'(Extended\s+Data\s+|Supplementary\s+(?:Data\s+)?)?(Fig(?:ure)?s?|Tables?)\.?\s*(\d+)', results, re.I):
-        if match[1] and match[1].lower().startswith('supplementary'):
-            continue  # exhaustive supplementary inspection is outside this phase
-        prefix = ('ed' if match[1] else '') + ('table' if match[2].lower().startswith('table') else 'fig')
-        mentioned.add(f'{prefix}:{int(match[3])}')
-    return sorted(mentioned - known)
+    return sorted(mentioned_refs(_prose_only(results)) - known)

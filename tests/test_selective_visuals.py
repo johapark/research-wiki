@@ -122,7 +122,8 @@ def test_truncated_json_recovers_claims_without_optional_objects(monkeypatch):
     assert out.visual_selection_status == 'incomplete'
 
 
-@pytest.mark.parametrize('change', [dict(source_quote='90%'), dict(observation='90%'),
+@pytest.mark.parametrize('change', [dict(source_quote='90%'),
+    dict(observation='Accuracy was 95% for condition A.'), dict(observation=''),
     dict(uncertainty='ambiguous'), dict(answered=False), dict(visible_labels='')])
 def test_visual_transcripts_cannot_certify_numeric_or_uncertain_claims(change):
     parsed = parse_observations(json.dumps({'observations':[observation(**change)]}),
@@ -378,7 +379,8 @@ def test_cache_reuses_success_and_invalidates_questions_source_and_model(tmp_pat
     assert len(calls)==4
     receipts=list((tmp_path/'cache').glob('*.json'))
     assert len(receipts)==4 and all('base64' not in path.read_text() for path in receipts)
-    with pytest.raises(ValueError,match='changed'):
+    from researchwiki.errors import EnvironmentFailure
+    with pytest.raises(EnvironmentFailure,match='changed'):
         visuals.inspect_visuals(pdf_path=pdf,pages=[QUOTE],sections={},inventory=[entry()],
             target_claims=targets,expected_source_hash='outdated',cache_dir=tmp_path/'cache')
 
@@ -533,3 +535,176 @@ def test_concurrent_inspection_workers_share_one_successful_reading(tmp_path,mon
         results=list(pool.map(lambda _:run(),range(2)))
     assert len(calls)==1 and sum(result.cache_hit for result in results)==1
     assert all(result.observations[0]['corroborated'] for result in results)
+
+
+# --- Review fixes (PR #28) -------------------------------------------------
+
+
+@pytest.mark.parametrize('prose', ['Expression remained stable 24 h after dosing.',
+                                   'This was notable 3 of 5 donors responded.',
+                                   'A comfortable 2 fold margin was kept.'])
+def test_words_ending_in_table_or_fig_are_not_references(prose):
+    from researchwiki.agents.visual_selection import mentioned_refs, missing_result_refs
+    assert mentioned_refs(prose) == set()
+    assert missing_result_refs({'results': prose}, []) == []
+    assert not build_inventory(['Table 3. Donor counts'], {'results': prose})[0].main_result
+
+
+def test_uppercase_captions_are_located_and_not_reported_missing():
+    pages = ['FIGURE 2 | Accuracy by donor', 'TABLE 1 Baseline characteristics']
+    results = 'Accuracy improved (Figure 2) across cohorts (Table 1).'
+    entries = build_inventory(pages, {'results': results})
+    assert {e.ref_id for e in entries} == {'fig:2', 'table:1'}
+    assert all(e.main_result for e in entries)
+    from researchwiki.agents.visual_selection import missing_result_refs
+    assert missing_result_refs({'results': results}, entries) == []
+
+
+def test_unlocated_reference_beside_a_located_main_result_is_not_a_veto(tmp_path, monkeypatch):
+    monkeypatch.setattr(llm, 'call', lambda **kw: pytest.fail('no request expected'))
+    pdf = tmp_path/'paper.pdf'; pdf.write_bytes(b'source')
+    result = visuals.inspect_visuals(pdf_path=pdf, pages=['Results (Figure 4).'],
+        sections={'results': 'Results (Figure 4) and (Fig. 2).'}, inventory=[entry()],
+        target_claims=TargetClaimsOutput(visual_selection_status='incomplete'), cache_dir=tmp_path)
+    gaps = {item['request']['ref_id']: item['request']['priority'] for item in result.unresolved
+            if item['reason'] == 'missing_caption_location'}
+    assert gaps == {'fig:4': 'high'}
+
+
+@pytest.mark.parametrize('uncertainty', ['none', 'None.', 'N/A', ''])
+def test_honest_no_uncertainty_values_still_corroborate(uncertainty):
+    parsed = parse_observations(json.dumps({'observations': [observation(uncertainty=uncertainty)]}),
+                                selected(), {'results': QUOTE})
+    assert parsed[0]['corroborated']
+
+
+def test_paraphrased_observation_corroborates_when_quote_is_verbatim_prose():
+    para = 'Condition A reached 90% accuracy, above condition B at 80%.'
+    parsed = parse_observations(json.dumps({'observations': [observation(observation=para)]}),
+                                selected(), {'results': QUOTE})
+    assert parsed[0]['corroborated']
+
+
+def test_supplementary_figure_quote_does_not_corroborate_main_figure():
+    quote = 'The measured accuracy was 90% for condition A and 80% for condition B (Supplementary Fig. 2).'
+    parsed = parse_observations(json.dumps({'observations': [observation(observation=quote, source_quote=quote)]}),
+                                selected(), {'results': quote})
+    assert not parsed[0]['corroborated']
+
+
+def test_prompt_offers_prose_candidates_per_reference(tmp_path, monkeypatch):
+    pdf = tmp_path/'paper.pdf'; pdf.write_bytes(b'source')
+    monkeypatch.setattr(llm, 'resolve_openai_endpoint', lambda: SimpleNamespace(url='http://localhost:1234/v1'))
+    monkeypatch.setattr(model_config, 'for_phase', lambda *a: model_config.ModelConfig('openai-compatible', 'gpt-6.1-sol', 0, 1200))
+    page = 'Table 1. Counts\n' + 'x' * 3000 + '\nFigure 2. Measured result'
+    def prepare(pdf, entries, requests, result, cache, deadline):
+        captions = {'table:1': 'Table 1. Counts', 'fig:2': 'Figure 2. Measured result'}
+        result.selected = [{'request': req.to_dict(), 'page': 1, 'caption': captions[req.ref_id]}
+                           for req in requests]
+        return [ImageInput(b'png', 900, 1200, 'Page 1')]
+    monkeypatch.setattr(visuals, 'prepare_images', prepare)
+    prompts = []
+    def call(**kw):
+        prompts.append(json.loads(kw['prompt']))
+        return llm.LLMResponse('{"observations":[]}', 'gpt-6.1-sol', 0, 1, 1)
+    monkeypatch.setattr(llm, 'call', call)
+    visuals.inspect_visuals(pdf_path=pdf, pages=[page], sections={'results': QUOTE},
+        inventory=[entry('table:1', main=False), entry('fig:2', main=False)],
+        target_claims=TargetClaimsOutput(visual_selection_status='complete',
+            visual_requests=[request('table:1'), request('fig:2')]), cache_dir=tmp_path/'cache')
+    context = prompts[0]['source_context']
+    assert set(context) == {'table:1', 'fig:2'}
+    assert 'Table 1. Counts' in context['table:1'] and 'Figure 2. Measured' in context['fig:2']
+    assert prompts[0]['prose_candidates']['fig:2'] == [QUOTE]
+
+
+def test_incomplete_selection_sends_no_image_request(tmp_path, monkeypatch):
+    monkeypatch.setattr(visuals, 'prepare_images', lambda *a: pytest.fail('no render expected'))
+    monkeypatch.setattr(llm, 'call', lambda **kw: pytest.fail('no request expected'))
+    pdf = tmp_path/'paper.pdf'; pdf.write_bytes(b'source')
+    result = visuals.inspect_visuals(pdf_path=pdf, pages=[QUOTE], sections={'results': QUOTE},
+        inventory=[entry()], target_claims=TargetClaimsOutput(visual_selection_status='off'),
+        cache_dir=tmp_path)
+    assert result.request_count == 0 and result.status == 'needs_review'
+    assert {item['reason'] for item in result.unresolved} == {'selection_incomplete'}
+
+
+def test_provider_failure_propagates_instead_of_becoming_a_review_veto(tmp_path, monkeypatch):
+    pdf = tmp_path/'paper.pdf'; pdf.write_bytes(b'source')
+    monkeypatch.setattr(llm, 'resolve_openai_endpoint', lambda: SimpleNamespace(url='http://localhost:1234/v1'))
+    monkeypatch.setattr(model_config, 'for_phase', lambda *a: model_config.ModelConfig('openai-compatible', 'gpt-6.1-sol', 0, 1200))
+    def prepare(pdf, entries, requests, result, cache, deadline):
+        result.selected = selected()
+        return [ImageInput(b'png', 900, 1200, 'Page 1')]
+    monkeypatch.setattr(visuals, 'prepare_images', prepare)
+    def call(**kw):
+        raise llm.ProviderUnavailable('Visual inspection HTTP 429; no retry was sent.')
+    monkeypatch.setattr(llm, 'call', call)
+    with pytest.raises(llm.ProviderUnavailable):
+        visuals.inspect_visuals(pdf_path=pdf, pages=[QUOTE], sections={}, inventory=[entry()],
+            target_claims=TargetClaimsOutput(visual_selection_status='complete'), cache_dir=tmp_path/'c')
+
+
+def test_rejected_effort_is_omitted_not_sent_as_null(image_call, monkeypatch):
+    _, sent = image_call
+    cfg = model_config.ModelConfig('openai-compatible', 'gpt-6.1-sol', 0, 1200, reasoning_effort='low',
+                                   image_token_bound=32768)
+    monkeypatch.setattr(model_config, 'for_phase', lambda *a: cfg)
+    monkeypatch.setitem(llm._EFFORT_REJECTED, ('http://localhost:1234/v1', 'gpt-6.1-sol'), {'low'})
+    llm.call(phase='visual_inspect', prompt='context', images=[ImageInput(b'png', 900, 1200, 'Page 1')])
+    assert 'reasoning_effort' not in sent[0]
+
+
+def test_image_payload_matches_text_transport_temperature_rule(image_call, monkeypatch):
+    _, sent = image_call
+    cfg = model_config.ModelConfig('openai-compatible', 'gpt-6.1-sol', 0, 1200, reasoning_effort='none',
+                                   image_token_bound=32768)
+    monkeypatch.setattr(model_config, 'for_phase', lambda *a: cfg)
+    llm.call(phase='visual_inspect', prompt='context', images=[ImageInput(b'png', 900, 1200, 'Page 1')])
+    assert sent[0]['temperature'] == 0 and sent[0]['reasoning_effort'] == 'none'
+
+
+def test_preflight_refuses_unbounded_image_model_under_a_budget(monkeypatch):
+    from researchwiki.agents import llm_images
+    monkeypatch.setattr(model_config, 'for_phase',
+                        lambda *a: model_config.ModelConfig('openai-compatible', 'gpt-6-luna', 0, 1200))
+    monkeypatch.setattr(llm, 'missing_provider_credentials', lambda **kw: [])
+    llm_images.preflight_visual_provider()  # no budget: no bound needed
+    for budget in (dict(max_tokens=200000), dict(max_cost_usd=1.0)):
+        with pytest.raises(model_config.ModelConfigUnavailable, match='image_token_bound'):
+            llm_images.preflight_visual_provider(**budget)
+    monkeypatch.setattr(model_config, 'for_phase', lambda *a: model_config.ModelConfig(
+        'openai-compatible', 'gpt-6-luna', 0, 1200, image_token_bound=8000))
+    llm_images.preflight_visual_provider(max_tokens=200000)
+
+
+def test_quoted_image_token_bound_is_an_int(tmp_path, monkeypatch):
+    cfg = tmp_path/'models.yaml'
+    cfg.write_text('roles:\n  judge: {provider: openai-compatible, model: m, image_token_bound: "8000"}\n'
+                   'phases:\n  visual_inspect: {role: judge, image_token_bound: "9000"}\n'
+                   'base_url: http://localhost:1234/v1\n')
+    monkeypatch.setenv('RW_MODELS_CONFIG', str(cfg))
+    model_config.clear_caches()
+    try:
+        phase = model_config.for_phase('visual_inspect')
+        role = model_config.for_phase('target_claims')
+    finally:
+        monkeypatch.delenv('RW_MODELS_CONFIG')
+        model_config.clear_caches()
+    assert phase.image_token_bound == 9000 and isinstance(phase.image_token_bound, int)
+    assert role.image_token_bound == 8000 and isinstance(role.image_token_bound, int)
+
+
+def test_visual_phase_duration_counts_in_timing():
+    from researchwiki.tasks.insights_timing import TIMED_ROLES
+    assert 'visual_inspect' in TIMED_ROLES
+
+
+def test_benchmark_validation_does_not_depend_on_assert(tmp_path):
+    import subprocess, sys
+    suite = Path(__file__).resolve().parents[1] / 'benchmark-fixtures' / 'visual-inspection'
+    source = (suite / 'benchmark.py').read_text()
+    assert '\n    assert ' not in source.split('def validate():', 1)[1].split('def prepare(', 1)[0]
+    out = subprocess.run([sys.executable, '-I', '-O', str(suite / 'benchmark.py'), 'validate'],
+                         capture_output=True, text=True, check=True)
+    assert json.loads(out.stdout)['source_hashes_verified'] is True

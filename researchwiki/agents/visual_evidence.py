@@ -4,6 +4,56 @@ from __future__ import annotations
 import json
 import re
 
+from .visual_selection import mentions
+
+PROSE_SECTIONS = ('abstract', 'results', 'discussion')
+# Values a model writes for "no uncertainty" when told to report uncertainty.
+_NO_UNCERTAINTY = frozenset({'', 'none', 'n/a', 'na', 'no', 'nil', 'not applicable',
+                             'none noted', 'none observed', 'no uncertainty', '-', '—'})
+_NUMBER_RE = re.compile(r'\d+(?:[.,]\d+)*')
+# Trust boundary: drop every line that opens on a figure/table label, caption
+# or not. Over-exclusion only costs corroboration; under-exclusion would let a
+# caption certify its own visual.
+_LABEL_LINE_RE = re.compile(r'^\s*(?:Extended\s+Data\s+)?(?:Fig(?:ure)?\.?|Table)\s*\d+', re.I)
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def prose_sentences(sections: dict) -> list[str]:
+    """Whole sentences of independently extracted prose, captions excluded.
+
+    The single splitter used both to offer the model candidate quotes and to
+    verify the quote it returns, so a quote copied from the offer matches.
+    """
+    out = []
+    for key in PROSE_SECTIONS:
+        text = sections.get(key) or ''
+        if not isinstance(text, str):
+            continue
+        lines = [line for line in text.splitlines() if not _LABEL_LINE_RE.match(line)]
+        out.extend(re.split(r'(?<=[.!?])\s+(?=[A-Z])', _normalize(' '.join(lines))))
+    return [sentence for sentence in out if re.match(r'^[A-Z].*[.!?]$', sentence)]
+
+
+def candidate_quotes(sections: dict, ref_id: str, *, limit: int = 6,
+                     max_chars: int = 1800) -> list[str]:
+    """Prose sentences that explicitly name `ref_id`, bounded for the prompt."""
+    out, used = [], 0
+    for sentence in prose_sentences(sections):
+        if not 40 <= len(sentence) <= 1200 or not mentions(sentence, ref_id):
+            continue
+        if sentence in out or used + len(sentence) > max_chars or len(out) >= limit:
+            continue
+        out.append(sentence)
+        used += len(sentence)
+    return out
+
+
+def _no_uncertainty(value: str) -> bool:
+    return value.strip().rstrip('.').strip().casefold() in _NO_UNCERTAINTY
+
 
 def parse_observations(raw: str, selected: list[dict], sections: dict) -> list[dict]:
     raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw.strip())
@@ -32,40 +82,34 @@ def parse_observations(raw: str, selected: list[dict], sections: dict) -> list[d
 
 
 def corroborate_observation(observation: dict, selection: dict, sections: dict) -> bool:
-    """Accept only an exact, complete prose statement; no number-only matching.
+    """Accept only an exact, complete prose sentence; no number-only matching.
 
-    Ambiguous table association is always review-only in v1. The model cannot
-    nominate a paraphrase or a bag of numbers as independent source evidence.
+    The quote must be a whole sentence of the independently extracted
+    abstract/results/discussion that explicitly names this figure/table, and
+    the observation may not carry a quantity that sentence does not state, so
+    nothing read only off the image is certified. Ambiguous table association
+    is always review-only in v1.
     """
-    quote = observation['source_quote']
-    if (not observation['answered'] or observation['uncertainty']
-            or not observation['visible_labels'] or len(quote) < 40
-            or quote != observation['observation']
-            or selection['request']['reason'] == 'table_alignment'):
+    quote = _normalize(observation['source_quote'])
+    if (not observation['answered'] or not _no_uncertainty(observation['uncertainty'])
+            or not observation['observation'] or not observation['visible_labels']
+            or len(quote) < 40 or selection['request']['reason'] == 'table_alignment'):
         return False
-    ref_id = observation['ref_id']
-    kind, number = ref_id.split(':', 1)
-    label = rf"{'Tables?' if 'table' in kind else r'Fig(?:ure)?s?'}\.?\s*{number}(?:[a-z])?\b"
-    if kind.startswith('ed'):
-        label = r'Extended\s+Data\s+' + label
     # A sentence about some other result isn't evidence for this visual. The
     # source statement must explicitly associate its conditions with this ID.
-    if not re.search(label, quote, re.I):
+    if not mentions(quote, observation['ref_id']):
         return False
-    normalize = lambda text: re.sub(r'\s+', ' ', text).strip()
-    quote = normalize(quote)
-    # Only independently extracted, section-anchored prose, never caption/table
-    # lines or the visual transcript. Whole sentence matching retains conditions.
-    for key in ('abstract', 'results', 'discussion'):
-        text = sections.get(key) or ''
-        if not isinstance(text, str):
-            continue
-        lines = [line for line in text.splitlines() if not re.match(
-            r'^\s*(?:Extended\s+Data\s+)?(?:Fig(?:ure)?\.?|Table)\s*\d+', line, re.I)]
-        sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', normalize(' '.join(lines)))
-        if quote in sentences and re.match(r'^[A-Z].*[.!?]$', quote):
-            return True
-    return False
+    stated = set(_NUMBER_RE.findall(quote))
+    if not set(_NUMBER_RE.findall(observation['observation'])) <= stated:
+        return False
+    return quote in prose_sentences(sections)
+
+
+def visual_evidence_block(quotes) -> str:
+    """Suffix carrying corroborated prose into EVOLVE/DEBUG repair evidence."""
+    if not quotes:
+        return ''
+    return '\n\nIndependent PDF prose corroborating inspected visuals:\n' + '\n'.join(quotes)
 
 
 def apply_evidence(targets, result) -> None:
@@ -76,7 +120,7 @@ def apply_evidence(targets, result) -> None:
     for observation in result.observations:
         if not observation['corroborated']:
             continue
-        quote = observation['source_quote']
+        quote = _normalize(observation['source_quote'])
         if quote not in targets.visual_evidence:
             targets.visual_evidence.append(quote)
         if len(targets.claims) < 35 and not any(claim.content == quote for claim in targets.claims):

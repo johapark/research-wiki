@@ -49,11 +49,20 @@ _PAGEOBJ_IMAGE = pypdfium2.raw.FPDF_PAGEOBJ_IMAGE
 # (fonseca-2026, hyphen with or without a leading space). Requiring whitespace
 # *after* the separator is what keeps a cross-reference range out: "Figure 1-3
 # show..." has a digit where the space must be.
+#
+# The label token is case-insensitive (`FIGURE 2 | Title`, `TABLE 1 Baseline`
+# are how Frontiers and several clinical venues typeset); the title-shape check
+# after it stays case-sensitive, because that check is what rejects prose.
 _CAPTION_RE = re.compile(
-    r'^[ \t]*((?:Extended\s+Data\s+)?(?:Fig(?:ure)?|Table)\.?)'
+    r'^[ \t]*((?i:(?:Extended\s+Data\s+)?(?:Fig(?:ure)?|Table))\.?)'
     r'\s*(\d+)\s*[|.:–—-]?\s+(["“(]?[A-Z0-9])',
     re.MULTILINE,
 )
+
+
+def is_caption_line(line: str) -> bool:
+    """True when `line` opens a caption under the same rules as the locator."""
+    return _CAPTION_RE.match(line) is not None
 
 # Cap the scan the same way the chunk index does: a figure past page 80 is
 # beyond anything the grading corpus covers, and the scan is O(pages).
@@ -181,6 +190,30 @@ def prefer_artwork_page(ref: FigureRef, coverage: list[float]) -> FigureRef:
     return ref
 
 
+def page_artwork_fraction(page) -> float:
+    """Fraction of one open pdfium page's area covered by drawables.
+
+    The per-page measurement behind `artwork_coverage`, exposed so a caller
+    that already holds the document (visual inspection) need not reopen it.
+    """
+    width, height = page.get_size()
+    page_area = width * height
+    if page_area <= 0:
+        return 0.0
+    total = 0.0
+    for obj in page.get_objects(max_depth=8):
+        if obj.type not in (_PAGEOBJ_PATH, _PAGEOBJ_IMAGE):
+            continue
+        try:
+            left, bottom, right, top = obj.get_bounds()
+        except Exception:
+            continue  # malformed object; contributes nothing
+        total += max(0.0, right - left) * max(0.0, top - bottom)
+    # Overlapping objects can sum past 1.0; the cap keeps the value readable
+    # without changing any comparison against the floor.
+    return min(total / page_area, 1.0)
+
+
 def artwork_coverage(
     pdf_path: Path | str, max_pages: int = MAX_SCAN_PAGES
 ) -> list[float]:
@@ -215,23 +248,7 @@ def artwork_coverage(
         for i in range(min(len(doc), max_pages)):
             page = doc[i]
             try:
-                width, height = page.get_size()
-                page_area = width * height
-                if page_area <= 0:
-                    out.append(0.0)
-                    continue
-                total = 0.0
-                for obj in page.get_objects(max_depth=8):
-                    if obj.type not in (_PAGEOBJ_PATH, _PAGEOBJ_IMAGE):
-                        continue
-                    try:
-                        left, bottom, right, top = obj.get_bounds()
-                    except Exception:
-                        continue  # malformed object; contributes nothing
-                    total += max(0.0, right - left) * max(0.0, top - bottom)
-                # Overlapping objects can sum past 1.0; the cap keeps the value
-                # readable without changing any comparison against the floor.
-                out.append(min(total / page_area, 1.0))
+                out.append(page_artwork_fraction(page))
             finally:
                 page.close()
     finally:

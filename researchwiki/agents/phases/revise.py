@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ...grade.salience import anchor_is_substantive
 from .. import llm, prompt_lib
+from ..visual_evidence import visual_evidence_block
 from .draft import Draft
 from .grade import ClaimDetail
 from .revision_evidence import (
@@ -277,7 +278,7 @@ def evolve(
     prompt = _build_evolve_prompt(
         draft.text, critique.notes, metadata, sections,
         pdf_full_text=pdf_full_text,
-        revision_evidence=evidence.text + ("\n\nIndependent PDF prose corroborating inspected visuals:\n" + "\n".join(visual_evidence) if visual_evidence else ""),
+        revision_evidence=evidence.text + visual_evidence_block(visual_evidence),
     )
     paper_type = (metadata or {}).get("paper_type")
     resp = llm.call(
@@ -418,7 +419,7 @@ def debug(
         drift_details=drift_details,
         sections=sections,
         pdf_full_text=pdf_full_text,
-        revision_evidence=evidence.text + ("\n\nIndependent PDF prose corroborating inspected visuals:\n" + "\n".join(visual_evidence) if visual_evidence else ""),
+        revision_evidence=evidence.text + visual_evidence_block(visual_evidence),
     )
     paper_type = (metadata or {}).get("paper_type")
     resp = llm.call(

@@ -42,34 +42,43 @@ def dump(path, value):
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
 
 
+class SuiteIntegrityError(Exception):
+    """A suite file fails validation. Raised explicitly so `python -O` cannot strip it."""
+
+
+def require(condition, detail):
+    if not condition:
+        raise SuiteIntegrityError(str(detail))
+
+
 def validate():
     manifest = read("manifest.json")
     cases = read("cases.json")
     nominations = read("nomination-cases.json")
     gold = read("reference/expectations.json")
-    assert len(cases) == manifest["inspection_cases"] == len(gold)
-    assert len(nominations) == manifest["nomination_cases"]
-    assert len({c["id"] for c in cases + nominations}) == len(cases + nominations)
+    require(len(cases) == manifest["inspection_cases"] == len(gold), "inspection case count disagrees across manifest, cases and gold")
+    require(len(nominations) == manifest["nomination_cases"], "nomination case count disagrees with manifest")
+    require(len({c["id"] for c in cases + nominations}) == len(cases + nominations), "duplicate case id")
     for source in manifest["sources"].values():
         path = REPO / source["path"]
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == source["sha256"], path
+        require(hashlib.sha256(path.read_bytes()).hexdigest() == source["sha256"], f"{path}: source hash mismatch")
     for asset in manifest["assets"].values():
         path = ROOT / asset["path"]
         data = path.read_bytes()
-        assert data[:8] == b"\x89PNG\r\n\x1a\n", path
-        assert struct.unpack(">II", data[16:24]) == (asset["width"], asset["height"]), path
-        assert hashlib.sha256(data).hexdigest() == asset["sha256"], path
+        require(data[:8] == b"\x89PNG\r\n\x1a\n", f"{path}: not a PNG")
+        require(struct.unpack(">II", data[16:24]) == (asset["width"], asset["height"]), f"{path}: dimensions mismatch")
+        require(hashlib.sha256(data).hexdigest() == asset["sha256"], f"{path}: image hash mismatch")
     for case in cases:
-        assert len(case["images"]) <= 2
-        assert sum(a["width"] * a["height"] for a in case["images"]) <= 3_000_000
+        require(len(case["images"]) <= 2, f"{case['id']}: more than two images")
+        require(sum(a["width"] * a["height"] for a in case["images"]) <= 3_000_000, f"{case['id']}: images exceed 3,000,000 pixels")
         question_ids = {q["id"] for q in case["questions"]}
         expected = gold[case["id"]]["answers"]
-        assert question_ids == {a["question_id"] for a in expected}
-        assert len(question_ids) == len(case["questions"])
+        require(question_ids == {a["question_id"] for a in expected}, f"{case['id']}: questions and gold answers disagree")
+        require(len(question_ids) == len(case["questions"]), f"{case['id']}: duplicate question id")
         image_ids = {a["id"] for a in case["images"]}
         for answer in expected:
-            assert set(answer["required_image_ids"]) <= image_ids
-            assert answer["required_image_ids"]
+            require(set(answer["required_image_ids"]) <= image_ids, f"{case['id']}: gold cites an image the case lacks")
+            require(answer["required_image_ids"], f"{case['id']}: gold answer cites no image")
     return {"inspection_cases": len(cases), "nomination_cases": len(nominations),
             "answer_atoms": sum(len(g["answers"]) for g in gold.values()),
             "assets": len(manifest["assets"]), "source_hashes_verified": True,

@@ -69,7 +69,7 @@ _throttle_lock = threading.Lock()
 _last_call_at: dict[str, float] = {}
 
 
-def _throttle(model: str, rpm: int | None) -> None:
+def _throttle(model: str, rpm: int | None, deadline: float | None = None) -> None:
     """Block until at least 60/rpm seconds have elapsed since the last call
     to `model`. No-op when `rpm` is None or <= 0.
 
@@ -77,17 +77,32 @@ def _throttle(model: str, rpm: int | None) -> None:
     queue and each computes its wait against the previous caller's updated
     timestamp, so N threads calling one model serialize onto a steady
     ~rpm/minute cadence instead of bursting past the provider's ceiling.
+
+    `deadline` (a `time.monotonic()` value) bounds both the lock wait and the
+    sleep: a call that cannot be sent in time raises `TimeoutError` before it
+    sleeps, rather than waking up past its deadline.
     """
     if not rpm or rpm <= 0:
         return
     interval = 60.0 / rpm
-    with _throttle_lock:
+    if deadline is None:
+        acquired = _throttle_lock.acquire()
+    else:
+        remaining = deadline - time.monotonic()
+        acquired = remaining > 0 and _throttle_lock.acquire(timeout=remaining)
+    if not acquired:
+        raise TimeoutError("deadline expired waiting for the throttle lock")
+    try:
         last = _last_call_at.get(model)
         if last is not None:
             wait = interval - (time.monotonic() - last)
             if wait > 0:
+                if deadline is not None and wait >= deadline - time.monotonic():
+                    raise TimeoutError("throttle wait exceeds the remaining deadline")
                 time.sleep(wait)
         _last_call_at[model] = time.monotonic()
+    finally:
+        _throttle_lock.release()
 
 
 @dataclass
@@ -410,6 +425,10 @@ def _needs_max_completion_tokens(model: str) -> bool:
     return bool(_MAX_COMPLETION_TOKENS_RE.search(model or ""))
 
 
+def _completion_limit_key(model: str) -> str:
+    return "max_completion_tokens" if _needs_max_completion_tokens(model) else "max_tokens"
+
+
 # GPT-5.1+ supports sampling parameters when reasoning is explicitly disabled.
 # Original GPT-5 and o-series retain their temperature restriction.
 _TEMPERATURE_WITHOUT_REASONING_RE = re.compile(
@@ -547,6 +566,27 @@ def _record_effort_rejection(
     return _nearest_effort(value, rejected, supported)
 
 
+def apply_effort_and_temperature(
+    payload: dict, *, model: str, temperature: float, effort: str | None,
+) -> None:
+    """Encode the fields every OpenAI-compatible transport derives from effort.
+
+    An effort the endpoint is known not to take resolves to None and the field
+    is omitted, never sent as JSON null. Temperature is sent unless the model
+    is a reasoning model with reasoning switched on.
+    """
+    if effort is not None:
+        payload["reasoning_effort"] = effort
+    else:
+        payload.pop("reasoning_effort", None)
+    if not _needs_max_completion_tokens(model) or (
+        effort == "none" and _TEMPERATURE_WITHOUT_REASONING_RE.search(model)
+    ):
+        payload["temperature"] = temperature
+    else:
+        payload.pop("temperature", None)
+
+
 def call_openai_compatible(
     *,
     model: str,
@@ -608,10 +648,7 @@ def call_openai_compatible(
     }
     # Completion limits include reasoning on GPT-5+/o-series. Temperature is
     # encoded below, after resolving the effective reasoning effort.
-    if _needs_max_completion_tokens(model):
-        payload["max_completion_tokens"] = max_tokens
-    else:
-        payload["max_tokens"] = max_tokens
+    payload[_completion_limit_key(model)] = max_tokens
 
     api_key = os.environ.get("OPENAI_API_KEY", "lm-studio")
     url = f"{base_url.rstrip('/')}/chat/completions"
@@ -622,18 +659,9 @@ def call_openai_compatible(
     effort = _resolve_effort(effort_key, reasoning_effort)
 
     def _encode_body() -> bytes:
-        if effort is not None:
-            payload["reasoning_effort"] = effort
-        else:
-            payload.pop("reasoning_effort", None)
         # Recompute on every negotiation: a retry may enable or disable
         # reasoning, changing whether temperature is accepted.
-        if not _needs_max_completion_tokens(model) or (
-            effort == "none" and _TEMPERATURE_WITHOUT_REASONING_RE.search(model)
-        ):
-            payload["temperature"] = temperature
-        else:
-            payload.pop("temperature", None)
+        apply_effort_and_temperature(payload, model=model, temperature=temperature, effort=effort)
         return json.dumps(payload).encode("utf-8")
 
     body = _encode_body()

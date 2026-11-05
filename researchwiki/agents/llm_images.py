@@ -31,12 +31,27 @@ def validate_image_provider(provider: str) -> None:
                                   f'{provider!r} has no image transport.')
 
 
-def preflight_visual_provider() -> None:
+def preflight_visual_provider(*, max_tokens: int | None = None,
+                              max_cost_usd: float | None = None) -> None:
+    """Refuse before any paid call what dispatch would refuse after them.
+
+    Under a token or cost budget the image request needs a conservative
+    per-image token bound. Without one, dispatch declines the request only
+    after extraction and target-claims have already been paid for, and the
+    publication gate then vetoes every run, so the refusal belongs here.
+    """
     from . import llm
-    validate_image_provider(model_config.for_phase('visual_inspect').provider)
+    cfg = model_config.for_phase('visual_inspect')
+    validate_image_provider(cfg.provider)
     problems = llm.missing_provider_credentials(phases=('visual_inspect',))
     if problems:
         raise ProviderUnavailable('; '.join(problems))
+    if ((max_tokens is not None or max_cost_usd is not None)
+            and image_token_bound(cfg.model, cfg.image_token_bound) is None):
+        raise model_config.ModelConfigUnavailable(
+            f'--visual-inspection under --max-tokens/--max-cost-usd needs a conservative '
+            f'image-token bound for {cfg.model!r}; set image_token_bound on the '
+            'visual_inspect phase (input tokens per image) or drop the budget flag.')
 
 
 def image_token_bound(model: str, configured: int | None) -> int | None:
@@ -57,24 +72,6 @@ def _remaining(deadline: float) -> float:
     if remaining <= 0:
         raise TimeoutError('visual inspection deadline expired')
     return remaining
-
-
-def _throttle_bounded(model: str, rpm: int | None, deadline: float) -> None:
-    from . import llm
-    if not rpm or rpm <= 0:
-        return
-    if not llm._throttle_lock.acquire(timeout=_remaining(deadline)):
-        raise TimeoutError('visual inspection deadline expired waiting for throttle lock')
-    try:
-        last = llm._last_call_at.get(model)
-        wait = max(0, 60.0 / rpm - (time.monotonic() - last)) if last is not None else 0
-        if wait >= _remaining(deadline):
-            raise TimeoutError('visual inspection throttle exceeds remaining deadline')
-        if wait:
-            time.sleep(wait)
-        llm._last_call_at[model] = time.monotonic()
-    finally:
-        llm._throttle_lock.release()
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -158,7 +155,7 @@ def dispatch_images(*, model: str, provider: str, prompt: str, system: str | Non
                                  provider=provider, model=model)
     observer.started()
     try:
-        _throttle_bounded(model, rpm, deadline)
+        llm._throttle(model, rpm, deadline=deadline)
         content = [{'type': 'text', 'text': prompt}]
         for image in images:
             content.extend([{'type': 'text', 'text': image.label},
@@ -167,12 +164,11 @@ def dispatch_images(*, model: str, provider: str, prompt: str, system: str | Non
         messages = ([{'role': 'system', 'content': system}] if system is not None else [])
         messages.append({'role': 'user', 'content': content})
         payload = {'model': model, 'messages': messages,
-                   'max_completion_tokens' if llm._needs_max_completion_tokens(model) else 'max_tokens':
-                       min(max_tokens, 1200)}
-        if not llm._needs_max_completion_tokens(model):
-            payload['temperature'] = temperature
-        if reasoning_effort is not None:
-            payload['reasoning_effort'] = llm._resolve_effort((endpoint.rstrip('/'), model), reasoning_effort)
+                   llm._completion_limit_key(model): min(max_tokens, 1200)}
+        # Same encoding as the text transport: a learned-rejected effort is
+        # omitted (never JSON null), and temperature follows the effective effort.
+        llm.apply_effort_and_temperature(payload, model=model, temperature=temperature,
+            effort=llm._resolve_effort((endpoint.rstrip('/'), model), reasoning_effort))
         data = _post_once(payload, endpoint, deadline, request_state)
         raw = data['choices'][0]['message']['content']
         if not isinstance(raw, str):
@@ -180,7 +176,9 @@ def dispatch_images(*, model: str, provider: str, prompt: str, system: str | Non
         usage = data.get('usage') or {}
         known = all(isinstance(usage.get(k), int) and usage[k] >= 0
                     for k in ('prompt_tokens', 'completion_tokens'))
-        response = llm.LLMResponse(raw, model, temperature,
+        served = data.get('model')
+        response = llm.LLMResponse(raw, served if isinstance(served, str) and served else model,
+                                   temperature,
             usage.get('prompt_tokens', 0) if known else 0,
             usage.get('completion_tokens', 0) if known else 0, usage_known=known)
         _remaining(deadline)
@@ -191,7 +189,7 @@ def dispatch_images(*, model: str, provider: str, prompt: str, system: str | Non
         raise
     if tracker and reservation:
         if response.usage_known:
-            tracker.finish(reservation, model=model, input_tokens=response.input_tokens,
+            tracker.finish(reservation, model=response.model, input_tokens=response.input_tokens,
                            output_tokens=response.output_tokens)
         else:
             tracker.fail(reservation)  # unknown usage retains conservative charge

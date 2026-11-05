@@ -443,7 +443,8 @@ def _load_routing_snapshot(
             max_tokens=int(fields.get("max_tokens", 2000)),
             reasoning_effort=str(re_raw) if re_raw is not None else None,
             rpm=int(rpm_raw) if rpm_raw is not None else None,
-            image_token_bound=fields.get("image_token_bound"),
+            image_token_bound=(int(fields["image_token_bound"])
+                               if fields.get("image_token_bound") is not None else None),
         )
 
     yaml_phases: dict[str, dict] = {}
@@ -760,7 +761,9 @@ def for_phase(name: str) -> ModelConfig:
         max_tokens=int(spec.get("max_tokens", base.max_tokens)),
         reasoning_effort=re_val,
         rpm=rpm_val,
-        image_token_bound=spec.get("image_token_bound", base.image_token_bound),
+        image_token_bound=(int(spec["image_token_bound"])
+                           if spec.get("image_token_bound") is not None
+                           else base.image_token_bound),
     )
     # Env-var override applied last — wins over config/models.yaml. Used by
     # subscription users to flip every phase to chat-relay without editing

@@ -17,7 +17,7 @@ NESTED_COMMIT_ROLES = frozenset({
     "memory_evolve", "grade_persist",
 })
 TIMED_ROLES = frozenset({
-    "reconcile", "extract", "target_claims", "crosslinks", "author",
+    "reconcile", "extract", "target_claims", "visual_inspect", "crosslinks", "author",
     "grade", "tournament", "critic", "debug", "claim_support", "commit",
     *NESTED_COMMIT_ROLES,
     "attempt",

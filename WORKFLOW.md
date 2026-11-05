@@ -172,20 +172,26 @@ unresolved; the runner does not guess their identity from nearby artwork.
 Route `phases.visual_inspect` to an image-capable OpenAI-compatible model; by
 default it inherits `judge`. Anthropic and chat-relay image transports are not
 supported in this first version. A custom model can supply a conservative
-`image_token_bound` (input tokens **per image**); an unknown model without a bound
-is declined before sending under a strict token/cost budget. Only known
+`image_token_bound` (input tokens **per image**); under `--max-tokens` or
+`--max-cost-usd`, preflight refuses an unknown model without a bound (exit 2)
+before any model call is paid for. Only known
 GPT-4o/4.1 families have built-in accounting bounds; proxy aliases need an
 explicit bound even when their image transport works. All existing total
 ingest budgets apply. Missing usage remains unknown and retains the conservative
 budget reservation; unknown pricing is not treated as zero cost.
 
 Visual transcripts remain separate from PDF text, retrieval indexes and claims.
-Only a complete observation independently matching an exact readable prose
-sentence explicitly naming the inspected figure/table can enrich the fixed
-drafting/repair packet. Ambiguous table associations
+The request offers, per reference, the prose sentences that name it. Only an
+observation whose quote is one of those exact sentences, which states no value the
+sentence does not, and which reports no uncertainty can enrich the fixed
+drafting/repair packet. A Supplementary mention never counts as the main figure. Ambiguous table associations
 and visual-only findings require source-image review. Unresolved critical
 visuals or incomplete selection/inspection block publication, including
-`--auto-promote`; the draft remains in `.agent-output/`. Read the source-hash-bound
+`--auto-promote`; the draft remains in `.agent-output/`. An incomplete selection
+sends no image request, since it is vetoed either way. A Results reference whose
+caption is not located is a recorded gap; it is critical only when no
+Results-cited visual was located at all. A provider or environment failure during
+the request exits 2 (retryable on `--resume`) rather than becoming a review veto. Read the source-hash-bound
 `<stem>-<attempt>.visual.json` receipt there for selected/unselected references,
 observations, coverage gaps and usage. This version does not accept durable human
 review approvals or automatically certify visual-only claims.
