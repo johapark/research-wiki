@@ -174,16 +174,27 @@ class BudgetTracker:
     ) -> None:
         actual_tokens = max(0, input_tokens) + max(0, output_tokens)
         unmetered = reservation.free if free is None else free
-        actual_cost = 0.0 if unmetered else model_config.estimate_usd(
-            model, max(0, input_tokens), max(0, output_tokens),
-            cache_read_tokens=max(0, cache_read_tokens),
-            cache_write_tokens=max(0, cache_write_tokens),
-        )
+        # A router may return an unpriced served model after we reserved using
+        # a priced request alias. Keep the conservative cost charge while
+        # settling known token usage, and expose the missing price as unknown.
+        cost_unavailable = not unmetered and model_config.rate_for(model) is None
+        if unmetered:
+            actual_cost = 0.0
+        elif cost_unavailable:
+            actual_cost = reservation.cost_usd
+        else:
+            actual_cost = model_config.estimate_usd(
+                model, max(0, input_tokens), max(0, output_tokens),
+                cache_read_tokens=max(0, cache_read_tokens),
+                cache_write_tokens=max(0, cache_write_tokens),
+            )
         with self._lock:
             self.reserved_tokens -= reservation.tokens
             self.reserved_cost_usd -= reservation.cost_usd
             self.tokens += actual_tokens
             self.cost_usd += actual_cost
+            if cost_unavailable:
+                self.cost_unknown = True
 
     def fail(self, reservation: _Reservation) -> None:
         """Charge the reservation when transport failure leaves usage unknown."""

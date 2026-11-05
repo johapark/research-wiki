@@ -14,8 +14,9 @@ PRIORITIES = ('critical', 'high', 'normal')
 # A figure/table mention in prose. The leading word boundary keeps "notable 3"
 # and "stable 24 h" from reading as Table 3 / Table 24; the series prefix is
 # captured so a "Supplementary Fig. 2" or "Extended Data Fig. 2" mention is
-# never mistaken for main Figure 2 (or vice versa).
-_SERIES = r'(?:(Extended\s+Data|Supplementary(?:\s+Data)?)\s+)?'
+# never mistaken for main Figure 2 (or vice versa). Target-claim locations also
+# use the documented "ED Fig." shorthand.
+_SERIES = r'(?:(\b(?:Extended\s+Data|ED\.?|Supplementary(?:\s+Data)?))\s+)?'
 _MENTION_RE = re.compile(_SERIES + r'\b(Fig(?:ure)?s?|Tables?)\b\.?\s*(\d+)(?:[a-z])?\b', re.I)
 
 
@@ -36,6 +37,12 @@ def mentioned_refs(text: str) -> set[str]:
 
 def mentions(text: str, ref_id: str) -> bool:
     return ref_id in mentioned_refs(text)
+
+
+def critical_claim_refs(claims: list | None) -> set[str]:
+    """References whose critical priority survives missing caption locations."""
+    return {ref for claim in claims or [] if claim.importance == 'critical'
+            for ref in mentioned_refs(claim.location + ' ' + claim.content)}
 
 
 def _prose_only(text: str) -> str:

@@ -182,19 +182,25 @@ budget reservation; unknown pricing is not treated as zero cost.
 
 Visual transcripts remain separate from PDF text, retrieval indexes and claims.
 The request offers, per reference, the prose sentences that name it. Only an
-observation whose quote is one of those exact sentences, which states no value the
-sentence does not, and which reports no uncertainty can enrich the fixed
-drafting/repair packet. A Supplementary mention never counts as the main figure. Ambiguous table associations
-and visual-only findings require source-image review. Unresolved critical
+observation matching one of those exact source sentences after whitespace
+normalization and reporting no uncertainty can enrich the fixed drafting/repair
+packet. Paraphrases remain review-only: numeric overlap cannot verify condition
+associations, units or significance. A Supplementary mention never counts as the
+main figure. Ambiguous table associations and visual-only findings require
+source-image review. Unresolved critical
 visuals or incomplete selection/inspection block publication, including
 `--auto-promote`; the draft remains in `.agent-output/`. An incomplete selection
 sends no image request, since it is vetoed either way. A Results reference whose
-caption is not located is a recorded gap; it is critical only when no
-Results-cited visual was located at all. A provider or environment failure during
-the request exits 2 (retryable on `--resume`) rather than becoming a review veto. Read the source-hash-bound
+caption is not located is a recorded gap; it is critical when no Results-cited
+visual was located at all or a critical target claim names it. Missing references
+named only in critical target claims also remain blocking. A provider or
+environment failure during the request exits 2 (retryable on `--resume`) rather
+than becoming a review veto. Read the source-hash-bound
 `<stem>-<attempt>.visual.json` receipt there for selected/unselected references,
-observations, coverage gaps and usage. This version does not accept durable human
-review approvals or automatically certify visual-only claims.
+observations, coverage gaps and usage. Receipts retain the served model name;
+when its cloud pricing is missing, cost stays unknown and the budget retains the
+conservative cost charge while settling known token usage. This version does not
+accept durable human review approvals or automatically certify visual-only claims.
 
 Successful readings are cached under `.figures-cache/inspection/`, keyed by
 source bytes, rendering, questions/context, model/provider/endpoint digest and

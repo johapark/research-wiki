@@ -10,7 +10,6 @@ PROSE_SECTIONS = ('abstract', 'results', 'discussion')
 # Values a model writes for "no uncertainty" when told to report uncertainty.
 _NO_UNCERTAINTY = frozenset({'', 'none', 'n/a', 'na', 'no', 'nil', 'not applicable',
                              'none noted', 'none observed', 'no uncertainty', '-', '—'})
-_NUMBER_RE = re.compile(r'\d+(?:[.,]\d+)*')
 # Trust boundary: drop every line that opens on a figure/table label, caption
 # or not. Over-exclusion only costs corroboration; under-exclusion would let a
 # caption certify its own visual.
@@ -85,10 +84,10 @@ def corroborate_observation(observation: dict, selection: dict, sections: dict) 
     """Accept only an exact, complete prose sentence; no number-only matching.
 
     The quote must be a whole sentence of the independently extracted
-    abstract/results/discussion that explicitly names this figure/table, and
-    the observation may not carry a quantity that sentence does not state, so
-    nothing read only off the image is certified. Ambiguous table association
-    is always review-only in v1.
+    abstract/results/discussion that explicitly names this figure/table. The
+    observation must match that sentence after whitespace normalization:
+    matching numbers cannot verify conditions, units, significance or meaning.
+    Paraphrases and ambiguous table associations remain review-only.
     """
     quote = _normalize(observation['source_quote'])
     if (not observation['answered'] or not _no_uncertainty(observation['uncertainty'])
@@ -99,8 +98,7 @@ def corroborate_observation(observation: dict, selection: dict, sections: dict) 
     # source statement must explicitly associate its conditions with this ID.
     if not mentions(quote, observation['ref_id']):
         return False
-    stated = set(_NUMBER_RE.findall(quote))
-    if not set(_NUMBER_RE.findall(observation['observation'])) <= stated:
+    if _normalize(observation['observation']) != quote:
         return False
     return quote in prose_sentences(sections)
 

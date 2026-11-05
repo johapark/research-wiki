@@ -18,9 +18,9 @@ from ...pdf.render import render_page
 from .. import llm, model_config
 from ..llm_images import ImageInput
 from ..visual_evidence import candidate_quotes, parse_observations
-from ..visual_selection import choose_requests, missing_result_refs
+from ..visual_selection import choose_requests, critical_claim_refs, missing_result_refs
 
-POLICY_VERSION = 'visual-v2-review-only-unless-offered-prose'
+POLICY_VERSION = 'visual-v3-review-only-unless-exact-prose'
 SYSTEM = """Inspect only the supplied source pages and specified reference/questions.
 Verify the requested label is on the image. Do not guess a plate's identity.
 Report visible labels, units, conditions, qualifications and uncertainty. Do not
@@ -31,8 +31,9 @@ Return JSON only: {"observations":[{"ref_id":"fig:2","page":2,"answered":true,
 Use answered=false for absent, ambiguous or unreadable evidence. uncertainty is
 an empty string when there is none. source_quote: copy one sentence verbatim from
 prose_candidates[ref_id] when that sentence states the whole observation including
-association/qualifications, and state no value in observation that the sentence
-does not; otherwise use an empty string.
+association/qualifications, and copy that same sentence into observation. A
+paraphrased observation remains review-only. When no sentence fully supports the
+observation, use an empty source_quote.
 No self-certification: visual-only observations require source-image review.
 """
 
@@ -161,16 +162,18 @@ def inspect_visuals(*, pdf_path: Path, pages: list[str], sections: dict, invento
             deadline = min(deadline, tracker.started + tracker.budget.max_wall_seconds)
     result = VisualResult(selection_status=getattr(target_claims, 'visual_selection_status', 'incomplete'),
                           source_sha256=expected_source_hash or '')
-    requests = choose_requests(inventory, getattr(target_claims, 'visual_requests', []),
-                               getattr(target_claims, 'claims', []))
-    # An unlocated Results reference is a recorded gap. It blocks publication
-    # only when nothing Results-cited was located, i.e. when the main-result
-    # slot would otherwise go uninspected; beside a located main result it is
-    # a review warning in the receipt.
+    claims = getattr(target_claims, 'claims', [])
+    requests = choose_requests(inventory, getattr(target_claims, 'visual_requests', []), claims)
+    # Locating an ancillary Results visual cannot resolve a missing visual
+    # named by a critical target, even when only the target's location names it.
+    critical_refs = critical_claim_refs(claims)
+    missing_refs = set(missing_result_refs(sections, inventory)) | (
+        critical_refs - {entry.ref_id for entry in inventory})
     gap_priority = 'high' if any(entry.main_result for entry in inventory) else 'critical'
-    result.unresolved.extend({'request': {'ref_id': ref, 'priority': gap_priority},
+    result.unresolved.extend({'request': {'ref_id': ref,
+                               'priority': 'critical' if ref in critical_refs else gap_priority},
                               'reason': 'missing_caption_location'}
-                             for ref in missing_result_refs(sections, inventory))
+                             for ref in sorted(missing_refs))
     result.unselected = [entry.ref_id for entry in inventory
                          if entry.ref_id not in {req.ref_id for req in requests}]
     if requests and result.selection_status != 'complete':
@@ -219,7 +222,7 @@ def inspect_visuals(*, pdf_path: Path, pages: list[str], sections: dict, invento
                 'model_config': asdict(cfg), 'completion_cap': min(1200, cfg.max_tokens),
                 'endpoint_sha256': hashlib.sha256(endpoint.encode()).hexdigest(),
                 'image_sha256': [hashlib.sha256(image.data).hexdigest() for image in images],
-                'system': SYSTEM, 'policy': POLICY_VERSION, 'schema_version': 2, 'stub': use_stub}
+                'system': SYSTEM, 'policy': POLICY_VERSION, 'schema_version': 3, 'stub': use_stub}
     result.cache_key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     receipt = cache_dir / f'{result.cache_key}.json'
     # The cache lock is inside its ignored namespace, with a bounded wait.
@@ -234,6 +237,7 @@ def inspect_visuals(*, pdf_path: Path, pages: list[str], sections: dict, invento
                     # Revalidate against current source; a cached transcript isn't evidence.
                     result.observations = parse_observations(json.dumps(cached['response']),
                                                               result.selected, sections)
+                    result.model = cached['model']
                     result.cache_hit = True
                     result.estimated_cost_usd = 0.0
                 except (ValueError, KeyError, TypeError):
@@ -247,8 +251,9 @@ def inspect_visuals(*, pdf_path: Path, pages: list[str], sections: dict, invento
                 result.request_ms = int((time.monotonic() - t0) * 1000)
                 result.input_tokens, result.output_tokens = response.input_tokens, response.output_tokens
                 result.usage_known = getattr(response, 'usage_known', True)
-                if result.usage_known and model_config.rate_for(cfg.model):
-                    result.estimated_cost_usd = model_config.estimate_usd(cfg.model,
+                result.model = response.model
+                if result.usage_known and model_config.rate_for(result.model):
+                    result.estimated_cost_usd = model_config.estimate_usd(result.model,
                         response.input_tokens, response.output_tokens)
                 result.observations = parse_observations(response.text, result.selected, sections)
                 if time.monotonic() > deadline:
@@ -257,7 +262,7 @@ def inspect_visuals(*, pdf_path: Path, pages: list[str], sections: dict, invento
                         and all(obs['answered'] for obs in result.observations)):
                     # The cache namespace lock already serializes this target;
                     # avoid an unbounded second lock inside the generic writer.
-                    cached_record = {'identity': identity,
+                    cached_record = {'identity': identity, 'model': result.model,
                         'response': {'observations': result.observations},
                         'usage': {'input_tokens': result.input_tokens, 'output_tokens': result.output_tokens,
                                   'known': result.usage_known}, 'policy': POLICY_VERSION}

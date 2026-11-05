@@ -44,7 +44,6 @@ _BATCH_INCOMPATIBLE_FLAGS = (
     ("title", "--title"),
     ("authors", "--authors"),
     ("year", "--year"),
-    ("author_prompt_file", "--author-prompt-file"),
     ("supplementary", "--supplementary"),
     ("allow_rename", "--allow-rename"),
 )
@@ -155,6 +154,8 @@ def _batch_passthrough_args(args) -> list[str]:
     out += ["-n", str(args.n_drafts)]
     if args.max_evolve != 1:
         out += ["--max-evolve", str(args.max_evolve)]
+    if args.author_prompt_file:
+        out += ["--author-prompt-file", str(args.author_prompt_file)]
     for attr, flag in (
         ("max_model_calls", "--max-model-calls"),
         ("max_tokens", "--max-tokens"),

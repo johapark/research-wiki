@@ -578,11 +578,11 @@ def test_honest_no_uncertainty_values_still_corroborate(uncertainty):
     assert parsed[0]['corroborated']
 
 
-def test_paraphrased_observation_corroborates_when_quote_is_verbatim_prose():
+def test_paraphrased_observation_requires_review_even_with_verbatim_quote():
     para = 'Condition A reached 90% accuracy, above condition B at 80%.'
     parsed = parse_observations(json.dumps({'observations': [observation(observation=para)]}),
                                 selected(), {'results': QUOTE})
-    assert parsed[0]['corroborated']
+    assert not parsed[0]['corroborated']
 
 
 def test_supplementary_figure_quote_does_not_corroborate_main_figure():
