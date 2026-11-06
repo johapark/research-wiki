@@ -1,7 +1,8 @@
 """CLI for `researchwiki scout search` and `scout search fetch`.
 
 Exit codes (search):
-  0 — every requested source answered (zero leads is still 0)
+  0 — every requested source answered (zero leads is still 0; openFDA's
+      "No matches" 404 is zero leads, not an error)
   1 — bad arguments, or a source rejected the query (HTTP 400 / arXiv error)
   2 — a requested source was unreachable; the others are still printed first
 Exit codes (fetch):
@@ -54,7 +55,10 @@ def _lead_lines(row: dict, today: str, abstracts: bool) -> list[str]:
         docs = [d["label"] for d in trial.get("documents") or [] if d.get("label")]
         if docs:
             lines.append(f"    documents: {', '.join(docs)}")
-    elif row.get("fetch_key") and row["fetch_key"] != row["key"]:
+    reg = row.get("regulatory")
+    if reg:
+        lines.extend(_regulatory_lines(reg))
+    elif not trial and row.get("fetch_key") and row["fetch_key"] != row["key"]:
         lines.append(f"    fetch as `{row['fetch_key']}`")
     if row.get("nearest"):
         top = row["nearest"][0]
@@ -63,8 +67,37 @@ def _lead_lines(row: dict, today: str, abstracts: bool) -> list[str]:
         lines.append(f"    ↳ on-topic for [[{t['page']}]]; closest trigger "
                      f"(z {t['z']:.1f}): {_clip(t['text'], 160)}")
     if abstracts and row.get("abstract"):
-        label = "summary" if row.get("kind") == "trial" else "abstract"
+        label = {"trial": "summary", "regulatory": _regulatory_text_label(reg)}.get(
+            row.get("kind"), "abstract")
         lines.append(f"    {label} ({srcs}, verbatim): {row['abstract']}")
+    return lines
+
+
+def _regulatory_text_label(reg: dict | None) -> str:
+    return "indications" if (reg or {}).get("record_type") == "label" else "approval statement"
+
+
+def _regulatory_lines(reg: dict) -> list[str]:
+    """`BLA125694 · Novartis · label revised 2026-06-16 · boxed warning`, then the URL."""
+    kind = reg.get("record_type")
+    apps = reg.get("application_numbers") or []
+    if kind == "label":
+        bits = [", ".join(apps[:3]) + (" …" if len(apps) > 3 else ""),
+                reg.get("manufacturer") or "?", reg.get("product_type") or "",
+                f"label revised {reg.get('effective_date') or '?'}"]
+        if reg.get("has_boxed_warning"):
+            bits.append("boxed warning")
+    else:
+        prefix = {"pma": "PMA", "de_novo": "De Novo"}.get(kind, "510(k)")
+        decision = reg.get("decision_description") if kind == "510k" else reg.get("decision_code")
+        bits = [f"{prefix} {apps[0] if apps else '?'}", reg.get("applicant") or "?",
+                f"{decision or '?'} {reg.get('decision_date') or '?'}",
+                reg.get("advisory_committee") or ""]
+        if reg.get("device_class"):
+            bits.append(f"class {reg['device_class']}")
+    lines = [f"    {' · '.join(b for b in bits if b)}"]
+    if reg.get("url"):
+        lines.append(f"    open: {reg['url']}")
     return lines
 
 
@@ -88,7 +121,7 @@ def render(snapshot: dict, *, sort: str, abstracts: bool = False) -> str:
         out.extend(line for r in matches for line in _lead_lines(r, today, abstracts))
         out.append("")
     if sort == "source":
-        for src in S.SOURCES[:-1]:
+        for src in S.PAPER_SOURCES:
             rows = [r for r in papers if r["sources"][0] == src]
             if rows:
                 out.append(f"## {src} ({len(rows)})")
@@ -105,13 +138,21 @@ def render(snapshot: dict, *, sort: str, abstracts: bool = False) -> str:
         out.append(f"## ClinicalTrials.gov ({len(snapshot['trials'])})")
         out.extend(line for r in snapshot["trials"] for line in _lead_lines(r, today, abstracts))
         out.append("")
-    if not (matches or papers or snapshot["trials"]):
+    regulatory = snapshot.get("regulatory") or []
+    if regulatory:
+        out.append(f"## FDA ({len(regulatory)})")
+        out.extend(line for r in regulatory for line in _lead_lines(r, today, abstracts))
+        out.append("")
+    if not (matches or papers or snapshot["trials"] or regulatory):
         out.append("_(no new leads)_")
         out.append("")
     out.append("_Leads only: nothing here is evidence until its PDF is ingested. "
                "Download open-access PDFs into `inbox/` with "
                "`researchwiki scout search fetch <key> ...`; reject one for good with "
                "`researchwiki scout search --decline <key> --reason \"…\"`._")
+    if regulatory:
+        out.append("_FDA records are not fetched: open the record's URL, save the document, "
+                   "and file it as a reference page (`references/`)._")
     return "\n".join(out)
 
 
@@ -199,16 +240,19 @@ def fetch_main(argv: list[str]) -> int:
 def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog=PROG,
-        description="Keyword search across PubMed, arXiv, bioRxiv/medRxiv (via Europe PMC) "
-                    "and ClinicalTrials.gov. Leads are ranked against the wiki and are "
-                    "discovery-only. `scout search fetch KEY...` downloads open-access PDFs.",
+        description="Keyword search across PubMed, arXiv, bioRxiv/medRxiv (via Europe PMC), "
+                    "ClinicalTrials.gov and openFDA (drug/biologic labels, device PMA and "
+                    "510(k)/De Novo). Leads are ranked against the wiki and are "
+                    "discovery-only. `scout search fetch KEY...` downloads open-access PDFs; "
+                    "trials and FDA records are never fetched.",
     )
     ap.add_argument("query", nargs="*", help="Search terms (source query syntax passes through).")
     ap.add_argument("--query", dest="query_opt", metavar="TEXT",
                     help="The query, as an option (needed for a query that is literally 'fetch').")
-    ap.add_argument("--source", action="append", choices=S.SOURCES, default=[],
-                    help="Repeatable. Default: pubmed, arxiv, biorxiv, medrxiv "
-                         "(clinicaltrials is opt-in).")
+    ap.add_argument("--source", action="append", choices=(*S.SOURCES, *S.SOURCE_GROUPS),
+                    default=[],
+                    help="Repeatable. Default: pubmed, arxiv, biorxiv, medrxiv. Opt-in: "
+                         "clinicaltrials, and fda (= fda-label, fda-pma, fda-510k).")
     ap.add_argument("--limit", type=int, default=S.DEFAULT_LIMIT,
                     help=f"Results requested per source (default {S.DEFAULT_LIMIT}, "
                          f"max {S.MAX_LIMIT}).")
@@ -294,7 +338,8 @@ def main(argv: list[str]) -> int:
     if problem:
         print(f"{PROG}: {problem}", file=sys.stderr)
         return 1
-    sources = list(dict.fromkeys(args.source)) or list(S.DEFAULT_SOURCES)
+    expanded = [s for name in args.source for s in S.SOURCE_GROUPS.get(name, (name,))]
+    sources = list(dict.fromkeys(expanded)) or list(S.DEFAULT_SOURCES)
     snapshot = S.run(query, sources=sources, limit=args.limit, since=since,
                      max_age_days=args.max_age_days)
     if args.as_json:

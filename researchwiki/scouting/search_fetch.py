@@ -2,7 +2,8 @@
 
 ✅ Use when: a lead is worth ingesting and its PDF is openly available —
    arXiv, bioRxiv/medRxiv, or an open-access PubMed Central article.
-❌ Don't use: for anything behind a paywall, for trial documents, or as a web
+❌ Don't use: for anything behind a paywall, for trial documents or FDA
+   records (labels, PMA, 510(k)/De Novo — regulatory documents, not papers), or as a web
    fetch for prose. The only output is a PDF in `inbox/`, which then goes
    through the normal ingest path and its gates; that PDF is what Rule 3 means
    by "the PDF we have".
@@ -113,6 +114,10 @@ def plan(raw_key: str) -> Plan:
     if key.startswith("nct:"):
         return Plan(key=key, refused="trial registrations have no paper PDF; "
                                      "trial documents are not fetched")
+    if key.startswith("fda:"):
+        return Plan(key=key, refused="FDA labels and device records are regulatory documents, "
+                                     "not papers; open the record's URL and file it as a "
+                                     "reference page")
     if key.startswith("s2:"):
         return Plan(key=key, refused="Semantic Scholar ids carry no open-access link here")
     m = _ARXIV_DOI_RE.fullmatch(key)
