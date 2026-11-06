@@ -11,6 +11,7 @@ import pytest
 
 from researchwiki.agents import llm, model_config
 from researchwiki.agents.budget import BudgetExhausted, BudgetTracker, IngestBudget, activate
+from researchwiki.agents import llm_images
 from researchwiki.agents.llm_images import ImageInput, _post_once as REAL_POST_ONCE
 from researchwiki.agents.phases import extract
 from researchwiki.agents.phases.target_claims import TargetClaimsOutput, extract_target_claims
@@ -304,7 +305,7 @@ def test_image_http_errors_including_effort_rejection_never_retry(image_call, mo
     requests = []
     def send(req, timeout):
         requests.append(req)
-        assert 0 < timeout <= 30
+        assert 0 < timeout <= llm_images.DEADLINE_SECONDS
         raise urllib.error.HTTPError(req.full_url,http_code,'reasoning_effort rejected',{},None)
     monkeypatch.setattr(module,'_open_once',send)
     with pytest.raises(llm.ProviderUnavailable):
@@ -718,3 +719,94 @@ def test_small_panel_figure_page_resolves_for_inspection():
                                   get_bounds=lambda: (0, 0, 160, 157))  # 5.2% of 612x792
     assert visuals.resolve_page(FakeDoc([SmallPanel()]), entry()) == 1
     assert visuals.resolve_page(FakeDoc([FakePage(False)]), entry()) is None
+
+
+
+# --- Results anchoring and request caps (2026-11-06 batch) -----------------
+
+
+NATURE_BODY = (
+    'Abstract\nWe screened genes in CAR T cells in vivo and found regulators of function.\n'
+    + ('CAR T cells lacking the regulator expanded more in tumours (Fig. 1b). '
+       'Survival improved in treated mice (Fig. 2c and Extended Data Fig. 3a). ' * 40)
+    + '\nDiscussion\nThese results suggest a strategy.\nOnline content\nAny methods are available.\n'
+    'Methods\nMice were housed under standard conditions.\nAuthor contributions\n'
+    'Experiments: N.H.K., G.E., F.K., T.K., A.Y.C., M.Z., A.B. performed experiments.\n'
+)
+
+
+def test_headingless_nature_body_stands_in_for_results():
+    from researchwiki.agents.visual_selection import visual_source_sections, mentioned_refs
+    sections, source = visual_source_sections(NATURE_BODY)
+    assert source == 'body'
+    assert {'fig:1', 'fig:2', 'edfig:3'} <= mentioned_refs(sections['results'])
+    assert 'Methods' not in sections['results'] and 'Mice were housed' not in sections['results']
+    pages = ['Fig. 1 | Screen design and hits', 'Fig. 2 | Survival of treated mice']
+    assert all(e.main_result for e in build_inventory(pages, sections))
+
+
+def test_results_heading_after_methods_is_not_trusted():
+    """An 'Experiments:' contributions line after Methods is not the Results section."""
+    from researchwiki.agents.visual_selection import visual_source_sections
+    text = NATURE_BODY.replace('Experiments: N.H.K.', 'Experiments\nN.H.K.')
+    sections, source = visual_source_sections(text)
+    assert source == 'body' and 'N.H.K.' not in sections['results']
+
+
+def test_real_results_heading_is_kept():
+    from researchwiki.agents.visual_selection import visual_source_sections
+    text = ('Abstract\nShort abstract.\nIntroduction\nWhy.\nResults\n'
+            + 'Accuracy rose (Fig. 2). ' * 120 + '\nDiscussion\nWhat.\nMethods\nHow.\n')
+    sections, source = visual_source_sections(text)
+    assert source == 'heading' and sections['results'].startswith('Results')
+
+
+def test_body_fallback_ignores_a_panel_label_reading_background():
+    """Figure-panel text can print 'Background' mid-body; the body must not start there."""
+    from researchwiki.agents.visual_selection import visual_source_sections, mentioned_refs
+    text = NATURE_BODY.replace('(Fig. 2c and', '\nBackground\n(Fig. 2c and', 1)
+    sections, _ = visual_source_sections(text)
+    assert 'fig:1' in mentioned_refs(sections['results'])
+
+
+def test_short_body_reports_no_results_source():
+    from researchwiki.agents.visual_selection import visual_source_sections
+    sections, source = visual_source_sections('Abstract\nTiny.\nMethods\nHow.\n')
+    assert source == 'none' and 'results' not in sections
+
+
+def test_receipt_records_how_results_were_found(tmp_path, monkeypatch):
+    from researchwiki.agents import visual_support
+    pdf = tmp_path/'paper.pdf'; pdf.write_bytes(b'source')
+    ctx = SimpleNamespace(next_iter=lambda: None, pdf_path=pdf, source_pages=[QUOTE],
+        visual_source_sections={}, visual_inventory=[], visual_results_source='body',
+        target_claims=TargetClaimsOutput(visual_selection_status='complete'), use_stub=True,
+        visual_source_hash=None, attempt_id='a', paper_stem='s', pdf_filename='p.pdf', iteration=1,
+        sandbox_dir=tmp_path/'out')
+    monkeypatch.setattr(visual_support, 'write_iteration', lambda **kw: None)
+    visual_support.phase_visual_inspect(ctx, None)
+    assert ctx.visual_result.metrics()['visual_results_source'] == 'body'
+    receipt = next((tmp_path/'out').glob('*.visual.json'))
+    assert json.loads(receipt.read_text())['results_source'] == 'body'
+
+
+def test_caps_cover_the_observed_batch(image_call):
+    assert llm_images.MAX_COMPLETION_TOKENS >= 2000
+    assert llm_images.DEADLINE_SECONDS >= 60
+    _, sent = image_call
+    llm.call(phase='visual_inspect', prompt='context', max_tokens=10_000,
+             images=[ImageInput(b'png', 900, 1200, 'Page 1')])
+    limit = sent[0].get('max_completion_tokens', sent[0].get('max_tokens'))
+    assert limit == llm_images.MAX_COMPLETION_TOKENS
+
+
+def test_truncated_reply_is_reported_as_truncation(image_call, monkeypatch):
+    module, _ = image_call
+    def post(payload, endpoint, deadline, state):
+        state['outbound_requests'] = 1
+        return {'choices': [{'message': {'content': '{"observations":[{"ref_id":"fig'},
+                             'finish_reason': 'length'}],
+                'usage': {'prompt_tokens': 100, 'completion_tokens': 2400}}
+    monkeypatch.setattr(module, '_post_once', post)
+    with pytest.raises(ValueError, match=r'truncated at the \d+-token completion cap'):
+        llm.call(phase='visual_inspect', prompt='context', images=[ImageInput(b'png', 900, 1200, 'Page 1')])

@@ -20,6 +20,7 @@ def phase_visual_inspect(ctx, conn) -> None:
     result = inspect_visuals(pdf_path=ctx.pdf_path, pages=ctx.source_pages,
         sections=ctx.visual_source_sections, inventory=ctx.visual_inventory,
         target_claims=ctx.target_claims, use_stub=ctx.use_stub, expected_source_hash=ctx.visual_source_hash)
+    result.results_source = getattr(ctx, 'visual_results_source', '') or ''
     ctx.visual_result = result
     apply_evidence(ctx.target_claims, result)
     write_iteration(attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,

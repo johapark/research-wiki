@@ -66,6 +66,11 @@ the reasoning behind any line below.
   still settle free, so they do not exhaust `--max-cost-usd`.
 - Numeric drift checks read a middle-dot decimal in the source PDF
   (`96·5%`) as its point form, so a page writing `96.5%` no longer drifts.
+- Visual inspection reads a headingless paper's body text as its Results
+  section, so Nature and Cell figure citations count as Results-cited instead
+  of making every missing caption critical; receipts record `results_source`.
+  The image request's caps rise to 2,400 completion tokens and 75 seconds,
+  and a reply cut off at the cap is reported as truncated.
 - The figure-page artwork floor drops from 6% to 3% page coverage, calibrated
   on 16,707 corpus pages with a hand-labelled sample. Small single-panel
   figures (2-5% coverage) now resolve for visual inspection and no longer

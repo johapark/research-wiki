@@ -971,7 +971,7 @@ def call(
     reasoning_effort: str | None = None,
     event_sink: EventRecorder | None = None,
     images: list | None = None,
-    deadline_seconds: float = 30,
+    deadline_seconds: float = 75,  # llm_images.DEADLINE_SECONDS; image calls only
     request_state: dict | None = None,
 ) -> LLMResponse:
     """Dispatch to the right provider, resolving config from phase or kwargs.

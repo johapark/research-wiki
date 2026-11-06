@@ -162,10 +162,14 @@ researchwiki agent ingest inbox/paper.pdf --visual-inspection
 Visual inspection is **off by default**. Configuring `visual_inspect` does not
 turn it on. The existing target-claims call nominates at most three questions
 from a caption inventory; a Results reference supplies a fallback when needed.
+When a paper prints no Results heading before Methods (most Nature and Cell
+articles), the body text from the abstract to the first back-matter heading
+stands in for Results, so its figure citations still count; the receipt's
+`results_source` records `heading`, `body` or `none`.
 The runner checks labeled locations and sends at most two full pages at 110 DPI,
 three million total pixels, and a maximum 4:1 page aspect ratio, in one OpenAI-compatible image request. It caps the
-completion at 1,200 tokens and the inspection at 30 seconds, including throttle
-and parsing. There are no HTTP retries, parameter renegotiations, or redirects.
+completion at 2,400 tokens and the inspection at 75 seconds, including throttle
+and parsing; a reply cut off at the cap is reported as truncated. There are no HTTP retries, parameter renegotiations, or redirects.
 Clean text cases need no image request. Unlabeled appended plates remain
 unresolved; the runner does not guess their identity from nearby artwork.
 

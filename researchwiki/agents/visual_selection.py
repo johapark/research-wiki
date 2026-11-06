@@ -47,6 +47,54 @@ def critical_claim_refs(claims: list | None) -> set[str]:
             for ref in mentioned_refs(claim.location + ' ' + claim.content)}
 
 
+# Where a paper's main narrative ends when it prints no Results heading. A
+# Nature/Cell article runs Introduction-less body prose straight into
+# "Discussion"; "Online content", "Methods" and the back matter follow.
+_BODY_END_RE = re.compile(
+    r'(?im)^\s*(?:\d+[.\s]\s*)?(?:discussion|conclusions?|online\s+content|methods|'
+    r'materials\s+and\s+methods|references|bibliography|acknowledg(?:e)?ments?|'
+    r'author\s+contributions|reporting\s+summary)\s*$')
+_CONTRIBUTIONS_RE = re.compile(r'(?:\b[A-Z]\.(?:[A-Z]\.)*-?[A-Z]?\.?,\s*){4,}')
+
+
+def visual_source_sections(full_text: str) -> tuple[dict, str]:
+    """Uncapped sections for the visual phase, and where `results` came from.
+
+    Section anchoring keys `results` on a heading. Nature-family articles
+    print none, so their body prose (where every figure is cited) became no
+    section at all; and a "Results" heading found *after* Methods is usually a
+    false anchor, such as an author-contributions line "Experiments: N.H.K.,
+    ...". Without a Results section no figure counts as Results-cited, and the
+    missing-caption gate then rates every gap critical. When the heading is
+    absent or sits after Methods, the body from the end of the abstract (or the
+    introduction heading) to the first back-matter heading stands in for it.
+    Returns `(sections, source)` with source "heading", "body" or "none".
+    """
+    from ..pdf.sections import anchor_sections, section_spans
+    sections = anchor_sections(full_text, max_chars=len(full_text))
+    spans = {name: (start, end) for start, end, name in section_spans(full_text)}
+    results = spans.get('results')
+    methods = spans.get('methods')
+    heading_ok = (results is not None and (methods is None or results[0] < methods[0])
+                  and not _CONTRIBUTIONS_RE.search(full_text[results[0]:results[0] + 600]))
+    if heading_ok:
+        return sections, 'heading'
+    # The body starts where the abstract ends. An "Introduction"/"Background"
+    # heading is not a safe start: figure-panel text can print "Background" as
+    # an axis label mid-body, which would drop every figure cited before it.
+    start = 0
+    if 'abstract' in spans:
+        start = spans['abstract'][0]
+    end_match = _BODY_END_RE.search(full_text, start + 1)
+    end = end_match.start() if end_match else len(full_text)
+    body = full_text[start:end].strip()
+    if len(body) < 2000:
+        sections.pop('results', None)
+        return sections, 'none'
+    sections['results'] = body
+    return sections, 'body'
+
+
 def _prose_only(text: str) -> str:
     """Drop caption lines: a Results caption alone isn't a prose dependency."""
     return '\n'.join(line for line in text.splitlines() if not is_caption_line(line))

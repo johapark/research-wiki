@@ -340,8 +340,8 @@ def phase_extract(ctx, conn):
         sections, full_text, ctx.source_pages = extract_source_pages(ctx.pdf_path)
         if file_sha256(ctx.pdf_path) != ctx.visual_source_hash:
             raise EnvironmentFailure("PDF changed during visual source extraction")
-        from ..pdf.sections import anchor_sections
-        ctx.visual_source_sections = anchor_sections(full_text, max_chars=len(full_text))
+        from .visual_selection import visual_source_sections
+        ctx.visual_source_sections, ctx.visual_results_source = visual_source_sections(full_text)
         ctx.visual_inventory = build_inventory(ctx.source_pages, ctx.visual_source_sections)
     else:
         sections, full_text = phases.extract_sections(ctx.pdf_path)

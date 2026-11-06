@@ -17,6 +17,17 @@ from . import model_config
 from .budget import current_tracker
 
 
+# Caps for the single image request. Calibrated on the 2026-11-06 batch of
+# eight Nature/Cell papers: two observations with full visible labels ran 450-
+# 1,050 output tokens and one ran into the old 1,200 cap mid-JSON (shi-2026),
+# while one ordinary two-page request took 29.9 s against the old 30 s
+# deadline. The completion cap stays bounded so a runaway answer cannot spend
+# an unbounded budget, and the deadline still covers throttle, render, request
+# and parsing.
+MAX_COMPLETION_TOKENS = 2400
+DEADLINE_SECONDS = 75
+
+
 @dataclass(frozen=True)
 class ImageInput:
     data: bytes
@@ -121,7 +132,7 @@ def _post_once(payload: dict, endpoint: str, deadline: float, request_state: dic
 def dispatch_images(*, model: str, provider: str, prompt: str, system: str | None,
                     temperature: float, max_tokens: int, reasoning_effort: str | None,
                     rpm: int | None, images: list[ImageInput], phase: str | None,
-                    use_stub: bool, event_sink=None, deadline_seconds: float = 30,
+                    use_stub: bool, event_sink=None, deadline_seconds: float = DEADLINE_SECONDS,
                     configured_bound: int | None = None, request_state: dict | None = None):
     from . import llm
     request_state = request_state if request_state is not None else {}
@@ -136,7 +147,7 @@ def dispatch_images(*, model: str, provider: str, prompt: str, system: str | Non
         return llm.LLMResponse('{"observations":[]}', '(stub)', 0, 0, 0)
     validate_image_provider(provider)
     tracker = current_tracker()
-    deadline = time.monotonic() + min(30, deadline_seconds)
+    deadline = time.monotonic() + min(DEADLINE_SECONDS, deadline_seconds)
     if tracker:
         tracker.check_wall()
         if tracker.budget.max_wall_seconds is not None:
@@ -164,7 +175,7 @@ def dispatch_images(*, model: str, provider: str, prompt: str, system: str | Non
         messages = ([{'role': 'system', 'content': system}] if system is not None else [])
         messages.append({'role': 'user', 'content': content})
         payload = {'model': model, 'messages': messages,
-                   llm._completion_limit_key(model): min(max_tokens, 1200)}
+                   llm._completion_limit_key(model): min(max_tokens, MAX_COMPLETION_TOKENS)}
         # Same encoding as the text transport: a learned-rejected effort is
         # omitted (never JSON null), and temperature follows the effective effort.
         llm.apply_effort_and_temperature(payload, model=model, temperature=temperature,
@@ -173,6 +184,9 @@ def dispatch_images(*, model: str, provider: str, prompt: str, system: str | Non
         raw = data['choices'][0]['message']['content']
         if not isinstance(raw, str):
             raise ValueError('visual response has no text content')
+        if data['choices'][0].get('finish_reason') == 'length':
+            raise ValueError(f'visual response truncated at the {payload[llm._completion_limit_key(model)]}'
+                             '-token completion cap; raise the visual_inspect max_tokens or select fewer refs')
         usage = data.get('usage') or {}
         known = all(isinstance(usage.get(k), int) and usage[k] >= 0
                     for k in ('prompt_tokens', 'completion_tokens'))

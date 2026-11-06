@@ -16,7 +16,7 @@ from ...fsatomic import file_sha256, _write_text_atomic_unlocked
 from ...pdf.figures import ARTWORK_FLOOR, page_artwork_fraction
 from ...pdf.render import render_page
 from .. import llm, model_config
-from ..llm_images import ImageInput
+from ..llm_images import DEADLINE_SECONDS, MAX_COMPLETION_TOKENS, ImageInput
 from ..visual_evidence import candidate_quotes, parse_observations
 from ..visual_selection import choose_requests, critical_claim_refs, missing_result_refs
 
@@ -60,6 +60,7 @@ class VisualResult:
     preparation_ms: int = 0
     request_ms: int = 0
     error: str | None = None
+    results_source: str = ''    # how the Results section was found: heading | body | none
 
     def metrics(self) -> dict:
         return {'visual_selected': len(self.selected), 'visual_inspected': len(self.observations),
@@ -69,6 +70,7 @@ class VisualResult:
             'visual_requests': self.request_count, 'visual_usage_unknown': not self.usage_known,
             'visual_preparation_ms': self.preparation_ms, 'visual_request_ms': self.request_ms,
             'visual_status': self.status, 'visual_selection_status': self.selection_status,
+            'visual_results_source': self.results_source,
             'visual_cost_usd': self.estimated_cost_usd}
 
 
@@ -153,7 +155,7 @@ def inspect_visuals(*, pdf_path: Path, pages: list[str], sections: dict, invento
                     target_claims, use_stub: bool = False, cache_dir: Path | None = None,
                     expected_source_hash: str | None = None) -> VisualResult:
     started = time.monotonic()
-    deadline = started + 30
+    deadline = started + DEADLINE_SECONDS
     from ..budget import current_tracker
     tracker = current_tracker()
     if tracker:
@@ -219,7 +221,7 @@ def inspect_visuals(*, pdf_path: Path, pages: list[str], sections: dict, invento
     endpoint = '(stub)' if use_stub else llm.resolve_openai_endpoint().url
     identity = {'pdf': result.source_sha256, 'selected': result.selected, 'context': context,
                 'prose_candidates': candidates,
-                'model_config': asdict(cfg), 'completion_cap': min(1200, cfg.max_tokens),
+                'model_config': asdict(cfg), 'completion_cap': min(MAX_COMPLETION_TOKENS, cfg.max_tokens),
                 'endpoint_sha256': hashlib.sha256(endpoint.encode()).hexdigest(),
                 'image_sha256': [hashlib.sha256(image.data).hexdigest() for image in images],
                 'system': SYSTEM, 'policy': POLICY_VERSION, 'schema_version': 3, 'stub': use_stub}
@@ -245,7 +247,7 @@ def inspect_visuals(*, pdf_path: Path, pages: list[str], sections: dict, invento
             if not result.cache_hit:
                 t0 = time.monotonic()
                 response = llm.call(phase='visual_inspect', prompt=prompt, system=SYSTEM,
-                    images=images, max_tokens=min(1200, cfg.max_tokens), use_stub=use_stub,
+                    images=images, max_tokens=min(MAX_COMPLETION_TOKENS, cfg.max_tokens), use_stub=use_stub,
                     deadline_seconds=deadline - t0, request_state=request_state)
                 result.request_count = request_state.get("outbound_requests", 0)
                 result.request_ms = int((time.monotonic() - t0) * 1000)

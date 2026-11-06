@@ -188,7 +188,7 @@ _FALLBACK_PHASES: dict[str, dict] = {
     "cross_paper_judge": {"role": "judge", "temperature": 0.0, "max_tokens": 400},
     "claim_overlap_judge": {"role": "judge", "temperature": 0.0, "max_tokens": 400},
     "reconcile":         {"role": "extractor"},
-    "visual_inspect":    {"role": "judge", "temperature": 0.0, "max_tokens": 1200},
+    "visual_inspect":    {"role": "judge", "temperature": 0.0, "max_tokens": 2400},
     "target_claims":     {"role": "judge", "temperature": 0.0, "max_tokens": 4000},
     "claim_support":     {"role": "judge"},
     "synthesis_author":  {"role": "author", "temperature": 0.2, "max_tokens": 10000},
