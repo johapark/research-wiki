@@ -199,9 +199,13 @@ caption is not located is a recorded gap; it is critical when no Results-cited
 visual was located at all or a critical target claim names it. Missing references
 named only in critical target claims also remain blocking. A provider or
 environment failure during the request exits 2 (retryable on `--resume`) rather
-than becoming a review veto. Read the source-hash-bound
-`<stem>-<attempt>.visual.json` receipt there for selected/unselected references,
-observations, coverage gaps and usage. Receipts retain the served model name;
+than becoming a review veto. To work through what was held, run
+`researchwiki inspect visuals` — it renders the queue as one page with each
+flagged figure's cached page render beside the model's reading of it, splitting
+the items a human can judge now from the ones needing a re-run first. The
+source-hash-bound `<stem>-<attempt>.visual.json` receipt in `.agent-output/` is
+the same data unrendered: selected/unselected references, observations, coverage
+gaps and usage. Receipts retain the served model name;
 when its cloud pricing is missing, cost stays unknown and the budget retains the
 conservative cost charge while settling known token usage (chat-relay answers are
 unmetered and settle free). This version does not

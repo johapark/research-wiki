@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>research wiki · review queue</title>
+<!--
+  Self-contained by design: no CDN, no build step, no external font. The file
+  opens from file:// and survives being copied to another machine. The page
+  images are base64 PNGs read from `.figures-cache/inspection/` at build time,
+  which is most of the bytes.
+
+  Both themes, unlike `graph.html`. That file is dark-only on purpose — it is a
+  full-bleed canvas tool. This one is a reading document whose job is comparing
+  a rendered page against a paragraph of prose, so it follows the reader's
+  system setting instead of imposing a surface.
+
+  Layout is a single measured column with the page image beside its reading, and
+  it collapses to one column on a phone. Nothing here is interactive except the
+  copy buttons: the page states a queue, it does not record decisions.
+-->
+<style>
+:root{
+  --bg:#f7f6f3; --panel:#fffefb; --ink:#1c1d1a; --muted:#5f6259;
+  --rule:#dddbd2; --accent:#4a6b8a; --blocking:#8a4a3c;
+  --warn-bg:#f6f1e7; --ok-bg:#eaf0ea; --shot-bg:#ffffff;
+  --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#16171a; --panel:#1d1f22; --ink:#e8e7e2; --muted:#a0a29b;
+    --rule:#33363a; --accent:#8fb3d0; --blocking:#d98b78;
+    --warn-bg:#2a2621; --ok-bg:#1f2621; --shot-bg:#e9e9e6;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.55;
+  padding:0 max(16px,env(safe-area-inset-left,0px)) 64px max(16px,env(safe-area-inset-right,0px));
+}
+.wrap{max-width:980px;margin:0 auto}
+h1{font-size:clamp(24px,4vw,34px);line-height:1.2;margin:0 0 10px;font-weight:600;text-wrap:balance}
+.top{padding:40px 0 24px;border-bottom:2px solid var(--ink)}
+.lede{color:var(--muted);margin:0;max-width:64ch}
+.counts{display:flex;flex-wrap:wrap;gap:8px 24px;margin-top:18px;font-size:13px;color:var(--muted)}
+.counts b{font-family:var(--mono);color:var(--ink);font-variant-numeric:tabular-nums;font-weight:500}
+.how{background:var(--panel);border:1px solid var(--rule);border-left:3px solid var(--accent);
+  padding:16px 18px;margin:26px 0;font-size:14px}
+.how ol{margin:8px 0 0;padding-left:20px}
+.how li{margin-bottom:5px}
+.how li:last-child{margin-bottom:0}
+h2.band{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);
+  font-weight:600;margin:38px 0 0;padding-bottom:7px;border-bottom:1px solid var(--rule)}
+h2.band span{text-transform:none;letter-spacing:0;font-weight:400}
+.paper{border-top:1px solid var(--rule);padding:30px 0 6px}
+.paper:first-of-type{border-top:0}
+.phead{display:flex;gap:14px;align-items:baseline}
+.pnum{font-family:var(--mono);font-size:13px;color:var(--accent);padding-top:5px}
+h3{font-size:clamp(18px,2.6vw,23px);line-height:1.25;margin:0;font-weight:600;text-wrap:balance}
+.stem{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin:6px 0 0;word-break:break-all}
+.flabel{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.gates{margin-top:16px}
+.gates ul{margin:5px 0 0;padding-left:20px;font-size:14px}
+.paths{margin-top:14px;padding:11px 13px;background:var(--panel);border:1px solid var(--rule);font-size:12px}
+.paths .row{display:flex;gap:10px;align-items:flex-start;min-width:0}
+.paths .row+.row{margin-top:4px}
+.paths .k{flex:0 0 52px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding-top:2px}
+.paths code{font-family:var(--mono);word-break:break-all;flex:1 1 auto;min-width:0}
+button.copy{font:inherit;font-size:11px;background:transparent;color:var(--accent);border:1px solid var(--rule);
+  border-radius:4px;padding:1px 7px;cursor:pointer;flex:0 0 auto}
+button.copy:hover{border-color:var(--accent)}
+button.copy:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.ref{margin-top:24px;padding-top:18px;border-top:1px dashed var(--rule)}
+.refhead{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+h4{font-size:18px;margin:0;font-weight:600}
+.pill{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:600;
+  padding:2px 8px;border:1px solid currentColor;border-radius:3px}
+.pill.block{color:var(--blocking)}
+.pill.note{color:var(--muted)}
+.where{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.q{margin:11px 0 0;font-size:14.5px}
+.q .k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);
+  font-weight:600;margin-right:8px}
+.body{display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:22px;margin-top:15px;align-items:start}
+@media (max-width:760px){.body{grid-template-columns:1fr}}
+figure{margin:0}
+figure img{display:block;width:100%;max-width:100%;border:1px solid var(--rule);background:var(--shot-bg)}
+figcaption{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.45}
+.noshot{border:1px dashed var(--rule);padding:14px;font-size:13px;color:var(--muted);background:var(--panel)}
+.fields{display:flex;flex-direction:column;gap:14px;min-width:0}
+.field p{margin:4px 0 0}
+.reading{font-size:15px}
+.meta{font-size:13.5px;color:var(--muted)}
+.field.why{background:var(--warn-bg);padding:11px 13px;border-left:2px solid var(--blocking)}
+.field.ok{background:var(--ok-bg);padding:11px 13px;border-left:2px solid var(--accent)}
+.quote{font-style:italic}
+.empty{padding:56px 0;text-align:center;color:var(--muted)}
+.empty strong{display:block;font-size:19px;color:var(--ink);margin-bottom:8px;font-style:normal}
+footer{border-top:2px solid var(--ink);margin-top:44px;padding-top:18px;font-size:13px;color:var(--muted)}
+footer code{font-family:var(--mono);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+const DATA = __QUEUE_DATA__;
+
+const esc = s => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
+/* A path is only useful if it reaches a terminal, so each one gets a copy
+   button. clipboard.writeText can reject (file:// in some browsers), so the
+   fallback selects the text instead of silently doing nothing. */
+function pathRow(key, value) {
+  if (!value) return '';
+  return `<div class="row"><span class="k">${esc(key)}</span>` +
+         `<code>${esc(value)}</code>` +
+         `<button class="copy" data-copy="${esc(value)}">copy</button></div>`;
+}
+
+function field(label, text, cls) {
+  if (!text) return '';
+  return `<div class="field${cls ? ' ' + cls : ''}"><div class="flabel">${esc(label)}</div>` +
+         `<p class="${cls === 'ok' ? 'quote' : 'meta'}">${esc(text)}</p></div>`;
+}
+
+function refBlock(item) {
+  const shot = item.image
+    ? `<figure><img src="${item.image}" alt="Page ${esc(item.page)} of the PDF" loading="lazy">` +
+      `<figcaption>${esc((item.caption || '').slice(0, 150))}</figcaption></figure>`
+    : `<div class="noshot">${esc(item.image_note || 'No page image: this reference was never inspected.')}</div>`;
+
+  const reading = item.has_reading
+    ? `<div class="field"><div class="flabel">What the model read off the image</div>` +
+      `<p class="reading">${esc(item.observation)}</p></div>` +
+      field('Labels it could see', item.visible_labels) +
+      field('Units and conditions', item.units_conditions) +
+      field(item.corroborated ? 'Why it was accepted' : 'Why it was not accepted on its own',
+            item.uncertainty || (item.corroborated ? '' : item.reason_text), 'why') +
+      field('Confirmed against this sentence in the paper', item.source_quote, 'ok')
+    : `<div class="field why"><div class="flabel">No reading recorded</div>` +
+      `<p class="meta">${esc(item.reason_text || 'nothing came back for this reference')}</p></div>`;
+
+  return `<section class="ref">
+    <div class="refhead">
+      <h4>${esc(item.label)}</h4>
+      ${item.blocking ? '<span class="pill block">blocks publication</span>'
+                      : '<span class="pill note">recorded, not blocking</span>'}
+      ${item.page ? `<span class="where">page ${esc(item.page)} of the PDF</span>` : ''}
+    </div>
+    ${item.question ? `<p class="q"><span class="k">Asked</span>${esc(item.question)}</p>` : ''}
+    <div class="body">${shot}<div class="fields">${reading}</div></div>
+  </section>`;
+}
+
+function paperBlock(paper, n) {
+  const gates = (paper.gate_reasons || []).map(g => `<li>${esc(g)}</li>`).join('');
+  return `<article class="paper">
+    <div class="phead">
+      <div class="pnum">${n}</div>
+      <div><h3>${esc(paper.title)}</h3><p class="stem">${esc(paper.stem)}</p></div>
+    </div>
+    ${gates ? `<div class="gates"><div class="flabel">Why it stopped</div><ul>${gates}</ul></div>` : ''}
+    <div class="paths">
+      ${pathRow('Draft', paper.draft_path)}
+      ${pathRow('Receipt', paper.receipt_path)}
+      ${pathRow('PDF', paper.source_pdf)}
+    </div>
+    ${(paper.items || []).map(refBlock).join('')}
+  </article>`;
+}
+
+function render() {
+  const m = DATA.meta || {};
+  const papers = DATA.papers || [];
+  const ready = papers.filter(p => p.ready);
+  const rerun = papers.filter(p => !p.ready);
+
+  const head = `<header class="top">
+    <h1>Held for review: what needs your eyes</h1>
+    <p class="lede">Each figure below stopped a paper from reaching the wiki because its
+    reading could not be confirmed against the paper's own prose. The page the model
+    looked at sits beside what it reported.</p>
+    <div class="counts">
+      <span><b>${papers.length}</b> ${papers.length === 1 ? 'draft' : 'drafts'} held</span>
+      <span><b>${m.n_blocking || 0}</b> blocking ${m.n_blocking === 1 ? 'figure' : 'figures'}</span>
+      <span><b>${m.n_corroborated || 0}</b> confirmed automatically</span>
+      <span><b>0</b> pages written to the wiki</span>
+      ${m.n_images_omitted ? `<span><b>${m.n_images_omitted}</b> images omitted (size cap)</span>` : ''}
+    </div>
+  </header>`;
+
+  if (!papers.length) {
+    document.getElementById('app').innerHTML = head + `<div class="empty">
+      <strong>Nothing is waiting on you.</strong>
+      No held draft has an unresolved figure reading.
+    </div>` + footer(m);
+    return;
+  }
+
+  const how = `<div class="how">
+    <div class="flabel">How to work through one</div>
+    <ol>
+      <li>Open the PDF page shown and compare it with the reading beside it.</li>
+      <li>If the reading is right and the draft text resting on it is accurate, the draft is
+      publishable: re-run <code>agent ingest</code> on that PDF without
+      <code>--visual-inspection</code>, which skips the figure gate.</li>
+      <li>If the reading is wrong, correct the draft text that depends on it before the paper lands.</li>
+      <li>Nothing here is in <code>wiki/</code>, and this page records no decisions.</li>
+    </ol>
+  </div>`;
+
+  let html = head + how;
+  if (ready.length) {
+    html += `<h2 class="band">Ready to judge <span>— ${ready.length} of ${papers.length}, fewest figures first</span></h2>`;
+    html += ready.map((p, i) => paperBlock(p, i + 1)).join('');
+  }
+  if (rerun.length) {
+    html += `<h2 class="band">Needs a re-run first <span>— nothing was read, so there is nothing to compare</span></h2>`;
+    html += rerun.map((p, i) => paperBlock(p, ready.length + i + 1)).join('');
+  }
+  document.getElementById('app').innerHTML = html + footer(m);
+}
+
+function footer(m) {
+  return `<footer><p>Drafts and receipts live under <code>.agent-output/</code>; page images are
+  read from <code>.figures-cache/inspection/</code>. Both are gitignored and local to this machine.
+  Rebuild with <code>researchwiki inspect visuals</code>.</p></footer>`;
+}
+
+render();
+
+document.addEventListener('click', ev => {
+  const button = ev.target.closest('button.copy');
+  if (!button) return;
+  const text = button.dataset.copy || '';
+  const done = () => {
+    const was = button.textContent;
+    button.textContent = 'copied';
+    setTimeout(() => { button.textContent = was; }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done, () => selectInstead(button));
+  } else {
+    selectInstead(button);
+  }
+});
+
+/* Clipboard refused: select the path so the reader can copy it by hand. */
+function selectInstead(button) {
+  const code = button.parentElement.querySelector('code');
+  if (!code) return;
+  const range = document.createRange();
+  range.selectNodeContents(code);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  button.textContent = 'select+copy';
+}
+</script>
+</body>
+</html>

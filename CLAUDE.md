@@ -564,6 +564,14 @@ Two edge kinds: `[[wikilinks]]` (what authors wrote) and typed claim edges from 
 
 Use it to decide whether a cluster deserves a synthesis page (pairs with `candidates synthesis`), or to spot an isolated component. **Not** for factual questions — it shows structure, not claims.
 
+### Inspect — review what an ingest gate held back
+
+`researchwiki inspect visuals` renders the pending visual-inspection queue to `output/inspect/visuals.html` (gitignored; `--open` launches it, `--json` emits the same object). Read-only, zero tokens, no network: it reads `.agent-output/*.visual.json`, embeds the page renders the ingest already cached under `.figures-cache/inspection/`, and best-effort joins the full gate reasons from the ingest log. Trigger: `--visual-inspection` left drafts in `.agent-output/` and you want to clear them.
+
+The page exists for the one thing the receipts can't do — it puts each flagged figure's **rendered PDF page beside the model's reading of it**, which is the comparison the gate asks a human to make. It splits *ready to judge* from *needs a re-run first* (a blocking figure with no reading has nothing to compare), shows newest attempt per paper, and drops anything nobody waits on (already promoted, or inspection passed — `--all` keeps them). A held paper's PDF is still in `inbox/`, so `resolve_pdf` can't find it and nothing can be re-rendered: a missing cached render degrades to a note, and `--max-bytes` (default 8 MB) drops images rather than shrinking them. `--no-images` gives a ~45 KB text page.
+
+**It records no decisions.** Act with the ordinary commands; a reviewer who accepts a reading re-ingests that PDF without `--visual-inspection`. An approval the publication gate could *read* would need a durable ledger, which this is deliberately not.
+
 ### Structured-API lookups — `retraction-check`, `preprint-check`, `orcid-lookup`
 
 CLI wrappers around PubMed / bioRxiv / ORCID. Usage, YAML-recording rules, and workflow split for each in [`prompts/lookups.md`](./prompts/lookups.md).

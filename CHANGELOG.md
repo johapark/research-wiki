@@ -66,6 +66,13 @@ the reasoning behind any line below.
   still settle free, so they do not exhaust `--max-cost-usd`.
 - Numeric drift checks read a middle-dot decimal in the source PDF
   (`96·5%`) as its point form, so a page writing `96.5%` no longer drifts.
+- `researchwiki inspect visuals` renders the pending visual-inspection queue to
+  `output/inspect/visuals.html`: each flagged figure's cached page render beside
+  the model's reading of it, split into what a human can judge now and what
+  needs a re-run first. Read-only, zero tokens, newest attempt per paper, with
+  `--json` (`schema_version: 1`), `--all`, `--all-attempts`, `--no-images` and
+  `--max-bytes`. A missing cached render degrades to a note, since a held
+  paper's PDF is still in `inbox/` and cannot be re-rendered.
 - Visual inspection reads a headingless paper's body text as its Results
   section, so Nature and Cell figure citations count as Results-cited instead
   of making every missing caption critical; receipts record `results_source`.
