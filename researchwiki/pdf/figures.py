@@ -234,8 +234,9 @@ def artwork_coverage(
     object (muslu-2026 p7 — one object covering 38% of the page), while a
     plain text page with a header rule and a logo has two. Summing bounding-box
     areas separates them cleanly — measured on this corpus, caption-only and
-    plain text pages land at ~1.5% while every real figure page checked ran
-    15-98%.
+    plain text pages mostly land under 1%, and most figure pages run 15-98%.
+    The two overlap between about 1% and 5% (see `ARTWORK_FLOOR`), so the
+    separation is a strong default, not a guarantee.
 
     Used only to *warn* and point at candidates; the caller still chooses what
     to render, because rendering a page it didn't ask for spends context it
@@ -256,9 +257,22 @@ def artwork_coverage(
     return out
 
 
-# Below this fraction a page is text. Caption-only and plain prose pages
-# measured ~1.5% across this corpus; the lowest real figure page was ~15%.
-ARTWORK_FLOOR = 0.06
+# Below this fraction a page is treated as text.
+#
+# Calibrated 2026-11-06 on 16,707 pages of 755 corpus PDFs, with 126 pages from
+# the 1-15% band labelled by eye (figure artwork present or not). Caption-only
+# and prose pages sit mostly under 1%, but a single small panel or schematic
+# can cover just 2-5% of a page: fraessle-2023 p4 carries Figure 2 at 5.2%.
+# On the main-figure caption pages of the labelled sample, every page from 4%
+# up had a figure; below 4% the two kinds mix. At 0.03 the floor rejects 6 of
+# 49 figure caption pages (0.06 rejected 28) and accepts 2 of 13 captions
+# without artwork; across the corpus it resolves 93.5% of main figures to one
+# artwork page, against 91.8% at 0.06.
+#
+# The floor is low because both callers are cheap to be wrong in that
+# direction: `figures` only *warns* below it, and visual inspection still asks
+# the model to confirm the requested label before reading the page.
+ARTWORK_FLOOR = 0.03
 
 
 def artwork_candidates(

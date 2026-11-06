@@ -708,3 +708,13 @@ def test_benchmark_validation_does_not_depend_on_assert(tmp_path):
     out = subprocess.run([sys.executable, '-I', '-O', str(suite / 'benchmark.py'), 'validate'],
                          capture_output=True, text=True, check=True)
     assert json.loads(out.stdout)['source_hashes_verified'] is True
+
+
+def test_small_panel_figure_page_resolves_for_inspection():
+    """A labelled page at ~5% artwork (a single small panel) is inspectable."""
+    class SmallPanel(FakePage):
+        def get_objects(self, **kw):
+            yield SimpleNamespace(type=visuals.pypdfium2.raw.FPDF_PAGEOBJ_PATH,
+                                  get_bounds=lambda: (0, 0, 160, 157))  # 5.2% of 612x792
+    assert visuals.resolve_page(FakeDoc([SmallPanel()]), entry()) == 1
+    assert visuals.resolve_page(FakeDoc([FakePage(False)]), entry()) is None

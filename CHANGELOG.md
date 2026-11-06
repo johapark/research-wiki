@@ -66,6 +66,11 @@ the reasoning behind any line below.
   still settle free, so they do not exhaust `--max-cost-usd`.
 - Numeric drift checks read a middle-dot decimal in the source PDF
   (`96·5%`) as its point form, so a page writing `96.5%` no longer drifts.
+- The figure-page artwork floor drops from 6% to 3% page coverage, calibrated
+  on 16,707 corpus pages with a hand-labelled sample. Small single-panel
+  figures (2-5% coverage) now resolve for visual inspection and no longer
+  trigger the `figures` "no artwork" warning; main-figure resolution rises from
+  91.8% to 93.5%.
 
 - Ingest repairs retain custom author instructions and request every existing
   page section. EVOLVE and DEBUG reject newly missed critical target IDs before
