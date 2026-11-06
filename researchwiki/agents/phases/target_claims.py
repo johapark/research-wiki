@@ -119,13 +119,14 @@ Constraints:
     64 cores" is right.
   - Each claim must be SOURCE-GROUNDED — cite the location (Abstract,
     Fig. 2, Methods §X, ED Fig. 3, Results) so a reader can verify.
-  - Preserve numerical meaning rather than PDF extraction artefacts. Use
-    Unicode superscripts for powers of ten when the scientific notation is
-    unambiguous: a flattened "2 × 105" dose may mean "2 × 10⁵", not 210.
-    Do not reconstruct an exponent when the source context is ambiguous.
-    Write decimal middle dots as decimal points, and repeat a shared unit
-    on every value in a list ("96%, 90%, 82%, and 77%", not "96, 90, 82,
-    and 77%"). Preserve the source's values, precision, and group association.
+  - Copy numbers as the source text prints them; the page is graded
+    digit-for-digit against that text, so a digit the text does not
+    contain cannot be verified even when it is the true value. Do not
+    reconstruct a flattened exponent ("2 × 105" stays "2 × 105"). Write
+    decimal middle dots as decimal points ("96·5%" → "96.5%"), and repeat
+    a shared unit on every value in a list ("96%, 90%, 82%, and 77%", not
+    "96, 90, 82, and 77%"). Preserve the source's values, precision, and
+    group association.
   - ONE entry per distinct fact. Do not emit the same result twice — not
     across types (if it has a number, prefer "headline"; if it's a
     demonstrated use case, prefer "capability"), and not with different
