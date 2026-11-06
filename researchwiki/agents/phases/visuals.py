@@ -1,4 +1,11 @@
-"""Select and inspect at most two source pages; keep transcripts out of PDF text."""
+"""Select and inspect at most two source pages; keep transcripts out of PDF text.
+
+Experimental (`visual-inspection` in `data/deprecations.yaml`): the `.visual.json`
+receipt shape, its `visual_*` gate metrics and `POLICY_VERSION` are exempt from
+the beta compatibility window while the review workflow settles. The
+`visual_inspect` phase-role identifier is **not** exempt — persisted roles are
+append-only permanently.
+"""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field

@@ -185,6 +185,13 @@ def _execute_ingest(args) -> int:
     # source of truth for subcommand + passthrough flags.
     from . import _ingest_batch
 
+    # Announced before any work, and only when the opt-in flag is set: an
+    # ordinary ingest must not grow a warning it cannot act on. Stderr only,
+    # so the stdout receipt and --result-file JSON stay clean.
+    if getattr(args, "visual_inspection", False):
+        from ..experimental import warn_visual_inspection
+        warn_visual_inspection()
+
     # Ahead of --resume: `-w 0` used to reach ThreadPoolExecutor and surface as
     # exit 3 with a traceback, after the batch dir and plan.json had been written.
     bad_workers = _ingest_batch.invalid_worker_count(args.workers)
@@ -667,7 +674,8 @@ def build_parser() -> argparse.ArgumentParser:
         "faster, less reliable)",
     )
     p_ingest.add_argument("--visual-inspection", action="store_true",
-                          help="Selectively inspect figures/tables (off by default).")
+                          help="[experimental] Selectively inspect figures/tables "
+                               "(off by default; flags and receipt shape may change).")
     p_ingest.add_argument(
         "--verify-claim-entailment",
         action="store_true",

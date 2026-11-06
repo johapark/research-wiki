@@ -159,8 +159,9 @@ To inspect selected figures and tables, opt in for that invocation:
 researchwiki agent ingest inbox/paper.pdf --visual-inspection
 ```
 
-Visual inspection is **off by default**. Configuring `visual_inspect` does not
-turn it on. The existing target-claims call nominates at most three questions
+Visual inspection is **experimental and off by default**; the command announces
+that on stderr each time it runs. Configuring `visual_inspect` does not turn it
+on. The existing target-claims call nominates at most three questions
 from a caption inventory; a Results reference supplies a fallback when needed.
 When a paper prints no Results heading before Methods (most Nature and Cell
 articles), the body text from the abstract to the first back-matter heading
@@ -208,8 +209,18 @@ the same data unrendered: selected/unselected references, observations, coverage
 gaps and usage. Receipts retain the served model name;
 when its cloud pricing is missing, cost stays unknown and the budget retains the
 conservative cost charge while settling known token usage (chat-relay answers are
-unmetered and settle free). This version does not
-accept durable human review approvals or automatically certify visual-only claims.
+unmetered and settle free).
+
+**This whole surface is experimental** (`visual-inspection` in
+`researchwiki/data/deprecations.yaml`), so its flags, receipt shape and `--json`
+contracts may change without a deprecation window — see
+[COMPATIBILITY.md § Experimental surfaces](./COMPATIBILITY.md#experimental-surfaces).
+The reason is the missing half of the workflow: a reviewer who checks a reading
+and finds it correct has nowhere to record that, so the only way to publish the
+paper is to re-ingest it without the flag, which drops the receipt and the
+coverage metrics along with the veto. A durable approval the gate could read is
+the next piece of design, and building it will move these surfaces. Visual-only
+claims are still never certified automatically.
 
 Successful readings are cached under `.figures-cache/inspection/`, keyed by
 source bytes, rendering, questions/context, model/provider/endpoint digest and

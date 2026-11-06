@@ -65,6 +65,33 @@ provenance_acknowledged_at: 2026-09-01
 Acknowledgment is an honest terminal state, not a fabricated `author_model`.
 `lint` reports it separately from actionable missing provenance.
 
+### Experimental surfaces
+
+A surface published ahead of its design settling may be marked experimental
+instead of frozen. An experimental surface must:
+
+1. be recorded in the `experimental:` section of
+   `researchwiki/data/deprecations.yaml`, naming both what the exemption covers
+   and what it does not;
+2. be opt-in, so no default workflow depends on it; and
+3. announce itself on stderr whenever it is used, leaving stdout and `--json`
+   parseable.
+
+Such a surface may change shape or be withdrawn without the deprecation window
+above — that exemption is the only thing the marker buys, and it is why the
+marker is a ledger row rather than a note in prose. Promoting one to the
+ordinary contract is a changelog entry and the removal of its row; from then on
+the window applies as normal.
+
+Two limits. Persisted phase-role identifiers are never exempt (see below), so an
+experimental feature's role name outlives it. And wiki frontmatter written by an
+experimental surface still follows the frontmatter rules: a page already in
+`wiki/` cannot be left unreadable by a change to the feature that wrote it.
+
+`--visual-inspection` and `researchwiki inspect` are experimental under this
+clause: a reviewer who confirms a figure reading has nowhere to record it, and
+closing that gap is expected to change the receipt shape and the CLI.
+
 ### Persisted phase-role identifiers
 
 Values stored in `ingest_iterations.role` and public model-routing phase names are

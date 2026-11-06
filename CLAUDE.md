@@ -366,7 +366,7 @@ New ingest rows record cache-read/write token subsets, and reports apply the tab
 
 **Step 1** — run agent ingest. **For ≥2 PDFs pass them all to a single `agent ingest` invocation** — it auto-enters crash-safe batch mode (4 workers on an API provider or `--stub`, 1 under chat-relay, atomic `.ingest/batch-<ts>/checkpoint.json` per completion, `--resume <batch-dir>` picks up after a crash; resume verifies input/configuration identity before dispatch and keeps an explicit `-w N`). Changed inputs, author prompts, model settings or framework code require restoring the original workflow or starting a new batch for the remaining PDFs; legacy checkpoints warn that provenance is unverified. See [WORKFLOW.md](./WORKFLOW.md#the-shape-of-one-ingest). Do NOT fan out one background Bash per file: it bypasses the checkpoint, uncaps concurrency, and multiplies `state.db` write contention. `agent ingest` takes **no `--category`** — the classifier picks one per paper and abstains to `other`. (`--category` is the digest path's flag, on `researchwiki ingest`.)
 
-**Optional visual inspection.** `agent ingest --visual-inspection` nominates figure/table questions in the existing extraction call and makes at most one bounded image call. Off by default; unresolved critical visuals require review. See [WORKFLOW.md](./WORKFLOW.md#2-run-the-agent) for routing, caps and receipts.
+**Optional visual inspection — experimental.** `agent ingest --visual-inspection` nominates figure/table questions in the existing extraction call and makes at most one bounded image call. Off by default; unresolved critical visuals require review, and a reviewer who confirms a reading still cannot record that, so publishing such a paper means re-ingesting without the flag. Its flags, receipt shape and `--json` contracts are exempt from the compatibility window (`visual-inspection` in `researchwiki/data/deprecations.yaml`) and may change; the command says so on stderr. See [WORKFLOW.md](./WORKFLOW.md#2-run-the-agent) for routing, caps and receipts.
 
 **Codex sandbox permissions.** Run `researchwiki agent ingest` with `sandbox_permissions: require_escalated` from the outset; ingestion requires network and database write access.
 
@@ -564,7 +564,9 @@ Two edge kinds: `[[wikilinks]]` (what authors wrote) and typed claim edges from 
 
 Use it to decide whether a cluster deserves a synthesis page (pairs with `candidates synthesis`), or to spot an isolated component. **Not** for factual questions — it shows structure, not claims.
 
-### Inspect — review what an ingest gate held back
+### Inspect — review what an ingest gate held back (experimental)
+
+**Experimental**, with `--visual-inspection`: flags and the `--json` contract may change without a deprecation window, and the command announces that on stderr (stdout stays parseable).
 
 `researchwiki inspect visuals` renders the pending visual-inspection queue to `output/inspect/visuals.html` (gitignored; `--open` launches it, `--json` emits the same object). Read-only, zero tokens, no network: it reads `.agent-output/*.visual.json`, embeds the page renders the ingest already cached under `.figures-cache/inspection/`, and best-effort joins the full gate reasons from the ingest log. Trigger: `--visual-inspection` left drafts in `.agent-output/` and you want to clear them.
 

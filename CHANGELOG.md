@@ -66,6 +66,15 @@ the reasoning behind any line below.
   still settle free, so they do not exhaust `--max-cost-usd`.
 - Numeric drift checks read a middle-dot decimal in the source PDF
   (`96·5%`) as its point form, so a page writing `96.5%` no longer drifts.
+- Visual inspection (`agent ingest --visual-inspection` and `researchwiki
+  inspect`) is marked **experimental**: a new `experimental:` section in
+  `researchwiki/data/deprecations.yaml` records which surfaces that exempts from
+  the beta compatibility window and which it does not (the `visual_inspect`
+  phase role stays append-only), `COMPATIBILITY.md` gains the clause the
+  exemption rests on, and both commands announce the status on stderr while
+  leaving stdout and `--json` parseable. No behaviour change. The reason is the
+  missing approval path: a reviewer who confirms a figure reading still has
+  nowhere to record it, and closing that gap will change these surfaces.
 - `researchwiki inspect visuals` renders the pending visual-inspection queue to
   `output/inspect/visuals.html`: each flagged figure's cached page render beside
   the model's reading of it, split into what a human can judge now and what

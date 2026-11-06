@@ -1,4 +1,4 @@
-"""Render what an ingest gate held back as one page for human review.
+"""[experimental] Render what an ingest gate held back as one page for review.
 
 ✅ Use when: `agent ingest --visual-inspection` left drafts in `.agent-output/`
    and you want to clear them. The page puts each flagged figure's rendered PDF
@@ -17,6 +17,11 @@ ordinary commands.
 
 The sub-mode is positional so other review queues (impact reviews, evolution
 proposals) can join as `inspect <source>` without changing this surface.
+
+**Experimental** (`visual-inspection` in `data/deprecations.yaml`): this command
+and its `--json` contract are exempt from the beta compatibility window while
+the review workflow settles — a reviewer who confirms a reading still has
+nowhere to record it, and closing that gap will change this surface.
 
 Exit codes: 0 on success, including an empty queue, which renders a page saying
 so; 1 for an unknown sub-mode or a bad `--max-bytes`; 2 if `wiki/` is missing or
@@ -38,6 +43,10 @@ DEFAULT_OUT = Path("output") / "inspect" / "visuals.html"
 
 
 def main(argv: list[str]) -> int:
+    # Before argparse, so `--help` and a mistyped flag announce it too.
+    from ..experimental import warn_visual_inspection
+    warn_visual_inspection()
+
     source = "visuals"
     if argv and not argv[0].startswith("-"):
         source, argv = argv[0], argv[1:]

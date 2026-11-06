@@ -30,6 +30,11 @@ from (0.07 s for 7 files on that backlog) rather than guessing from a filename.
 Read-only, zero tokens, no network. The page records no decisions — a reviewer
 acts with the ordinary commands, and an approval a gate could *read* would need
 a durable ledger, which is deliberately not this.
+
+**Experimental surface** (`visual-inspection` in `data/deprecations.yaml`): the
+`--json` contract here, and the receipt shape it reads, are exempt from the beta
+compatibility window. The missing approval ledger is the reason — building it
+will change both.
 """
 
 from __future__ import annotations
