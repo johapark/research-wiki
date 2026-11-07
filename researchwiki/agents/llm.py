@@ -69,7 +69,7 @@ _throttle_lock = threading.Lock()
 _last_call_at: dict[str, float] = {}
 
 
-def _throttle(model: str, rpm: int | None) -> None:
+def _throttle(model: str, rpm: int | None, deadline: float | None = None) -> None:
     """Block until at least 60/rpm seconds have elapsed since the last call
     to `model`. No-op when `rpm` is None or <= 0.
 
@@ -77,17 +77,32 @@ def _throttle(model: str, rpm: int | None) -> None:
     queue and each computes its wait against the previous caller's updated
     timestamp, so N threads calling one model serialize onto a steady
     ~rpm/minute cadence instead of bursting past the provider's ceiling.
+
+    `deadline` (a `time.monotonic()` value) bounds both the lock wait and the
+    sleep: a call that cannot be sent in time raises `TimeoutError` before it
+    sleeps, rather than waking up past its deadline.
     """
     if not rpm or rpm <= 0:
         return
     interval = 60.0 / rpm
-    with _throttle_lock:
+    if deadline is None:
+        acquired = _throttle_lock.acquire()
+    else:
+        remaining = deadline - time.monotonic()
+        acquired = remaining > 0 and _throttle_lock.acquire(timeout=remaining)
+    if not acquired:
+        raise TimeoutError("deadline expired waiting for the throttle lock")
+    try:
         last = _last_call_at.get(model)
         if last is not None:
             wait = interval - (time.monotonic() - last)
             if wait > 0:
+                if deadline is not None and wait >= deadline - time.monotonic():
+                    raise TimeoutError("throttle wait exceeds the remaining deadline")
                 time.sleep(wait)
         _last_call_at[model] = time.monotonic()
+    finally:
+        _throttle_lock.release()
 
 
 @dataclass
@@ -101,6 +116,7 @@ class LLMResponse:
     output_tokens: int
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    usage_known: bool = True
 
 
 def response_usage(response) -> dict:
@@ -276,6 +292,8 @@ def missing_provider_credentials(*, phases: tuple[str, ...] | None = None) -> li
     _validated_anthropic_base_url()
     providers: set[str] = set()
     for name in model_config.list_phases() if phases is None else phases:
+        if phases is None and name == "visual_inspect":
+            continue  # optional route must not require credentials when disabled
         try:
             providers.add(
                 model_config.canonical_provider_id(
@@ -405,6 +423,10 @@ _MAX_COMPLETION_TOKENS_RE = re.compile(
 def _needs_max_completion_tokens(model: str) -> bool:
     """True for OpenAI models that reject `max_tokens` (GPT-5+/o-series)."""
     return bool(_MAX_COMPLETION_TOKENS_RE.search(model or ""))
+
+
+def _completion_limit_key(model: str) -> str:
+    return "max_completion_tokens" if _needs_max_completion_tokens(model) else "max_tokens"
 
 
 # GPT-5.1+ supports sampling parameters when reasoning is explicitly disabled.
@@ -544,6 +566,27 @@ def _record_effort_rejection(
     return _nearest_effort(value, rejected, supported)
 
 
+def apply_effort_and_temperature(
+    payload: dict, *, model: str, temperature: float, effort: str | None,
+) -> None:
+    """Encode the fields every OpenAI-compatible transport derives from effort.
+
+    An effort the endpoint is known not to take resolves to None and the field
+    is omitted, never sent as JSON null. Temperature is sent unless the model
+    is a reasoning model with reasoning switched on.
+    """
+    if effort is not None:
+        payload["reasoning_effort"] = effort
+    else:
+        payload.pop("reasoning_effort", None)
+    if not _needs_max_completion_tokens(model) or (
+        effort == "none" and _TEMPERATURE_WITHOUT_REASONING_RE.search(model)
+    ):
+        payload["temperature"] = temperature
+    else:
+        payload.pop("temperature", None)
+
+
 def call_openai_compatible(
     *,
     model: str,
@@ -605,10 +648,7 @@ def call_openai_compatible(
     }
     # Completion limits include reasoning on GPT-5+/o-series. Temperature is
     # encoded below, after resolving the effective reasoning effort.
-    if _needs_max_completion_tokens(model):
-        payload["max_completion_tokens"] = max_tokens
-    else:
-        payload["max_tokens"] = max_tokens
+    payload[_completion_limit_key(model)] = max_tokens
 
     api_key = os.environ.get("OPENAI_API_KEY", "lm-studio")
     url = f"{base_url.rstrip('/')}/chat/completions"
@@ -619,18 +659,9 @@ def call_openai_compatible(
     effort = _resolve_effort(effort_key, reasoning_effort)
 
     def _encode_body() -> bytes:
-        if effort is not None:
-            payload["reasoning_effort"] = effort
-        else:
-            payload.pop("reasoning_effort", None)
         # Recompute on every negotiation: a retry may enable or disable
         # reasoning, changing whether temperature is accepted.
-        if not _needs_max_completion_tokens(model) or (
-            effort == "none" and _TEMPERATURE_WITHOUT_REASONING_RE.search(model)
-        ):
-            payload["temperature"] = temperature
-        else:
-            payload.pop("temperature", None)
+        apply_effort_and_temperature(payload, model=model, temperature=temperature, effort=effort)
         return json.dumps(payload).encode("utf-8")
 
     body = _encode_body()
@@ -939,6 +970,9 @@ def call(
     schema: dict | None = None,
     reasoning_effort: str | None = None,
     event_sink: EventRecorder | None = None,
+    images: list | None = None,
+    deadline_seconds: float = 75,  # llm_images.DEADLINE_SECONDS; image calls only
+    request_state: dict | None = None,
 ) -> LLMResponse:
     """Dispatch to the right provider, resolving config from phase or kwargs.
 
@@ -1026,6 +1060,14 @@ def call(
     # forgo the cache discount. Only call_anthropic receives cache_prefix
     # separately (as its own cached block).
     _np_prompt = f"{cache_prefix}\n\n{prompt}" if cache_prefix else prompt
+
+    if images:
+        from .llm_images import dispatch_images
+        return dispatch_images(model=model, provider=provider, prompt=_np_prompt, system=system,
+            temperature=temperature, max_tokens=max_tokens, reasoning_effort=reasoning_effort,
+            rpm=rpm, images=images, phase=phase, use_stub=use_stub, event_sink=event_sink,
+            deadline_seconds=deadline_seconds,
+            configured_bound=cfg.image_token_bound if phase is not None else None, request_state=request_state)
 
     if use_stub:
         return call_stub(
@@ -1140,6 +1182,9 @@ def call(
             output_tokens=response.output_tokens,
             cache_read_tokens=response.cache_read_tokens,
             cache_write_tokens=response.cache_write_tokens,
+            # A relay answer is unmetered ($0, per WORKFLOW.md); its model label
+            # is never priced, which must not read as an unpriced served model.
+            **({"free": True} if p == "chat-relay" else {}),
         )
     observer.finished(response)
     return response

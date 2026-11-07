@@ -46,6 +46,42 @@ deprecations:
       - "page type: concept (wiki/concepts/*.md)"
       - "wiki/views.md: legacy `Recent concept hubs` table"
 
+# Surfaces published ahead of their design settling. The sibling of
+# `deprecations:` above: both answer "how much may this surface change?", from
+# opposite ends of a feature's life. A deprecated surface is frozen until it is
+# removed; an experimental one is exempt from the freeze while it moves.
+#
+# An entry here is what COMPATIBILITY.md § Experimental surfaces rests on, so
+# the exemption is explicit rather than assumed: each one names the surfaces it
+# covers, and anything NOT exempt. Promotion to the ordinary contract is a
+# changelog entry plus deleting the row; withdrawal needs no deprecation window,
+# which is the whole point of the marker.
+experimental:
+  - id: visual-inspection
+    surface: cli-flag
+    feature: researchwiki agent ingest --visual-inspection
+    announced_in: 0.6.0
+    announced_on: 2026-11-06
+    status: active
+    reason: >
+      Opt-in and off by default. A reviewer who confirms a figure reading has
+      nowhere to record it, so the only way to publish a paper whose reading is
+      correct is to re-ingest without the flag. Closing that gap is expected to
+      change the receipt shape and the CLI.
+    exempt_from_beta_contract:
+      - "--visual-inspection flag spelling and semantics"
+      - "researchwiki inspect (command, flags, and its schema_version JSON)"
+      - ".agent-output/<stem>-<attempt>.visual.json receipt shape"
+      - "visual_* keys in ingest_iterations.gate_metrics"
+      - "the visual_coverage check name in --result-file / --events-file"
+    not_exempt:
+      - >
+        ingest_iterations.role = 'visual_inspect' and the visual_inspect
+        model-routing phase name. Persisted phase-role identifiers are
+        append-only permanently, maturity notwithstanding: db rebuild cannot
+        reconstruct historical telemetry, so a shipped role outlives the
+        feature that wrote it.
+
 # Historical database values are append-only, not deprecated. Every shipped role
 # stays here and in VALID_ROLES permanently; new roles are appended to both.
 persisted_phase_roles:
@@ -70,3 +106,4 @@ persisted_phase_roles:
   - short_name
   - target_claims
   - tournament
+  - visual_inspect

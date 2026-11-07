@@ -74,6 +74,8 @@ roles:
     max_tokens: 800
 
 phases:
+  # Optional image work has a small completion cap; avoid reasoning overhead.
+  visual_inspect:   {role: proposer, temperature: 0.0, max_tokens: 2400}
   author:           {role: author}
   evolve:           {role: author}
   debug:            {role: author, temperature: 0.2}

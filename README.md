@@ -311,6 +311,10 @@ The framework is licensed under [PolyForm Noncommercial 1.0.0](./LICENSE), which
 
 PDFs under `benchmark-fixtures/pdfs/` are redistributed under CC-BY-4.0 with attribution in [`benchmark-fixtures/LICENSES.md`](./benchmark-fixtures/LICENSES.md). Your own PDFs remain under their original terms and are never included in the repository.
 
+The [example visual inspection dataset](./benchmark-fixtures/visual-inspection/README.md)
+is likewise CC-BY-4.0, with source attribution and image-modification records in
+[its license ledger](./benchmark-fixtures/visual-inspection/LICENSES.md).
+
 ## Inspiration
 
 Inspired by [Andrej Karpathy’s LLM Wiki pattern](https://gist.github.com/karpathy/1dd0294ef9567971c1e4348a90d69285) and [joonan30’s llm-wiki](https://gist.github.com/joonan30/cbce305684d079dbe9a3fbaefe4e3959), simplified to two tiers: immutable source PDF → one LLM-authored wiki page.

@@ -243,3 +243,121 @@ def test_deprecated_concept_surfaces_are_still_published():
     assert "concept_contract_violations" in LINT_JSON_KEYS
     from researchwiki.provenance import AUTHORED_PAGE_TYPES
     assert "concept" in AUTHORED_PAGE_TYPES
+
+
+# ---------- experimental surfaces ----------
+#
+# The mirror of the deprecation rows above: a deprecated surface is frozen until
+# removal, an experimental one is exempt from the freeze. Both promises are only
+# worth as much as the agreement between the ledger, the prose contract and what
+# the commands actually print.
+
+
+def _experimental_rows() -> dict:
+    rows = _ledger()["experimental"]
+    assert isinstance(rows, list) and rows
+    return {row["id"]: row for row in rows}
+
+
+def test_experimental_ids_are_unique_and_disjoint_from_deprecations():
+    rows = _ledger()["experimental"]
+    ids = [row["id"] for row in rows]
+    assert len(ids) == len(set(ids))
+    # A surface cannot be both exempt from the window and frozen by it.
+    assert not set(ids) & {row["id"] for row in _ledger()["deprecations"]}
+
+
+def test_every_experimental_row_names_what_it_exempts():
+    """The exemption is the only thing the marker buys, so it must be explicit."""
+    for entry_id, row in _experimental_rows().items():
+        assert row["status"] == "active", entry_id
+        assert _version(row["announced_in"]) <= _version(researchwiki_pkg.__version__)
+        assert str(row.get("reason") or "").strip(), entry_id
+        exempt = row["exempt_from_beta_contract"]
+        assert isinstance(exempt, list) and exempt, entry_id
+
+
+def test_visual_inspection_is_experimental_and_matches_its_notice():
+    from researchwiki.experimental import (
+        VISUAL_INSPECTION,
+        VISUAL_INSPECTION_NOTICE,
+        load_experimental,
+    )
+
+    row = _experimental_rows()[VISUAL_INSPECTION]
+    assert VISUAL_INSPECTION in load_experimental()
+    assert "experimental" in VISUAL_INSPECTION_NOTICE
+    assert str(row["announced_in"]) in VISUAL_INSPECTION_NOTICE
+
+
+def test_the_visual_phase_role_is_never_exempted_by_the_marker():
+    """`db rebuild` cannot reconstruct telemetry, so a shipped role is forever.
+
+    The marker must not read as permission to withdraw it — hence both the
+    ledger's own `not_exempt` note and this pin against VALID_ROLES.
+    """
+    row = _experimental_rows()["visual-inspection"]
+    not_exempt = " ".join(row["not_exempt"])
+    assert "visual_inspect" in not_exempt
+    assert "visual_inspect" in VALID_ROLES
+    assert "visual_inspect" in set(_ledger()["persisted_phase_roles"])
+
+
+def test_the_contract_documents_the_experimental_clause():
+    text = (ROOT / "COMPATIBILITY.md").read_text(encoding="utf-8")
+    assert "### Experimental surfaces" in text
+    # The two limits that keep the exemption honest.
+    assert "Persisted phase-role identifiers are never exempt" in text
+    assert "stderr" in text
+
+
+def test_experimental_ledger_is_in_the_installed_package():
+    packaged = resources.files("researchwiki").joinpath("data/deprecations.yaml")
+    assert "visual-inspection" in packaged.read_text(encoding="utf-8")
+
+
+def test_inspect_warns_on_stderr_and_keeps_json_stdout_parseable(tmp_path, monkeypatch):
+    import json as _json
+
+    from researchwiki import paths
+    from researchwiki.tasks import inspect as inspect_cli
+
+    monkeypatch.setattr(paths, "wiki_root", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = inspect_cli.main(["visuals", "--json"])
+    assert rc == 0
+    assert _json.loads(out.getvalue())["schema_version"]
+    assert "experimental" in err.getvalue()
+    assert "experimental" not in out.getvalue()
+
+
+def test_inspect_warns_even_when_argv_fails():
+    """Warned before parsing, so `--help` and a typo still announce it."""
+    from researchwiki.tasks import inspect as inspect_cli
+
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with contextlib.suppress(SystemExit):
+            inspect_cli.main(["--__definitely_not_a_flag__"])
+    assert "experimental" in err.getvalue()
+
+
+def test_ingest_announces_the_marker_only_when_the_flag_is_set(monkeypatch):
+    """An ordinary ingest must not grow a warning it cannot act on."""
+    from researchwiki.tasks import agent as agent_cli
+
+    parser = agent_cli.build_parser()
+    for argv, expected in ((["ingest", "p.pdf", "--stub"], False),
+                           (["ingest", "p.pdf", "--stub", "--visual-inspection"], True)):
+        args = parser.parse_args(argv)
+        # Stop immediately after the notice: `-w 0` is rejected before any work,
+        # so this exercises the announce path without running an ingest.
+        args.workers = 0
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            agent_cli._execute_ingest(args)
+        assert ("experimental" in err.getvalue()) is expected, argv
+        assert "experimental" not in out.getvalue()

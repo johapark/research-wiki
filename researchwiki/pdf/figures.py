@@ -49,11 +49,20 @@ _PAGEOBJ_IMAGE = pypdfium2.raw.FPDF_PAGEOBJ_IMAGE
 # (fonseca-2026, hyphen with or without a leading space). Requiring whitespace
 # *after* the separator is what keeps a cross-reference range out: "Figure 1-3
 # show..." has a digit where the space must be.
+#
+# The label token is case-insensitive (`FIGURE 2 | Title`, `TABLE 1 Baseline`
+# are how Frontiers and several clinical venues typeset); the title-shape check
+# after it stays case-sensitive, because that check is what rejects prose.
 _CAPTION_RE = re.compile(
-    r'^[ \t]*((?:Extended\s+Data\s+)?(?:Fig(?:ure)?|Table)\.?)'
+    r'^[ \t]*((?i:(?:Extended\s+Data\s+)?(?:Fig(?:ure)?|Table))\.?)'
     r'\s*(\d+)\s*[|.:–—-]?\s+(["“(]?[A-Z0-9])',
     re.MULTILINE,
 )
+
+
+def is_caption_line(line: str) -> bool:
+    """True when `line` opens a caption under the same rules as the locator."""
+    return _CAPTION_RE.match(line) is not None
 
 # Cap the scan the same way the chunk index does: a figure past page 80 is
 # beyond anything the grading corpus covers, and the scan is O(pages).
@@ -181,6 +190,30 @@ def prefer_artwork_page(ref: FigureRef, coverage: list[float]) -> FigureRef:
     return ref
 
 
+def page_artwork_fraction(page) -> float:
+    """Fraction of one open pdfium page's area covered by drawables.
+
+    The per-page measurement behind `artwork_coverage`, exposed so a caller
+    that already holds the document (visual inspection) need not reopen it.
+    """
+    width, height = page.get_size()
+    page_area = width * height
+    if page_area <= 0:
+        return 0.0
+    total = 0.0
+    for obj in page.get_objects(max_depth=8):
+        if obj.type not in (_PAGEOBJ_PATH, _PAGEOBJ_IMAGE):
+            continue
+        try:
+            left, bottom, right, top = obj.get_bounds()
+        except Exception:
+            continue  # malformed object; contributes nothing
+        total += max(0.0, right - left) * max(0.0, top - bottom)
+    # Overlapping objects can sum past 1.0; the cap keeps the value readable
+    # without changing any comparison against the floor.
+    return min(total / page_area, 1.0)
+
+
 def artwork_coverage(
     pdf_path: Path | str, max_pages: int = MAX_SCAN_PAGES
 ) -> list[float]:
@@ -201,8 +234,9 @@ def artwork_coverage(
     object (muslu-2026 p7 — one object covering 38% of the page), while a
     plain text page with a header rule and a logo has two. Summing bounding-box
     areas separates them cleanly — measured on this corpus, caption-only and
-    plain text pages land at ~1.5% while every real figure page checked ran
-    15-98%.
+    plain text pages mostly land under 1%, and most figure pages run 15-98%.
+    The two overlap between about 1% and 5% (see `ARTWORK_FLOOR`), so the
+    separation is a strong default, not a guarantee.
 
     Used only to *warn* and point at candidates; the caller still chooses what
     to render, because rendering a page it didn't ask for spends context it
@@ -215,23 +249,7 @@ def artwork_coverage(
         for i in range(min(len(doc), max_pages)):
             page = doc[i]
             try:
-                width, height = page.get_size()
-                page_area = width * height
-                if page_area <= 0:
-                    out.append(0.0)
-                    continue
-                total = 0.0
-                for obj in page.get_objects(max_depth=8):
-                    if obj.type not in (_PAGEOBJ_PATH, _PAGEOBJ_IMAGE):
-                        continue
-                    try:
-                        left, bottom, right, top = obj.get_bounds()
-                    except Exception:
-                        continue  # malformed object; contributes nothing
-                    total += max(0.0, right - left) * max(0.0, top - bottom)
-                # Overlapping objects can sum past 1.0; the cap keeps the value
-                # readable without changing any comparison against the floor.
-                out.append(min(total / page_area, 1.0))
+                out.append(page_artwork_fraction(page))
             finally:
                 page.close()
     finally:
@@ -239,9 +257,22 @@ def artwork_coverage(
     return out
 
 
-# Below this fraction a page is text. Caption-only and plain prose pages
-# measured ~1.5% across this corpus; the lowest real figure page was ~15%.
-ARTWORK_FLOOR = 0.06
+# Below this fraction a page is treated as text.
+#
+# Calibrated 2026-11-06 on 16,707 pages of 755 corpus PDFs, with 126 pages from
+# the 1-15% band labelled by eye (figure artwork present or not). Caption-only
+# and prose pages sit mostly under 1%, but a single small panel or schematic
+# can cover just 2-5% of a page: fraessle-2023 p4 carries Figure 2 at 5.2%.
+# On the main-figure caption pages of the labelled sample, every page from 4%
+# up had a figure; below 4% the two kinds mix. At 0.03 the floor rejects 6 of
+# 49 figure caption pages (0.06 rejected 28) and accepts 2 of 13 captions
+# without artwork; across the corpus it resolves 93.5% of main figures to one
+# artwork page, against 91.8% at 0.06.
+#
+# The floor is low because both callers are cheap to be wrong in that
+# direction: `figures` only *warns* below it, and visual inspection still asks
+# the model to confirm the requested label before reading the page.
+ARTWORK_FLOOR = 0.03
 
 
 def artwork_candidates(

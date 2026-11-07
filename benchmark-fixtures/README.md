@@ -2,13 +2,23 @@
 
 Hand-curated fixtures that score the `researchwiki agent ingest` pipeline. Each fixture pairs a paper PDF with a structured YAML declaring what a thorough wiki page **should** capture: headline claims, capabilities, limitations, related-paper links.
 
-The ingest harness is **portable**: six CC-BY-4.0 OA papers are committed under `pdfs/` so anyone with a fresh clone can run its bundled content benchmarks without a pre-existing corpus. Attribution: see [`LICENSES.md`](./LICENSES.md).
+The ingest harness is **portable**: its six content-coverage papers are bundled
+under `pdfs/`, alongside three additional visual-benchmark papers. All nine PDFs
+are CC-BY-4.0, so a fresh clone can run the bundled benchmarks. Attribution:
+see [`LICENSES.md`](./LICENSES.md).
 
 The separate [proposal/ideation suite](./proposals/README.md) contains twelve
 personal-corpus cases, an anchored human rubric, and offline preparation/checking/
 scoring commands. It requires the specified local papers and is not dispatched
 through `researchwiki benchmark-fixture`. Its rubric is agent-calibrated, not human-validated;
 preparation does not run models or change the wiki.
+
+The [visual inspection suite](./visual-inspection/README.md) is also portable:
+14 inspection cases and three nomination cases use six bundled PDFs. Its
+images, source excerpts and dataset annotations are
+CC-BY-4.0 with explicit attribution and modification records. It prepares and
+scores bounded visual tasks without changing the wiki or making model calls;
+independent human adjudication of its reference answers is pending.
 
 ```
 benchmark-fixtures/
@@ -18,6 +28,7 @@ benchmark-fixtures/
 │   └── {stem}.pdf
 ├── {stem}.yaml                # content-coverage fixtures (this dir)
 ├── proposals/                # personal-corpus proposal quality suite + handbook
+├── visual-inspection/        # portable CC-BY-4.0 image/questions/reference set
 └── retrieval/
     ├── claims/{slug}.yaml     # claim-level retrieval fixtures
     └── pages/{slug}.yaml      # page-level retrieval fixtures
@@ -78,6 +89,9 @@ researchwiki benchmark-fixture <stem> --repeat 5 --llm   # ~$0.93/fixture; mean�
 | fonseca-2026-adjunctive-ibuprofen-in-pre-extensively-drug-resistant | clinical-trial | Nat Comms | tuberculosis phase IIA |
 | chuai-2018-deepcrispr-optimized-crispr-guide-rna | method-with-benchmarks | Genome Biology | CRISPR guide prediction |
 | assa-2024-quantifying-allele-specific-crispr-editing-activity | method-with-benchmarks | Nucleic Acids Research | allele-specific editing measurement |
+| schreiber-2026-tangermeme-a-toolkit-for-understanding | visual-inspection source | Nature Methods | genomic deep-learning toolkit |
+| abdelaal-2019-a-comparison-of-automatic-cell | visual-inspection source | Genome Biology | cell-annotation benchmarking |
+| ji-2023-scannotate-an-automated-cell-type-annotation | visual-inspection source | Bioinformatics Advances | cell-type annotation |
 
 Content-coverage fixtures declare `published_at:` for automatic contamination flagging by the scorer.
 

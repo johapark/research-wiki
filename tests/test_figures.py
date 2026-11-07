@@ -379,3 +379,17 @@ def test_does_not_move_when_no_repeat_has_artwork():
 def test_prefer_artwork_page_tolerates_short_coverage_list():
     ref = figlib.locate_in_texts(["Fig. 1 | A thing\n"])[0]
     assert figlib.prefer_artwork_page(ref, []).page == 1
+
+
+def test_artwork_floor_admits_small_panel_figure_pages():
+    """fraessle-2023 p4 carries Figure 2 at 5.2% coverage; 0.06 rejected it.
+
+    Pins the calibration documented on ARTWORK_FLOOR: pages from 4% up were
+    all figure pages in the labelled sample, and prose sits mostly below 1%.
+    """
+    assert figlib.ARTWORK_FLOOR <= 0.04
+    assert figlib.ARTWORK_FLOOR > 0.015
+    ref = figlib.FigureRef("Figure", 2, 1, False, "Fig. 2 Inducible CAR T cells")
+    assert figlib.prefer_artwork_page(ref, [0.052]).page == 1
+    assert figlib.artwork_candidates([0.0, 0.052, 0.01], caption_page=1) == [2]
+    assert figlib.artwork_candidates([0.0, 0.012, 0.008], caption_page=1) == []

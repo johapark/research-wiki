@@ -132,3 +132,9 @@ phases:
   reconcile:        {role: extractor}
   target_claims:    {role: judge, temperature: 0.0, max_tokens: 4000}
   claim_support:    {role: judge}
+
+# Optional: configuring this route alone does not enable visual ingest.
+# Add under phases (with an image-capable model) and pass --visual-inspection:
+#   visual_inspect: {role: judge, temperature: 0.0, max_tokens: 2400}
+# Custom servers can set image_token_bound: <conservative input tokens per image>
+# for strict token/cost budgets. The call never retries unsupported parameters.

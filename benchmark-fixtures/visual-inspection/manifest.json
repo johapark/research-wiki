@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-11-04",
+  "sources": {
+    "mga": {
+      "path": "benchmark-fixtures/pdfs/zhang-2026-mga-a-tool-for-haplotype-mixed.pdf",
+      "sha256": "abdacdee6b5dc6b75fe398dc5d4557bd14d34b16eaddf4b04f71e3cd818fcdf0",
+      "license": "CC-BY-4.0; see benchmark-fixtures/LICENSES.md",
+      "license_pdf_page": 1,
+      "doi": "10.1186/s13059-026-04128-5",
+      "license_verified_at": "2026-11-04"
+    },
+    "clinical": {
+      "path": "benchmark-fixtures/pdfs/fonseca-2026-adjunctive-ibuprofen-in-pre-extensively-drug-resistant.pdf",
+      "sha256": "7298a9e00b1097bf01805ef81964624e338a32b27dc491d151b9eb7fc78ebc8e",
+      "license": "CC-BY-4.0; see benchmark-fixtures/LICENSES.md",
+      "license_pdf_page": 1,
+      "doi": "10.1038/s41467-026-75148-9",
+      "license_verified_at": "2026-11-04"
+    },
+    "tangermeme": {
+      "path": "benchmark-fixtures/pdfs/schreiber-2026-tangermeme-a-toolkit-for-understanding.pdf",
+      "sha256": "19f22c33251482c7eba9f6e754980735ccdc03b44e0e4a5828ca6cc19c98aa6f",
+      "license": "CC-BY-4.0; see benchmark-fixtures/LICENSES.md",
+      "license_pdf_page": 5,
+      "doi": "10.1038/s41592-026-03254-z",
+      "license_verified_at": "2026-11-04"
+    },
+    "cellbench": {
+      "path": "benchmark-fixtures/pdfs/abdelaal-2019-a-comparison-of-automatic-cell.pdf",
+      "sha256": "89a626d7e6ba86e27c12230f697b7f15fcc996d359a505d376548f2f34ccf2d6",
+      "license": "CC-BY-4.0; see benchmark-fixtures/LICENSES.md",
+      "license_pdf_page": 1,
+      "doi": "10.1186/s13059-019-1795-z",
+      "license_verified_at": "2026-11-04"
+    },
+    "deepcrispr": {
+      "path": "benchmark-fixtures/pdfs/chuai-2018-deepcrispr-optimized-crispr-guide-rna.pdf",
+      "sha256": "da06e848ed7368244c93e8983b7d71d033a17cdcf4335b7b39fd85f02a32d72f",
+      "license": "CC-BY-4.0; see benchmark-fixtures/LICENSES.md",
+      "license_pdf_page": 1,
+      "doi": "10.1186/s13059-018-1459-4",
+      "license_verified_at": "2026-11-04"
+    },
+    "scannotate": {
+      "path": "benchmark-fixtures/pdfs/ji-2023-scannotate-an-automated-cell-type-annotation.pdf",
+      "sha256": "c5fd7baa3ec9c02661b1034ac396ec684cd500b605df623c15a5950cb339e141",
+      "license": "CC-BY-4.0; see benchmark-fixtures/LICENSES.md",
+      "license_pdf_page": 1,
+      "doi": "10.1093/bioadv/vbad030",
+      "license_verified_at": "2026-11-04"
+    }
+  },
+  "assets": {
+    "mga-p10": {
+      "id": "mga-p10",
+      "path": "assets/mga-p10@110.png",
+      "source_id": "mga",
+      "pdf_page": 10,
+      "dpi": 110,
+      "width": 910,
+      "height": 1209,
+      "sha256": "fc1b5bc7ac3b8aaac34e4e7816490554e8f9789c4e63ea5733c8c1b09e74e074",
+      "altered": false
+    },
+    "mga-p17": {
+      "id": "mga-p17",
+      "path": "assets/mga-p17@110.png",
+      "source_id": "mga",
+      "pdf_page": 17,
+      "dpi": 110,
+      "width": 910,
+      "height": 1209,
+      "sha256": "bfc4d1a53b5d5af3c28ab6d1d1eab7d24402c79a651f1341d435812b70a54267",
+      "altered": false
+    },
+    "clinical-p29": {
+      "id": "clinical-p29",
+      "path": "assets/clinical-p29@110.png",
+      "source_id": "clinical",
+      "pdf_page": 29,
+      "dpi": 110,
+      "width": 935,
+      "height": 1272,
+      "sha256": "03fe4f750b3254fe1d8976c73adba43228e055ee6126973338d2753df269199e",
+      "altered": false
+    },
+    "clinical-p35": {
+      "id": "clinical-p35",
+      "path": "assets/clinical-p35@110.png",
+      "source_id": "clinical",
+      "pdf_page": 35,
+      "dpi": 110,
+      "width": 1394,
+      "height": 714,
+      "sha256": "9ac1cb6ce308c72222dc73035dac95ae6c61aecbd006449574c229b286d13601",
+      "altered": false
+    },
+    "clinical-p36": {
+      "id": "clinical-p36",
+      "path": "assets/clinical-p36@110.png",
+      "source_id": "clinical",
+      "pdf_page": 36,
+      "dpi": 110,
+      "width": 535,
+      "height": 337,
+      "sha256": "3716c7a8016e1faa4378c40a04db82611832658d8c5daa26239af349b18bf225",
+      "altered": false
+    },
+    "tangermeme-p2": {
+      "id": "tangermeme-p2",
+      "path": "assets/tangermeme-p2@110.png",
+      "source_id": "tangermeme",
+      "pdf_page": 2,
+      "dpi": 110,
+      "width": 910,
+      "height": 1209,
+      "sha256": "5c2ad4fec09a0180c2b3f7c53dd2659a76e6f9ee293c0d121fbe07415ef109b6",
+      "altered": false
+    },
+    "cellbench-p5": {
+      "id": "cellbench-p5",
+      "path": "assets/cellbench-p5@110.png",
+      "source_id": "cellbench",
+      "pdf_page": 5,
+      "dpi": 110,
+      "width": 910,
+      "height": 1209,
+      "sha256": "cec550e7c2dad27a57723f89cbdbf72b555e792143b9be40b46d48491909693d",
+      "altered": false
+    },
+    "cellbench-p7": {
+      "id": "cellbench-p7",
+      "path": "assets/cellbench-p7@110.png",
+      "source_id": "cellbench",
+      "pdf_page": 7,
+      "dpi": 110,
+      "width": 910,
+      "height": 1209,
+      "sha256": "11d3b09598a0c8956fdbb0f1b0304759c4cab21e905f7a4ecd9b65ec32d68d08",
+      "altered": false
+    },
+    "deepcrispr-p6": {
+      "id": "deepcrispr-p6",
+      "path": "assets/deepcrispr-p6@110.png",
+      "source_id": "deepcrispr",
+      "pdf_page": 6,
+      "dpi": 110,
+      "width": 910,
+      "height": 1209,
+      "sha256": "98a7f47e7b401dc648e25686bfe3b2f46d3e5c86377af68c106551d631ad06b6",
+      "altered": false
+    },
+    "deepcrispr-p9": {
+      "id": "deepcrispr-p9",
+      "path": "assets/deepcrispr-p9@110.png",
+      "source_id": "deepcrispr",
+      "pdf_page": 9,
+      "dpi": 110,
+      "width": 910,
+      "height": 1209,
+      "sha256": "6bf464d1922babea9d5e83344ab5587b76a024429064ee097cec71ae7b968f5b",
+      "altered": false
+    },
+    "scannotate-p7": {
+      "id": "scannotate-p7",
+      "path": "assets/scannotate-p7@110.png",
+      "source_id": "scannotate",
+      "pdf_page": 7,
+      "dpi": 110,
+      "width": 936,
+      "height": 1209,
+      "sha256": "850a7b8467b732b4cb018a28c80ca8b2ebcc1374a9fb318f13d3f7463e8a8f06",
+      "altered": false
+    },
+    "scannotate-p8": {
+      "id": "scannotate-p8",
+      "path": "assets/scannotate-p8@110.png",
+      "source_id": "scannotate",
+      "pdf_page": 8,
+      "dpi": 110,
+      "width": 936,
+      "height": 1209,
+      "sha256": "fc5ef1ac1d9ef5e13d30f8031e9c674f8b3b6484180fad7b7c53032a03f5d600",
+      "altered": false
+    },
+    "mga-p10-masked": {
+      "id": "mga-p10-masked",
+      "path": "assets/mga-p10-masked@110.png",
+      "source_id": "mga",
+      "pdf_page": 10,
+      "dpi": 110,
+      "width": 910,
+      "height": 1209,
+      "sha256": "c374d93782723804b530e16a39f9af9cc93f80a6bd99c09bb53e54e55766c14c",
+      "altered": true
+    }
+  },
+  "inspection_cases": 14,
+  "nomination_cases": 3,
+  "smoke_case_ids": [
+    "v01",
+    "v08",
+    "v13",
+    "v15",
+    "v17",
+    "v19"
+  ],
+  "dataset_license": "CC-BY-4.0; see LICENSES.md",
+  "gold_status": "assistant-source-checked; independent human adjudication pending",
+  "scope": "Diagnostic fixtures, not a corpus-representative estimate; no model performance has been measured."
+}

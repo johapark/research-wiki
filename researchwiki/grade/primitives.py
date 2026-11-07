@@ -177,6 +177,27 @@ def restore_lost_decimals(text: str) -> str:
     return text + " " + " ".join(sorted(repaired)) if repaired else text
 
 
+# Lancet-family journals typeset decimals with a raised middle dot (`96·5%`,
+# `95% CI 94·1–98·0`). The tokenizer reads `96·5` as two numbers, 96 and 5, so a
+# page that writes the decimal the ordinary way (`96.5%`) — which the
+# target-claim extractor is told to do — drifted against its own PDF. Only
+# U+00B7 *between* digits is a decimal point; the dot operators (⋅, ∙) between
+# digits are usually multiplication ("2⋅10⁵"), so they are left alone.
+_MIDDLE_DOT_DECIMAL_RE = re.compile(r"(?<=\d)·(?=\d)")
+
+
+def restore_middle_dot_decimals(text: str) -> str:
+    """Append the point-decimal form of every middle-dot decimal in `text`.
+
+    Appended rather than substituted, like `restore_lost_decimals`, so the
+    original tokens survive and the repair can only make matching more
+    permissive. Evidence-side only: authored claim text is not rewritten.
+    """
+    if not text or not _MIDDLE_DOT_DECIMAL_RE.search(text):
+        return text
+    return text + " " + _MIDDLE_DOT_DECIMAL_RE.sub(".", text)
+
+
 # Negation lexicon. Catches the dominant contradiction failure mode: the page
 # asserts a negation that the cited evidence doesn't echo. Deliberately coarse —
 # recall over precision; callers treat it as a soft signal, not an auto-fail.
@@ -252,8 +273,8 @@ def check_numerics(
     # Repair decimals the PDF extractor lost (`0 0065` → `0.0065`) in the
     # evidence only. The claim is authored text and its decimals are intact; a
     # claim that really says "0 0065" is a typo worth flagging.
-    retrieved_text = restore_lost_decimals(retrieved_text)
-    full_text = restore_lost_decimals(full_text)
+    retrieved_text = restore_lost_decimals(restore_middle_dot_decimals(retrieved_text))
+    full_text = restore_lost_decimals(restore_middle_dot_decimals(full_text))
     tokens = NUMERIC_TOKEN_RE.findall(claim_text)
     if not tokens:
         return [], []

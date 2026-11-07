@@ -63,6 +63,9 @@ class TargetClaimsOutput:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     error: str | None = None
+    visual_requests: list = field(default_factory=list)
+    visual_selection_status: str = "off"
+    visual_evidence: list[str] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return not self.claims
@@ -116,6 +119,14 @@ Constraints:
     64 cores" is right.
   - Each claim must be SOURCE-GROUNDED — cite the location (Abstract,
     Fig. 2, Methods §X, ED Fig. 3, Results) so a reader can verify.
+  - Copy numbers as the source text prints them; the page is graded
+    digit-for-digit against that text, so a digit the text does not
+    contain cannot be verified even when it is the true value. Do not
+    reconstruct a flattened exponent ("2 × 105" stays "2 × 105"). Write
+    decimal middle dots as decimal points ("96·5%" → "96.5%"), and repeat
+    a shared unit on every value in a list ("96%, 90%, 82%, and 77%", not
+    "96, 90, 82, and 77%"). Preserve the source's values, precision, and
+    group association.
   - ONE entry per distinct fact. Do not emit the same result twice — not
     across types (if it has a number, prefer "headline"; if it's a
     demonstrated use case, prefer "capability"), and not with different
@@ -172,6 +183,7 @@ def extract_target_claims(
     sections: dict,
     pdf_full_text: str | None = None,
     use_stub: bool = False,
+    visual_inventory: list | None = None,
 ) -> TargetClaimsOutput:
     """Run one target-claims LLM call. Returns the parsed list.
 
@@ -191,6 +203,7 @@ def extract_target_claims(
             keywords=["stub keyword one", "stub keyword two", "stub keyword three",
                       "stub keyword four", "stub keyword five"],
             model="(stub)",
+            visual_selection_status="complete" if visual_inventory is not None else "off",
         )
 
     from .. import model_config
@@ -199,12 +212,18 @@ def extract_target_claims(
         metadata, sections, pdf_full_text,
         max_chars=model_config.target_claims_max_chars(),
     )
+    system, schema = _SYSTEM_PROMPT, _JSON_SCHEMA
+    if visual_inventory is not None:
+        from ..visual_selection import inventory_prompt, nomination_schema, NOMINATION_SYSTEM
+        prompt += inventory_prompt(visual_inventory)
+        system += NOMINATION_SYSTEM
+        schema = nomination_schema(schema)
     try:
         resp = llm.call(
             phase="target_claims",
             prompt=prompt,
-            system=_SYSTEM_PROMPT,
-            schema=_JSON_SCHEMA,
+            system=system,
+            schema=schema,
             # Claude's adaptive thinking can consume the visible JSON budget.
             # Keep configured reasoning effort for other providers.
             disable_thinking=(
@@ -237,6 +256,8 @@ def extract_target_claims(
     raw_json = json_match.group(0)
     try:
         data = json.loads(raw_json)
+        if not isinstance(data, dict):
+            data = {}
         claims_raw = data.get("claims") or []
         keywords_raw = data.get("keywords") or []
         partial = False
@@ -245,20 +266,24 @@ def extract_target_claims(
         # than failing entirely. Each object ends with `}` before a `,` or `]`.
         claims_raw = [
             m for m in (
-                _try_parse(s) for s in re.findall(r"\{[^{}]+\}", raw_json)
+                _try_parse(s) for s in re.findall(r"\{[^{}]+\}", raw_json.split('"keywords"', 1)[0].split('"visual_requests"', 1)[0])
             )
             if m is not None
         ]
         keywords_raw = []
         partial = True
+        data = {}
 
     _TIER_ORDER = {"critical": 0, "high": 1, "normal": 2}
     _MAX_CLAIMS = 35
 
     parsed: list[TargetClaim] = []
     seen: set[str] = set()
-    for item in claims_raw:
+    for item in claims_raw if isinstance(claims_raw, list) else []:
         if not isinstance(item, dict):
+            continue
+        if any(item.get(k) is not None and not isinstance(item[k], str)
+               for k in ("type", "importance", "content", "location")):
             continue
         ctype = (item.get("type") or "").strip().lower()
         importance = (item.get("importance") or "normal").strip().lower()
@@ -286,9 +311,14 @@ def extract_target_claims(
 
     from .commit import filter_keywords
 
+    requests, selection_status = [], "off"
+    if visual_inventory is not None:
+        from ..visual_selection import parse_requests
+        requests, selection_status = parse_requests(data, visual_inventory)
     return TargetClaimsOutput(
+        visual_requests=requests, visual_selection_status=selection_status,
         claims=parsed,
-        keywords=filter_keywords(keywords_raw),
+        keywords=filter_keywords(keywords_raw if isinstance(keywords_raw, list) else []),
         model=resp.model,
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
@@ -468,4 +498,7 @@ def render_for_author_prompt(out: TargetClaimsOutput, *, max_normal: int = 5) ->
             loc = f" ({c.location})" if c.location else ""
             lines.append(f"  - [{c.type}] {c.content}{loc}")
         lines.append("")
+    if out.visual_evidence:
+        lines.extend(["## Independently corroborated PDF prose for inspected visuals:",
+                      *out.visual_evidence])
     return "\n".join(lines)

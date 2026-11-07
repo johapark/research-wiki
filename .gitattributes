@@ -1,0 +1,2 @@
+# PDF sources are immutable artifacts; preserve their bytes and use binary diffs.
+*.pdf binary

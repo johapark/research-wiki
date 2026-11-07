@@ -63,6 +63,7 @@ class BudgetTracker:
         self.calls = 0
         self.tokens = 0
         self.cost_usd = 0.0
+        self.cost_unknown = False
         self.reserved_tokens = 0
         self.reserved_cost_usd = 0.0
         self.suspended = False
@@ -77,6 +78,11 @@ class BudgetTracker:
         with self._lock:
             self.suspended = False
 
+    def mark_cost_unavailable(self) -> None:
+        """Retain unknown image-call pricing without reporting free work."""
+        with self._lock:
+            self.cost_unknown = True
+
     def snapshot(self) -> dict:
         with self._lock:
             return self._snapshot_unlocked()
@@ -85,7 +91,7 @@ class BudgetTracker:
         return {
             "model_calls": self.calls,
             "tokens": self.tokens,
-            "estimated_cost_usd": round(self.cost_usd, 8),
+            "estimated_cost_usd": None if self.cost_unknown else round(self.cost_usd, 8),
             "reserved_tokens": self.reserved_tokens,
             "reserved_cost_usd": round(self.reserved_cost_usd, 8),
             "wall_seconds": round(time.monotonic() - self.started, 3),
@@ -103,9 +109,9 @@ class BudgetTracker:
 
     def reserve_call(
         self, *, model: str, provider: str, prompt_chars: int, max_tokens: int,
-        free: bool | None = None,
+        free: bool | None = None, image_tokens: int = 0,
     ) -> _Reservation:
-        estimated_input = max(1, prompt_chars // 4)
+        estimated_input = max(1, prompt_chars // 4) + max(0, image_tokens)
         reserved_tokens = estimated_input + max(0, max_tokens)
         # The dispatch layer passes whether its *resolved* endpoint is
         # unmetered. Direct tracker callers retain the historical LM Studio
@@ -168,16 +174,31 @@ class BudgetTracker:
     ) -> None:
         actual_tokens = max(0, input_tokens) + max(0, output_tokens)
         unmetered = reservation.free if free is None else free
-        actual_cost = 0.0 if unmetered else model_config.estimate_usd(
-            model, max(0, input_tokens), max(0, output_tokens),
-            cache_read_tokens=max(0, cache_read_tokens),
-            cache_write_tokens=max(0, cache_write_tokens),
-        )
+        # A router may return an unpriced served model after we reserved using
+        # a priced request alias. Keep the conservative cost charge while
+        # settling known token usage, and expose the missing price as unknown.
+        # Only a metered call can miss a price. Unmetered work settles free:
+        # local endpoints via the reservation, and chat-relay via `free=True`
+        # from the dispatch layer, since its "chat-relay:<via>" label names the
+        # responding agent, not a served model.
+        cost_unavailable = not unmetered and model_config.rate_for(model) is None
+        if unmetered:
+            actual_cost = 0.0
+        elif cost_unavailable:
+            actual_cost = reservation.cost_usd
+        else:
+            actual_cost = model_config.estimate_usd(
+                model, max(0, input_tokens), max(0, output_tokens),
+                cache_read_tokens=max(0, cache_read_tokens),
+                cache_write_tokens=max(0, cache_write_tokens),
+            )
         with self._lock:
             self.reserved_tokens -= reservation.tokens
             self.reserved_cost_usd -= reservation.cost_usd
             self.tokens += actual_tokens
             self.cost_usd += actual_cost
+            if cost_unavailable:
+                self.cost_unknown = True
 
     def fail(self, reservation: _Reservation) -> None:
         """Charge the reservation when transport failure leaves usage unknown."""

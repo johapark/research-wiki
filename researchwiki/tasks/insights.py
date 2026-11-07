@@ -317,7 +317,7 @@ def _gather(conn, cutoff: int | None, stem: str | None = None,
 
     gate_rows = conn.execute(
         "SELECT role, gate_metrics FROM ingest_iterations "
-        "WHERE role IN ('target_claims','grade','critic','claim_support','commit','budget')" +
+        "WHERE role IN ('target_claims','visual_inspect','grade','critic','claim_support','commit','budget')" +
         where_time,
         params,
     ).fetchall()
@@ -332,6 +332,8 @@ def _gather(conn, cutoff: int | None, stem: str | None = None,
             continue
         gate_measured += 1
         for key, value in metrics.items():
+            if key.startswith("visual_") and row["role"] != "visual_inspect":
+                continue  # commit repeats coverage; aggregate phase work only
             if isinstance(value, bool):
                 gate_totals[key] += int(value)
             elif isinstance(value, (int, float)):

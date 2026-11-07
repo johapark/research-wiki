@@ -25,6 +25,17 @@ def test_surname_simple():
     assert first_author_surname(["Sangsu Bae"]) == "bae"
 
 
+def test_surname_uses_romanized_name_before_trailing_native_script_alias():
+    assert first_author_surname(["Liqun Zhou (周立群)"]) == "zhou"
+    assert first_author_surname(["Peiguo Shi (时培果)"]) == "shi"
+    assert first_author_surname(["Zhou, Liqun (周立群)"]) == "zhou"
+    assert first_author_surname(["Liqun Zhou (周立群) et al."]) == "zhou"
+    assert derive_stem(
+        ["Liqun Zhou (周立群)", "Paul A. Renauer"], 2026,
+        "In vivo CAR-T double knockout screen maps synergistic antitumour gene pairs",
+    ) == "zhou-2026-in-vivo-car-t-double-knockout"
+
+
 def test_surname_hyphenated_given_name_dropped():
     # "Wen-Wei Liao" → the hyphenated given name is not the surname.
     assert first_author_surname(["Wen-Wei Liao"]) == "liao"
