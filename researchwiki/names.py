@@ -23,6 +23,7 @@ stem derivation's business and stays in `stems`, its only consumer that wants it
 from __future__ import annotations
 
 import re
+import unicodedata
 
 #: Tokens that mark a byline as a consortium rather than a person, so it is never
 #: split into given/family. `1000 Genomes Project` has no surname.
@@ -43,6 +44,8 @@ SURNAME_PARTICLES = frozenset({
 
 #: `et al.` / `et al` / `and others`, with or without a preceding comma.
 _ET_AL_RE = re.compile(r"(?i)[,;]?\s*\b(?:et\s+al\.?|and\s+others)\s*\.?\s*$")
+
+_TRAILING_NATIVE_ALIAS_RE = re.compile(r"^(?P<base>.+?)\s+\((?P<alias>[^()]*)\)$")
 
 #: Above this many whitespace tokens, a single *name* is a sentence — which means
 #: the delimiter was not acting as one and the field is prose.
@@ -72,6 +75,25 @@ def strip_et_al(raw: str) -> str:
     DOIs were fine.
     """
     return _ET_AL_RE.sub("", (raw or "").strip()).strip().rstrip(",;")
+
+
+def without_trailing_native_alias(raw: str) -> str:
+    """Use the romanized byline for name boundaries when a native-script
+    rendering of the same name follows it: ``Liqun Zhou (周立群)`` → ``Liqun Zhou``.
+
+    Keep Latin-script parentheses and names inside the byline untouched. This
+    helper is for parsing only; the stored author string keeps its source form.
+    """
+    raw = (raw or "").strip()
+    match = _TRAILING_NATIVE_ALIAS_RE.fullmatch(raw)
+    if not match or not re.search(r"[A-Za-z]", match["base"]):
+        return raw
+    alias = match["alias"]
+    letters = [char for char in alias if char.isalpha()]
+    if (not letters or any(char.isdigit() for char in alias)
+            or any("LATIN" in unicodedata.name(char, "") for char in letters)):
+        return raw
+    return match["base"]
 
 
 def is_consortium(raw: str) -> bool:
@@ -172,13 +194,18 @@ def as_family_given(raw: str) -> tuple[str, str] | None:
     unmodified and cannot be corrupted by a wrong guess here.
 
     Declines to split when: the byline is a consortium, it is a single token
-    (`DeepSeek-AI`), it holds a comma that is not an inversion, or it has more
-    than four tokens with no particle to anchor the boundary — the
+    (`DeepSeek-AI`), it ends in a native-script rendering of the full name, it
+    holds a comma that is not an inversion, or it has more than four tokens
+    with no particle to anchor the boundary — the
     `Given Given Family` vs `Given Family Family` ambiguity that this corpus
     carries no marker for.
     """
     raw = (raw or "").strip()
     if not raw or is_consortium(raw):
+        return None
+    # A native-script parenthetical is a second rendering of the whole name,
+    # not the family name. Keep it intact through CSL's ``literal`` field.
+    if without_trailing_native_alias(raw) != raw:
         return None
 
     if "," in raw:

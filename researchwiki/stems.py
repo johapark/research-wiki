@@ -102,13 +102,15 @@ def slugify_phrase(s: str) -> str:
 def first_author_surname(authors: list[str]) -> str:
     """Extract the last name from the first author string, slugged for a stem.
 
-    Handles three shapes:
+    Handles four shapes:
       - "First M. Last" / "F. M. Last" → `last`
       - "Last, First" (comma = surname-first, common in bibliographic exports)
         → `last`
       - consortium bylines ("1000 Genomes Project") → the whole name slugged,
         per CLAUDE.md's consortium rule, rather than a trailing token
         (`project`).
+      - a romanized name followed by its native-script rendering
+        ("Liqun Zhou (周立群)") → `zhou`.
 
     The *parsing* lives in `names`, shared with the bibliographic exporter, which
     needs the same boundary for CSL-JSON's `family`/`given`. What stays here is
@@ -120,7 +122,8 @@ def first_author_surname(authors: list[str]) -> str:
     # Fold before parsing, so the walk sees ASCII and the slug below has nothing
     # left to strip. `names.surname_span` compares against ASCII particles, which
     # is why folding first is safe rather than merely convenient.
-    raw = names.strip_et_al(strip_diacritics(authors[0]).strip())
+    raw = names.without_trailing_native_alias(names.strip_et_al(authors[0]))
+    raw = strip_diacritics(raw)
     if not raw:
         return "unknown"
 

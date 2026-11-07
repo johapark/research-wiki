@@ -336,7 +336,7 @@ def _single_ingest(args) -> int:
     except ReconcileFailed as e:
         # Focused diagnostic for the common case where the metadata
         # cascade gave up — print the providers tried + which fields
-        # ended up null, and a copy-pasteable retry hint. No stack
+        # were missing or invalid, and a copy-pasteable retry hint. No stack
         # trace; ReconcileFailed is a known-failure mode, not a bug.
         print(
             f"{_prog()}: reconcile failed — could not derive a paper stem.",
@@ -344,7 +344,7 @@ def _single_ingest(args) -> int:
         )
         print(f"  sources tried: {', '.join(e.sources) or '(none)'}", file=sys.stderr)
         print(
-            f"  missing fields: {', '.join(e.missing) or '(unknown)'}", file=sys.stderr
+            f"  missing or invalid fields: {', '.join(e.missing) or '(unknown)'}", file=sys.stderr
         )
         # Suggest the most-targeted fix the user can apply. DOI is the
         # highest-leverage override — once a DOI lands, S2/Crossref
@@ -359,6 +359,12 @@ def _single_ingest(args) -> int:
         elif "year" in e.missing:
             print(
                 "  fix: re-run with `--year YYYY` (and `--title` if needed).",
+                file=sys.stderr,
+            )
+        elif "first-author surname" in e.missing:
+            print(
+                "  fix: re-run with `--authors 'Given Surname; Second Author'` "
+                "using the PDF's byline.",
                 file=sys.stderr,
             )
         else:

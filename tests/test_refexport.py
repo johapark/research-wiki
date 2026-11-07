@@ -189,6 +189,11 @@ def test_csl_uses_literal_for_a_name_it_cannot_split():
     ]
 
 
+def test_csl_preserves_native_script_alias_without_mislabeling_family():
+    items = json.loads(render_csl_json([rec(authors=["Liqun Zhou (周立群)"])]))
+    assert items[0]["author"] == [{"literal": "Liqun Zhou (周立群)"}]
+
+
 def test_ris_emits_one_au_line_per_author():
     out = render_ris([rec(authors=["Sangsu Bae", "Jeongbin Park"])])
     assert out.count("AU  - ") == 2

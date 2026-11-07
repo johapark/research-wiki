@@ -31,9 +31,8 @@ class ReconcileFailed(RuntimeError):
     those three, `derive_stem` cannot run, and proceeding through the
     remaining phases would burn tokens on a draft we cannot file.
 
-    Carries the providers tried and which fields ended up null so the CLI
-    handler can surface the right `--doi`/`--year`/`--title` hint without
-    a stack trace.
+    Carries the providers tried and which fields were missing or invalid so
+    the CLI handler can surface the right override hint without a stack trace.
     """
 
     def __init__(self, *, sources: list[str], missing: list[str]) -> None:
