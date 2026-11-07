@@ -142,6 +142,13 @@ def run_ingest(
         meta, parent_id = _phase_reconcile(ctx, conn)
         ctx.metadata = meta
         ctx.paper_stem = meta.get("stem")
+        # A nonempty byline can still collapse to ``unknown`` after surname
+        # parsing. Stop before authoring or promotion, even under --auto-promote.
+        if ctx.paper_stem and ctx.paper_stem.startswith("unknown-"):
+            raise ReconcileFailed(
+                sources=meta.get("sources") or [],
+                missing=["first-author surname"],
+            )
         if ctx.paper_stem:
             update_paper_stem(ctx.attempt_id, ctx.paper_stem, conn=conn)
             conn.commit()

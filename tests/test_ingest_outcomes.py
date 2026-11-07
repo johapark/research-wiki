@@ -8,7 +8,7 @@ import os
 import pytest
 
 from researchwiki.agents import runner
-from researchwiki.agents.context import Context
+from researchwiki.agents.context import Context, ReconcileFailed
 from researchwiki.agents.runner import _find_exact_duplicate
 from researchwiki.agents.runner_support import _archive_duplicate_inbox_pdf
 from researchwiki.db.iterations import read_attempt
@@ -119,6 +119,50 @@ def duplicate_library(tmp_path, monkeypatch):
 
 class _ExtractionReached(Exception):
     """A nonduplicate reaches extraction rather than finishing early."""
+
+
+def test_unknown_surname_stops_before_extraction(duplicate_library, monkeypatch):
+    incoming, _, _ = duplicate_library
+    monkeypatch.setattr(
+        runner, "_phase_reconcile",
+        lambda ctx, conn: ({
+            "stem": "unknown-2026-in-vivo-car-t-double-knockout",
+            "authors": "Liqun Zhou (周立群), Paul A. Renauer",
+            "sources": ["pdf", "llm-extractor"],
+        }, None),
+    )
+
+    with pytest.raises(ReconcileFailed) as error:
+        runner.run_ingest(incoming, use_stub=True)
+
+    assert error.value.missing == ["first-author surname"]
+    assert incoming.exists()
+    assert not (incoming.parent.parent / "wiki" / "methods" /
+                "unknown-2026-in-vivo-car-t-double-knockout.md").exists()
+
+
+def test_unknown_surname_cli_error_points_to_authors_override(monkeypatch, capsys):
+    import importlib
+
+    from researchwiki.tasks import _ingest_observation, agent
+
+    operation_ingest = importlib.import_module("researchwiki.operations.ingest")
+
+    monkeypatch.setattr(_ingest_observation, "request_from_args", lambda _args: object())
+    monkeypatch.setattr(
+        operation_ingest, "execute_ingest",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            recovery_notes=[],
+            result=SimpleNamespace(publication="not_published"),
+            error=ReconcileFailed(sources=["pdf"], missing=["first-author surname"]),
+            context=None,
+        ),
+    )
+
+    assert agent._single_ingest(SimpleNamespace(_observation=None)) == 2
+    error = capsys.readouterr().err
+    assert "first-author surname" in error
+    assert "--authors 'Given Surname; Second Author'" in error
 
 
 def test_ingest_archives_exact_inbox_duplicate_by_default(duplicate_library):

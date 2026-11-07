@@ -21,6 +21,7 @@ from researchwiki.names import (
     split_author_field,
     strip_et_al,
     surname_span,
+    without_trailing_native_alias,
 )
 from researchwiki.stems import first_author_surname
 
@@ -98,6 +99,26 @@ def test_a_parenthesized_preferred_name_is_kept():
     field = "Eser Aygün, Xuefei (Julie) Wang, Lai Wei"
     assert split_author_field(field) == \
         ["Eser Aygün", "Xuefei (Julie) Wang", "Lai Wei"]
+
+
+@pytest.mark.parametrize("raw,base", [
+    ("Liqun Zhou (周立群)", "Liqun Zhou"),
+    ("Peiguo Shi (时培果)", "Peiguo Shi"),
+    ("Zhou, Liqun (周立群)", "Zhou, Liqun"),
+    ("Ada Kim (김아다)", "Ada Kim"),
+])
+def test_trailing_native_script_alias_is_for_name_boundaries_only(raw, base):
+    assert without_trailing_native_alias(raw) == base
+    assert as_family_given(raw) is None  # CSL keeps the complete byline literal
+
+
+@pytest.mark.parametrize("raw", [
+    "Xuefei (Julie) Wang",      # preferred name is within the byline
+    "John Smith (José)",       # Latin-script parenthetical is ambiguous
+    "Anthropic (enterprise team)",
+])
+def test_other_parentheses_are_not_stripped(raw):
+    assert without_trailing_native_alias(raw) == raw
 
 
 def test_a_long_author_list_is_ordinary():
