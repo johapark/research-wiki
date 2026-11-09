@@ -227,6 +227,18 @@ def ingest_dir() -> Path:
     return wiki_root() / ".ingest"
 
 
+def sandbox_dir() -> Path:
+    """Review drafts and receipts a gate held back (`.agent-output/`).
+
+    Gitignored, and *not* a cache: a sandboxed draft is the only copy of a paid
+    authoring run, so nothing here is regenerable by re-rendering. Readers that
+    only report on the directory (`inspect`) resolve it through here;
+    `agents.Context.sandbox_dir` keeps its own relative default because a run
+    may be pointed at a scratch directory instead.
+    """
+    return wiki_root() / ".agent-output"
+
+
 def mutation_dir() -> Path:
     """Write-ahead journals + backups for multi-file mutations (`.mutation/`).
 

@@ -44,7 +44,6 @@ _BATCH_INCOMPATIBLE_FLAGS = (
     ("title", "--title"),
     ("authors", "--authors"),
     ("year", "--year"),
-    ("author_prompt_file", "--author-prompt-file"),
     ("supplementary", "--supplementary"),
     ("allow_rename", "--allow-rename"),
 )
@@ -132,6 +131,8 @@ def _batch_passthrough_args(args) -> list[str]:
         out.append("--stub")
     if args.no_semantic:
         out.append("--no-semantic")
+    if getattr(args, "visual_inspection", False):
+        out.append("--visual-inspection")
     if args.verify_claim_entailment:
         out.append("--verify-claim-entailment")
     if args.no_cross_link:
@@ -153,6 +154,8 @@ def _batch_passthrough_args(args) -> list[str]:
     out += ["-n", str(args.n_drafts)]
     if args.max_evolve != 1:
         out += ["--max-evolve", str(args.max_evolve)]
+    if args.author_prompt_file:
+        out += ["--author-prompt-file", str(args.author_prompt_file)]
     for attr, flag in (
         ("max_model_calls", "--max-model-calls"),
         ("max_tokens", "--max-tokens"),
@@ -181,6 +184,13 @@ def _execute_ingest(args) -> int:
     # --resume takes over completely: the batch dir's plan.json is the
     # source of truth for subcommand + passthrough flags.
     from . import _ingest_batch
+
+    # Announced before any work, and only when the opt-in flag is set: an
+    # ordinary ingest must not grow a warning it cannot act on. Stderr only,
+    # so the stdout receipt and --result-file JSON stay clean.
+    if getattr(args, "visual_inspection", False):
+        from ..experimental import warn_visual_inspection
+        warn_visual_inspection()
 
     # Ahead of --resume: `-w 0` used to reach ThreadPoolExecutor and surface as
     # exit 3 with a traceback, after the batch dir and plan.json had been written.
@@ -263,6 +273,10 @@ def _execute_ingest(args) -> int:
         if not args.stub:
             from ..agents.llm import preflight_providers
             preflight_providers()
+            if getattr(args, "visual_inspection", False):
+                from ..agents.llm_images import preflight_visual_provider
+                preflight_visual_provider(max_tokens=getattr(args, "max_tokens", None),
+                                          max_cost_usd=getattr(args, "max_cost_usd", None))
         workers = _ingest_batch.resolve_batch_workers(args.workers, stub=args.stub)
         return _ingest_batch.new_batch(
             args.pdfs,
@@ -665,6 +679,9 @@ def build_parser() -> argparse.ArgumentParser:
         "ranking (BM25 + numeric drift + negation only — "
         "faster, less reliable)",
     )
+    p_ingest.add_argument("--visual-inspection", action="store_true",
+                          help="[experimental] Selectively inspect figures/tables "
+                               "(off by default; flags and receipt shape may change).")
     p_ingest.add_argument(
         "--verify-claim-entailment",
         action="store_true",

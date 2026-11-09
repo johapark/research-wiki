@@ -22,6 +22,18 @@ the reasoning behind any line below.
 
 ### Added
 
+- Opt-in `agent ingest --visual-inspection`: bounded figure/table nominations,
+  conservative page selection and one OpenAI-compatible image request, with
+  shared ingest budgets, cached readings and separate coverage receipts.
+  Critical visual-only evidence stays gated for source-image review; the
+  default remains off.
+
+- Portable visual-inspection benchmark with 14 inspection cases, 84 answer
+  checks and three nomination cases from six CC-BY-4.0 papers. Includes a
+  six-case smoke suite, rendered images, separate reference answers, offline
+  packet preparation/scoring, source hashes and attribution. Reference answers
+  are source-checked; independent human adjudication is pending.
+
 - `scout search --source fda` searches openFDA: approved drug and biologic
   labels (BLA/NDA only, so CBER cell and gene therapies are included and OTC,
   unapproved and generic-only labels are not), original PMA device approvals,
@@ -45,6 +57,41 @@ the reasoning behind any line below.
   `counts.regulatory`) are additive.
 
 ### Fixed
+
+- Visual inspection requires exact source prose for automatic corroboration;
+  paraphrases cannot clear critical review gates. Missing references named by
+  critical target claims remain blocking beside located Results visuals.
+  Receipts preserve the served model; unpriced cloud responses retain a
+  conservative budget charge and report unknown cost. Chat-relay answers
+  still settle free, so they do not exhaust `--max-cost-usd`.
+- Numeric drift checks read a middle-dot decimal in the source PDF
+  (`96·5%`) as its point form, so a page writing `96.5%` no longer drifts.
+- Visual inspection (`agent ingest --visual-inspection` and `researchwiki
+  inspect`) is marked **experimental**: a new `experimental:` section in
+  `researchwiki/data/deprecations.yaml` records which surfaces that exempts from
+  the beta compatibility window and which it does not (the `visual_inspect`
+  phase role stays append-only), `COMPATIBILITY.md` gains the clause the
+  exemption rests on, and both commands announce the status on stderr while
+  leaving stdout and `--json` parseable. No behaviour change. The reason is the
+  missing approval path: a reviewer who confirms a figure reading still has
+  nowhere to record it, and closing that gap will change these surfaces.
+- `researchwiki inspect visuals` renders the pending visual-inspection queue to
+  `output/inspect/visuals.html`: each flagged figure's cached page render beside
+  the model's reading of it, split into what a human can judge now and what
+  needs a re-run first. Read-only, zero tokens, newest attempt per paper, with
+  `--json` (`schema_version: 1`), `--all`, `--all-attempts`, `--no-images` and
+  `--max-bytes`. A missing cached render degrades to a note, since a held
+  paper's PDF is still in `inbox/` and cannot be re-rendered.
+- Visual inspection reads a headingless paper's body text as its Results
+  section, so Nature and Cell figure citations count as Results-cited instead
+  of making every missing caption critical; receipts record `results_source`.
+  The image request's caps rise to 2,400 completion tokens and 75 seconds,
+  and a reply cut off at the cap is reported as truncated.
+- The figure-page artwork floor drops from 6% to 3% page coverage, calibrated
+  on 16,707 corpus pages with a hand-labelled sample. Small single-panel
+  figures (2-5% coverage) now resolve for visual inspection and no longer
+  trigger the `figures` "no artwork" warning; main-figure resolution rises from
+  91.8% to 93.5%.
 
 - Ingest repairs retain custom author instructions and request every existing
   page section. EVOLVE and DEBUG reject newly missed critical target IDs before

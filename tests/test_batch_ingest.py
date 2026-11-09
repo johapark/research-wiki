@@ -264,6 +264,28 @@ def test_agent_ingest_passthrough_flags_recorded(wiki, monkeypatch):
 # ---------- `agent ingest --resume` ----------
 
 
+def test_agent_batch_shared_author_prompt_is_forwarded_and_frozen(wiki, monkeypatch, capsys):
+    pdfs = _make_pdfs(wiki, ["a.pdf", "b.pdf"])
+    prompt = wiki / "shared-author.md"
+    prompt.write_text("Preserve source endpoint precision.")
+    captured = []
+    monkeypatch.setattr(_ingest_batch, "_worker",
+                        _stub_worker({pdfs[1]: 1}, arg_capture=captured))
+    assert agent_cli.main(["ingest", "--author-prompt-file", str(prompt), *pdfs]) == 1
+    directory = _only_batch(wiki)
+    plan = json.loads((directory / "plan.json").read_text())
+    index = plan["extra_args"].index("--author-prompt-file")
+    assert plan["extra_args"][index + 1] == str(prompt.resolve())
+    assert len(captured) == 2
+    assert all(extra == plan["extra_args"] for _, extra in captured)
+    prompt.write_text("Changed instructions.")
+    touched = []
+    monkeypatch.setattr(_ingest_batch, "_worker", _stub_worker({}, calls=touched))
+    assert agent_cli.main(["ingest", "--resume", str(directory)]) == 1
+    assert touched == []
+    assert "resume refused" in capsys.readouterr().err
+
+
 def test_agent_ingest_resume_skips_completed(wiki, monkeypatch):
     """Load-bearing case: 5-PDF batch finishes 3 successes + 2 failures,
     process dies, `--resume` re-runs only the 2 failures."""

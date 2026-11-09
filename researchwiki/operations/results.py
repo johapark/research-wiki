@@ -87,4 +87,9 @@ def checks_from_scores(scores):
             "passed" if scores.get("n_graded", 0) and "n_drift" in scores else "unavailable"
         )))
     checks.append(CheckResult(name="entailment", status=entailment_check(scores)["status"]))
+    visual = scores.get("visual_coverage")
+    if visual:
+        checks.append(CheckResult(name="visual_inspection", status=(
+            "incomplete" if visual.get("visual_status") in ("incomplete", "needs_review")
+            else "completed")))
     return tuple(checks)

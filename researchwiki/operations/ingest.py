@@ -89,6 +89,10 @@ def _execute(request, recorder, facts, runner, recover):
 
             with phase("preflight"):
                 preflight_providers()
+                if request.options.visual_inspection:
+                    from ..agents.llm_images import preflight_visual_provider
+                    preflight_visual_provider(max_tokens=request.options.max_tokens,
+                                              max_cost_usd=request.options.max_cost_usd)
         options = runner_options(request.options)
         with phase("recovery"):
             notes = tuple((recover or recover_ingest_mutations)() or ())

@@ -20,7 +20,7 @@ _BUSY_RETRIES = 4
 _BUSY_BACKOFF = 0.25
 
 VALID_ROLES = {
-    "reconcile", "extract", "target_claims", "crosslinks", "author",
+    "reconcile", "extract", "target_claims", "visual_inspect", "crosslinks", "author",
     "grade", "grade_persist", "tournament", "critic", "debug", "short_name",
     "keywords", "commit", "memory_evolve", "pdf_upgrade", "claim_support",
     "budget", "duplicate",

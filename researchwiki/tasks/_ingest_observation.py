@@ -19,7 +19,7 @@ def request_from_args(args) -> IngestRequest:
     from ..env_profiles import ACTIVE_ENV_FILE_VAR
 
     values = {name: getattr(args, name) for name in (
-        "n_drafts", "max_evolve", "verify_claim_entailment", "doi", "title", "year",
+        "n_drafts", "max_evolve", "verify_claim_entailment", "visual_inspection", "doi", "title", "year",
         "allow_rename", "no_cross_link", "claim_overlap", "contradiction_alert", "memory_evolve",
         "max_model_calls", "max_tokens", "max_cost_usd", "max_wall_seconds",
     )}

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ...grade.salience import anchor_is_substantive
 from .. import llm, prompt_lib
+from ..visual_evidence import visual_evidence_block
 from .draft import Draft
 from .grade import ClaimDetail
 from .revision_evidence import (
@@ -267,6 +268,7 @@ def evolve(
     stem: str | None = None,
     pdf_path: Path | str | None = None,
     use_stub: bool = False,
+    visual_evidence: tuple[str, ...] = (),
 ) -> EvolveOutput:
     """Evolve phase — produce a revised draft addressing the critic's notes."""
     evidence = build_repair_evidence(
@@ -276,7 +278,7 @@ def evolve(
     prompt = _build_evolve_prompt(
         draft.text, critique.notes, metadata, sections,
         pdf_full_text=pdf_full_text,
-        revision_evidence=evidence.text,
+        revision_evidence=evidence.text + visual_evidence_block(visual_evidence),
     )
     paper_type = (metadata or {}).get("paper_type")
     resp = llm.call(
@@ -376,6 +378,7 @@ def debug(
     stem: str | None = None,
     pdf_path: Path | str | None = None,
     use_stub: bool = False,
+    visual_evidence: tuple[str, ...] = (),
 ) -> DebugOutput:
     """DEBUG phase — repair a draft that failed structural gate checks.
 
@@ -416,7 +419,7 @@ def debug(
         drift_details=drift_details,
         sections=sections,
         pdf_full_text=pdf_full_text,
-        revision_evidence=evidence.text,
+        revision_evidence=evidence.text + visual_evidence_block(visual_evidence),
     )
     paper_type = (metadata or {}).get("paper_type")
     resp = llm.call(

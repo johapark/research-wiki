@@ -29,12 +29,16 @@ def usage_costs(result) -> dict[str, int]:
 
 def revision_inputs(ctx) -> dict:
     """Repairs share the author's instructions and the grader's exact PDF."""
-    return {
+    result = {
         "pdf_full_text": getattr(ctx, "pdf_full_text", None),
         "system_prompt_override": getattr(ctx, "author_prompt_override", None),
         "stem": ctx.paper_stem,
         "pdf_path": getattr(ctx, "pdf_path", None),
     }
+    quotes = getattr(getattr(ctx, "target_claims", None), "visual_evidence", [])
+    if quotes:
+        result["visual_evidence"] = tuple(quotes)
+    return result
 
 
 def make_revision_draft(out, prior):
@@ -328,7 +332,19 @@ def phase_reconcile(ctx, conn):
 @observed_phase("extract")
 def phase_extract(ctx, conn):
     t0 = time.monotonic()
-    sections, full_text = phases.extract_sections(ctx.pdf_path)
+    if getattr(ctx, 'visual_inspection', False):
+        from ..fsatomic import file_sha256
+        ctx.visual_source_hash = file_sha256(ctx.pdf_path)
+        from .phases.extract import extract_source_pages
+        from .visual_selection import build_inventory
+        sections, full_text, ctx.source_pages = extract_source_pages(ctx.pdf_path)
+        if file_sha256(ctx.pdf_path) != ctx.visual_source_hash:
+            raise EnvironmentFailure("PDF changed during visual source extraction")
+        from .visual_selection import visual_source_sections
+        ctx.visual_source_sections, ctx.visual_results_source = visual_source_sections(full_text)
+        ctx.visual_inventory = build_inventory(ctx.source_pages, ctx.visual_source_sections)
+    else:
+        sections, full_text = phases.extract_sections(ctx.pdf_path)
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     from ..pdf.sections import assess_section_health
     health = assess_section_health(full_text, sections)
@@ -351,6 +367,7 @@ def phase_target_claims(ctx, conn):
     out = extract_target_claims(
         metadata=ctx.metadata or {}, sections=ctx.sections or {},
         pdf_full_text=ctx.pdf_full_text, use_stub=ctx.use_stub,
+        **({"visual_inventory": ctx.visual_inventory} if getattr(ctx, "visual_inspection", False) else {}),
     )
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     if out.error:

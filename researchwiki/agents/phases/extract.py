@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...pdf.text import extract_pdf
+from ...pdf.text import PAGE_SEPARATOR, extract_pdf_page_texts
 from ...pdf.sections import anchor_sections
 
 
@@ -40,6 +40,12 @@ def extract_sections(pdf_path: Path) -> tuple[dict, str]:
     papers, with per-claim importance. `runner._warn_thin_extraction` now
     keys the zero-claims warning off that instead.
     """
-    text, _ = extract_pdf(pdf_path, max_pages=80)
-    sections = anchor_sections(text, max_chars=4000)
+    sections, text, _ = extract_source_pages(pdf_path)
     return sections, text
+
+
+def extract_source_pages(pdf_path: Path) -> tuple[dict, str, list[str]]:
+    """One repaired text pass, preserving source pages for opt-in inspection."""
+    pages = extract_pdf_page_texts(pdf_path, max_pages=80)
+    text = PAGE_SEPARATOR.join(pages)
+    return anchor_sections(text, max_chars=4000), text, pages
