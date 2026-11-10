@@ -1,32 +1,18 @@
-"""Proactively cross-link a newly-ingested paper via claim overlap.
+"""Judge claim overlap, verify bibliography identity, and apply reversible links.
 
-Finds existing wiki papers whose claims are near-paraphrases of the new paper's
-claims (cheap cosine, no LLM), then asks a small LLM judge whether each is a
-*real* relationship — the new paper builds on, extends, refines, or corroborates
-the existing one — versus mere vocabulary overlap. A reciprocal `[[wikilink]]`
-is added only when a PDF reference list verifies that one paper cites the other.
-
-A `measures_same` verdict is real but weaker: both claims measure the same
-quantity on different cohorts, which in practice means shared methodology
-rather than one paper engaging the other. It records a typed claim-graph edge
-and no bullet (see `_EDGE_ONLY_VERDICTS`). Coincidences are dropped entirely.
-
-Runs AFTER `db rebuild` (claim rows are inserted there, from the final page —
-never drafts), so it belongs in the post-ingest sequence, not the ingest agent.
-LLM-gated on purpose: cosine alone is topical adjacency, which the framework
-forbids as a linking basis (see the cross-link corollary in CLAUDE.md).
+Stem and exact-pair review share canonical A/B judgments and explicit direction.
+A relationship writes a typed graph edge; Related Papers additionally requires
+entry-scoped PDF citation proof. Receipts bind actual insertions to the existing
+mutation journal, and recover completion records after interrupted maintenance.
 
 Usage:
-  researchwiki claim-overlap <stem>              # judge + auto-apply
-  researchwiki claim-overlap <stem> --dry-run    # show candidates + verdicts, write nothing
-  researchwiki claim-overlap --pair A#slug B#slug # judge these exact claims
-  researchwiki claim-overlap <stem> --json
+  researchwiki claim-overlap STEM [--dry-run] [--json]
+  researchwiki claim-overlap --pair A#slug B#slug
+  researchwiki claim-overlap --backlog --progress-json PATH
+  researchwiki claim-overlap --revert RUN_ID [--stem STEM] [--link A B] [--apply]
 
-Exit codes: 0 = ran (including "no candidates"); 1 = unknown stem; 2 = env
-(state.db or the search index unreachable — nothing to do). A missing
-bi-encoder dependency is *not* 2: it's an ImportError, which propagates to the
-CLI funnel as 3 with a traceback, because a broken install needs the traceback
-to diagnose rather than a one-line "environment error".
+Exit codes: 0 ran, 1 invalid stem/pair/revert, 2 environment failure, 3 internal
+error. JSON errors retain a traceback on stderr for internal failures.
 """
 
 from __future__ import annotations
@@ -34,13 +20,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
 import sys
 import time
-from typing import Callable
 
-from ..backlinks import append_related_paper
 from ..errors import EnvironmentFailure
+from ..overlap import judging as _judging
 from ..log import log
 from ..wiki import read_pages
 from ..paths import papers_dir
@@ -48,190 +32,43 @@ from ..paths import papers_dir
 _NOTE = "claim-grounded match (auto-added; claim-overlap)"
 
 
-def _source_cites_target(source, target) -> bool:
-    """Require a positive citation in the source PDF before writing a wikilink.
-
-    Claim similarity and the relation judge can establish a useful claim-graph
-    edge, but neither proves that one paper engages the other. A Related Papers
-    bullet needs that extra source evidence. A missing or unreadable PDF leaves
-    the pair edge-only.
-    """
-    from ..pdf.text import cites_reference, extract_ref_dois
-
-    pdf = papers_dir() / f"{source.stem}.pdf"
-    if not pdf.is_file():
+def _source_cites_target(source, target, *, verifier=None) -> bool:
+    from ..pdf.citation import CitationVerifier, target_identity
+    own_doi = source.str_field("doi", "").strip().lower()
+    if own_doi and own_doi == target.str_field("doi", "").strip().lower():
         return False
-    doi = target.str_field("doi", "").strip().lower()
-    if doi and doi in extract_ref_dois(pdf, own_doi=source.str_field("doi", "")):
-        return True
-    stem_match = re.match(r"^(.+?)-((?:19|20)\d{2})[a-z]?-.+$", target.stem)
-    if stem_match is None:
-        return False
-    surname, stem_year = stem_match.group(1), stem_match.group(2)
-    years = {stem_year}
-    yaml_year = target.year_int()
-    if yaml_year is not None:
-        years.add(str(yaml_year))
-    return any(cites_reference(pdf, surname, year) for year in years)
+    return (verifier or CitationVerifier()).verify(
+        papers_dir() / f"{source.stem}.pdf", source.stem, target_identity(target))["verified"]
 
 
 def _pair_has_explicit_citation(page_a, page_b) -> bool:
-    """The PDF of at least one paper must cite the other paper."""
-    return _source_cites_target(page_a, page_b) or _source_cites_target(page_b, page_a)
+    from ..pdf.citation import CitationVerifier
+    verifier = CitationVerifier()
+    return (_source_cites_target(page_a, page_b, verifier=verifier)
+            or _source_cites_target(page_b, page_a, verifier=verifier))
 
-# Typed relation vocabulary — a superset of the earlier binary
-# {cross_link, coincidence} vocabulary. The specific verdict decides BOTH what
-# the claim-graph edge cache stores and whether a Related Papers bullet is
-# written: see `_CROSS_LINK_VERDICTS` vs `_EDGE_ONLY_VERDICTS` below. `none`
-# replaces the earlier `coincidence`; the older term is still accepted as a
-# fallback for callers that haven't migrated yet.
-_JUDGE_SYSTEM = """\
-You classify the relation between two research-paper claims for a research wiki.
 
-Claim NEW is from a newly-added paper; claim EXISTING is from a paper already
-in the wiki. They were retrieved as near-paraphrases by embedding similarity —
-so they use similar words. Similar words are NOT enough.
+_CROSS_LINK_VERDICTS = _judging.CROSS_LINK_VERDICTS
+_EDGE_ONLY_VERDICTS = _judging.EDGE_ONLY_VERDICTS
+_RELATION_VERDICTS = _judging.RELATION_VERDICTS
 
-Pick ONE verdict:
 
-  corroborates    Independent papers affirming the SAME finding on the same
-                  entity/benchmark, arriving from different setups. Both can
-                  be true simultaneously and they strengthen each other.
-  measures_same   Both claims measure the same quantity or benchmark, but on
-                  legitimately DIFFERENT cohorts / datasets / conditions —
-                  the values may differ without contradicting. Use this
-                  instead of `corroborates` when the setups are not directly
-                  comparable.
-  refines         NEW sharpens, conditions, or qualifies the finding in
-                  EXISTING (e.g. narrows the applicable regime, adds a
-                  constraint, corrects a scope).
-  builds_on      NEW generalizes, extends, or reuses the method/result of
-                  EXISTING. Directed: NEW → EXISTING.
-  none            The embeddings clustered them but the claims describe
-                  DIFFERENT things — different entities, domains, datasets,
-                  or contexts that merely sound alike. No cross-link.
+def _relation_from_verdict(value):
+    return value if value in _RELATION_VERDICTS else None
 
-Be conservative on non-none verdicts. When multiple could apply, prefer the
-weakest (measures_same < corroborates < refines < builds_on). When the
-setups are unclear, use `none`.
-
-Output strict JSON: {"verdict": "corroborates" | "measures_same" | "refines" | "builds_on" | "none", "rationale": "one short sentence"}.
-"""
-
-_JUDGE_SCHEMA = {
-    "type": "object",
-    "required": ["verdict", "rationale"],
-    "properties": {
-        "verdict": {
-            "type": "string",
-            "enum": ["corroborates", "measures_same", "refines", "builds_on", "none"],
-        },
-        "rationale": {"type": "string"},
-    },
-}
-
-# The normal overlap path is directional because it has a newly-ingested paper
-# on one side.  Bottom-up discovery hands us two existing claims in arbitrary
-# row order, so its exact-pair path needs the judge to state direction rather
-# than silently treating the first stem as "new".
-_PAIR_JUDGE_SYSTEM = """\
-You classify the relation between two research-paper claims for a research wiki.
-
-Claim A and Claim B were selected by a human from a discovery queue. Judge only
-the quoted claims; do not infer a relationship from their titles or fields.
-
-Pick ONE verdict:
-  corroborates    Independent papers affirming the same finding.
-  measures_same   Same quantity or benchmark under different conditions.
-  refines         One claim narrows, conditions, or qualifies the other.
-  builds_on       One claim extends or reuses the other.
-  none            They are not a source-supported relationship.
-
-Set direction to:
-  symmetric for corroborates or measures_same;
-  a_to_b / b_to_a for refines or builds_on, where the arrow points from the
-  refining/building claim to the claim it refines/builds on;
-  none for verdict none.
-
-Be conservative. A Related Papers link needs a real source-supported relation,
-not topical adjacency.
-
-Output strict JSON:
-{"verdict": "corroborates" | "measures_same" | "refines" | "builds_on" | "none",
- "direction": "symmetric" | "a_to_b" | "b_to_a" | "none",
- "rationale": "one short sentence"}.
-"""
-
-_PAIR_JUDGE_SCHEMA = {
-    "type": "object",
-    "required": ["verdict", "direction", "rationale"],
-    "properties": {
-        "verdict": {
-            "type": "string",
-            "enum": ["corroborates", "measures_same", "refines", "builds_on", "none"],
-        },
-        "direction": {
-            "type": "string",
-            "enum": ["symmetric", "a_to_b", "b_to_a", "none"],
-        },
-        "rationale": {"type": "string"},
-    },
-}
-
-# Verdicts that earn a `[[wikilink]]` in Related Papers. `refines` and
-# `builds_on` are directed (NEW → EXISTING); symmetric verdicts still get a
-# reciprocal bullet on both sides because Related Papers is undirected.
-# Directedness only affects the edge record.
-_CROSS_LINK_VERDICTS = frozenset({
-    "corroborates", "refines", "builds_on",
-    # Legacy alias — old prompt returned this and older callers rely on it.
-    "cross_link",
-})
-
-# Verdicts that earn a typed claim-graph edge but NOT a Related Papers bullet.
-#
-# `measures_same` is defined in `_JUDGE_SYSTEM` as "both claims measure the same
-# quantity or benchmark, but on legitimately DIFFERENT cohorts / datasets /
-# conditions", and the prompt ranks it the weakest accepted relation. In practice
-# it fires on shared methodology — "both quantify indel frequency by deep
-# sequencing, on different CRISPR systems" — which is not the source explicitly
-# citing, building on, or contrasting the other paper, so it fails CLAUDE.md's
-# cross-link corollary. Measured over a 56-stem backlog drain it was 6 of 9
-# confirmed links, i.e. it dominated the output with its weakest tier.
-#
-# The edge is still worth keeping: `concepts/refresh.py` consumes
-# `measures_same` when seeding hub spokes, and "these two papers measure the
-# same thing under different conditions" is a real fact about the corpus. It
-# just doesn't earn Related Papers real estate.
-_EDGE_ONLY_VERDICTS = frozenset({"measures_same"})
-
-# Any verdict the judge returned that means something — used to separate a real
-# relation from `none`/unparseable, independent of whether it earns a bullet.
-_RELATION_VERDICTS = _CROSS_LINK_VERDICTS | _EDGE_ONLY_VERDICTS
 
 _DIRECTED_VERDICTS = frozenset({"refines", "builds_on"})
-
-
-def _relation_from_verdict(v: str) -> str | None:
-    """Map a judge verdict to a claim-graph relation, or None when the pair
-    should not be linked. Legacy `cross_link` maps to `builds_on` — the
-    closest typed cousin — so old callers still emit a well-typed edge."""
-    if v in ("corroborates", "measures_same", "refines", "builds_on"):
-        return v
-    if v == "cross_link":
-        return "builds_on"
-    return None
 
 
 def _persist_typed_edge(
     new_stem: str, new_claim: dict,
     existing_stem: str, existing_claim: dict,
-    relation: str, rationale: str, cosine: float,
+    relation: str, rationale: str, cosine: float, *, judge_model: str = "",
 ) -> None:
-    """Side-write a typed edge to `.claim-graph/edges.db`. Slug-computed on
-    both sides (deterministic — same as _upsert_claims). Silent no-op on
-    error; the cross-link itself is the primary outcome, edge write is a
-    bonus for the claim graph."""
+    """Persist a canonical edge with actual provenance, preserving human rows.
+
+    Failures propagate to receipt maintenance; they never silently close a stem.
+    """
     try:
         from ..claim_graph import (
             Edge, SLUG_SCHEME_VERSION, compute_claim_slug, open_edges_db, upsert_edge,
@@ -239,6 +76,9 @@ def _persist_typed_edge(
         new_slug = compute_claim_slug(new_claim["section"], new_claim["text"])
         old_slug = compute_claim_slug(existing_claim["section"], existing_claim["text"])
         directed = relation in _DIRECTED_VERDICTS
+        if not directed and (new_stem, new_slug) > (existing_stem, old_slug):
+            new_stem, existing_stem = existing_stem, new_stem
+            new_slug, old_slug = old_slug, new_slug
         conn = open_edges_db()
         try:
             upsert_edge(conn, Edge(
@@ -248,6 +88,7 @@ def _persist_typed_edge(
                 confidence=float(cosine),
                 rationale=rationale[:400] if rationale else "",
                 judge_phase="claim_overlap_judge",
+                judge_model=judge_model,
                 slug_scheme_version=SLUG_SCHEME_VERSION,
                 status="candidate",
             ))
@@ -255,26 +96,9 @@ def _persist_typed_edge(
         finally:
             conn.close()
     except Exception as e:
-        log(f"claim-overlap edge persistence skipped: {type(e).__name__}: {e}",
+        log(f"claim-overlap edge persistence failed: {type(e).__name__}: {e}",
             tag="claim-overlap")
-
-
-def _format_prompt(new_stem: str, existing_stem: str, cand) -> str:
-    nc, ec = cand.new_claim, cand.existing_claim
-    return (
-        f"Claim NEW — paper [[{new_stem}]] ({nc['section']}#{nc['position']}):\n"
-        f"  {nc['text']}\n\n"
-        f"Claim EXISTING — paper [[{existing_stem}]] ({ec['section']}#{ec['position']}):\n"
-        f"  {ec['text']}\n\n"
-        f"(embedding cosine {cand.cosine})\n\nOutput JSON only."
-    )
-
-
-def _default_judge(prompt: str) -> dict | None:
-    from ..agents.judge import run_llm_judge
-    return run_llm_judge(
-        phase="claim_overlap_judge", system=_JUDGE_SYSTEM, prompt=prompt, schema=_JUDGE_SCHEMA,
-    )
+        raise
 
 
 def _parse_claim_ref(raw: str) -> tuple[str, str]:
@@ -333,128 +157,34 @@ def _exact_pair_cosine(claim_a: dict, claim_b: dict) -> float:
     return 0.0
 
 
-def _format_exact_pair_prompt(claim_a: dict, claim_b: dict, cosine: float) -> str:
-    return (
-        f"Claim A — paper [[{claim_a['paper_stem']}]] "
-        f"({claim_a['section']}#{claim_a['position']}):\n"
-        f"  {claim_a['text']}\n\n"
-        f"Claim B — paper [[{claim_b['paper_stem']}]] "
-        f"({claim_b['section']}#{claim_b['position']}):\n"
-        f"  {claim_b['text']}\n\n"
-        f"(embedding cosine {cosine:.4f}; selection was by the discovery queue)\n\n"
-        "Output JSON only."
-    )
-
-
-def _default_pair_judge(prompt: str) -> dict | None:
-    from ..agents.judge import run_llm_judge
-    return run_llm_judge(
-        phase="claim_overlap_judge", system=_PAIR_JUDGE_SYSTEM,
-        prompt=prompt, schema=_PAIR_JUDGE_SCHEMA,
-    )
-
-
-def review_pair(
-    ref_a: str,
-    ref_b: str,
-    *,
-    dry_run: bool = False,
-    judge_fn: Callable[[str], dict | None] | None = None,
-    conn=None,
-) -> dict:
-    """Judge the two exact claims emitted by ``candidates pairs``.
-
-    Unlike :func:`run`, this path does no threshold retrieval and cannot be
-    diverted to a higher-cosine paper.  It is intentionally not recorded in
-    ``claim_overlap_runs``: that ledger means a stem-wide >=threshold scan was
-    completed, which this one-pair review does not establish.
-    """
-    close_conn = False
-    if conn is None:
-        conn = _default_conn()
-        close_conn = True
+def review_pair(ref_a: str, ref_b: str, *, dry_run=False, judge_fn=None, conn=None,
+                session=None, run_id=None) -> dict:
+    from types import SimpleNamespace
+    from ..overlap.workflow import evaluate
+    from ..overlap.receipts import recover
+    c = conn or _default_conn()
+    close = conn is None
     try:
-        claim_a = _exact_claim(ref_a, conn)
-        claim_b = _exact_claim(ref_b, conn)
+        if not dry_run:
+            recover(conn=c)
+        a, b = _exact_claim(ref_a, c), _exact_claim(ref_b, c)
+        if a["paper_stem"] == b["paper_stem"]:
+            raise ValueError("exact review needs claims from two different papers")
+        pages = {p.stem: p for p in read_pages()}
+        if a["paper_stem"] not in pages or b["paper_stem"] not in pages:
+            raise ValueError("one or both claim papers are absent from wiki/")
+        cosine = _exact_pair_cosine(a, b)
+        cand = SimpleNamespace(existing_stem=b["paper_stem"], new_claim=a,
+                               existing_claim=b, cosine=cosine)
+        result = evaluate(a["paper_stem"], [cand], pages, compared=[], conn=c,
+                          sim_threshold=0.83, dry_run=dry_run, judge_fn=judge_fn,
+                          session=session, run_id=run_id, exact=True)
+        result["pair"] = [f"[[{p['paper_stem']}#{p['claim_slug']}]]" for p in (a, b)]
+        result["cosine"] = cosine
+        return result
     finally:
-        if close_conn:
-            conn.close()
-
-    if claim_a["paper_stem"] == claim_b["paper_stem"]:
-        raise ValueError("exact review needs claims from two different papers")
-
-    pages = {p.stem: p for p in read_pages()}
-    page_a = pages.get(claim_a["paper_stem"])
-    page_b = pages.get(claim_b["paper_stem"])
-    if page_a is None or page_b is None:
-        raise ValueError("one or both claim papers are absent from wiki/")
-
-    key_a, key_b = page_a.key, page_b.key
-    body_a = page_a.path.read_text(encoding="utf-8") if page_a.path.exists() else ""
-    body_b = page_b.path.read_text(encoding="utf-8") if page_b.path.exists() else ""
-    cosine = _exact_pair_cosine(claim_a, claim_b)
-    result = {
-        "pair": [f"[[{claim_a['paper_stem']}#{claim_a['claim_slug']}]]",
-                 f"[[{claim_b['paper_stem']}#{claim_b['claim_slug']}]]"],
-        "cosine": cosine,
-        "applied": [], "edge_only": [], "coincidence": [],
-        "skipped": [], "judge_failed": [], "dry_run": dry_run,
-    }
-
-    if f"[[{key_b}" in body_a or f"[[{key_a}" in body_b:
-        result["skipped"].append({"existing": key_b, "reason": "already-linked", "cosine": cosine})
-        return result
-
-    verdict = (judge_fn or _default_pair_judge)(
-        _format_exact_pair_prompt(claim_a, claim_b, cosine)
-    )
-    if verdict is None:
-        result["judge_failed"].append({"existing": key_b, "cosine": cosine})
-        return result
-
-    value = (verdict.get("verdict") or "").strip()
-    direction = (verdict.get("direction") or "").strip()
-    rationale = (verdict.get("rationale") or "").strip()
-    expected_directions = {
-        "corroborates": {"symmetric"},
-        "measures_same": {"symmetric"},
-        "refines": {"a_to_b", "b_to_a"},
-        "builds_on": {"a_to_b", "b_to_a"},
-        "none": {"none"},
-    }
-    if value not in expected_directions or direction not in expected_directions[value]:
-        result["judge_failed"].append({"existing": key_b, "cosine": cosine,
-                                       "reason": "invalid verdict/direction"})
-        return result
-    if value == "none":
-        result["coincidence"].append({"existing": key_b, "cosine": cosine,
-                                      "rationale": rationale, "verdict": value})
-        return result
-
-    relation = _relation_from_verdict(value)
-    citation_proven = (_pair_has_explicit_citation(page_a, page_b)
-                       if value in _CROSS_LINK_VERDICTS else False)
-    links = value in _CROSS_LINK_VERDICTS and citation_proven
-    record = {"existing": key_b, "cosine": cosine, "rationale": rationale,
-              "relation": relation, "direction": direction}
-    if value in _CROSS_LINK_VERDICTS and not citation_proven:
-        record["reason"] = "no explicit citation verified in either PDF"
-    if not dry_run and relation is not None:
-        src_claim, dst_claim = claim_a, claim_b
-        if direction == "b_to_a":
-            src_claim, dst_claim = claim_b, claim_a
-        _persist_typed_edge(
-            src_claim["paper_stem"], src_claim,
-            dst_claim["paper_stem"], dst_claim,
-            relation, rationale, cosine,
-        )
-        if links:
-            record["wrote"] = {
-                "a_page": append_related_paper(page_a.path, key_b, note=_NOTE),
-                "b_page": append_related_paper(page_b.path, key_a, note=_NOTE),
-            }
-    (result["applied"] if links else result["edge_only"]).append(record)
-    return result
+        if close:
+            c.close()
 
 
 def claims_from_page(stem: str, page_path) -> list[dict]:
@@ -682,130 +412,28 @@ def backlog_warning(*, touch: bool = True) -> str | None:
     )
 
 
-def run(
-    stem: str,
-    *,
-    new_claims: list[dict] | None = None,
-    sim_threshold: float = 0.83,
-    top_papers: int = 10,
-    dry_run: bool = False,
-    judge_fn: Callable[[str], dict | None] | None = None,
-    conn=None,
-) -> dict:
-    """Core: find overlaps → judge → (optionally) apply reciprocal links.
-
-    `new_claims` lets the caller supply the new paper's claims directly (ingest
-    hook, pre-rebuild); when None they're read from the DB. Returns a decisions
-    dict. `judge_fn`/`conn` are injectable for tests. Raises LookupError if
-    `stem` isn't a wiki page.
-    """
-    pages = {p.stem: p for p in read_pages()}
-    if stem not in pages:
-        raise LookupError(stem)
-
+def run(stem: str, *, new_claims=None, sim_threshold=0.83, top_papers=10,
+        dry_run=False, judge_fn=None, conn=None, session=None, run_id=None) -> dict:
     from ..grade.claim_overlap import find_claim_overlaps
-    candidates = find_claim_overlaps(
-        stem, new_claims=new_claims, sim_threshold=sim_threshold,
-        top_papers=top_papers, conn=conn,
-    )
-
-    new_page = pages[stem]
-    new_key = new_page.key
-    new_body = new_page.path.read_text(encoding="utf-8") if new_page.path.exists() else ""
-    judge = judge_fn or _default_judge
-
-    applied, edge_only, coincidence, skipped, judge_failed = [], [], [], [], []
-    for cand in candidates:
-        ex = pages.get(cand.existing_stem)
-        if ex is None:
-            continue
-        ex_key = ex.key
-        # Already linked either direction → no judge call, no work.
-        if f"[[{ex_key}]]" in new_body or f"[[{new_key}]]" in (
-            ex.path.read_text(encoding="utf-8") if ex.path.exists() else ""
-        ):
-            skipped.append({"existing": ex_key, "reason": "already-linked", "cosine": cand.cosine})
-            continue
-
-        verdict = judge(_format_prompt(stem, cand.existing_stem, cand))
-        if verdict is None:
-            # No verdict ≠ coincidence — the judge was unreachable / returned
-            # unparseable output. Surface it distinctly so a provider/config
-            # problem doesn't masquerade as "nothing to link".
-            judge_failed.append({"existing": ex_key, "cosine": cand.cosine})
-            continue
-        v = verdict.get("verdict")
-        rationale = verdict.get("rationale", "")
-        if v not in _RELATION_VERDICTS:
-            coincidence.append({"existing": ex_key, "cosine": cand.cosine,
-                                "rationale": rationale, "verdict": v})
-            continue
-
-        relation = _relation_from_verdict(v)
-        record = {"existing": ex_key, "cosine": cand.cosine,
-                  "rationale": rationale, "relation": relation}
-        citation_proven = _pair_has_explicit_citation(new_page, ex) if v in _CROSS_LINK_VERDICTS else False
-        links = v in _CROSS_LINK_VERDICTS and citation_proven
-        if v in _CROSS_LINK_VERDICTS and not citation_proven:
-            record["reason"] = "no explicit citation verified in either PDF"
+    from ..overlap.workflow import evaluate
+    from ..overlap.receipts import recover
+    c = conn or _default_conn()
+    close = conn is None
+    try:
         if not dry_run:
-            # Typed edge lands for every real relation, and regardless of
-            # whether a wikilink was already present — the edge cache is
-            # orthogonal to Related Papers.
-            if relation is not None:
-                _persist_typed_edge(
-                    stem, cand.new_claim,
-                    cand.existing_stem, cand.existing_claim,
-                    relation, rationale, cand.cosine,
-                )
-            if links:
-                wrote_new = append_related_paper(new_page.path, ex_key, note=_NOTE)
-                wrote_ex = append_related_paper(ex.path, new_key, note=_NOTE)
-                record["wrote"] = {"new_page": wrote_new, "existing_page": wrote_ex}
-                if wrote_new:  # keep in-memory body current so a later candidate sees the link
-                    new_body = new_page.path.read_text(encoding="utf-8")
-        (applied if links else edge_only).append(record)
-
-    # Mark the stem covered so `find_backlog` stops returning it. Not on a dry
-    # run: nothing was applied, so claiming coverage would hide real work.
-    #
-    # The fingerprint is taken over the claims actually compared. On the ingest
-    # hook path those come from the committed page rather than the DB (claims
-    # land at `db rebuild`), so if rebuild normalises text differently the
-    # fingerprint won't match later and the stem resurfaces once — after which
-    # the DB-derived fingerprint is recorded and matches thereafter. Costs one
-    # redundant re-run in the worst case; never silently drops a stem.
-    if not dry_run and not judge_failed:
-        compared = new_claims if new_claims is not None else _claims_for_stem(
-            conn or _default_conn(), stem
-        )
-        try:
-            record_run(
-                conn or _default_conn(), stem,
-                fingerprint=claims_fingerprint(compared),
-                n_claims=len(compared),
-                n_candidates=len(candidates),
-                n_judged=len(applied) + len(edge_only) + len(coincidence),
-                n_confirmed=len(applied),
-                sim_threshold=sim_threshold,
-            )
-        except Exception as e:      # never fail the cross-link over bookkeeping
-            log(f"could not record run for {stem}: {type(e).__name__}: {e}",
-                tag="claim-overlap")
-
-    return {
-        "stem": stem,
-        "n_candidates": len(candidates),
-        "applied": applied,
-        # Real relation, typed edge written, deliberately no bullet — see
-        # _EDGE_ONLY_VERDICTS. Distinct from `coincidence`, which is the
-        # judge saying the pair is unrelated.
-        "edge_only": edge_only,
-        "coincidence": coincidence,
-        "skipped": skipped,
-        "judge_failed": judge_failed,
-        "dry_run": dry_run,
-    }
+            recover(conn=c)
+        pages = {p.stem: p for p in read_pages()}
+        if stem not in pages:
+            raise LookupError(stem)
+        compared = new_claims if new_claims is not None else _claims_for_stem(c, stem)
+        candidates = find_claim_overlaps(stem, new_claims=new_claims,
+            sim_threshold=sim_threshold, top_papers=top_papers, conn=c)
+        return evaluate(stem, candidates, pages, compared=compared, conn=c,
+                        sim_threshold=sim_threshold, dry_run=dry_run, judge_fn=judge_fn,
+                        session=session, run_id=run_id)
+    finally:
+        if close:
+            c.close()
 
 
 def run_after_ingest(stem: str, committed_path, *, sim_threshold: float = 0.83,
@@ -850,99 +478,103 @@ def print_ingest_result(result: dict) -> None:
 
 
 def _run_backlog(args) -> int:
-    """Drain the uncovered-stem backlog, one stem at a time.
-
-    Sequential on purpose: each stem's judge calls are cheap (~3) but the
-    finder holds a bi-encoder, and a confirmed link mutates both pages — so a
-    later stem must see the links an earlier one wrote, or the two runs
-    disagree about what is already linked.
-    """
+    from ..overlap.judging import JudgeSession
+    from ..overlap.receipts import new_run_id, recover, run_path
+    from ..overlap.progress import emit
+    from ..fsatomic import write_json_atomic
+    if not args.dry_run:
+        recover()
     pending = find_backlog()
-    if not pending:
-        print("claim-overlap backlog is empty — every paper page with claims "
-              "has been covered at its current claim set.")
-        return 0
-
+    all_pending = list(pending)
     withheld = 0
-    if args.limit is not None and len(pending) > args.limit:
-        withheld = len(pending) - args.limit
+    if args.limit is not None:
+        withheld = max(0, len(pending) - args.limit)
         pending = pending[:args.limit]
-    if not pending:
-        # `--limit 0`. Distinguished from a genuinely empty backlog above,
-        # so the report can't claim coverage that doesn't exist.
-        print(f"claim-overlap backlog: {withheld} stem(s) pending, all withheld "
-              f"by --limit 0.")
-        return 0
-
-    print(f"backlog: {len(pending)} stem(s)"
-          + (f", {withheld} withheld by --limit" if withheld else "")
-          + (" — DRY RUN, no links written" if args.dry_run else ""))
-
+    run_id = new_run_id()
+    progress = getattr(args, "progress_json", None)
+    if not args.json:
+        if not all_pending:
+            print("claim-overlap backlog is empty — every paper page with claims has been covered.")
+        else:
+            print(f"backlog: {len(pending)} stem(s), {withheld} withheld by --limit"
+                  + (" — DRY RUN, no links written" if args.dry_run else ""))
     results, failed = [], []
-    stopped_early: str | None = None
-    tot = {"candidates": 0, "judged": 0, "confirmed": 0, "edge_only": 0}
+    retryable, completed, maintenance = [], [], []
+    stopped_early = None
+    totals = {k: 0 for k in ("candidates", "judged", "confirmed", "edge_only",
+                             "judged_pairs", "reused_judgments", "committed_link_pairs")}
+    session = JudgeSession(dry_run=args.dry_run)
     for i, stem in enumerate(pending, 1):
+        halted = False
         try:
             r = run(stem, sim_threshold=args.sim, top_papers=args.top,
-                    dry_run=args.dry_run)
-        except LookupError:
-            # In the DB but not on disk — a page deleted without a rebuild.
+                    dry_run=args.dry_run, session=session, run_id=run_id)
+        except LookupError as exc:
+            if type(exc) is not LookupError:
+                raise
             failed.append((stem, "no wiki page"))
+            retryable.append(stem)
+            emit(progress, run_id=run_id, stem=stem, completed=len(completed), total=len(pending),
+                 result={"status": "incomplete", "judge_failed": [{}]})
             continue
         except EnvironmentFailure as exc:
-            # House rule 3 (errors.py): stop draining, report what landed.
-            # `run` records coverage only on a complete stem, so this stem stays
-            # in the backlog and is retried whole — but the stems before it are
-            # already committed, and letting this unwind threw away their
-            # summary. Continuing instead would pay a fresh timeout per
-            # remaining stem for a responder who has plainly gone away.
             stopped_early = f"{type(exc).__name__}: {exc}"
-            break
+            r = getattr(exc, "claim_overlap_result", None)
+            retryable.extend(pending[i:] if r else pending[i - 1:])
+            if r is None:
+                break
+            halted = True
+        r.setdefault("stem", stem)
         results.append(r)
-        edge_only = len(r.get("edge_only", []))
-        judged = len(r["applied"]) + edge_only + len(r["coincidence"])
-        tot["candidates"] += r["n_candidates"]
-        tot["judged"] += judged
-        tot["confirmed"] += len(r["applied"])
-        tot["edge_only"] += edge_only
+        if r.get("judge_failed"):
+            retryable.append(stem)
+        elif r.get("status") == "maintenance-pending":
+            maintenance.append(stem)
+            retryable.append(stem)
+        else:
+            completed.append(stem)
+        judged = sum(len(r.get(k, [])) for k in ("applied", "edge_only", "coincidence"))
+        totals["candidates"] += r["n_candidates"]
+        totals["judged"] += judged
+        totals["confirmed"] += len(r["applied"])
+        totals["edge_only"] += len(r.get("edge_only", []))
+        for k in ("judged_pairs", "reused_judgments", "committed_link_pairs"):
+            totals[k] += r.get(k, 0)
+        emit(progress, run_id=run_id, stem=stem, completed=len(completed), total=len(pending), result=r)
         if not args.json:
-            mark = "✓" if r["applied"] else " "
-            print(f"  {mark} [{i}/{len(pending)}] {stem[:56]:56s} "
-                  f"cand {r['n_candidates']:2d}  judged {judged:2d}  "
-                  f"confirmed {len(r['applied'])}")
-            for a in r["applied"]:
-                print(f"        → [[{a['existing']}]] (cos {a['cosine']}) {a['rationale'][:70]}")
-
+            print(f"  [{i}/{len(pending)}] {stem}: {judged} judged, {len(r['applied'])} confirmed")
+        if halted:
+            break
+    summary = {"schema_version": 1, "record_type": "run", "run_id": run_id,
+               "pending": len(pending), "withheld": withheld, "totals": totals,
+               "failed": failed, "stopped_early": stopped_early, "results": results,
+               "completed_stems": completed, "retryable_stems": retryable,
+               "maintenance_pending_stems": maintenance}
+    if not args.dry_run:
+        path = run_path(run_id) / "summary.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json_atomic(path, summary)
+    emit(progress, run_id=run_id, completed=len(completed), total=len(pending), retryable=retryable,
+         result={"status": "incomplete" if retryable else "completed"})
     if args.json:
-        print(json.dumps({"pending": len(pending), "withheld": withheld,
-                          "totals": tot, "failed": failed,
-                          "stopped_early": stopped_early,
-                          "results": results}, ensure_ascii=False, indent=2))
-        return 0 if stopped_early is None else 2
-
-    print(f"\n  {len(results)} stem(s) processed: {tot['candidates']} candidate(s), "
-          f"{tot['judged']} judged, {tot['confirmed']} confirmed link(s), "
-          f"{tot['edge_only']} edge-only (typed edge, no bullet)")
-    for stem, why in failed:
-        print(f"  ! skipped {stem}: {why}")
-    if not args.dry_run and tot["confirmed"]:
-        print("  links written to both pages — run `researchwiki db rebuild && "
-              "researchwiki reindex`")
-    if stopped_early:
-        print(f"\n  ! STOPPED EARLY after {len(results)} of {len(pending)} "
-              f"stem(s) — {stopped_early}", file=sys.stderr)
-        print(f"  Remaining stems are still in the backlog; re-run "
-              f"`researchwiki claim-overlap --backlog` to continue "
-              f"(processed stems are not re-paid).", file=sys.stderr)
-    log(f"claim-overlap backlog: {len(results)} stem(s), {tot['confirmed']} link(s) "
-        f"{'(dry-run)' if args.dry_run else 'applied'}", tag="claim-overlap")
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+    else:
+        print(f"\n  {len(results)} stem(s) processed: {totals['candidates']} candidate(s), "
+              f"{totals['judged']} judged, {totals['confirmed']} confirmed link(s), "
+              f"{totals['edge_only']} edge-only")
+        for stem, why in failed:
+            print(f"  ! skipped {stem}: {why}")
+        if stopped_early:
+            print(f"STOPPED EARLY after {len(results)} of {len(pending)} stem(s) — {stopped_early}",
+                  file=sys.stderr)
+            print("Remaining stems are still in the backlog; re-run to continue.", file=sys.stderr)
     return 0 if stopped_early is None else 2
 
 
-def main(argv: list[str]) -> int:
+def _main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="researchwiki claim-overlap",
-        description="Auto cross-link a new paper to existing papers via claim overlap (LLM-gated).",
+        description="Judge claim relationships, verify citations, and apply or revert paper links.",
     )
     parser.add_argument("stem", nargs="?",
                         help="Stem of the newly-ingested paper (e.g. smith-2024-...).")
@@ -960,16 +592,37 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--top", type=int, default=10, help="Max existing papers to judge (default 10).")
     parser.add_argument("--dry-run", action="store_true", help="Show verdicts, write no links.")
     parser.add_argument("--json", action="store_true", help="Emit the decisions as JSON.")
+    parser.add_argument("--revert", metavar="RUN_ID", help="Preview reverting this run's owned link insertions.")
+    parser.add_argument("--stem", dest="revert_stem", help="With --revert: restrict to one processed stem.")
+    parser.add_argument("--link", nargs=2, metavar=("STEM_A", "STEM_B"), help="With --revert: restrict to this paper pair.")
+    parser.add_argument("--apply", action="store_true", help="Apply the previewed revert.")
+    parser.add_argument("--progress-json", metavar="PATH", help="Append flushed per-stem JSON Lines progress.")
     args = parser.parse_args(argv)
+    if args.limit is not None and args.limit < 0:
+        parser.error("--limit must be nonnegative")
+    if args.revert:
+        from ..overlap.receipts import revert
+        if args.stem or args.pair or args.backlog or args.mark_covered:
+            parser.error("--revert does not combine with a positional stem or another review mode")
+        if args.apply and args.dry_run:
+            parser.error("--apply and --dry-run are mutually exclusive")
+        result = revert(args.revert, stem=args.revert_stem, link=args.link, apply=args.apply)
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            for item in result["reverted"]:
+                print(f"  {item['outcome']}: {item['path']}")
+            print(f"{'Applied' if args.apply else 'Preview'}: {len(result['reverted'])} owned insertion(s)")
+        return 0
+    if args.apply or args.link or args.revert_stem:
+        parser.error("--apply, --link and --stem require --revert")
+
 
     if args.pair:
         if args.stem or args.backlog or args.mark_covered:
             parser.error("--pair does not combine with a stem, --backlog, or --mark-covered")
-        try:
-            result = review_pair(*args.pair, dry_run=args.dry_run)
-        except ValueError as e:
-            print(f"researchwiki claim-overlap --pair: {e}", file=sys.stderr)
-            return 1
+        result = review_pair(*args.pair, dry_run=args.dry_run)
+        _progress_result(args, result)
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
@@ -992,7 +645,13 @@ def main(argv: list[str]) -> int:
     if args.mark_covered:
         if args.stem or args.backlog:
             parser.error("--mark-covered takes no stem and does not combine with --backlog")
+        if not args.dry_run:
+            from ..overlap.receipts import recover
+            recover()
         res = mark_covered(dry_run=args.dry_run)
+        if args.json:
+            print(json.dumps(dict(res, remaining_backlog=len(find_backlog()))))
+            return 0
         verb = "would mark" if res["dry_run"] else "marked"
         print(f"{verb} {res['marked']} agent-ingested paper(s) as covered"
               + (f"; {res['skipped_no_claims']} had no claims and stay pending"
@@ -1008,15 +667,8 @@ def main(argv: list[str]) -> int:
     if args.backlog:
         return _run_backlog(args)
 
-    try:
-        result = run(args.stem, sim_threshold=args.sim, top_papers=args.top, dry_run=args.dry_run)
-    except LookupError:
-        print(f"researchwiki claim-overlap: no wiki page for stem `{args.stem}`", file=sys.stderr)
-        return 1
-    # Deliberately no `except Exception: return 2` here. state.db and the search
-    # index raise `EnvironmentFailure`, which the funnel already reports as 2;
-    # an ImportError on numpy/torch is a broken install, which the funnel's
-    # code-3 traceback diagnoses far better than a one-line message would.
+    result = run(args.stem, sim_threshold=args.sim, top_papers=args.top, dry_run=args.dry_run)
+    _progress_result(args, result)
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -1046,3 +698,38 @@ def main(argv: list[str]) -> int:
         f"{len(result['coincidence'])} coincidence, {len(result['skipped'])} already-linked",
         tag="claim-overlap")
     return 0
+
+
+def _progress_result(args, result):
+    from ..overlap.progress import emit
+    if args.progress_json:
+        emit(args.progress_json, run_id=result.get("run_id", "unknown"), stem=result.get("stem"),
+             completed=0 if result.get("judge_failed") else 1, result=result)
+
+
+def main(argv: list[str]) -> int:
+    try:
+        return _main(argv)
+    except Exception as exc:
+        known = (isinstance(exc, EnvironmentFailure) or type(exc) is LookupError
+                 or (isinstance(exc, ValueError) and any(
+                     value == flag or value.startswith(flag + "=")
+                     for value in argv for flag in ("--pair", "--revert"))))
+        if not known and "--json" not in argv:
+            raise
+        code = (2 if isinstance(exc, EnvironmentFailure) else 1) if known else 3
+        result = getattr(exc, "claim_overlap_result", None) or {}
+        from ..overlap.receipts import new_run_id
+        from ..overlap.progress import emit
+        for i, value in enumerate(argv):
+            if value == "--progress-json" and i + 1 < len(argv):
+                emit(argv[i + 1], run_id=result.get("run_id") or new_run_id(), result=result,
+                     retryable=[result["stem"]] if result.get("stem") else [])
+        if "--json" in argv:
+            print(json.dumps(dict(result, error=f"{type(exc).__name__}: {exc}",
+                                  exit_code=code, status="incomplete")))
+        print(f"researchwiki claim-overlap: {exc}", file=sys.stderr)
+        if not known:
+            import traceback
+            traceback.print_exc()
+        return code

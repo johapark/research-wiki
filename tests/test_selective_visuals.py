@@ -39,11 +39,6 @@ def selected(req=None):
     return [{'request': (req or request()).to_dict(), 'page': 1}]
 
 
-@pytest.fixture(autouse=True)
-def isolate_locks(tmp_path, monkeypatch):
-    monkeypatch.setenv('RESEARCHWIKI_LOCK_DIR', str(tmp_path/'locks'))
-
-
 QUOTE = 'The measured accuracy was 90% for condition A and 80% for condition B (Fig. 2).'
 
 
@@ -411,7 +406,6 @@ def test_runner_opt_in_is_per_attempt_and_visual_gate_survives_score_replacement
     from researchwiki.agents.runner_support import phase_extract
     from researchwiki.agents import visual_support
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv('RESEARCHWIKI_LOCK_DIR',str(tmp_path/'locks'))
     (tmp_path/'wiki/other').mkdir(parents=True)
     pdf=tmp_path/'paper.pdf';pdf.write_bytes(b'source')
     monkeypatch.setattr(runner,'_phase_reconcile',lambda *a:({'stem':'smith-2026-test',

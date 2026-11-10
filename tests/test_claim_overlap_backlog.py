@@ -238,7 +238,7 @@ def test_measures_same_does_not_earn_a_bullet():
     assert "measures_same" in co._EDGE_ONLY_VERDICTS
 
 
-@pytest.mark.parametrize("verdict", ["corroborates", "refines", "builds_on", "cross_link"])
+@pytest.mark.parametrize("verdict", ["corroborates", "refines", "builds_on"])
 def test_engaging_verdicts_do_earn_a_bullet(verdict):
     assert verdict in co._CROSS_LINK_VERDICTS
 
@@ -264,9 +264,10 @@ def test_relation_verdicts_is_the_union():
 def test_judge_prompt_still_offers_every_verdict_the_code_handles():
     """If the prompt stops emitting a verdict the sets accept, the split is dead
     code; if it emits one they don't, the pair is dropped as a coincidence."""
-    emitted = set(co._JUDGE_SCHEMA["properties"]["verdict"]["enum"]) - {"none"}
-    handled = co._RELATION_VERDICTS - {"cross_link"}   # legacy, not emitted
-    assert emitted == handled
+    from researchwiki.overlap.judging import SCHEMA, DIRECTIONS
+    emitted = set(SCHEMA["properties"]["verdict"]["enum"])
+    assert emitted == set(DIRECTIONS)
+
 
 
 # ---------- end to end: what actually lands on disk ----------
@@ -287,16 +288,17 @@ class _Page:
 
 
 def _two_pages(tmp_path, monkeypatch, verdict):
+    monkeypatch.chdir(tmp_path)
+    from researchwiki.wiki import read_page
     """Wire `run()` against two real files and a judge stubbed to `verdict`."""
-    new_p = tmp_path / "new-2026-a.md"
-    old_p = tmp_path / "old-2020-b.md"
+    (tmp_path / "wiki/compbio").mkdir(parents=True)
+    new_p = tmp_path / "wiki/compbio/new-2026-a.md"
+    old_p = tmp_path / "wiki/compbio/old-2020-b.md"
     for p in (new_p, old_p):
-        p.write_text("---\ntitle: t\n---\n\n## Related Papers\n\n")
+        p.write_text("---\ntitle: t\ntype: paper\ncategory: [compbio]\n---\n\n## Related Papers\n\n")
 
-    pages = [_Page(new_p, "compbio/new-2026-a", "new-2026-a"),
-             _Page(old_p, "compbio/old-2020-b", "old-2020-b")]
+    pages = [read_page(new_p), read_page(old_p)]
     monkeypatch.setattr(co, "read_pages", lambda: pages)
-    monkeypatch.setattr(co, "_pair_has_explicit_citation", lambda _a, _b: True)
     monkeypatch.setattr("researchwiki.grade.claim_overlap.find_claim_overlaps",
                         lambda *a, **k: [_Cand("old-2020-b")])
     edges = []
@@ -304,11 +306,11 @@ def _two_pages(tmp_path, monkeypatch, verdict):
                         lambda *a, **k: edges.append(a[4]))   # relation
     monkeypatch.setattr(co, "record_run", lambda *a, **k: None)
     res = co.run("new-2026-a", new_claims=[{"section": "results", "text": "x"}],
-                 judge_fn=lambda _p: {"verdict": verdict, "rationale": "r"})
+                 judge_fn=lambda _p: {"direction": {"none": "none", "measures_same": "symmetric", "builds_on": "a_to_b"}[verdict], "verdict": verdict, "rationale": "r"})
     return res, edges, new_p.read_text(), old_p.read_text()
 
 
-def test_measures_same_writes_an_edge_but_no_bullet(tmp_path, monkeypatch):
+def test_measures_same_writes_an_edge_but_no_bullet(tmp_path, monkeypatch, verified_overlap_citations):
     res, edges, new_body, old_body = _two_pages(tmp_path, monkeypatch, "measures_same")
     assert edges == ["measures_same"], "the typed edge must still be recorded"
     assert res["applied"] == []
@@ -317,7 +319,7 @@ def test_measures_same_writes_an_edge_but_no_bullet(tmp_path, monkeypatch):
         "no Related Papers bullet on either page"
 
 
-def test_builds_on_writes_reciprocal_bullets_and_an_edge(tmp_path, monkeypatch):
+def test_builds_on_writes_reciprocal_bullets_and_an_edge(tmp_path, monkeypatch, verified_overlap_citations):
     res, edges, new_body, old_body = _two_pages(tmp_path, monkeypatch, "builds_on")
     assert edges == ["builds_on"]
     assert len(res["applied"]) == 1 and res["edge_only"] == []
@@ -325,7 +327,7 @@ def test_builds_on_writes_reciprocal_bullets_and_an_edge(tmp_path, monkeypatch):
     assert "[[compbio/new-2026-a]] — claim-grounded match" in old_body
 
 
-def test_none_writes_neither(tmp_path, monkeypatch):
+def test_none_writes_neither(tmp_path, monkeypatch, verified_overlap_citations):
     res, edges, new_body, old_body = _two_pages(tmp_path, monkeypatch, "none")
     assert edges == [] and res["applied"] == [] and res["edge_only"] == []
     assert len(res["coincidence"]) == 1
@@ -420,7 +422,7 @@ def test_backlog_json_reports_the_halt(monkeypatch, capsys):
 
     rc = co._run_backlog(_backlog_args(json=True))
     raw = capsys.readouterr().out
-    payload = _json.loads(raw[raw.index("{"):])
+    payload = _json.loads(raw)
 
     assert rc == 2
     assert "RelayTimeout" in payload["stopped_early"]
@@ -436,7 +438,7 @@ def test_backlog_reports_no_halt_on_a_clean_drain(monkeypatch, capsys):
 
     assert co._run_backlog(_backlog_args(json=True)) == 0
     raw = capsys.readouterr().out
-    payload = _json.loads(raw[raw.index("{"):])
+    payload = _json.loads(raw)
     assert payload["stopped_early"] is None
 
 

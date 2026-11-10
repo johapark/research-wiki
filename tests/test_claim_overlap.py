@@ -124,20 +124,19 @@ def _write_page(tmp_path, cat, stem, body="## Summary\n\nx\n"):
 
 
 @pytest.fixture
-def wiki_and_db(embed, tmp_path, monkeypatch):
+def wiki_and_db(embed, tmp_path, monkeypatch, verified_overlap_citations):
     # embed already chdir'd to tmp_path; add DB + pages + claims.
     monkeypatch.setenv("RESEARCHWIKI_DB_PATH", str(tmp_path / "state.db"))
     conn = get_connection()
     _seed_claims(conn, [("new-2026-x", 0, "SHARED finding"), ("old-2020-y", 0, "SHARED finding")])
     _write_page(tmp_path, "ai", "new-2026-x")
     _write_page(tmp_path, "ai", "old-2020-y")
-    monkeypatch.setattr(cmd, "_pair_has_explicit_citation", lambda _a, _b: True)
     return tmp_path, conn
 
 
 def test_cross_link_applies_reciprocal(wiki_and_db):
     tmp_path, conn = wiki_and_db
-    res = cmd.run("new-2026-x", sim_threshold=0.9, judge_fn=lambda _p: {"verdict": "cross_link", "rationale": "same finding"}, conn=conn)
+    res = cmd.run("new-2026-x", sim_threshold=0.9, judge_fn=lambda _p: {"direction": "a_to_b", "verdict": "builds_on", "rationale": "same finding"}, conn=conn)
     assert len(res["applied"]) == 1
     new_body = (tmp_path / "wiki/ai/new-2026-x.md").read_text()
     old_body = (tmp_path / "wiki/ai/old-2020-y.md").read_text()
@@ -148,10 +147,10 @@ def test_cross_link_applies_reciprocal(wiki_and_db):
 
 def test_judged_relation_without_pdf_citation_remains_edge_only(wiki_and_db, monkeypatch):
     tmp_path, conn = wiki_and_db
-    monkeypatch.setattr(cmd, "_pair_has_explicit_citation", lambda _a, _b: False)
+    monkeypatch.setattr("researchwiki.overlap.workflow.citation_proofs", lambda *_a: [])
     res = cmd.run(
         "new-2026-x", sim_threshold=0.9,
-        judge_fn=lambda _p: {"verdict": "builds_on", "rationale": "same method"},
+        judge_fn=lambda _p: {"direction": "a_to_b", "verdict": "builds_on", "rationale": "same method"},
         conn=conn,
     )
     assert not res["applied"]
@@ -164,8 +163,8 @@ def test_pdf_citation_gate_accepts_exact_doi(tmp_path, monkeypatch):
     source_pdf = tmp_path / "source-2026-a.pdf"
     source_pdf.write_bytes(b"pdf stub")
     monkeypatch.setattr(cmd, "papers_dir", lambda: tmp_path)
-    monkeypatch.setattr("researchwiki.pdf.text.extract_ref_dois",
-                        lambda _path, own_doi="": ["10.1000/target"])
+    monkeypatch.setattr("researchwiki.pdf.text.extract_pdf_page_texts",
+                        lambda *_a, **_k: ["References\n1. Target A. A full target paper title. Journal (2020). doi:10.1000/target"])
     _write_page(tmp_path, "ai", "source-2026-a")
     target_path = tmp_path / "wiki/ai/target-2020-b.md"
     target_path.write_text("---\ntype: paper\ncategory: [ai]\nyear: 2020\ndoi: 10.1000/target\n---\n")
@@ -176,18 +175,43 @@ def test_pdf_citation_gate_accepts_exact_doi(tmp_path, monkeypatch):
 def test_pdf_citation_gate_checks_reference_year_when_doi_absent(tmp_path, monkeypatch):
     (tmp_path / "source-2026-a.pdf").write_bytes(b"pdf stub")
     monkeypatch.setattr(cmd, "papers_dir", lambda: tmp_path)
-    monkeypatch.setattr("researchwiki.pdf.text.extract_ref_dois", lambda *_a, **_k: [])
-    seen = []
-    def cites(_path, surname, year):
-        seen.append((surname, str(year)))
-        return surname == "target" and str(year) == "2025"
-    monkeypatch.setattr("researchwiki.pdf.text.cites_reference", cites)
+    monkeypatch.setattr("researchwiki.pdf.text.extract_pdf_page_texts",
+                        lambda *_a, **_k: ["References\n1. Target A. A full target paper title. Journal (2025)."])
     _write_page(tmp_path, "ai", "source-2026-a")
     target_path = tmp_path / "wiki/ai/target-2023-b.md"
-    target_path.write_text("---\ntype: paper\ncategory: [ai]\nyear: 2025\n---\n")
+    target_path.write_text("---\ntype: paper\ncategory: [ai]\ntitle: A full target paper title\nyear: 2025\n---\n")
     assert cmd._source_cites_target(
         read_page(tmp_path / "wiki/ai/source-2026-a.md"), read_page(target_path))
-    assert ("target", "2025") in seen
+
+
+@pytest.mark.parametrize("title,reference", [
+    ("Gene Editing Technologies to Target HBV cccDNA",
+     "Martinez MG et al. (2022). CRISPR-Cas9 targeting of hepatitis B virus "
+     "covalently closed circular DNA generates transcriptionally active episomal variants."),
+    ("Targeting hepatitis B virus cccDNA using CRISPR/Cas9",
+     "Kennedy EM et al. (2015). Suppression of hepatitis B virus DNA "
+     "accumulation in chronically infected cells using a bacterial CRISPR/Cas "
+     "RNA-guided DNA endonuclease."),
+    ("Bioinformatics for human long-read whole-genome sequencing",
+     "Zheng Z et al. (2026). Accelerated long-read variant calling with Clair3 "
+     "for whole-genome sequencing."),
+])
+def test_pdf_citation_gate_rejects_another_paper_by_same_author_and_year(
+    tmp_path, monkeypatch, title, reference,
+):
+    (tmp_path / "source-2026-a.pdf").write_bytes(b"pdf stub")
+    monkeypatch.setattr(cmd, "papers_dir", lambda: tmp_path)
+    monkeypatch.setattr("researchwiki.pdf.text.extract_ref_dois", lambda *_a, **_k: [])
+    monkeypatch.setattr("researchwiki.pdf.text.cites_reference", lambda *_a, **_k: True)
+    monkeypatch.setattr("researchwiki.pdf.text.extract_pdf_page_texts",
+                        lambda *_a, **_k: ["References\n1. " + reference])
+    _write_page(tmp_path, "ai", "source-2026-a")
+    target_path = tmp_path / "wiki/ai/target-2026-b.md"
+    target_path.write_text(
+        f'---\ntype: paper\ncategory: [ai]\nyear: 2026\ntitle: "{title}"\n---\n'
+    )
+    assert not cmd._source_cites_target(
+        read_page(tmp_path / "wiki/ai/source-2026-a.md"), read_page(target_path))
 
 
 def test_pdf_citation_gate_rejects_missing_or_unverified_source(tmp_path, monkeypatch):
@@ -205,14 +229,14 @@ def test_pdf_citation_gate_rejects_missing_or_unverified_source(tmp_path, monkey
 
 def test_coincidence_writes_nothing(wiki_and_db):
     tmp_path, conn = wiki_and_db
-    res = cmd.run("new-2026-x", sim_threshold=0.9, judge_fn=lambda _p: {"verdict": "coincidence", "rationale": "different domain"}, conn=conn)
+    res = cmd.run("new-2026-x", sim_threshold=0.9, judge_fn=lambda _p: {"direction": "none", "verdict": "none", "rationale": "different domain"}, conn=conn)
     assert res["applied"] == [] and len(res["coincidence"]) == 1
     assert "[[ai/old-2020-y]]" not in (tmp_path / "wiki/ai/new-2026-x.md").read_text()
 
 
 def test_dry_run_judges_but_does_not_write(wiki_and_db):
     tmp_path, conn = wiki_and_db
-    res = cmd.run("new-2026-x", sim_threshold=0.9, dry_run=True, judge_fn=lambda _p: {"verdict": "cross_link", "rationale": "x"}, conn=conn)
+    res = cmd.run("new-2026-x", sim_threshold=0.9, dry_run=True, judge_fn=lambda _p: {"direction": "a_to_b", "verdict": "builds_on", "rationale": "x"}, conn=conn)
     assert len(res["applied"]) == 1
     assert "[[ai/old-2020-y]]" not in (tmp_path / "wiki/ai/new-2026-x.md").read_text()
 
@@ -226,7 +250,7 @@ def test_already_linked_skips_without_judging(wiki_and_db):
 
     def _judge(_p):
         judged["n"] += 1
-        return {"verdict": "cross_link", "rationale": "should not run"}
+        return {"direction": "a_to_b", "verdict": "builds_on", "rationale": "should not run"}
 
     res = cmd.run("new-2026-x", sim_threshold=0.9, judge_fn=_judge, conn=conn)
     assert judged["n"] == 0                          # skipped before the LLM
@@ -239,7 +263,7 @@ def test_unknown_stem_raises(wiki_and_db):
         cmd.run("nonexistent-stem", conn=conn)
 
 
-def test_supplied_new_claims_bypass_db(embed, tmp_path, monkeypatch):
+def test_supplied_new_claims_bypass_db(embed, tmp_path, monkeypatch, verified_overlap_citations):
     # The ingest hook supplies new claims from the committed page BEFORE they're
     # in the DB. Seed only the EXISTING paper's claims; supply the new ones.
     monkeypatch.setenv("RESEARCHWIKI_DB_PATH", str(tmp_path / "state.db"))
@@ -249,9 +273,8 @@ def test_supplied_new_claims_bypass_db(embed, tmp_path, monkeypatch):
     _write_page(tmp_path, "ai", "old-2020-y")
 
     supplied = [{"paper_stem": "new-2026-x", "section": "results", "position": 0, "text": "SHARED finding"}]
-    monkeypatch.setattr(cmd, "_pair_has_explicit_citation", lambda _a, _b: True)
     res = cmd.run("new-2026-x", new_claims=supplied, sim_threshold=0.9,
-                  judge_fn=lambda _p: {"verdict": "cross_link", "rationale": "match"}, conn=conn)
+                  judge_fn=lambda _p: {"direction": "a_to_b", "verdict": "builds_on", "rationale": "match"}, conn=conn)
     assert len(res["applied"]) == 1
     assert "[[ai/new-2026-x]]" in (tmp_path / "wiki/ai/old-2020-y.md").read_text()
 
@@ -296,7 +319,7 @@ def test_exact_pair_reviews_the_selected_below_threshold_claims(wiki_and_db, mon
     assert len(prompts) == 1
     assert "Claim A — paper [[new-2026-x]]" in prompts[0]
     assert "Claim B — paper [[old-2020-y]]" in prompts[0]
-    assert "embedding cosine 0.7430" in prompts[0]
+    assert "embedding cosine" not in prompts[0]
     assert res["applied"][0]["relation"] == "builds_on"
     assert res["applied"][0]["direction"] == "a_to_b"
     assert "[[ai/old-2020-y]]" not in (tmp_path / "wiki/ai/new-2026-x.md").read_text()
@@ -341,7 +364,7 @@ def test_exact_pair_cli_routes_to_exact_review_without_a_stem(monkeypatch, capsy
 def test_typed_corroborates_verdict_applies_link(wiki_and_db):
     tmp_path, conn = wiki_and_db
     res = cmd.run("new-2026-x", sim_threshold=0.9,
-                  judge_fn=lambda _p: {"verdict": "corroborates",
+                  judge_fn=lambda _p: {"direction": "symmetric", "verdict": "corroborates",
                                         "rationale": "same finding on same benchmark"},
                   conn=conn)
     assert len(res["applied"]) == 1
@@ -351,7 +374,7 @@ def test_typed_corroborates_verdict_applies_link(wiki_and_db):
 def test_typed_none_verdict_does_not_apply(wiki_and_db):
     tmp_path, conn = wiki_and_db
     res = cmd.run("new-2026-x", sim_threshold=0.9,
-                  judge_fn=lambda _p: {"verdict": "none",
+                  judge_fn=lambda _p: {"direction": "none", "verdict": "none",
                                         "rationale": "different domains"},
                   conn=conn)
     assert res["applied"] == []
@@ -391,12 +414,11 @@ def test_directed_verdicts_persist_directed_edge(tmp_path, monkeypatch, embed):
     assert by_rel["measures_same"].directed is False
 
 
-def test_legacy_cross_link_verdict_maps_to_builds_on(wiki_and_db):
-    """Older callers/tests use the pre-typed `cross_link` verdict. Still
-    applies the reciprocal link AND emits a `builds_on` edge in the graph."""
+def test_builds_on_verdict_retains_direction(wiki_and_db):
+    """A directed typed verdict emits a matching graph edge and reciprocal links."""
     tmp_path, conn = wiki_and_db
     res = cmd.run("new-2026-x", sim_threshold=0.9,
-                  judge_fn=lambda _p: {"verdict": "cross_link", "rationale": "..."},
+                  judge_fn=lambda _p: {"direction": "a_to_b", "verdict": "builds_on", "rationale": "..."},
                   conn=conn)
     assert len(res["applied"]) == 1
     assert res["applied"][0]["relation"] == "builds_on"

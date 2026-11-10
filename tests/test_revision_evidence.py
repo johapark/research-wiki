@@ -130,7 +130,6 @@ def test_debug_expansion_keeps_broad_source_without_retrieval(monkeypatch):
 
 
 def test_index_retrieves_late_incoming_pdf_not_old_canonical(monkeypatch, tmp_path):
-    monkeypatch.setenv("RESEARCHWIKI_LOCK_DIR", str(tmp_path / "locks"))
     monkeypatch.setattr(pc, "grade_cache_dir", lambda: tmp_path / "cache")
     monkeypatch.setattr(pc, "_build_embeddings_cache", lambda *a: None)
     canonical, incoming = tmp_path / "old.pdf", tmp_path / "incoming.pdf"

@@ -162,6 +162,46 @@ class TestEtAlBylines:
         assert first_author_surname(["et al."]) == "unknown"
 
 
+class TestReferenceTitleIdentity:
+    TITLE = "Targeting hepatitis B virus cccDNA using CRISPR/Cas9"
+
+    @pytest.mark.parametrize("body,expected", [
+        ("References\nKennedy et al. Targeting hepatitis B virus cccDNA using "
+         "CRISPR/Cas9. (2015).", True),
+        ("REFERENCES AND NOTES\nKennedy et al. TARGETING HEPATITIS B VIRUS "
+         "cccDNA\nusing CRISPR–Cas9 (2015).", True),
+        ("References\nKennedy et al. Targeting hepatitis B virus cccDNA using "
+         "CRISPR/Cas9 revisited (2015).", False),
+        ("Targeting hepatitis B virus cccDNA using CRISPR/Cas9\nReferences\n"
+         "Kennedy et al. Suppression of HBV replication (2015).", False),
+        ("Kennedy et al. Targeting hepatitis B virus cccDNA using CRISPR/Cas9 "
+         "(2015).", False),
+        ("References\nKennedy et al. Targeting HBV cccDNA (2015).", False),
+    ])
+    def test_title_must_appear_in_identified_bibliography(self, monkeypatch, body, expected):
+        from pathlib import Path
+        from researchwiki.pdf import text
+        monkeypatch.setattr(text, "extract_pdf", lambda *_a, **_k: (body, {}))
+        assert text.cites_reference_title(Path("stub.pdf"), self.TITLE) is expected
+
+    def test_unreadable_pdf_is_not_proof(self, monkeypatch):
+        from pathlib import Path
+        from researchwiki.pdf import text
+        def unreadable(*_a, **_k):
+            raise OSError("unreadable")
+        monkeypatch.setattr(text, "extract_pdf", unreadable)
+        assert not text.cites_reference_title(Path("stub.pdf"), self.TITLE)
+
+    def test_bibliography_can_insert_of_and_omit_thousands_comma(self, monkeypatch):
+        from pathlib import Path
+        from researchwiki.pdf import text
+        body = ("References\nSirén et al. Pangenomics enables genotyping of known "
+                "structural variants in 5202 diverse genomes. Science (2021).")
+        monkeypatch.setattr(text, "extract_pdf", lambda *_a, **_k: (body, {}))
+        title = "Pangenomics enables genotyping known structural variants in 5,202 diverse genomes"
+        assert text.cites_reference_title(Path("stub.pdf"), title)
+
+
 class TestSurnameMatchesWholeWords:
     """A surname is a word, not a substring. Hermetic: the PDF reader is stubbed.
 

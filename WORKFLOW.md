@@ -1839,3 +1839,62 @@ For new contributors: read `CLAUDE.md` first (it's load-bearing for the
 LLM-facing semantics), then this doc. For the pipeline internals, the
 phase functions in `researchwiki/agents/phases/` and the state machine in
 `researchwiki/agents/runner.py` are the source of truth.
+
+
+## Claim-overlap review and recovery
+
+`researchwiki claim-overlap STEM` and `--pair A#slug B#slug` share one judge.
+Claims are ordered by paper stem and durable slug, so the same pair has one
+meaning and one direction whichever paper is processed first. `--backlog`
+shares an in-memory memo across stems. Successful judgments, including `none`,
+are cached in `.claim-graph/edges.db` independently of deterministic `state.db`.
+The key includes full claim text/section and judge prompt/schema/configuration;
+responses retain actual model and usage metadata. Historical missing model
+provenance stays unknown. A malformed verdict/direction is a failure and does
+not mark a pending stem covered.
+
+A judged relationship alone does not authorize a wikilink. The citation gate
+requires the target DOI, or its full title with first-author surname and exact
+version year, within one identified bibliography entry. It returns source PDF
+SHA-256, target identity, verifier version, one-based page, excerpt and span.
+Each source hash is extracted once per run. Missing/unreadable/unidentified or
+ambiguous evidence leaves the relationship edge-only. Reference punctuation,
+line wrapping, thousands separators and the tested inserted `of` variant are
+supported; broad fuzzy titles and author/year-only matches are not.
+
+Writing runs stage decisions outside the corpus lock and save versioned
+per-stem receipts in `.ingest/claim-overlap/<run-id>/`. Each reciprocal insertion
+records exact text and actual ownership. Pages and receipts commit together
+through `mutation`, followed by projection repair without loading an embedding
+model. Claim, PDF or target-identity changes during review invalidate the staged
+write; retrying reuses eligible judgments but verifies citation evidence again.
+At the start of every writing invocation, pending mutation journals are recovered
+and durable receipt completion records are reconciled before selecting backlog
+stems. Maintenance failures retain enough evidence to finish bookkeeping.
+
+```sh
+researchwiki claim-overlap --backlog --json --progress-json /tmp/overlap-progress.jsonl
+researchwiki claim-overlap --revert RUN_ID --json                 # preview
+researchwiki claim-overlap --revert RUN_ID --apply                # apply
+researchwiki claim-overlap --revert RUN_ID --stem STEM --apply
+researchwiki claim-overlap --revert RUN_ID --link STEM_A STEM_B --apply
+```
+
+Revert removes only exact bullets this run inserted and still owns. An unchanged
+page is restored byte-for-byte; later unrelated edits are preserved. Edited,
+absent or ambiguous bullets are reported for review. Pre-existing/manual links
+and claim-graph edges stay intact. Active receipt events determine corrected
+counts, and an older revert cannot overwrite a newer completion record or close
+a changed-claim backlog. Both apply and revert recover after a post-commit
+bookkeeping failure.
+
+`--dry-run` writes no pages, edges, coverage records or judgment cache entries;
+it may read an existing cache. An explicitly requested progress file is still
+written. `--json` stdout is one object; human/provider logging stays on stderr.
+Progress files contain flushed JSON Lines with run ID, stem, status, counts and
+retryable work, without research excerpts. Backlog `summary.json` records
+completed, retryable and maintenance-pending stems. Legacy `confirmed` and
+`n_confirmed` count citation-approved link decisions; `committed_link_pairs`
+separately counts pairs with an actual insertion. `judged` remains the number
+of evaluated comparisons; `judged_pairs` counts new judge invocations and
+`reused_judgments` counts reuse.
