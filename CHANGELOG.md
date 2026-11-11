@@ -20,6 +20,8 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-11
+
 ### Added
 
 - Stem and exact-pair review share one canonical, direction-aware judge. A
@@ -64,6 +66,14 @@ the reasoning behind any line below.
   Critical visual-only evidence stays gated for source-image review; the
   default remains off.
 
+- `researchwiki inspect visuals` renders the pending visual-inspection queue to
+  `output/inspect/visuals.html`: each flagged figure's cached page render beside
+  the model's reading of it, split into what a human can judge now and what
+  needs a re-run first. Read-only, zero tokens, newest attempt per paper, with
+  `--json` (`schema_version: 1`), `--all`, `--all-attempts`, `--no-images` and
+  `--max-bytes`. A missing cached render degrades to a note, since a held
+  paper's PDF is still in `inbox/` and cannot be re-rendered.
+
 - Portable visual-inspection benchmark with 14 inspection cases, 84 answer
   checks and three nomination cases from six CC-BY-4.0 papers. Includes a
   six-case smoke suite, rendered images, separate reference answers, offline
@@ -94,6 +104,10 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- Stem derivation uses the romanized surname when an author's name ends with
+  a native-script alias (for example, `Liqun Zhou (周立群)` becomes `zhou`).
+  Stored author names retain their source form, and bibliographic export
+  preserves these names intact instead of treating the alias as a surname.
 - Visual inspection requires exact source prose for automatic corroboration;
   paraphrases cannot clear critical review gates. Missing references named by
   critical target claims remain blocking beside located Results visuals.
@@ -111,13 +125,6 @@ the reasoning behind any line below.
   leaving stdout and `--json` parseable. No behaviour change. The reason is the
   missing approval path: a reviewer who confirms a figure reading still has
   nowhere to record it, and closing that gap will change these surfaces.
-- `researchwiki inspect visuals` renders the pending visual-inspection queue to
-  `output/inspect/visuals.html`: each flagged figure's cached page render beside
-  the model's reading of it, split into what a human can judge now and what
-  needs a re-run first. Read-only, zero tokens, newest attempt per paper, with
-  `--json` (`schema_version: 1`), `--all`, `--all-attempts`, `--no-images` and
-  `--max-bytes`. A missing cached render degrades to a note, since a held
-  paper's PDF is still in `inbox/` and cannot be re-rendered.
 - Visual inspection reads a headingless paper's body text as its Results
   section, so Nature and Cell figure citations count as Results-cited instead
   of making every missing caption critical; receipts record `results_source`.
@@ -2772,7 +2779,8 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/johapark/research-wiki/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/johapark/research-wiki/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/johapark/research-wiki/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/johapark/research-wiki/compare/v0.5.1...v0.5.2
