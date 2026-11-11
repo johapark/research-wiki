@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import text as pdf_text
 
-VERSION = 'citation-entry-v5'
+VERSION = 'citation-entry-v6'
 _NUMBERED = re.compile(r'(?m)^[ \t]*(?:\[\d{1,4}\]|\d{1,4}[.)]|\d{1,4}[ \t]+(?=[A-Z]))[ \t]*')
 # Headingless fallback: "1. Surname, I." / "[1] Surname I" runs, the layout
 # Nature-family PDFs print with no "References" line at all.
@@ -22,6 +22,9 @@ _MAX_ENTRY = 2000
 # Dates and short entries also occur in procedures. Require recognizable
 # author and publication-year fields in most entries of a headingless run.
 _RUN_REFERENCE_SHARE = 0.7
+# A preprint's line-number gutter. A wrapped line may itself begin with the
+# publication year, so 19xx/20xx values are never stripped.
+_GUTTER = re.compile(r'(?m)^[ \t]*(?!(?:19|20)\d{2}\b)\d{1,5}[ \t]+')
 _RUN_MEDIAN_ENTRY = 1000
 _AUTHOR = re.compile(r"(?m)^[ \t]*(?:[A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ’']+(?:-[A-ZÀ-ÖØ-Ý]?[a-zà-öø-ÿ’']+)*"
                      r"(?:[ -][A-Z][a-z]+)?),?[ \t]+(?:[A-Z]{1,4}(?:[.,]|"
@@ -171,6 +174,9 @@ def _reference_fields(entry):
     if number is None:
         return False
     body = pdf_text._fold_ascii(entry[number.end():])
+    # Line-numbered preprints prefix every wrapped line ("Cell,\n227 2021."),
+    # which separates the year from the punctuation before it.
+    body = _GUTTER.sub('', body)
     return bool(_REFERENCE_AUTHOR.match(body)
                 and _PUBLICATION_YEAR.search(_YEAR_NOISE.sub(' ', body)))
 

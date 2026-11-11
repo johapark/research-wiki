@@ -315,3 +315,17 @@ def test_headingless_citations_keep_initials_full_names_and_publication_styles(
                      for i in range(1, 6))
     result = proof(tmp_path, monkeypatch, refs, doi='10.1234/ref-3')
     assert result['verified'] and result['method'] == 'exact-doi'
+
+
+def test_line_numbered_gutter_does_not_hide_wrapped_publication_years(tmp_path, monkeypatch):
+    """denadel-2025: the year wraps onto a gutter-numbered line ("Cell,\\n227 2021.")."""
+    refs = '\n'.join(f'{200 + 2 * i} {i}. Other{i}, B. Unrelated study number {i}. Journal,\n'
+                     f'{201 + 2 * i} 2020. doi:10.1234/ref-{i}' for i in range(1, 8))
+    result = proof(tmp_path, monkeypatch, refs, doi='10.1234/ref-3')
+    assert result['verified'] and result['method'] == 'exact-doi'
+
+
+def test_gutter_strip_keeps_a_wrapped_line_that_starts_with_a_year():
+    from researchwiki.pdf.citation import _GUTTER
+    assert _GUTTER.sub('', 'Cell,\n227 2021. doi') == 'Cell,\n2021. doi'
+    assert _GUTTER.sub('', 'Proc.,\n2019 IEEE meeting') == 'Proc.,\n2019 IEEE meeting'

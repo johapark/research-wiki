@@ -1867,7 +1867,8 @@ at least 70% of entries, and a median entry of at most 1,000 characters. A short
 entry with a date alone cannot establish those citation fields.
 Author prefixes support surname/initials and given-name-first references;
 publication years support parentheses, comma-separated fields, month/year and
-Vancouver year/volume notation. Independently identified main references stay
+Vancouver year/volume notation, including a year that wraps onto a preprint's
+line-numbered next line. Independently identified main references stay
 eligible before a later Methods References heading. Section boundaries end
 entries even when the next list continues that numbering, so Methods prose
 cannot supply a publication year or DOI. When no entry can be segmented, an
