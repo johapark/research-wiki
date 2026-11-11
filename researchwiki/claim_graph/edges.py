@@ -152,6 +152,10 @@ def upsert_edge(
     "human said no; don't re-surface it" invariant from §3.3. To reopen a
     rejected edge, delete the row explicitly with `delete_edge()`.
 
+    Automatic candidate refreshes never overwrite any part of a confirmed,
+    promoted or rejected row, even when skip_if_rejected=False. Human status
+    transitions use set_status; reopening is an explicit delete.
+
     Identity is `(src_stem, src_slug, tgt_stem, tgt_slug, relation)`.
     """
     if edge.relation not in RELATIONS:
@@ -167,6 +171,8 @@ def upsert_edge(
     ).fetchone()
 
     if existing is not None:
+        if edge.status == "candidate" and existing["status"] in {"confirmed", "promoted", "rejected"}:
+            return "skipped", existing["id"]
         if skip_if_rejected and existing["status"] == "rejected":
             return "skipped", existing["id"]
         conn.execute(

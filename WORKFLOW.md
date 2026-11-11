@@ -1839,3 +1839,96 @@ For new contributors: read `CLAUDE.md` first (it's load-bearing for the
 LLM-facing semantics), then this doc. For the pipeline internals, the
 phase functions in `researchwiki/agents/phases/` and the state machine in
 `researchwiki/agents/runner.py` are the source of truth.
+
+
+## Claim-overlap review and recovery
+
+`researchwiki claim-overlap STEM` and `--pair A#slug B#slug` share one judge.
+Claims are ordered by paper stem and durable slug, so the same pair has one
+meaning and one direction whichever paper is processed first. `--backlog`
+shares an in-memory memo across stems. Successful judgments, including `none`,
+are cached in `.claim-graph/edges.db` independently of deterministic `state.db`.
+The key includes full claim text/section and judge prompt/schema/configuration;
+responses retain actual model and usage metadata. Historical missing model
+provenance stays unknown. A malformed verdict/direction is a failure and does
+not mark a pending stem covered.
+
+A judged relationship alone does not authorize a wikilink. The citation gate
+requires the target DOI, or its full title with first-author surname and a
+version year, within one identified bibliography entry. The accepted years are
+the YAML year and the stem year, so a preprint→journal upgrade still matches a
+source that cites the preprint; an entry with two distinct publication years
+fails, while page ranges, DOI-embedded dates and arXiv IDs are not read as
+years. Entries are found under every References heading and in consecutively
+numbered lists with no heading (Nature-family layouts, and Methods lists that
+continue the main numbering). A numbered run counts only if it reads like a
+reference list — recognizable author prefixes and publication-year notation in
+at least 70% of entries, and a median entry of at most 1,000 characters. A short
+entry with a date alone cannot establish those citation fields.
+Author prefixes support surname/initials and given-name-first references;
+publication years support parentheses, comma-separated fields, month/year and
+Vancouver year/volume notation, including a year that wraps onto a preprint's
+line-numbered next line. Line numbers are removed only when the entry proves a
+gutter (consecutive leading numbers starting before the list item), so a day of
+the month such as `12 July 2020` is never stripped to expose a bare year.
+Independently identified main references stay
+eligible before a later Methods References heading. Section boundaries end
+entries even when the next list continues that numbering, so Methods prose
+cannot supply a publication year or DOI. When no entry can be segmented, an
+exact DOI in a region bounded by an explicit bibliography heading and the next
+section still verifies (`exact-doi-unsegmented`); an arbitrary character cutoff or singular
+figure label does not establish that region. Title/author/year never uses this
+fallback. Proofs include source PDF SHA-256, target identity, verifier version,
+one-based page, excerpt and match span, plus the bibliography span for the
+fallback. Only bibliography spans are memoized in a bounded extraction LRU.
+Missing/unreadable/unidentified or ambiguous evidence leaves the
+relationship edge-only. Reference punctuation, line wrapping, thousands
+separators and the tested inserted `of` variant are supported; broad fuzzy
+titles and author/year-only matches are not.
+
+Writing runs stage decisions outside the corpus lock and save versioned
+per-stem receipts in `.ingest/claim-overlap/<run-id>/`. Each reciprocal insertion
+records exact text and actual ownership. Pages and receipts commit together
+through `mutation`, followed by projection repair without loading an embedding
+model. Claim, PDF or target-identity changes during review invalidate the staged
+write; retrying reuses eligible judgments but verifies citation evidence again.
+At the start of every writing invocation (once, not per backlog stem), pending
+mutation journals are recovered and durable receipt completion records are
+reconciled before selecting backlog stems. Only active or claim-overlap journals
+block that; a committed journal from another operation awaiting projection
+repair cannot roll back overlap pages. Receipt structure, including nested
+edges, coverage and insertion ownership, is validated before recovery or revert;
+malformed JSON, invalid UTF-8 and foreign versions are logged and skipped rather
+than blocking every run. A stem whose candidates produce no link or edge records
+coverage directly, without a receipt or journal, after checking all compared
+pages and database claims under the corpus lock. That check does not hash the
+PDFs a second time. A candidate whose wiki page is gone is skipped, not treated
+as a judge failure.
+Maintenance failures retain enough evidence to finish bookkeeping.
+
+```sh
+researchwiki claim-overlap --backlog --json --progress-json /tmp/overlap-progress.jsonl
+researchwiki claim-overlap --revert RUN_ID --json                 # preview
+researchwiki claim-overlap --revert RUN_ID --apply                # apply
+researchwiki claim-overlap --revert RUN_ID --stem STEM --apply
+researchwiki claim-overlap --revert RUN_ID --link STEM_A STEM_B --apply
+```
+
+Revert removes only exact bullets this run inserted and still owns. An unchanged
+page is restored byte-for-byte; later unrelated edits are preserved. Edited,
+absent or ambiguous bullets are reported for review. Pre-existing/manual links
+and claim-graph edges stay intact. Active receipt events determine corrected
+counts, and an older revert cannot overwrite a newer completion record or close
+a changed-claim backlog. Both apply and revert recover after a post-commit
+bookkeeping failure.
+
+`--dry-run` writes no pages, edges, coverage records or judgment cache entries;
+it may read an existing cache. An explicitly requested progress file is still
+written. `--json` stdout is one object; human/provider logging stays on stderr.
+Progress files contain flushed JSON Lines with run ID, stem, status, counts and
+retryable work, without research excerpts. Backlog `summary.json` records
+completed, retryable and maintenance-pending stems. Legacy `confirmed` and
+`n_confirmed` count citation-approved link decisions; `committed_link_pairs`
+separately counts pairs with an actual insertion. `judged` remains the number
+of evaluated comparisons; `judged_pairs` counts new judge invocations and
+`reused_judgments` counts reuse.

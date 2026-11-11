@@ -22,6 +22,42 @@ the reasoning behind any line below.
 
 ### Added
 
+- Stem and exact-pair review share one canonical, direction-aware judge. A
+  backlog memo prevents reverse-order duplicate calls; a persistent cache in
+  the separate claim-graph store reuses validated judgments, including `none`.
+  Keys include claim text/section, prompt/schema, provider/model and generation
+  configuration. Actual served model and usage are retained; invalid replies
+  leave the stem pending. Automatic updates preserve entire human-decided rows.
+- Related Papers links require identity proof from one bibliography entry in
+  one PDF extraction, with its hash, page, excerpt and span. Exact DOI and
+  tested title variants remain supported; author/year alone is insufficient.
+  Another paper by the same author/year, longer title prefixes and identities
+  assembled across entries are rejected. Both the YAML and stem year are
+  accepted (preprint→journal upgrades); page ranges, DOI dates and arXiv IDs
+  are not read as entry years. Headingless numbered bibliographies and Methods
+  reference lists are segmented without including intervening Methods prose;
+  headingless runs require author and publication-year fields, so dates in
+  numbered steps alone do not qualify; a preprint's line-number gutter does
+  not hide a wrapped year, and only a proven gutter is stripped, so a day of
+  the month stays part of its date. A later Methods bibliography heading
+  preserves independently identified main references before it.
+  An exact DOI still verifies when no entry can be segmented, within a region
+  bounded by an explicit bibliography heading and the next section.
+- Per-stem receipts under `.ingest/claim-overlap/<run-id>/` apply reciprocal
+  links through the existing mutation journal and recover completion records
+  after interruption. `claim-overlap --revert RUN_ID` previews removal of owned
+  insertions; `--apply`, `--stem` and `--link A B` select an applied revert.
+  Manual/pre-existing or edited bullets and human graph decisions are preserved.
+  Malformed receipt structures and invalid UTF-8 are logged and skipped during
+  recovery and revert. Direct coverage records retain page and database claim
+  freshness checks under the corpus lock without a second PDF hash pass.
+- `--json` emits one parseable object, including empty/limited backlogs and
+  provider interruptions. `--progress-json PATH` writes flushed JSON Lines per
+  finished stem, plus a final event naming retryable stems. Additive counters
+  distinguish fresh judgments, reuse and committed link pairs.
+- Tests isolate machine-local locks per test, including inherited subprocess
+  environments, without adding lock directories to each test's scratch repo.
+
 - Opt-in `agent ingest --visual-inspection`: bounded figure/table nominations,
   conservative page selection and one OpenAI-compatible image request, with
   shared ingest budgets, cached readings and separate coverage receipts.

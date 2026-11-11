@@ -40,7 +40,8 @@ def parse_json_response(raw: str) -> dict | None:
         return None
 
 
-def run_llm_judge(*, phase: str, system: str, prompt: str, schema: dict | None = None) -> dict | None:
+def run_llm_judge(*, phase: str, system: str, prompt: str, schema: dict | None = None,
+                  include_metadata: bool = False) -> dict | None:
     """Call the configured LLM for `phase` and return the parsed JSON verdict.
 
     Returns None on an untyped runtime failure or bad JSON so callers can treat
@@ -67,4 +68,14 @@ def run_llm_judge(*, phase: str, system: str, prompt: str, schema: dict | None =
         raise
     except Exception:
         return None
-    return parse_json_response(resp.text or "")
+    verdict = parse_json_response(resp.text or "")
+    if not isinstance(verdict, dict):
+        return None
+    if include_metadata:
+        verdict["_metadata"] = {
+            key: getattr(resp, key, None) for key in (
+                "model", "temperature", "input_tokens", "output_tokens",
+                "cache_read_tokens", "cache_write_tokens", "usage_known",
+            )
+        }
+    return verdict

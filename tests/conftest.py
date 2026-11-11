@@ -24,6 +24,13 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _isolate_locks(tmp_path_factory, monkeypatch):
+    """Children inherit this override; tests never use production lock files."""
+    locks = tmp_path_factory.mktemp("locks")
+    monkeypatch.setenv("RESEARCHWIKI_LOCK_DIR", str(locks))
+
+
+@pytest.fixture(autouse=True)
 def _no_dotenv_leak(monkeypatch):
     from researchwiki import __main__ as cli
     monkeypatch.setattr(cli, "_load_dotenv", lambda *_args, **_kwargs: None)
@@ -159,3 +166,24 @@ def _isolate_edges_db(tmp_path, monkeypatch):
     from researchwiki.claim_graph import edges
     graph_dir = tmp_path / "_claim-graph"
     monkeypatch.setattr(edges, "claim_graph_dir", lambda: graph_dir)
+
+
+@pytest.fixture
+def verified_overlap_citations(tmp_path, monkeypatch):
+    """Synthetic proof with pinned PDF bytes; never used on the real corpus."""
+    from researchwiki.pdf.citation import CitationVerifier, VERSION, file_hash
+    for stem in ('new-2026-x', 'old-2020-y', 'new-2026-a', 'old-2020-b'):
+        path = tmp_path / 'papers' / f'{stem}.pdf'
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(b'synthetic pdf')
+    monkeypatch.setattr('researchwiki.overlap.workflow.papers_dir', lambda: tmp_path / 'papers')
+    # Most fixture users chdir to tmp_path; this path override keeps snapshots
+    # pinned in tests that do not.
+    monkeypatch.setattr('researchwiki.overlap.receipts.papers_dir', lambda: tmp_path / 'papers')
+    def verify(self, path, source_stem, expected):
+        return {'source_stem': source_stem, 'target_stem': expected['stem'],
+                'verified': True, 'method': 'exact-doi', 'reason': 'verified',
+                'source_pdf_sha256': file_hash(path), 'expected_identity': expected,
+                'verifier_version': VERSION, 'page': 1, 'excerpt': 'Synthetic reference entry.',
+                'match_span': [0, 9], 'entry_span': [0, 26]}
+    monkeypatch.setattr(CitationVerifier, 'verify', verify)

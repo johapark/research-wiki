@@ -64,7 +64,6 @@ def test_verbatim_observation_allows_only_whitespace_normalization():
 
 @pytest.fixture
 def inspection(tmp_path, monkeypatch):
-    monkeypatch.setenv('RESEARCHWIKI_LOCK_DIR', str(tmp_path / 'locks'))
     cfg = model_config.ModelConfig('openai-compatible', 'requested-vision', 0, 1200,
                                    image_token_bound=32768)
     monkeypatch.setattr(model_config, 'for_phase', lambda *a: cfg)
