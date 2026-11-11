@@ -216,6 +216,27 @@ def test_dated_numbered_steps_never_insert_related_paper_bullets(pair, monkeypat
     assert [p.read_bytes() for p in paths] == before
 
 
+def test_dated_patient_records_never_insert_related_paper_bullets(pair, monkeypatch):
+    """Negative control: "Patient A.\\n12 July 2020." must not read as a citation."""
+    c, paths, _ = pair
+    paths[1].write_text(paths[1].read_text().replace('type: paper', 'type: paper\ndoi: 10.1234/exact'))
+    upsert_page(paths[1])
+    before = [p.read_bytes() for p in paths]
+    for path in paths:
+        (Path('papers') / f'{path.stem}.pdf').write_bytes(path.stem.encode())
+    records = '\n'.join(
+        f'{i}. Patient {chr(64 + i)}.\n12 July 2020. '
+        + ('Literal example DOI: 10.1234/exact' if i == 2 else 'Sample retained.')
+        for i in range(1, 6))
+    monkeypatch.setattr(CitationVerifier, 'verify', _ORIGINAL_VERIFY)
+    monkeypatch.setattr('researchwiki.pdf.text.extract_pdf_page_texts', lambda path, **kw:
+        [records] if path.stem == paths[0].stem else ['No bibliography here.'])
+    result = run(pair)
+    assert result['status'] == 'committed' and len(result['edge_only']) == 1
+    assert not result['applied'] and result['committed_link_pairs'] == 0
+    assert [p.read_bytes() for p in paths] == before
+
+
 def test_revert_failure_after_commit_recovers_counts(pair, monkeypatch):
     c, paths, _ = pair
     result = run(pair)

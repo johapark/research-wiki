@@ -326,6 +326,19 @@ def test_line_numbered_gutter_does_not_hide_wrapped_publication_years(tmp_path, 
 
 
 def test_gutter_strip_keeps_a_wrapped_line_that_starts_with_a_year():
-    from researchwiki.pdf.citation import _GUTTER
-    assert _GUTTER.sub('', 'Cell,\n227 2021. doi') == 'Cell,\n2021. doi'
-    assert _GUTTER.sub('', 'Proc.,\n2019 IEEE meeting') == 'Proc.,\n2019 IEEE meeting'
+    from researchwiki.pdf.citation import _strip_gutter
+    entry = '210 5. Other, B. A study. Proc.,\n211 2019 IEEE meeting, 2019.'
+    assert _strip_gutter(entry, 'Other, B. A study. Proc.,\n211 2019 IEEE meeting, 2019.') == (
+        'Other, B. A study. Proc.,\n2019 IEEE meeting, 2019.')
+
+
+@pytest.mark.parametrize('first_line', ['{i}. Patient {name}.', '7 {i}. Patient {name}.'])
+def test_day_of_month_is_not_a_gutter(tmp_path, monkeypatch, first_line):
+    """A leading day ("12 July 2020") must not be stripped to fake a reference year."""
+    records = '\n'.join(
+        first_line.format(i=i, name=chr(64 + i)) + '\n12 July 2020. '
+        + ('Literal example DOI: 10.1234/exact' if i == 2 else 'Sample retained.')
+        for i in range(1, 6))
+    from researchwiki.pdf.citation import bibliography_entries
+    assert bibliography_entries(records) == []
+    assert not proof(tmp_path, monkeypatch, records, doi='10.1234/exact')['verified']

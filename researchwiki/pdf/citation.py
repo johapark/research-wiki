@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import text as pdf_text
 
-VERSION = 'citation-entry-v6'
+VERSION = 'citation-entry-v7'
 _NUMBERED = re.compile(r'(?m)^[ \t]*(?:\[\d{1,4}\]|\d{1,4}[.)]|\d{1,4}[ \t]+(?=[A-Z]))[ \t]*')
 # Headingless fallback: "1. Surname, I." / "[1] Surname I" runs, the layout
 # Nature-family PDFs print with no "References" line at all.
@@ -22,9 +22,10 @@ _MAX_ENTRY = 2000
 # Dates and short entries also occur in procedures. Require recognizable
 # author and publication-year fields in most entries of a headingless run.
 _RUN_REFERENCE_SHARE = 0.7
-# A preprint's line-number gutter. A wrapped line may itself begin with the
-# publication year, so 19xx/20xx values are never stripped.
-_GUTTER = re.compile(r'(?m)^[ \t]*(?!(?:19|20)\d{2}\b)\d{1,5}[ \t]+')
+# A preprint's line-number gutter: a leading number on each line that counts
+# up by one. A lone leading number ("12 July 2020") is a date, not a gutter.
+_GUTTER_LINE = re.compile(r'^[ \t]*(\d{1,5})[ \t]+')
+_LINE_BREAK = re.compile(r'\r\n|\r|\n')
 _RUN_MEDIAN_ENTRY = 1000
 _AUTHOR = re.compile(r"(?m)^[ \t]*(?:[A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ’']+(?:-[A-ZÀ-ÖØ-Ý]?[a-zà-öø-ÿ’']+)*"
                      r"(?:[ -][A-Z][a-z]+)?),?[ \t]+(?:[A-Z]{1,4}(?:[.,]|"
@@ -169,14 +170,40 @@ def _reference_like(text, spans):
             and (not lengths or lengths[len(lengths) // 2] <= _RUN_MEDIAN_ENTRY))
 
 
+def _strip_gutter(entry, body):
+    """Remove line numbers only where the entry itself proves a gutter.
+
+    Line-numbered preprints prefix every wrapped line ("Cell,\\n227 2021."),
+    which separates the year from the punctuation before it. Proof is a
+    number before the list item on the entry's first line, then at least one
+    later line continuing that count by one, with no line breaking it. Only
+    the final line may fail, because the 600-character window can cut it.
+    Without proof the text is untouched, so "12 July 2020" keeps its day.
+    """
+    lines = _LINE_BREAK.split(entry)
+    first = _GUTTER_LINE.match(lines[0])
+    if first is None:
+        return body
+    expected, proven = int(first.group(1)), 0
+    for i, line in enumerate(lines[1:], 1):
+        m = _GUTTER_LINE.match(line)
+        if m is not None and int(m.group(1)) == expected + 1:
+            expected, proven = expected + 1, proven + 1
+        elif i < len(lines) - 1 and line.strip():
+            return body
+    if not proven:
+        return body
+    # `body` starts after the list item on line one; later lines align with
+    # `lines[1:]` because ASCII folding never removes CR or LF.
+    head, *rest = _LINE_BREAK.split(body)
+    return '\n'.join([head] + [_GUTTER_LINE.sub('', line, count=1) for line in rest])
+
+
 def _reference_fields(entry):
     number = _LIST_ITEM.match(entry)
     if number is None:
         return False
-    body = pdf_text._fold_ascii(entry[number.end():])
-    # Line-numbered preprints prefix every wrapped line ("Cell,\n227 2021."),
-    # which separates the year from the punctuation before it.
-    body = _GUTTER.sub('', body)
+    body = _strip_gutter(entry, pdf_text._fold_ascii(entry[number.end():]))
     return bool(_REFERENCE_AUTHOR.match(body)
                 and _PUBLICATION_YEAR.search(_YEAR_NOISE.sub(' ', body)))
 

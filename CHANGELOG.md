@@ -38,7 +38,8 @@ the reasoning behind any line below.
   reference lists are segmented without including intervening Methods prose;
   headingless runs require author and publication-year fields, so dates in
   numbered steps alone do not qualify; a preprint's line-number gutter does
-  not hide a wrapped year. A later Methods bibliography heading
+  not hide a wrapped year, and only a proven gutter is stripped, so a day of
+  the month stays part of its date. A later Methods bibliography heading
   preserves independently identified main references before it.
   An exact DOI still verifies when no entry can be segmented, within a region
   bounded by an explicit bibliography heading and the next section.
