@@ -1861,7 +1861,11 @@ source that cites the preprint; an entry with two distinct publication years
 fails, while page ranges, DOI-embedded dates and arXiv IDs are not read as
 years. Entries are found under every References heading and in consecutively
 numbered lists with no heading (Nature-family layouts, and Methods lists that
-continue the main numbering). Section boundaries end entries even when the
+continue the main numbering). A numbered run counts only if it reads like a
+reference list — a year in at least 70% of entries and a median entry of at
+most 1,000 characters — and never before the first References heading, so
+numbered section titles, protocol steps and enumerated prose are not entries.
+Section boundaries end entries even when the
 next list continues that numbering, so intervening Methods prose cannot supply
 a publication year or DOI. When no entry can be segmented, an exact DOI in a
 region bounded by an explicit bibliography heading and the next section still

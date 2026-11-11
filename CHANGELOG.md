@@ -35,7 +35,8 @@ the reasoning behind any line below.
   assembled across entries are rejected. Both the YAML and stem year are
   accepted (preprint→journal upgrades); page ranges, DOI dates and arXiv IDs
   are not read as entry years. Headingless numbered bibliographies and Methods
-  reference lists are segmented without including intervening Methods prose.
+  reference lists are segmented without including intervening Methods prose;
+  numbered section titles and steps are not mistaken for either.
   An exact DOI still verifies when no entry can be segmented, within a region
   bounded by an explicit bibliography heading and the next section.
 - Per-stem receipts under `.ingest/claim-overlap/<run-id>/` apply reciprocal

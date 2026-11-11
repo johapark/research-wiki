@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import text as pdf_text
 
-VERSION = 'citation-entry-v3'
+VERSION = 'citation-entry-v4'
 _NUMBERED = re.compile(r'(?m)^[ \t]*(?:\[\d{1,4}\]|\d{1,4}[.)]|\d{1,4}[ \t]+(?=[A-Z]))[ \t]*')
 # Headingless fallback: "1. Surname, I." / "[1] Surname I" runs, the layout
 # Nature-family PDFs print with no "References" line at all.
@@ -19,6 +19,13 @@ _YEAR_NOISE = re.compile(r'(?i)(?:\b10\.\d{4,9}/\S+|https?://\S+|\b\d{1,6}[–-]
                          r'|\b\d{4}\.\d{4,5}(?:v\d+)?\b)')
 _MIN_RUN = 5
 _MAX_ENTRY = 2000
+# A numbered run is a bibliography only if it reads like one. In a 250-PDF
+# corpus sample (435 runs), every reference list had a year in ≥80% of its
+# entries and a median entry under 1,000 characters, while numbered section
+# titles, steps and enumerated prose reached at most 67% or ran to thousands
+# of characters. 0.7 sits between the two groups.
+_RUN_YEAR_SHARE = 0.7
+_RUN_MEDIAN_ENTRY = 1000
 _AUTHOR = re.compile(r"(?m)^[ \t]*(?:[A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ’']+(?:-[A-ZÀ-ÖØ-Ý]?[a-zà-öø-ÿ’']+)*"
                      r"(?:[ -][A-Z][a-z]+)?),?[ \t]+(?:[A-Z]{1,4}(?:[.,]|"
                      r"(?=[ \t]+(?:et[ \t]+al\b|(?:19|20)\d{2}\b)))|et[ \t]+al\b)")
@@ -127,13 +134,30 @@ def _numbered_runs(text):
         candidates.append(current)
     runs = []
     for run in candidates:
-        continues = runs and run[0][1] == runs[-1][-1][1] + 1
-        if len(run) >= _MIN_RUN or continues:
-            runs.append(run)
-    for run in runs:
         stop = _section_end(text, run[-1][0])
         bounds = [s for s, _ in run] + [stop]
-        yield [(bounds[i], bounds[i + 1]) for i in range(len(run))]
+        spans = [(bounds[i], bounds[i + 1]) for i in range(len(run))]
+        if not _reference_like(text, spans):
+            continue
+        # Continuations attach only to an accepted, reference-like run.
+        continues = runs and run[0][1] == runs[-1][0][-1][1] + 1
+        if len(run) >= _MIN_RUN or continues:
+            runs.append((run, spans))
+    for _, spans in runs:
+        yield spans
+
+
+def _reference_like(text, spans):
+    """Most entries carry a year, and entries are reference-sized.
+
+    The last span runs to the section end, so it is left out of the median; a
+    one-entry run (a continuation) therefore has no measurable length and is
+    judged on its year alone. `bibliography_entries` still caps every span.
+    """
+    with_year = sum(bool(_YEAR.search(text[s:min(e, s + 600)])) for s, e in spans)
+    lengths = sorted(e - s for s, e in spans[:-1])
+    return (with_year >= _RUN_YEAR_SHARE * len(spans)
+            and (not lengths or lengths[len(lengths) // 2] <= _RUN_MEDIAN_ENTRY))
 
 
 def bibliography_entries(text):
@@ -148,8 +172,13 @@ def bibliography_entries(text):
     entries = [e for section in sections for e in section]
     covered = [(s[0][0], s[-1][1]) for s in sections]
     # With a headed bibliography, only runs after it count (back-matter lists);
-    # numbered prose in the body is never a reference list.
-    floor = covered[0][0] if covered else 0
+    # numbered prose in the body is never a reference list. That holds even
+    # when the heading's own entries cannot be parsed (e.g. author-year lists
+    # with given names first): the heading still marks where references begin,
+    # and leaving entries empty lets the bounded DOI fallback search it.
+    plural = next((h.start() for h in pdf_text.REFS_HEADING_RE.finditer(text)
+                   if h.group(1).lower() != 'reference'), None)
+    floor = covered[0][0] if covered else (plural or 0)
     # A Methods list may continue the main numbering, but is a separate run
     # so the preceding entry cannot absorb intervening Methods prose.
     for run in _numbered_runs(text):

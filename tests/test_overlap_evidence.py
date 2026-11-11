@@ -208,3 +208,53 @@ def test_extraction_memo_is_bounded_and_keeps_no_full_text(tmp_path, monkeypatch
     assert len(v.extractions) == 2
     entries, _loose, _offsets, _total = next(iter(v.extractions.values()))
     assert sum(len(text) for _, text in entries) < 200
+
+
+# --- numbered body sections are not a bibliography --------------------------
+
+_SECTIONS = ('1. Introduction\nWe study retention in large models across many settings.\n'
+             '2. Related Work\nThe benchmark data (doi:10.1234/exact) were reused here.\n'
+             '3. Approach\nWe propose a method and describe it in detail.\n'
+             '4. Experiments\nResults follow in the tables below.\n'
+             '5. Conclusion\nWe summarize the findings.\n6. Limitations\nSome remain.\n')
+
+
+def test_numbered_body_sections_are_not_a_bibliography():
+    from researchwiki.pdf.citation import bibliography_entries
+    assert bibliography_entries(_SECTIONS) == []
+
+
+def test_body_doi_under_numbered_sections_cannot_verify(tmp_path, monkeypatch):
+    """Given-name-first references fail the entry parser; body text must not stand in."""
+    refs = 'References\nIbrahim M Alabdulmohsin and Behnam Neyshabur. Revisiting scaling laws. NeurIPS, 2022.\n'
+    result = proof(tmp_path, monkeypatch, _SECTIONS + refs, doi='10.1234/exact')
+    assert not result['verified']
+
+
+def test_unparsed_references_after_numbered_sections_reach_doi_fallback(tmp_path, monkeypatch):
+    refs = ('References\nZeyuan Allen-Zhu and Yuanzhi Li. Physics of language models. '
+            'CoRR, abs/2404.05405, 2024b. doi: 10.48550/ARXIV.2404.05405.\n')
+    result = proof(tmp_path, monkeypatch, _SECTIONS.replace('(doi:10.1234/exact) ', '') + refs,
+                   doi='10.48550/arxiv.2404.05405')
+    assert result['verified'] and result['method'] == 'exact-doi-unsegmented'
+    assert 'Related Work' not in result['excerpt']
+
+
+def test_numbered_steps_with_dates_are_not_a_bibliography():
+    """Year-free numbered prose stays out even when long enough to form a run."""
+    from researchwiki.pdf.citation import bibliography_entries
+    steps = '\n'.join(f'{i}. Retain structures with at most {i}024 residues.' for i in range(1, 8))
+    assert bibliography_entries(steps) == []
+
+
+def test_single_entry_continuation_after_page_break_is_kept(tmp_path, monkeypatch):
+    """Entry 25 continues 1–24 under a repeated heading, then a gap splits the run.
+
+    Mirrors marconato-2025: 26 is not an author-led entry, so 25 stands alone
+    as a one-entry continuation and must still be reference-like.
+    """
+    refs = ('References\n' + _nature_list(1, 24) + '\nReferences\n'
+            '25. Target, A. A full target paper title. bioRxiv (2020).\n'
+            '26. anndataR: interoperability in R. GitHub.\n' + _nature_list(27, 6))
+    result = proof(tmp_path, monkeypatch, refs)
+    assert result['verified'] and result['excerpt'].startswith('25. Target, A.')
