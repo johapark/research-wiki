@@ -39,7 +39,9 @@ def evaluate(stem, candidates, pages, *, compared, conn, sim_threshold, dry_run,
     for cand in candidates:
         if cand.existing_stem in pages:
             involved[cand.existing_stem] = pages[cand.existing_stem]
-    inputs = receipts.snapshot_inputs(involved.values(), conn)
+    # Hash inputs before judging so changes during review are detectable; with
+    # no candidates nothing is staged, so there is nothing to pin.
+    inputs = receipts.snapshot_inputs(involved.values(), conn) if candidates else {}
     result = {'stem': stem, 'run_id': run_id, 'n_candidates': len(candidates),
               'applied': [], 'edge_only': [], 'coincidence': [], 'skipped': [],
               'judge_failed': [], 'dry_run': dry_run, 'judged_pairs': 0,
@@ -53,7 +55,11 @@ def evaluate(stem, candidates, pages, *, compared, conn, sim_threshold, dry_run,
     for cand in candidates:
         target = pages.get(cand.existing_stem)
         if target is None:
-            result['judge_failed'].append({'existing': cand.existing_stem, 'reason': 'missing wiki page'})
+            # Stale claim rows for a hand-deleted page: nothing to judge or
+            # link, and retrying cannot help until `db rebuild`. Skipping (as
+            # before receipts) keeps coverage completable.
+            result['skipped'].append({'existing': cand.existing_stem, 'cosine': cand.cosine,
+                                      'reason': 'missing wiki page'})
             continue
         record = {'existing': target.key, 'cosine': cand.cosine}
         if already_linked(pages[stem], target):
@@ -107,6 +113,25 @@ def evaluate(stem, candidates, pages, *, compared, conn, sim_threshold, dry_run,
             'n_judged': sum(len(result[k]) for k in ('applied', 'edge_only', 'coincidence')),
             'sim_threshold': sim_threshold,
         }
+        if not links and not edges:
+            # Nothing touches a page or the graph: record coverage directly,
+            # without a receipt, mutation journal or second round of PDF hashing.
+            # Same guard as receipt reconciliation: never close a stem whose
+            # stored claims differ from the set actually compared.
+            from ..tasks.claim_overlap import _claims_for_stem, record_run
+            if (cov and cov['complete']
+                    and claims_fingerprint(_claims_for_stem(conn, stem)) == cov['fingerprint']):
+                # `direct:` carries a nanosecond stamp so an older receipt's
+                # replay (e.g. a later revert) cannot supersede this record.
+                record_run(conn, stem, fingerprint=cov['fingerprint'], n_claims=cov['n_claims'],
+                           n_candidates=cov['n_candidates'], n_judged=cov['n_judged'],
+                           n_confirmed=0, sim_threshold=sim_threshold,
+                           source=receipts.direct_source(run_id))
+            result['status'] = 'incomplete' if result['judge_failed'] else 'committed'
+            if interruption:
+                interruption.claim_overlap_result = result
+                raise interruption
+            return result
         path, doc = receipts.stage(result, run_id=run_id, stem=stem, inputs=inputs,
                                    links=links, edges=edges, coverage=cov)
         result['receipt'] = str(path)

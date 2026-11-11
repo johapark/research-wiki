@@ -32,7 +32,11 @@ the reasoning behind any line below.
   one PDF extraction, with its hash, page, excerpt and span. Exact DOI and
   tested title variants remain supported; author/year alone is insufficient.
   Another paper by the same author/year, longer title prefixes and identities
-  assembled across entries are rejected.
+  assembled across entries are rejected. Both the YAML and stem year are
+  accepted (preprint→journal upgrades); page ranges, DOI dates and arXiv IDs
+  are not read as entry years. Headingless numbered bibliographies and Methods
+  reference lists are segmented, and an exact DOI still verifies when no entry
+  can be segmented.
 - Per-stem receipts under `.ingest/claim-overlap/<run-id>/` apply reciprocal
   links through the existing mutation journal and recover completion records
   after interruption. `claim-overlap --revert RUN_ID` previews removal of owned

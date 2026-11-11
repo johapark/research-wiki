@@ -159,29 +159,49 @@ def test_judged_relation_without_pdf_citation_remains_edge_only(wiki_and_db, mon
     assert "[[ai/old-2020-y]]" not in (tmp_path / "wiki/ai/new-2026-x.md").read_text()
 
 
+def _cites(source, target, tmp_path, monkeypatch):
+    """Does `source`'s PDF prove a citation of `target`? Uses the real gate."""
+    from researchwiki.overlap.workflow import citation_proofs
+    from researchwiki.pdf.citation import CitationVerifier
+    monkeypatch.setattr("researchwiki.overlap.workflow.papers_dir", lambda: tmp_path)
+    proof = citation_proofs(source, target, CitationVerifier())[0]
+    assert proof["source_stem"] == source.stem
+    return proof["verified"]
+
+
 def test_pdf_citation_gate_accepts_exact_doi(tmp_path, monkeypatch):
     source_pdf = tmp_path / "source-2026-a.pdf"
     source_pdf.write_bytes(b"pdf stub")
-    monkeypatch.setattr(cmd, "papers_dir", lambda: tmp_path)
     monkeypatch.setattr("researchwiki.pdf.text.extract_pdf_page_texts",
                         lambda *_a, **_k: ["References\n1. Target A. A full target paper title. Journal (2020). doi:10.1000/target"])
     _write_page(tmp_path, "ai", "source-2026-a")
     target_path = tmp_path / "wiki/ai/target-2020-b.md"
     target_path.write_text("---\ntype: paper\ncategory: [ai]\nyear: 2020\ndoi: 10.1000/target\n---\n")
-    assert cmd._source_cites_target(
-        read_page(tmp_path / "wiki/ai/source-2026-a.md"), read_page(target_path))
+    assert _cites(read_page(tmp_path / "wiki/ai/source-2026-a.md"), read_page(target_path),
+                  tmp_path, monkeypatch)
 
 
 def test_pdf_citation_gate_checks_reference_year_when_doi_absent(tmp_path, monkeypatch):
     (tmp_path / "source-2026-a.pdf").write_bytes(b"pdf stub")
-    monkeypatch.setattr(cmd, "papers_dir", lambda: tmp_path)
     monkeypatch.setattr("researchwiki.pdf.text.extract_pdf_page_texts",
                         lambda *_a, **_k: ["References\n1. Target A. A full target paper title. Journal (2025)."])
     _write_page(tmp_path, "ai", "source-2026-a")
     target_path = tmp_path / "wiki/ai/target-2023-b.md"
     target_path.write_text("---\ntype: paper\ncategory: [ai]\ntitle: A full target paper title\nyear: 2025\n---\n")
-    assert cmd._source_cites_target(
-        read_page(tmp_path / "wiki/ai/source-2026-a.md"), read_page(target_path))
+    assert _cites(read_page(tmp_path / "wiki/ai/source-2026-a.md"), read_page(target_path),
+                  tmp_path, monkeypatch)
+
+
+def test_pdf_citation_gate_accepts_preprint_stem_year_after_journal_upgrade(tmp_path, monkeypatch):
+    """Upgrade keeps the 2023 stem, YAML says 2025; a source citing the preprint still counts."""
+    (tmp_path / "source-2026-a.pdf").write_bytes(b"pdf stub")
+    monkeypatch.setattr("researchwiki.pdf.text.extract_pdf_page_texts",
+                        lambda *_a, **_k: ["References\n1. Target A. A full target paper title. bioRxiv (2023)."])
+    _write_page(tmp_path, "ai", "source-2026-a")
+    target_path = tmp_path / "wiki/ai/target-2023-b.md"
+    target_path.write_text("---\ntype: paper\ncategory: [ai]\ntitle: A full target paper title\nyear: 2025\n---\n")
+    assert _cites(read_page(tmp_path / "wiki/ai/source-2026-a.md"), read_page(target_path),
+                  tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("title,reference", [
@@ -200,9 +220,6 @@ def test_pdf_citation_gate_rejects_another_paper_by_same_author_and_year(
     tmp_path, monkeypatch, title, reference,
 ):
     (tmp_path / "source-2026-a.pdf").write_bytes(b"pdf stub")
-    monkeypatch.setattr(cmd, "papers_dir", lambda: tmp_path)
-    monkeypatch.setattr("researchwiki.pdf.text.extract_ref_dois", lambda *_a, **_k: [])
-    monkeypatch.setattr("researchwiki.pdf.text.cites_reference", lambda *_a, **_k: True)
     monkeypatch.setattr("researchwiki.pdf.text.extract_pdf_page_texts",
                         lambda *_a, **_k: ["References\n1. " + reference])
     _write_page(tmp_path, "ai", "source-2026-a")
@@ -210,21 +227,28 @@ def test_pdf_citation_gate_rejects_another_paper_by_same_author_and_year(
     target_path.write_text(
         f'---\ntype: paper\ncategory: [ai]\nyear: 2026\ntitle: "{title}"\n---\n'
     )
-    assert not cmd._source_cites_target(
-        read_page(tmp_path / "wiki/ai/source-2026-a.md"), read_page(target_path))
+    assert not _cites(read_page(tmp_path / "wiki/ai/source-2026-a.md"), read_page(target_path),
+                      tmp_path, monkeypatch)
 
 
 def test_pdf_citation_gate_rejects_missing_or_unverified_source(tmp_path, monkeypatch):
-    monkeypatch.setattr(cmd, "papers_dir", lambda: tmp_path)
     _write_page(tmp_path, "ai", "source-2026-a")
     _write_page(tmp_path, "ai", "target-2020-b")
     source = read_page(tmp_path / "wiki/ai/source-2026-a.md")
     target = read_page(tmp_path / "wiki/ai/target-2020-b.md")
-    assert not cmd._source_cites_target(source, target)
+    assert not _cites(source, target, tmp_path, monkeypatch)
     (tmp_path / "source-2026-a.pdf").write_bytes(b"pdf stub")
-    monkeypatch.setattr("researchwiki.pdf.text.extract_ref_dois", lambda *_a, **_k: [])
-    monkeypatch.setattr("researchwiki.pdf.text.cites_reference", lambda *_a, **_k: False)
-    assert not cmd._source_cites_target(source, target)
+    monkeypatch.setattr("researchwiki.pdf.text.extract_pdf_page_texts",
+                        lambda *_a, **_k: ["References\n1. Other A. Unrelated work. (2020)."])
+    assert not _cites(source, target, tmp_path, monkeypatch)
+
+
+def test_same_doi_pair_is_never_a_citation(tmp_path, monkeypatch):
+    for stem in ("source-2026-a", "target-2020-b"):
+        (tmp_path / "wiki/ai").mkdir(parents=True, exist_ok=True)
+        (tmp_path / f"wiki/ai/{stem}.md").write_text("---\ntype: paper\ndoi: 10.1/same\n---\n")
+    source, target = (read_page(tmp_path / f"wiki/ai/{s}.md") for s in ("source-2026-a", "target-2020-b"))
+    assert not _cites(source, target, tmp_path, monkeypatch)
 
 
 def test_coincidence_writes_nothing(wiki_and_db):

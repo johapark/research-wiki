@@ -77,3 +77,92 @@ def test_false_figure_heading_and_wrapped_page_range_preserve_real_entries(tmp_p
                    'Target A. A full target paper title. Journal (2020).')
     assert result['verified']
     assert result['excerpt'].startswith('Target A.')
+
+
+# --- regressions: identity proofs the entry-scoped gate must not lose -------
+
+@pytest.mark.parametrize('reference', [
+    # Page range and a DOI-embedded date are not publication years.
+    '1. Target A. A full target paper title. Cell 184, 1995–2008 (2020). doi:10.1016/j.cell.2019.12.015',
+    # arXiv identifiers start with four digits too.
+    '1. Target A. A full target paper title. arXiv:2012.01234 (2020).',
+])
+def test_years_inside_ranges_dois_and_arxiv_ids_are_not_entry_years(tmp_path, monkeypatch, reference):
+    result = proof(tmp_path, monkeypatch, 'References\n' + reference)
+    assert result['verified'] and result['method'] == 'title-author-year'
+
+
+def test_preprint_and_journal_years_are_both_accepted(tmp_path, monkeypatch):
+    for year in (2020, 2021):
+        result = proof(tmp_path, monkeypatch,
+                       f'References\n1. Target A. A full target paper title. Journal ({year}).',
+                       year=2021, years=[2020, 2021])
+        assert result['verified'], year
+
+
+def test_two_distinct_publication_years_still_fail_closed(tmp_path, monkeypatch):
+    result = proof(tmp_path, monkeypatch,
+                   'References\n1. Target A. A full target paper title. (2020). Other B. (2022).')
+    assert not result['verified']
+
+
+def _nature_list(start, n, target_at=None):
+    lines = []
+    for i in range(start, start + n):
+        who = 'Target, A.' if i == target_at else f'Other{i}, B.'
+        what = 'A full target paper title' if i == target_at else f'Unrelated study number {i}'
+        lines.append(f'{i}. {who} et al. {what}. Nature 1, 1–2 (2020).')
+    return '\n'.join(lines)
+
+
+def test_headingless_numbered_bibliography_is_segmented(tmp_path, monkeypatch):
+    """Nature-family PDFs print the list with no References heading."""
+    refs = ('…statements of data and code availability are available at '
+            'https://doi.org/10.1038/own.\n' + _nature_list(1, 8, target_at=3))
+    result = proof(tmp_path, monkeypatch, refs)
+    assert result['verified'] and result['excerpt'].startswith('3. Target, A.')
+
+
+def test_methods_reference_list_after_methods_heading_is_searched(tmp_path, monkeypatch):
+    refs = ('References\n' + _nature_list(1, 6) + '\nMethods\nCells were cultured.\n'
+            'Data availability\nSource data are provided.\n' + _nature_list(7, 2, target_at=8))
+    result = proof(tmp_path, monkeypatch, refs)
+    assert result['verified'] and result['excerpt'].startswith('8. Target, A.')
+
+
+def test_numbered_prose_is_not_a_bibliography(tmp_path, monkeypatch):
+    body = '\n'.join(f'{i}. Target A. A full target paper title. (2020).' for i in (1, 2))
+    result = proof(tmp_path, monkeypatch, body)
+    assert not result['verified']
+
+
+def test_line_numbered_preprint_entry(tmp_path, monkeypatch):
+    refs = 'References\n' + '\n'.join(
+        f'{700 + i} {i}. {"Target, A." if i == 2 else f"Other{i}, B."} '
+        f'{"A full target paper title" if i == 2 else f"Unrelated work {i}"}. J. 1, 1 (2020).'
+        for i in range(1, 7))
+    result = proof(tmp_path, monkeypatch, refs)
+    assert result['verified'] and result['method'] == 'title-author-year'
+
+
+def test_exact_doi_survives_unsegmentable_bibliography(tmp_path, monkeypatch):
+    refs = ('References\nWe thank colleagues.\n'
+            'Ainslie J and others: gqa training, 2023. https://doi.org/10.1234/exact')
+    result = proof(tmp_path, monkeypatch, refs, doi='10.1234/exact')
+    assert result['verified'] and result['method'] == 'exact-doi-unsegmented'
+    # Title/author/year never verifies without an identified entry.
+    assert not proof(tmp_path, monkeypatch, refs.replace('10.1234/exact', '10.1/other'))['verified']
+
+
+def test_extraction_memo_is_bounded_and_keeps_no_full_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(pdf_text, 'extract_pdf_page_texts',
+                        lambda *a, **k: ['x' * 10_000, 'References\n1. Target A. A full target paper title. (2020).'])
+    v = CitationVerifier(max_extractions=2)
+    expected = {'stem': 't', 'title': 'A full target paper title', 'surname': 'target', 'year': 2020, 'doi': ''}
+    for i in range(4):
+        path = tmp_path / f'{i}.pdf'
+        path.write_bytes(f'pdf {i}'.encode())
+        assert v.verify(path, 's', expected)['verified']
+    assert len(v.extractions) == 2
+    entries, _loose, _offsets, _total = next(iter(v.extractions.values()))
+    assert sum(len(text) for _, text in entries) < 200

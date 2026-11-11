@@ -27,34 +27,11 @@ from ..errors import EnvironmentFailure
 from ..overlap import judging as _judging
 from ..log import log
 from ..wiki import read_pages
-from ..paths import papers_dir
 
-_NOTE = "claim-grounded match (auto-added; claim-overlap)"
-
-
-def _source_cites_target(source, target, *, verifier=None) -> bool:
-    from ..pdf.citation import CitationVerifier, target_identity
-    own_doi = source.str_field("doi", "").strip().lower()
-    if own_doi and own_doi == target.str_field("doi", "").strip().lower():
-        return False
-    return (verifier or CitationVerifier()).verify(
-        papers_dir() / f"{source.stem}.pdf", source.stem, target_identity(target))["verified"]
-
-
-def _pair_has_explicit_citation(page_a, page_b) -> bool:
-    from ..pdf.citation import CitationVerifier
-    verifier = CitationVerifier()
-    return (_source_cites_target(page_a, page_b, verifier=verifier)
-            or _source_cites_target(page_b, page_a, verifier=verifier))
-
-
+# The citation gate lives in `overlap.workflow.citation_proofs` alone.
 _CROSS_LINK_VERDICTS = _judging.CROSS_LINK_VERDICTS
 _EDGE_ONLY_VERDICTS = _judging.EDGE_ONLY_VERDICTS
 _RELATION_VERDICTS = _judging.RELATION_VERDICTS
-
-
-def _relation_from_verdict(value):
-    return value if value in _RELATION_VERDICTS else None
 
 
 _DIRECTED_VERDICTS = frozenset({"refines", "builds_on"})
@@ -81,6 +58,14 @@ def _persist_typed_edge(
             new_slug, old_slug = old_slug, new_slug
         conn = open_edges_db()
         try:
+            if not directed and conn.execute(
+                    "SELECT 1 FROM edges WHERE src_stem=? AND src_slug=? AND tgt_stem=? "
+                    "AND tgt_slug=? AND relation=?",
+                    (existing_stem, old_slug, new_stem, new_slug, relation)).fetchone():
+                # Pre-canonical rows store some symmetric pairs reversed.
+                # Refresh that row rather than adding a canonical duplicate.
+                new_stem, existing_stem = existing_stem, new_stem
+                new_slug, old_slug = old_slug, new_slug
             upsert_edge(conn, Edge(
                 src_stem=new_stem, src_slug=new_slug,
                 tgt_stem=existing_stem, tgt_slug=old_slug,
@@ -413,14 +398,16 @@ def backlog_warning(*, touch: bool = True) -> str | None:
 
 
 def run(stem: str, *, new_claims=None, sim_threshold=0.83, top_papers=10,
-        dry_run=False, judge_fn=None, conn=None, session=None, run_id=None) -> dict:
+        dry_run=False, judge_fn=None, conn=None, session=None, run_id=None,
+        recovered=False) -> dict:
+    """`recovered=True` when the caller already ran receipt recovery this invocation."""
     from ..grade.claim_overlap import find_claim_overlaps
     from ..overlap.workflow import evaluate
     from ..overlap.receipts import recover
     c = conn or _default_conn()
     close = conn is None
     try:
-        if not dry_run:
+        if not dry_run and not recovered:
             recover(conn=c)
         pages = {p.stem: p for p in read_pages()}
         if stem not in pages:
@@ -508,7 +495,7 @@ def _run_backlog(args) -> int:
         halted = False
         try:
             r = run(stem, sim_threshold=args.sim, top_papers=args.top,
-                    dry_run=args.dry_run, session=session, run_id=run_id)
+                    dry_run=args.dry_run, session=session, run_id=run_id, recovered=True)
         except LookupError as exc:
             if type(exc) is not LookupError:
                 raise

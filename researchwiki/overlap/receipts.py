@@ -29,6 +29,11 @@ def root():
     return wiki_root() / '.ingest' / 'claim-overlap'
 
 
+def direct_source(run_id):
+    """Coverage source for a stem that committed nothing and so has no receipt."""
+    return f'direct:{run_id}:{time.time_ns()}'
+
+
 def run_path(run_id):
     if not re.fullmatch(r'[a-zA-Z0-9_-]+', run_id):
         raise ValueError('invalid run ID')
@@ -40,6 +45,16 @@ def load(path):
     if doc.get('schema_version') != RECEIPT_VERSION:
         raise ValueError(f'unsupported claim-overlap receipt: {path}')
     return doc
+
+
+def try_load(path):
+    """`load` for corpus walks: an unreadable or foreign file is skipped, not fatal."""
+    try:
+        return load(path)
+    except (OSError, ValueError) as exc:  # JSONDecodeError is a ValueError
+        from ..log import log
+        log(f'claim-overlap: skipped unreadable receipt {path}: {exc}', tag='claim-overlap')
+        return None
 
 
 def _page_signature(page):
@@ -155,8 +170,10 @@ def reconcile_receipt(path, *, conn=None):
             newer = current and current[0] > doc['created_at'] // 1_000_000_000
             if current and current[1].startswith('receipt:') and current[1] != source:
                 _, other_run, other_file = current[1].split(':', 2)
-                other_path = run_path(other_run) / other_file
-                newer = newer or (other_path.exists() and load(other_path)['created_at'] > doc['created_at'])
+                other = try_load(run_path(other_run) / other_file)
+                newer = newer or bool(other and other.get('created_at', 0) > doc['created_at'])
+            elif current and current[1].startswith('direct:'):
+                newer = newer or int(current[1].rsplit(':', 1)[1]) > doc['created_at']
             if fp == cov['fingerprint'] and not newer:
                 confirmed = sum(link.get('active', False) for link in doc['links'])
                 record_run(c, doc['stem'], fingerprint=fp, n_claims=cov['n_claims'],
@@ -170,18 +187,38 @@ def reconcile_receipt(path, *, conn=None):
             c.close()
 
 
+def _blocks_overlap(journal):
+    """A retained journal blocks overlap only if it could roll back our pages.
+
+    Committed journals awaiting projection repair (e.g. a promote whose index
+    update failed) never restore page bytes, so they cannot undo or be undone
+    by an overlap write. Active journals, and any claim-overlap journal, can.
+    """
+    return (journal.get('status') != 'committed'
+            or str(journal.get('operation', '')).startswith('claim-overlap'))
+
+
 def recover(*, conn=None):
+    """Drain journals, then finish receipt bookkeeping. Call once per invocation."""
     notes = recover_pending()
     with corpus_lock():
-        remaining = pending_journals()
+        remaining = [j for j in pending_journals() if _blocks_overlap(j)]
         if remaining:
             from ..errors import EnvironmentFailure
             raise EnvironmentFailure(f"claim-overlap recovery incomplete: {len(remaining)} retained mutation journal(s)")
+        # Only receipts still owing bookkeeping need parsing; completed ones are
+        # skipped by a cheap substring check before any JSON decode.
         for path in sorted(root().glob('*/*.json')):
-            doc = load(path)
-            if doc.get('record_type') == 'run':
+            try:
+                raw = path.read_text(encoding='utf-8')
+            except OSError:
                 continue
-            if doc.get('bookkeeping_pending') and doc['status'] in {'committed', 'reverted'}:
+            if '"bookkeeping_pending": true' not in raw:
+                continue
+            doc = try_load(path)
+            if doc is None or doc.get('record_type') == 'run':
+                continue
+            if doc.get('bookkeeping_pending') and doc.get('status') in {'committed', 'reverted'}:
                 reconcile_receipt(path, conn=conn)
     return notes
 
@@ -195,9 +232,8 @@ def revert(run_id, *, stem=None, link=None, apply=False, conn=None):
         raise ValueError(f'unknown claim-overlap run: {run_id}')
     reports = []
     with corpus_lock():
-        for path in sorted(directory.glob('*.json'),
-                           key=lambda p: load(p).get('created_at', 0), reverse=True):
-            doc = load(path)
+        docs = [(p, d) for p in directory.glob('*.json') if (d := try_load(p)) is not None]
+        for path, doc in sorted(docs, key=lambda item: item[1].get('created_at', 0), reverse=True):
             if doc.get('record_type') == 'run':
                 continue
             if stem and doc['stem'] != stem:

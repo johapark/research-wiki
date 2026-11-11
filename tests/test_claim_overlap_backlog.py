@@ -248,13 +248,6 @@ def test_the_two_sets_are_disjoint():
     assert not (co._CROSS_LINK_VERDICTS & co._EDGE_ONLY_VERDICTS)
 
 
-def test_every_edge_only_verdict_still_maps_to_a_relation():
-    """An edge-only verdict whose relation is None would write nothing at all —
-    silently dropping the pair instead of recording it."""
-    for v in co._EDGE_ONLY_VERDICTS:
-        assert co._relation_from_verdict(v) is not None
-
-
 def test_relation_verdicts_is_the_union():
     """The `none`/unparseable boundary must not drift from the two sets."""
     assert co._RELATION_VERDICTS == co._CROSS_LINK_VERDICTS | co._EDGE_ONLY_VERDICTS

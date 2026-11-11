@@ -12,8 +12,7 @@ binding distributed as pre-built wheels.
 unparseable file, `FileNotFoundError` on a missing one): they are the ingest and
 grading paths, where a PDF that cannot be read means the operation cannot
 proceed and a silent empty string would land a page grounded in nothing. The
-probing functions — `pdf_shape`, `extract_ref_dois`, `cites_reference`,
-`cites_reference_title` —
+three probing functions — `pdf_shape`, `extract_ref_dois`, `cites_reference` —
 return an empty sentinel instead (`(None, "")`, `[]`, `False`), because each
 answers an optional question whose "don't know" is a legitimate answer and whose
 callers must not be aborted by one bad file in a corpus walk.
@@ -432,37 +431,6 @@ def _fold_ascii(s: str) -> str:
     return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
 
 
-def cites_reference_title(path: Path, title: str) -> bool:
-    """Verify a full paper title in the PDF bibliography, failing closed.
-
-    Author/year matches cannot disambiguate multiple papers by the same
-    authors in one year. Use this alongside that check when a DOI is absent.
-    Punctuation, line breaks, thousands separators and an inserted "of" may
-    differ, but every other title word must match. An abbreviated title or an
-    unidentified bibliography is not proof.
-    """
-    def normalized(value: str) -> str:
-        value = re.sub(r"[\u2010-\u2015\u2212]", "-", value)
-        value = _fold_ascii(repair_text(value).replace("\u00ad", "")).lower()
-        value = re.sub(r"(?<=\d),(?=\d{3}\b)", "", value)
-        return re.sub(r"\bof\b", " ", value)
-
-    title_words = re.findall(r"[a-z0-9]+", normalized(title))
-    if len(title_words) < 4:
-        return False
-    try:
-        text, _ = extract_pdf(path, max_pages=None)
-    except Exception:
-        return False
-    heading = REFS_HEADING_RE.search(text)
-    if heading is None:
-        return False
-    references = normalized(text[heading.end():])
-    pattern = (r"\b" + r"[^a-z0-9]+".join(map(re.escape, title_words))
-               + r"(?=\s*[\"')\]]*(?:[.;?!]|\((?:19|20)\d{2}\)))")
-    return re.search(pattern, references) is not None
-
-
 def extract_ref_dois(path: Path, own_doi: str | None = None) -> list[str]:
     """Harvest unique DOIs from the References section of a PDF.
 
@@ -516,9 +484,3 @@ def dois_as_s2_refs(dois: list[str]) -> list[dict]:
         {"externalIds": {"DOI": d}, "title": "(from PDF references)", "year": None}
         for d in dois
     ]
-
-
-def citation_evidence(path, *, source_stem, expected_identity, verifier=None):
-    """Structured, entry-scoped proof; legacy Boolean helpers remain available."""
-    from .citation import CitationVerifier
-    return (verifier or CitationVerifier()).verify(path, source_stem, expected_identity)

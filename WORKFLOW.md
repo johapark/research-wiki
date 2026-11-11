@@ -1854,13 +1854,22 @@ provenance stays unknown. A malformed verdict/direction is a failure and does
 not mark a pending stem covered.
 
 A judged relationship alone does not authorize a wikilink. The citation gate
-requires the target DOI, or its full title with first-author surname and exact
-version year, within one identified bibliography entry. It returns source PDF
-SHA-256, target identity, verifier version, one-based page, excerpt and span.
-Each source hash is extracted once per run. Missing/unreadable/unidentified or
-ambiguous evidence leaves the relationship edge-only. Reference punctuation,
-line wrapping, thousands separators and the tested inserted `of` variant are
-supported; broad fuzzy titles and author/year-only matches are not.
+requires the target DOI, or its full title with first-author surname and a
+version year, within one identified bibliography entry. The accepted years are
+the YAML year and the stem year, so a preprint→journal upgrade still matches a
+source that cites the preprint; an entry with two distinct publication years
+fails, while page ranges, DOI-embedded dates and arXiv IDs are not read as
+years. Entries are found under every References heading and in consecutively
+numbered lists with no heading (Nature-family layouts, and Methods lists that
+continue the main numbering). When no entry can be segmented, an exact DOI
+anywhere in the references still verifies (`exact-doi-unsegmented`), but a
+title/author/year match never does. It returns source PDF SHA-256, target
+identity, verifier version, one-based page, excerpt and span. Each source hash
+is extracted once per run, and only bibliography spans are memoized (bounded
+LRU). Missing/unreadable/unidentified or ambiguous evidence leaves the
+relationship edge-only. Reference punctuation, line wrapping, thousands
+separators and the tested inserted `of` variant are supported; broad fuzzy
+titles and author/year-only matches are not.
 
 Writing runs stage decisions outside the corpus lock and save versioned
 per-stem receipts in `.ingest/claim-overlap/<run-id>/`. Each reciprocal insertion
@@ -1868,9 +1877,15 @@ records exact text and actual ownership. Pages and receipts commit together
 through `mutation`, followed by projection repair without loading an embedding
 model. Claim, PDF or target-identity changes during review invalidate the staged
 write; retrying reuses eligible judgments but verifies citation evidence again.
-At the start of every writing invocation, pending mutation journals are recovered
-and durable receipt completion records are reconciled before selecting backlog
-stems. Maintenance failures retain enough evidence to finish bookkeeping.
+At the start of every writing invocation (once, not per backlog stem), pending
+mutation journals are recovered and durable receipt completion records are
+reconciled before selecting backlog stems. Only active or claim-overlap journals
+block that; a committed journal from another operation awaiting projection
+repair cannot roll back overlap pages. An unreadable or foreign-version receipt
+is logged and skipped rather than blocking every run. A stem whose candidates
+produce no link or edge records coverage directly, without a receipt or journal;
+a candidate whose wiki page is gone is skipped, not treated as a judge failure.
+Maintenance failures retain enough evidence to finish bookkeeping.
 
 ```sh
 researchwiki claim-overlap --backlog --json --progress-json /tmp/overlap-progress.jsonl

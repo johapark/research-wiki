@@ -168,7 +168,9 @@ def test_invalid_judgment_leaves_backlog_pending(pair):
     result = co.run(paths[0].stem, conn=c, judge_fn=lambda _: {'verdict': 'garbled'})
     assert result['judge_failed'] and not result['coincidence']
     assert paths[0].stem in co.find_backlog(c)
-    assert receipts.load(Path(result['receipt']))['coverage']['complete'] is False
+    # Nothing to commit: no receipt, no journal, and coverage stays open.
+    assert 'receipt' not in result and result['status'] == 'incomplete'
+    assert not receipts.root().exists() or not list(receipts.root().glob('*/*.json'))
 
 
 def test_revert_preserves_a_preexisting_identical_bullet(pair):
@@ -296,3 +298,49 @@ def test_restart_incomplete_stem_reuses_successes_only(pair, monkeypatch):
     assert second['judged_pairs'] == second['reused_judgments'] == 1
     assert not second['judge_failed'] and len(calls) == 3
     assert paths[0].stem not in co.find_backlog(c)
+
+
+def test_missing_target_page_is_skipped_and_coverage_completes(pair, monkeypatch):
+    from researchwiki.grade.claim_overlap import OverlapCandidate
+    c, paths, claims = pair
+    monkeypatch.setattr('researchwiki.grade.claim_overlap.find_claim_overlaps',
+                        lambda stem, **kw: [OverlapCandidate('gone-2019-z', .9, claims[0], claims[1])])
+    result = co.run(paths[0].stem, conn=c, judge_fn=lambda _: pytest.fail('nothing to judge'))
+    assert not result['judge_failed']
+    assert result['skipped'][0]['reason'] == 'missing wiki page'
+    assert paths[0].stem not in co.find_backlog(c)
+
+
+def test_unreadable_or_foreign_receipt_does_not_block_writes(pair):
+    c, paths, _ = pair
+    bad = receipts.root() / 'oldrun'
+    bad.mkdir(parents=True)
+    (bad / 'truncated.json').write_text('{"schema_version": 1, "bookkeeping_pending": true')
+    (bad / 'future.json').write_text('{"schema_version": 99, "bookkeeping_pending": true}')
+    assert run(pair)['status'] == 'committed'
+
+
+def test_committed_unrelated_journal_does_not_block_overlap(pair, monkeypatch):
+    c, paths, _ = pair
+    monkeypatch.setattr(receipts, 'recover_pending', lambda: [])
+    monkeypatch.setattr(receipts, 'pending_journals',
+                        lambda: [{'operation': 'promote', 'status': 'committed'}])
+    assert run(pair)['status'] == 'committed'
+
+
+def test_backlog_recovers_once_per_invocation(pair, monkeypatch):
+    from types import SimpleNamespace
+    c, paths, _ = pair
+    calls = []
+    real = receipts.recover
+    monkeypatch.setattr(receipts, 'recover', lambda **kw: calls.append(1) or real(**kw))
+    monkeypatch.setattr(co, 'find_backlog', lambda *a, **k: [paths[0].stem, paths[1].stem])
+    seen = []
+    def fake_run(stem, **kw):
+        seen.append(kw.get('recovered'))
+        return {'stem': stem, 'n_candidates': 0, 'applied': [], 'edge_only': [],
+                'coincidence': [], 'skipped': [], 'judge_failed': [], 'status': 'committed'}
+    monkeypatch.setattr(co, 'run', fake_run)
+    args = SimpleNamespace(dry_run=False, limit=None, json=True, progress_json=None, sim=0.83, top=10)
+    co._run_backlog(args)
+    assert len(calls) == 1 and seen == [True, True]

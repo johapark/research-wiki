@@ -7,8 +7,18 @@ from pathlib import Path
 
 from . import text as pdf_text
 
-VERSION = 'citation-entry-v1'
+VERSION = 'citation-entry-v2'
 _NUMBERED = re.compile(r'(?m)^[ \t]*(?:\[\d{1,4}\]|\d{1,4}[.)]|\d{1,4}[ \t]+(?=[A-Z]))[ \t]*')
+# Headingless fallback: "1. Surname, I." / "[1] Surname I" runs, the layout
+# Nature-family PDFs print with no "References" line at all.
+_LIST_ITEM = re.compile(r"(?m)^[ \t]*(?:\d{1,5}[ \t]+)?(?:\[(\d{1,4})\]|(\d{1,4})\.)[ \t]+"
+                        r"(?=[A-Z][\w’'-]+[,\s])")
+_YEAR = re.compile(r'\b((?:19|20)\d{2})[a-z]?\b')
+# Years that are part of a DOI, URL, or page/article range are not entry years.
+_YEAR_NOISE = re.compile(r'(?i)(?:\b10\.\d{4,9}/\S+|https?://\S+|\b\d{1,6}[–-]\d{1,6}\b'
+                         r'|\b\d{4}\.\d{4,5}(?:v\d+)?\b)')
+_MIN_RUN = 5
+_MAX_ENTRY = 2000
 _AUTHOR = re.compile(r"(?m)^[ \t]*(?:[A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ’']+(?:-[A-ZÀ-ÖØ-Ý]?[a-zà-öø-ÿ’']+)*"
                      r"(?:[ -][A-Z][a-z]+)?),?[ \t]+(?:[A-Z]{1,4}(?:[.,]|"
                      r"(?=[ \t]+(?:et[ \t]+al\b|(?:19|20)\d{2}\b)))|et[ \t]+al\b)")
@@ -25,11 +35,23 @@ def file_hash(path):
 
 def target_identity(page):
     stem = re.match(r'^(.+?)-((?:19|20)\d{2})[a-z]?-.+$', page.stem)
-    # The current YAML version year is authoritative when present.
-    year = page.year_int() or (int(stem.group(2)) if stem else None)
+    # The YAML version year is primary, but a preprint→journal upgrade keeps
+    # the stem's preprint year (CLAUDE.md), and sources cite either version.
+    stem_year = int(stem.group(2)) if stem else None
+    year = page.year_int() or stem_year
+    years = sorted({y for y in (year, stem_year) if y})
     return {'stem': page.stem, 'title': page.str_field('title', ''),
             'doi': page.str_field('doi', '').strip().lower(),
-            'surname': stem.group(1) if stem else '', 'year': year}
+            'surname': stem.group(1) if stem else '', 'year': year, 'years': years}
+
+
+def _accepted_years(expected):
+    years = expected.get('years') or [expected.get('year')]
+    return {str(y) for y in years if y}
+
+
+def _entry_years(entry):
+    return set(_YEAR.findall(_YEAR_NOISE.sub(' ', entry)))
 
 
 def _tokens(value):
@@ -55,9 +77,11 @@ def _title_span(entry, title):
     return None
 
 
-def bibliography_entries(text):
+def _sections(text):
     # Figures also label a genome "Reference". Accept a heading only when
     # a recognizable first bibliography entry follows it, not distant prose.
+    # Every qualifying heading counts: Nature-style papers print a second,
+    # Methods-only reference list after the main one.
     for heading in pdf_text.REFS_HEADING_RE.finditer(text):
         end = _END.search(text, heading.end())
         finish = end.start() if end else len(text)
@@ -69,17 +93,96 @@ def bibliography_entries(text):
             starts = list(_AUTHOR.finditer(section))
         if not starts or section[:starts[0].start()].strip():
             continue
-        return [(heading.end() + m.start(),
-                 heading.end() + (starts[i + 1].start() if i + 1 < len(starts) else len(section)))
-                for i, m in enumerate(starts)]
-    return []
+        yield [(heading.end() + m.start(),
+                heading.end() + (starts[i + 1].start() if i + 1 < len(starts) else len(section)))
+               for i, m in enumerate(starts)]
 
+
+def _numbered_runs(text):
+    """Headingless bibliographies: runs of consecutively numbered entries.
+
+    A run must count up by one for at least `_MIN_RUN` entries, so section
+    numbering and short enumerated prose do not qualify. A shorter run is kept
+    only when it continues an accepted run's numbering: a Methods list picks
+    up where the main list stopped (e.g. 47, 48 after 1–46).
+    """
+    items = [(m.start(), int(m.group(1) or m.group(2))) for m in _LIST_ITEM.finditer(text)]
+    candidates, current = [], []
+    for start, number in items:
+        if current and number == current[-1][1] + 1:
+            current.append((start, number))
+            continue
+        if current:
+            candidates.append(current)
+        current = [(start, number)]
+    if current:
+        candidates.append(current)
+    runs = []
+    for run in candidates:
+        continues = runs and run[0][1] == runs[-1][-1][1] + 1
+        if len(run) >= _MIN_RUN or continues:
+            runs.append(run)
+    for run in runs:
+        tail = _END.search(text, run[-1][0])
+        stop = tail.start() if tail else len(text)
+        bounds = [s for s, _ in run] + [stop]
+        yield [(bounds[i], bounds[i + 1]) for i in range(len(run))]
+
+
+def bibliography_entries(text):
+    """Non-overlapping entry spans from every identified reference list.
+
+    Heading-scoped lists come first; a consecutively numbered run outside them
+    (a headingless list, or a Methods list after the main one) is added too.
+    Each entry ends at the next entry's start and never exceeds `_MAX_ENTRY`,
+    so one entry's text cannot appear in another and manufacture ambiguity.
+    """
+    sections = list(_sections(text))
+    entries = [e for section in sections for e in section]
+    covered = [(s[0][0], s[-1][1]) for s in sections]
+    # With a headed bibliography, only runs after it count (back-matter lists);
+    # numbered prose in the body is never a reference list.
+    floor = covered[0][0] if covered else 0
+    # Filter per entry: a Methods list continues the main list's numbering,
+    # so it arrives as the tail of one run that began inside the headed list.
+    for run in _numbered_runs(text):
+        entries.extend((s, e) for s, e in run
+                       if s >= floor and not any(lo <= s < hi for lo, hi in covered))
+    starts = sorted({s: e for s, e in sorted(entries, reverse=True)}.items())
+    return [(s, min(e, starts[i + 1][0] if i + 1 < len(starts) else e, s + _MAX_ENTRY))
+            for i, (s, e) in enumerate(starts)]
+
+
+def _unsegmented_identifiers(text):
+    """Exact DOI/arXiv identifiers in a bibliography that cannot be segmented.
+
+    The pre-entry gate accepted an exact DOI anywhere past the References
+    heading (or past the first page when there is none). A DOI is a complete
+    identity by itself, so that fallback stays valid when entries are not
+    identifiable; title/author/year never uses it.
+    """
+    heading = pdf_text.REFS_HEADING_RE.search(text)
+    offset = heading.end() if heading else min(3000, len(text))
+    found = []
+    for m in pdf_text.DOI_RE.finditer(text, offset):
+        found.append((pdf_text._trim_doi_noise(m.group()).lower(), m.start(), m.end()))
+    for m in pdf_text._ARXIV_ID_RE.finditer(text, offset):
+        found.append(('10.48550/arxiv.' + m.group(1), m.start(), m.end()))
+    return [(ident, s, e, text[max(offset, s - 200):e + 200]) for ident, s, e in found]
 
 
 class CitationVerifier:
-    """Per-run extraction memo; every proof pins the PDF hash and coordinates."""
-    def __init__(self):
-        self.extractions = {}
+    """Per-run extraction memo; every proof pins the PDF hash and coordinates.
+
+    Only the bibliography spans are retained, in a bounded LRU, so a corpus-wide
+    backlog does not hold every PDF's full text for the life of the process.
+    """
+    MAX_EXTRACTIONS = 64
+
+    def __init__(self, max_extractions=MAX_EXTRACTIONS):
+        from collections import OrderedDict
+        self.extractions = OrderedDict()
+        self.max_extractions = max_extractions
         self.proofs = {}
 
     def verify(self, path, source_stem, expected):
@@ -94,21 +197,34 @@ class CitationVerifier:
         key = (digest, repr(sorted(expected.items())), VERSION)
         if key in self.proofs:
             return dict(self.proofs[key], source_stem=source_stem)
-        if digest not in self.extractions:
+        if digest in self.extractions:
+            self.extractions.move_to_end(digest)
+        else:
             try:
                 pages = pdf_text.extract_pdf_page_texts(path, max_pages=None)
                 text = pdf_text.PAGE_SEPARATOR.join(pages)
                 if file_hash(path) != digest:
                     return dict(base, reason='PDF changed during extraction')
-                self.extractions[digest] = (text, pdf_text.page_offsets(pages))
+                # Keep only each entry's absolute span and text, not the PDF.
+                entries = [((s, e), text[s:e]) for s, e in bibliography_entries(text)]
+                loose = [] if entries else _unsegmented_identifiers(text)
+                self.extractions[digest] = (entries, loose, pdf_text.page_offsets(pages), len(text))
+                while len(self.extractions) > self.max_extractions:
+                    self.extractions.popitem(last=False)
             except Exception as exc:
                 return dict(base, reason=f'unreadable PDF: {type(exc).__name__}')
-        text, offsets = self.extractions[digest]
-        entries = bibliography_entries(text)
+        entries, loose, offsets, total = self.extractions[digest]
         matches = []
-        for start, end in entries:
-            entry = text[start:end]
-            doi = expected.get('doi')
+        doi = expected.get('doi')
+        for ident, s, e, excerpt in loose:
+            if doi and ident == doi:
+                matches.append(dict(base, verified=True, reason='verified',
+                                    method='exact-doi-unsegmented',
+                                    page=pdf_text.page_for_offset(offsets, s, total),
+                                    excerpt=excerpt.strip(), entry_span=None, match_span=[s, e]))
+        # The same DOI printed twice is still one identity, not ambiguity.
+        matches = matches[:1]
+        for (start, end), entry in entries:
             span = next(((m.start(), m.end()) for m in pdf_text.DOI_RE.finditer(entry)
                          if doi and pdf_text._trim_doi_noise(m.group()).lower() == doi), None)
             method = 'exact-doi' if span else None
@@ -119,30 +235,32 @@ class CitationVerifier:
             if not span:
                 title_span = _title_span(entry, expected.get('title', ''))
                 surname = pdf_text._surname_pattern(expected.get('surname', ''))
-                year = expected.get('year')
+                accepted = _accepted_years(expected)
                 author_text = entry[:title_span[0]] if title_span else ''
-                number = _NUMBERED.match(author_text)
+                # `_LIST_ITEM` also strips a preprint's line-number gutter.
+                number = _LIST_ITEM.match(author_text) or _NUMBERED.match(author_text)
                 author_text = author_text[number.end():] if number else author_text.lstrip()
                 # Author identity belongs before the title, not in another
                 # entry or in a title mentioning the same surname.
-                if (title_span and surname and surname.match(pdf_text._fold_ascii(author_text).lower())
-                        and year and re.search(rf'\b{year}[a-z]?\b', entry)):
-                    years = set(re.findall(r'\b((?:19|20)\d{2})[a-z]?\b', entry))
-                    # Multiple different years could be another unsegmented
-                    # reference. Do not borrow an arbitrary later year.
-                    if years == {str(year)}:
+                if title_span and surname and accepted and surname.match(
+                        pdf_text._fold_ascii(author_text).lower()):
+                    years = _entry_years(entry)
+                    # Several distinct publication years could be another,
+                    # unsegmented reference: never borrow an arbitrary later
+                    # year. Page ranges and DOI-embedded dates are not years.
+                    if len(years) == 1 and years <= accepted:
                         span, method = title_span, 'title-author-year'
             if span:
                 absolute = [start + span[0], start + span[1]]
                 matches.append(dict(base, verified=True, reason='verified', method=method,
-                                    page=pdf_text.page_for_offset(offsets, absolute[0], len(text)),
+                                    page=pdf_text.page_for_offset(offsets, absolute[0], total),
                                     excerpt=entry.strip(), entry_span=[start, end], match_span=absolute))
         if len(matches) == 1:
             proof = matches[0]
         else:
             reason = ('ambiguous bibliography identity' if matches else
                       'target identity absent from one bibliography entry' if entries else
-                      'bibliography entries unidentified')
+                      'bibliography entries unidentified; no exact DOI in references')
             proof = dict(base, reason=reason)
         self.proofs[key] = proof
         return proof

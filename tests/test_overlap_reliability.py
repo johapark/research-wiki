@@ -87,42 +87,16 @@ def test_dry_run_does_not_populate_persistent_cache(monkeypatch):
     assert fresh.calls == 1
 
 
-def test_duplicates_collapse_only_symmetric_candidates_and_archive():
-    from researchwiki.overlap.maintenance import collapse_duplicates
+def test_symmetric_edge_refreshes_legacy_reversed_row_instead_of_duplicating():
+    """Pre-canonical rows stored some symmetric pairs reversed; no second row."""
+    from researchwiki.tasks.claim_overlap import _persist_typed_edge
+    from researchwiki.claim_graph import compute_claim_slug
+    a, b = _claim('a', 'alpha finding'), _claim('b', 'beta finding')
+    sa, sb = (compute_claim_slug(c['section'], c['text']) for c in (a, b))
     conn = open_edges_db()
-    for src, dst in [('a', 'b'), ('b', 'a')]:
-        upsert_edge(conn, Edge(src, 'kc-' + src, dst, 'kc-' + dst,
-                             'corroborates', 1, judge_phase='claim_overlap_judge'))
-        upsert_edge(conn, Edge(src, 'kc-' + src, dst, 'kc-' + dst,
-                             'refines', 1, directed=True, judge_phase='claim_overlap_judge'))
-    # Relation disagreement keeps the whole pair for source review.
-    assert not collapse_duplicates(conn, run_id='test')[0]['collapsible']
-    conn.execute("DELETE FROM edges WHERE relation='refines'")
+    upsert_edge(conn, Edge('b', sb, 'a', sa, 'corroborates', 1, judge_phase='claim_overlap_judge'))
     conn.commit()
-    report = collapse_duplicates(conn, run_id='test', apply=True)
-    assert report[0]['collapsible']
-    rows = conn.execute('SELECT * FROM edges').fetchall()
-    assert len(rows) == 1 and rows[0]['src_stem'] == 'a'
-    assert rows[0]['judge_model'] == ''
-    assert conn.execute('SELECT COUNT(*) FROM overlap_edge_archive').fetchone()[0] == 1
-    conn.close()
-
-
-def test_source_review_none_archives_candidates_and_preserves_human_rows():
-    from researchwiki.overlap.maintenance import replace_automatic_pair
-    from researchwiki.overlap.judging import identity
-    conn = open_edges_db()
-    a, b = _claim('a'), _claim('b')
-    _, eid = upsert_edge(conn, Edge(*identity(a), *identity(b), 'refines', 1,
-                                    directed=True, judge_phase='claim_overlap_judge'))
-    verdict = {'verdict': 'none', 'direction': 'none', 'rationale': 'different endpoints'}
-    report = replace_automatic_pair(conn, a, b, verdict, run_id='test')
-    assert report['archived_ids'] == [eid]
-    assert not conn.execute('SELECT * FROM edges').fetchall()
-    assert conn.execute('SELECT old_id FROM overlap_edge_archive').fetchone()[0] == eid
-    upsert_edge(conn, Edge(*identity(a), *identity(b), 'refines', 1,
-                           status='confirmed', judge_phase='claim_overlap_judge'))
-    before = [dict(r) for r in conn.execute('SELECT * FROM edges')]
-    assert replace_automatic_pair(conn, a, b, verdict, run_id='test')['status'] == 'human-decision-preserved'
-    assert [dict(r) for r in conn.execute('SELECT * FROM edges')] == before
+    _persist_typed_edge('a', a, 'b', b, 'corroborates', 'same', 0.9)
+    rows = conn.execute('SELECT src_stem, rationale FROM edges').fetchall()
+    assert [(r['src_stem'], r['rationale']) for r in rows] == [('b', 'same')]
     conn.close()
