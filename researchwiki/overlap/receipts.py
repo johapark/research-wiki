@@ -41,10 +41,18 @@ def run_path(run_id):
 
 
 def load(path):
+    from .receipt_schema import validate
     doc = json.loads(path.read_text(encoding='utf-8'))
-    if doc.get('schema_version') != RECEIPT_VERSION:
-        raise ValueError(f'unsupported claim-overlap receipt: {path}')
+    try:
+        validate(doc, RECEIPT_VERSION)
+    except ValueError as exc:
+        raise ValueError(f'invalid claim-overlap receipt {path}: {exc}') from exc
     return doc
+
+
+def _log_unreadable(path, exc):
+    from ..log import log
+    log(f'claim-overlap: skipped unreadable receipt {path}: {exc}', tag='claim-overlap')
 
 
 def try_load(path):
@@ -52,8 +60,7 @@ def try_load(path):
     try:
         return load(path)
     except (OSError, ValueError) as exc:  # JSONDecodeError is a ValueError
-        from ..log import log
-        log(f'claim-overlap: skipped unreadable receipt {path}: {exc}', tag='claim-overlap')
+        _log_unreadable(path, exc)
         return None
 
 
@@ -70,7 +77,7 @@ def snapshot_inputs(pages, conn):
                      'identity': target_identity(p)} for p in pages}
 
 
-def _require_fresh(inputs, conn):
+def _require_fresh(inputs, conn, *, citation_inputs=True):
     from ..tasks.claim_overlap import _claims_for_stem, claims_fingerprint
     for stem, expected in inputs.items():
         page = read_page(Path(expected['path']))
@@ -78,7 +85,8 @@ def _require_fresh(inputs, conn):
             raise ValueError(f'page claims changed during review: {stem}')
         if claims_fingerprint(_claims_for_stem(conn, stem)) != expected['db_claims']:
             raise ValueError(f'database claims changed during review: {stem}')
-        if (file_hash(papers_dir() / f'{stem}.pdf') != expected['pdf_sha256']
+        if citation_inputs and (
+                file_hash(papers_dir() / f'{stem}.pdf') != expected['pdf_sha256']
                 or target_identity(page) != expected['identity']):
             raise ValueError(f'citation inputs changed during review: {stem}; retry review')
 
@@ -211,9 +219,10 @@ def recover(*, conn=None):
         for path in sorted(root().glob('*/*.json')):
             try:
                 raw = path.read_text(encoding='utf-8')
-            except OSError:
+            except (OSError, UnicodeError) as exc:
+                _log_unreadable(path, exc)
                 continue
-            if '"bookkeeping_pending": true' not in raw:
+            if not re.search(r'"bookkeeping_pending"\s*:\s*true\b', raw):
                 continue
             doc = try_load(path)
             if doc is None or doc.get('record_type') == 'run':

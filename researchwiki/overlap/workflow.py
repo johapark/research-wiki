@@ -116,17 +116,23 @@ def evaluate(stem, candidates, pages, *, compared, conn, sim_threshold, dry_run,
         if not links and not edges:
             # Nothing touches a page or the graph: record coverage directly,
             # without a receipt, mutation journal or second round of PDF hashing.
-            # Same guard as receipt reconciliation: never close a stem whose
-            # stored claims differ from the set actually compared.
+            # Validate every compared page and claim set under the same lock
+            # used by receipt commits. With no citation being applied, PDFs
+            # need no second hash pass.
             from ..tasks.claim_overlap import _claims_for_stem, record_run
-            if (cov and cov['complete']
-                    and claims_fingerprint(_claims_for_stem(conn, stem)) == cov['fingerprint']):
-                # `direct:` carries a nanosecond stamp so an older receipt's
-                # replay (e.g. a later revert) cannot supersede this record.
-                record_run(conn, stem, fingerprint=cov['fingerprint'], n_claims=cov['n_claims'],
-                           n_candidates=cov['n_candidates'], n_judged=cov['n_judged'],
-                           n_confirmed=0, sim_threshold=sim_threshold,
-                           source=receipts.direct_source(run_id))
+            try:
+                with receipts.corpus_lock():
+                    receipts._require_fresh(inputs, conn, citation_inputs=False)
+                    if cov and cov['complete']:
+                        if claims_fingerprint(_claims_for_stem(conn, stem)) != cov['fingerprint']:
+                            raise ValueError(f'database claims changed during review: {stem}')
+                        # An older receipt's replay cannot supersede this record.
+                        record_run(conn, stem, fingerprint=cov['fingerprint'], n_claims=cov['n_claims'],
+                                   n_candidates=cov['n_candidates'], n_judged=cov['n_judged'],
+                                   n_confirmed=0, sim_threshold=sim_threshold,
+                                   source=receipts.direct_source(run_id))
+            except ValueError as exc:
+                result['judge_failed'].append({'reason': str(exc)})
             result['status'] = 'incomplete' if result['judge_failed'] else 'committed'
             if interruption:
                 interruption.claim_overlap_result = result

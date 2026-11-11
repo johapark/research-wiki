@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import text as pdf_text
 
-VERSION = 'citation-entry-v2'
+VERSION = 'citation-entry-v3'
 _NUMBERED = re.compile(r'(?m)^[ \t]*(?:\[\d{1,4}\]|\d{1,4}[.)]|\d{1,4}[ \t]+(?=[A-Z]))[ \t]*')
 # Headingless fallback: "1. Surname, I." / "[1] Surname I" runs, the layout
 # Nature-family PDFs print with no "References" line at all.
@@ -23,7 +23,8 @@ _AUTHOR = re.compile(r"(?m)^[ \t]*(?:[A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ’']+(?:-[A-Z
                      r"(?:[ -][A-Z][a-z]+)?),?[ \t]+(?:[A-Z]{1,4}(?:[.,]|"
                      r"(?=[ \t]+(?:et[ \t]+al\b|(?:19|20)\d{2}\b)))|et[ \t]+al\b)")
 _END = re.compile(r'(?im)^\s*(?:acknowledg(?:e)?ments|author contributions|competing interests|'
-                  r'online methods|methods|supplementary information|extended data)\s*[:.]?\s*$')
+                  r'online methods|methods|supplementary information|extended data|'
+                  r'data availability|code availability|funding|ethics declarations)\s*[:.]?\s*$')
 
 
 def file_hash(path):
@@ -77,14 +78,20 @@ def _title_span(entry, title):
     return None
 
 
+def _section_end(text, start, stop=None):
+    """The next section/reference heading bounds every bibliography region."""
+    stop = len(text) if stop is None else stop
+    boundaries = (_END.search(text, start, stop), pdf_text.REFS_HEADING_RE.search(text, start, stop))
+    return min([stop] + [m.start() for m in boundaries if m])
+
+
 def _sections(text):
     # Figures also label a genome "Reference". Accept a heading only when
     # a recognizable first bibliography entry follows it, not distant prose.
     # Every qualifying heading counts: Nature-style papers print a second,
     # Methods-only reference list after the main one.
     for heading in pdf_text.REFS_HEADING_RE.finditer(text):
-        end = _END.search(text, heading.end())
-        finish = end.start() if end else len(text)
+        finish = _section_end(text, heading.end())
         section = text[heading.end():finish]
         starts = list(_NUMBERED.finditer(section))
         numbered = (starts and starts[0].start() < 250
@@ -109,7 +116,8 @@ def _numbered_runs(text):
     items = [(m.start(), int(m.group(1) or m.group(2))) for m in _LIST_ITEM.finditer(text)]
     candidates, current = [], []
     for start, number in items:
-        if current and number == current[-1][1] + 1:
+        if (current and number == current[-1][1] + 1
+                and _section_end(text, current[-1][0], start) == start):
             current.append((start, number))
             continue
         if current:
@@ -123,8 +131,7 @@ def _numbered_runs(text):
         if len(run) >= _MIN_RUN or continues:
             runs.append(run)
     for run in runs:
-        tail = _END.search(text, run[-1][0])
-        stop = tail.start() if tail else len(text)
+        stop = _section_end(text, run[-1][0])
         bounds = [s for s, _ in run] + [stop]
         yield [(bounds[i], bounds[i + 1]) for i in range(len(run))]
 
@@ -143,8 +150,8 @@ def bibliography_entries(text):
     # With a headed bibliography, only runs after it count (back-matter lists);
     # numbered prose in the body is never a reference list.
     floor = covered[0][0] if covered else 0
-    # Filter per entry: a Methods list continues the main list's numbering,
-    # so it arrives as the tail of one run that began inside the headed list.
+    # A Methods list may continue the main numbering, but is a separate run
+    # so the preceding entry cannot absorb intervening Methods prose.
     for run in _numbered_runs(text):
         entries.extend((s, e) for s, e in run
                        if s >= floor and not any(lo <= s < hi for lo, hi in covered))
@@ -156,19 +163,24 @@ def bibliography_entries(text):
 def _unsegmented_identifiers(text):
     """Exact DOI/arXiv identifiers in a bibliography that cannot be segmented.
 
-    The pre-entry gate accepted an exact DOI anywhere past the References
-    heading (or past the first page when there is none). A DOI is a complete
-    identity by itself, so that fallback stays valid when entries are not
-    identifiable; title/author/year never uses it.
+    Require an explicit bibliography heading and stop at the next section.
+    Singular "Reference" can be a figure label, so it only qualifies through
+    the entry parser. Headingless PDFs need an identified numbered list; an
+    arbitrary character cutoff cannot establish citation context.
     """
-    heading = pdf_text.REFS_HEADING_RE.search(text)
-    offset = heading.end() if heading else min(3000, len(text))
     found = []
-    for m in pdf_text.DOI_RE.finditer(text, offset):
-        found.append((pdf_text._trim_doi_noise(m.group()).lower(), m.start(), m.end()))
-    for m in pdf_text._ARXIV_ID_RE.finditer(text, offset):
-        found.append(('10.48550/arxiv.' + m.group(1), m.start(), m.end()))
-    return [(ident, s, e, text[max(offset, s - 200):e + 200]) for ident, s, e in found]
+    for heading in pdf_text.REFS_HEADING_RE.finditer(text):
+        if heading.group(1).lower() == 'reference':
+            continue
+        start, end = heading.end(), _section_end(text, heading.end())
+        identifiers = [(pdf_text._trim_doi_noise(m.group()).lower(), m)
+                       for m in pdf_text.DOI_RE.finditer(text, start, end)]
+        identifiers.extend(('10.48550/arxiv.' + m.group(1), m)
+                           for m in pdf_text._ARXIV_ID_RE.finditer(text, start, end))
+        for ident, m in identifiers:
+            excerpt = text[max(start, m.start() - 200):min(end, m.end() + 200)]
+            found.append((ident, m.start(), m.end(), excerpt, [start, end]))
+    return found
 
 
 class CitationVerifier:
@@ -216,12 +228,13 @@ class CitationVerifier:
         entries, loose, offsets, total = self.extractions[digest]
         matches = []
         doi = expected.get('doi')
-        for ident, s, e, excerpt in loose:
+        for ident, s, e, excerpt, region in loose:
             if doi and ident == doi:
                 matches.append(dict(base, verified=True, reason='verified',
                                     method='exact-doi-unsegmented',
                                     page=pdf_text.page_for_offset(offsets, s, total),
-                                    excerpt=excerpt.strip(), entry_span=None, match_span=[s, e]))
+                                    excerpt=excerpt.strip(), entry_span=None, match_span=[s, e],
+                                    bibliography_span=region))
         # The same DOI printed twice is still one identity, not ambiguity.
         matches = matches[:1]
         for (start, end), entry in entries:

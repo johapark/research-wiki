@@ -1861,12 +1861,16 @@ source that cites the preprint; an entry with two distinct publication years
 fails, while page ranges, DOI-embedded dates and arXiv IDs are not read as
 years. Entries are found under every References heading and in consecutively
 numbered lists with no heading (Nature-family layouts, and Methods lists that
-continue the main numbering). When no entry can be segmented, an exact DOI
-anywhere in the references still verifies (`exact-doi-unsegmented`), but a
-title/author/year match never does. It returns source PDF SHA-256, target
-identity, verifier version, one-based page, excerpt and span. Each source hash
-is extracted once per run, and only bibliography spans are memoized (bounded
-LRU). Missing/unreadable/unidentified or ambiguous evidence leaves the
+continue the main numbering). Section boundaries end entries even when the
+next list continues that numbering, so intervening Methods prose cannot supply
+a publication year or DOI. When no entry can be segmented, an exact DOI in a
+region bounded by an explicit bibliography heading and the next section still
+verifies (`exact-doi-unsegmented`); an arbitrary character cutoff or singular
+figure label does not establish that region. Title/author/year never uses this
+fallback. Proofs include source PDF SHA-256, target identity, verifier version,
+one-based page, excerpt and match span, plus the bibliography span for the
+fallback. Only bibliography spans are memoized in a bounded extraction LRU.
+Missing/unreadable/unidentified or ambiguous evidence leaves the
 relationship edge-only. Reference punctuation, line wrapping, thousands
 separators and the tested inserted `of` variant are supported; broad fuzzy
 titles and author/year-only matches are not.
@@ -1881,10 +1885,14 @@ At the start of every writing invocation (once, not per backlog stem), pending
 mutation journals are recovered and durable receipt completion records are
 reconciled before selecting backlog stems. Only active or claim-overlap journals
 block that; a committed journal from another operation awaiting projection
-repair cannot roll back overlap pages. An unreadable or foreign-version receipt
-is logged and skipped rather than blocking every run. A stem whose candidates
-produce no link or edge records coverage directly, without a receipt or journal;
-a candidate whose wiki page is gone is skipped, not treated as a judge failure.
+repair cannot roll back overlap pages. Receipt structure, including nested
+edges, coverage and insertion ownership, is validated before recovery or revert;
+malformed JSON, invalid UTF-8 and foreign versions are logged and skipped rather
+than blocking every run. A stem whose candidates produce no link or edge records
+coverage directly, without a receipt or journal, after checking all compared
+pages and database claims under the corpus lock. That check does not hash the
+PDFs a second time. A candidate whose wiki page is gone is skipped, not treated
+as a judge failure.
 Maintenance failures retain enough evidence to finish bookkeeping.
 
 ```sh

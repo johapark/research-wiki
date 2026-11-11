@@ -149,6 +149,53 @@ def test_staged_review_rejects_changed_inputs(pair, changed):
     assert 'auto-added; claim-overlap' not in paths[0].read_text()
 
 
+@pytest.mark.parametrize('changed_page', [0, 1])
+@pytest.mark.parametrize('sync_db', [False, True])
+def test_direct_coverage_rejects_claims_changed_during_none_judgment(pair, changed_page, sync_db):
+    c, paths, _ = pair
+    def judge(_):
+        path = paths[changed_page]
+        path.write_text(path.read_text().replace('Same finding.', 'Changed finding.'))
+        if sync_db:
+            upsert_page(path)
+        return {'verdict': 'none', 'direction': 'none', 'rationale': 'different findings'}
+    result = co.run(paths[0].stem, conn=c, judge_fn=judge)
+    assert result['status'] == 'incomplete' and result['judge_failed']
+    assert paths[0].stem in co.find_backlog(c)
+    assert 'receipt' not in result
+
+
+def test_direct_coverage_keeps_single_pdf_hash_pass(pair, monkeypatch):
+    c, paths, _ = pair
+    original = receipts.file_hash
+    calls = []
+    def hashed(path):
+        calls.append(path)
+        return original(path)
+    monkeypatch.setattr(receipts, 'file_hash', hashed)
+    result = co.run(paths[0].stem, conn=c, judge_fn=lambda _: {
+        'verdict': 'none', 'direction': 'none', 'rationale': 'different findings'})
+    assert result['status'] == 'committed' and paths[0].stem not in co.find_backlog(c)
+    assert len(calls) == 2 and 'receipt' not in result
+
+
+def test_doi_in_methods_example_never_inserts_related_paper_bullets(pair, monkeypatch):
+    c, paths, _ = pair
+    paths[1].write_text(paths[1].read_text().replace('type: paper', 'type: paper\ndoi: 10.1234/exact'))
+    upsert_page(paths[1])
+    before = [p.read_bytes() for p in paths]
+    for path in paths:
+        (Path('papers') / f'{path.stem}.pdf').write_bytes(path.stem.encode())
+    monkeypatch.setattr(CitationVerifier, 'verify', _ORIGINAL_VERIFY)
+    monkeypatch.setattr('researchwiki.pdf.text.extract_pdf_page_texts', lambda path, **kw:
+        ['References\nUnparseable reference text.\nMethods\nLiteral example DOI: 10.1234/exact']
+        if path.stem == paths[0].stem else ['No bibliography here.'])
+    result = run(pair)
+    assert result['status'] == 'committed' and len(result['edge_only']) == 1
+    assert not result['applied'] and result['committed_link_pairs'] == 0
+    assert [p.read_bytes() for p in paths] == before
+
+
 def test_revert_failure_after_commit_recovers_counts(pair, monkeypatch):
     c, paths, _ = pair
     result = run(pair)
@@ -318,6 +365,48 @@ def test_unreadable_or_foreign_receipt_does_not_block_writes(pair):
     (bad / 'truncated.json').write_text('{"schema_version": 1, "bookkeeping_pending": true')
     (bad / 'future.json').write_text('{"schema_version": 99, "bookkeeping_pending": true}')
     assert run(pair)['status'] == 'committed'
+
+
+@pytest.mark.parametrize('malformation', [
+    'list', 'missing-edges', 'bad-created-at', 'bad-edge', 'bad-coverage',
+    'bad-insertions', 'missing-bullet', 'bad-owned', 'missing-event', 'invalid-utf8',
+])
+def test_malformed_receipts_do_not_block_recovery_or_revert(pair, malformation):
+    import copy
+    import json
+    c, paths, _ = pair
+    result = run(pair)
+    original = receipts.load(Path(result['receipt']))
+    doc = copy.deepcopy(original)
+    doc.update(bookkeeping_pending=True, edges_pending=True)
+    if malformation == 'list':
+        doc = [doc]
+    elif malformation == 'missing-edges':
+        del doc['edges']
+    elif malformation == 'bad-created-at':
+        doc['created_at'] = 'yesterday'
+    elif malformation == 'bad-edge':
+        doc['edges'][0]['src'] = {'paper_stem': paths[0].stem}
+    elif malformation == 'bad-coverage':
+        del doc['coverage']['n_claims']
+    elif malformation == 'bad-insertions':
+        doc['links'][0]['insertions'] = ['not an insertion']
+    elif malformation == 'missing-bullet':
+        del doc['links'][0]['insertions'][0]['bullet']
+    elif malformation == 'bad-owned':
+        doc['links'][0]['insertions'][0]['owned'] = 'yes'
+    elif malformation == 'missing-event':
+        del doc['links'][0]['event_id']
+    bad = Path(result['receipt']).parent / 'bad.json'
+    bad.write_bytes(b'{"bookkeeping_pending": true, "bad": "\xff"}'
+                    if malformation == 'invalid-utf8' else json.dumps(doc).encode())
+    receipts.recover(conn=c)
+    with pytest.raises(ValueError):
+        receipts.load(bad)
+    assert receipts.load(Path(result['receipt'])) == original
+    assert len(receipts.revert(result['run_id'], conn=c)['reverted']) == 2
+    receipts.revert(result['run_id'], apply=True, conn=c)
+    assert all('auto-added; claim-overlap' not in p.read_text() for p in paths)
 
 
 def test_committed_unrelated_journal_does_not_block_overlap(pair, monkeypatch):

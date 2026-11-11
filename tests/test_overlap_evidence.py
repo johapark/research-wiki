@@ -154,6 +154,48 @@ def test_exact_doi_survives_unsegmentable_bibliography(tmp_path, monkeypatch):
     assert not proof(tmp_path, monkeypatch, refs.replace('10.1234/exact', '10.1/other'))['verified']
 
 
+@pytest.mark.parametrize('text', [
+    'x' * 3100 + '\nLiteral example DOI for parsing tests: 10.1234/exact',
+    'References\nUnparseable reference text.\nMethods\nLiteral example DOI: 10.1234/exact',
+    'References\nUnparseable reference text.\nCode availability\nExample DOI: 10.1234/exact',
+    'Figure\nReference\nLong-read alignments\nExample DOI: 10.1234/exact',
+], ids=['headingless', 'methods', 'code-availability', 'figure-label'])
+def test_unsegmented_doi_cannot_license_non_bibliography_text(tmp_path, monkeypatch, text):
+    assert not proof(tmp_path, monkeypatch, text, doi='10.1234/exact')['verified']
+
+
+def test_unsegmented_doi_searches_later_bibliography_and_bounds_excerpt(tmp_path, monkeypatch):
+    text = ('Figure\nReference\nAlignments\nExample DOI: 10.1234/wrong\n'
+            'References\nAinslie J and others: gqa training, 2023. doi:10.1234/exact\n'
+            'Methods\nSamples were collected in 2020. doi:10.1234/wrong')
+    result = proof(tmp_path, monkeypatch, text, doi='10.1234/exact')
+    assert result['verified'] and result['method'] == 'exact-doi-unsegmented'
+    assert 'Methods' not in result['excerpt'] and 'Alignments' not in result['excerpt']
+    assert not proof(tmp_path, monkeypatch, text, doi='10.1234/wrong')['verified']
+
+
+@pytest.mark.parametrize('entry_year,verified', [('', False), (' (2020).', True)])
+def test_headingless_entry_stops_at_methods_before_continuing_list(
+    tmp_path, monkeypatch, entry_year, verified,
+):
+    text = (_nature_list(1, 4) + '\n5. Target, A. A full target paper title.' + entry_year
+            + '\nMethods\nSamples were collected in 2021.\n' + _nature_list(6, 2))
+    result = proof(tmp_path, monkeypatch, text)
+    assert result['verified'] is verified
+    if verified:
+        assert 'Methods' not in result['excerpt']
+    else:
+        # Borrowing the Methods year is also forbidden when it matches.
+        assert not proof(tmp_path, monkeypatch, text.replace('2021', '2020'))['verified']
+
+
+def test_headingless_methods_continuation_remains_citable(tmp_path, monkeypatch):
+    text = (_nature_list(1, 5) + '\nMethods\nSamples were collected in 2021.\n'
+            + _nature_list(6, 2, target_at=7))
+    result = proof(tmp_path, monkeypatch, text)
+    assert result['verified'] and result['excerpt'].startswith('7. Target, A.')
+
+
 def test_extraction_memo_is_bounded_and_keeps_no_full_text(tmp_path, monkeypatch):
     monkeypatch.setattr(pdf_text, 'extract_pdf_page_texts',
                         lambda *a, **k: ['x' * 10_000, 'References\n1. Target A. A full target paper title. (2020).'])
