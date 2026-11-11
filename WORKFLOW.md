@@ -1862,14 +1862,17 @@ fails, while page ranges, DOI-embedded dates and arXiv IDs are not read as
 years. Entries are found under every References heading and in consecutively
 numbered lists with no heading (Nature-family layouts, and Methods lists that
 continue the main numbering). A numbered run counts only if it reads like a
-reference list — a year in at least 70% of entries and a median entry of at
-most 1,000 characters — and never before the first References heading, so
-numbered section titles, protocol steps and enumerated prose are not entries.
-Section boundaries end entries even when the
-next list continues that numbering, so intervening Methods prose cannot supply
-a publication year or DOI. When no entry can be segmented, an exact DOI in a
-region bounded by an explicit bibliography heading and the next section still
-verifies (`exact-doi-unsegmented`); an arbitrary character cutoff or singular
+reference list — recognizable author prefixes and publication-year notation in
+at least 70% of entries, and a median entry of at most 1,000 characters. A short
+entry with a date alone cannot establish those citation fields.
+Author prefixes support surname/initials and given-name-first references;
+publication years support parentheses, comma-separated fields, month/year and
+Vancouver year/volume notation. Independently identified main references stay
+eligible before a later Methods References heading. Section boundaries end
+entries even when the next list continues that numbering, so Methods prose
+cannot supply a publication year or DOI. When no entry can be segmented, an
+exact DOI in a region bounded by an explicit bibliography heading and the next
+section still verifies (`exact-doi-unsegmented`); an arbitrary character cutoff or singular
 figure label does not establish that region. Title/author/year never uses this
 fallback. Proofs include source PDF SHA-256, target identity, verifier version,
 one-based page, excerpt and match span, plus the bibliography span for the

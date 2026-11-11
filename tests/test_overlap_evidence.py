@@ -258,3 +258,60 @@ def test_single_entry_continuation_after_page_break_is_kept(tmp_path, monkeypatc
             '26. anndataR: interoperability in R. GitHub.\n' + _nature_list(27, 6))
     result = proof(tmp_path, monkeypatch, refs)
     assert result['verified'] and result['excerpt'].startswith('25. Target, A.')
+
+
+@pytest.mark.parametrize('after_main_references', [False, True])
+def test_dated_procedure_steps_cannot_verify_a_literal_doi(tmp_path, monkeypatch, after_main_references):
+    start = 6 if after_main_references else 1
+    steps = '\n'.join(
+        f'{i}. Retain samples collected in 2020. '
+        + ('Literal example DOI: 10.1234/exact' if i == start + 1 else 'Store the samples.')
+        for i in range(start, start + 5))
+    text = 'References\n' + _nature_list(1, 5) + '\nMethods\n' + steps if after_main_references else steps
+    result = proof(tmp_path, monkeypatch, text, doi='10.1234/exact')
+    assert not result['verified']
+
+
+@pytest.mark.parametrize('date', ['2020', 'July 2020'])
+def test_named_sample_records_are_not_publication_references(tmp_path, monkeypatch, date):
+    records = '\n'.join(
+        f'{i}. Technician, A. Samples were collected in {date}. '
+        + ('Literal example DOI: 10.1234/exact' if i == 2 else 'Samples were retained.')
+        for i in range(1, 6))
+    assert not proof(tmp_path, monkeypatch, records, doi='10.1234/exact')['verified']
+
+
+@pytest.mark.parametrize('methods_start', [1, 6])
+@pytest.mark.parametrize('doi', ['', '10.1234/main-target'])
+def test_headingless_main_references_before_headed_methods_are_kept(tmp_path, monkeypatch, methods_start, doi):
+    main = _nature_list(1, 5, target_at=3).splitlines()
+    if doi:
+        main[2] += ' doi:' + doi
+    text = ('\n'.join(main) + '\nMethods\nCells were cultured.\nReferences\n'
+            + _nature_list(methods_start, 2))
+    result = proof(tmp_path, monkeypatch, text, doi=doi)
+    assert result['verified']
+    assert result['excerpt'].startswith('3. Target, A.') and 'Methods' not in result['excerpt']
+
+
+def test_dated_body_steps_do_not_hide_unparsed_bibliography_doi(tmp_path, monkeypatch):
+    steps = '\n'.join(f'{i}. Retain samples collected in 2020. Store the samples.' for i in range(1, 6))
+    refs = ('References\nZeyuan Allen-Zhu and Yuanzhi Li. Physics of language models. '
+            'CoRR, 2024. doi:10.1234/exact')
+    result = proof(tmp_path, monkeypatch, steps + '\n' + refs, doi='10.1234/exact')
+    assert result['verified'] and result['method'] == 'exact-doi-unsegmented'
+    assert 'Retain samples' not in result['excerpt']
+
+
+@pytest.mark.parametrize('author,publication', [
+    ('Example AB, Other CD, et al.', 'Journal 2020;12:34-56.'),
+    ('Alice Example and Bob Other.', 'Conference, 2020.'),
+    ('Alice Example.', 'Conference, July 2020.'),
+])
+def test_headingless_citations_keep_initials_full_names_and_publication_styles(
+    tmp_path, monkeypatch, author, publication,
+):
+    refs = '\n'.join(f'{i}. {author} A complete research paper title. {publication} doi:10.1234/ref-{i}'
+                     for i in range(1, 6))
+    result = proof(tmp_path, monkeypatch, refs, doi='10.1234/ref-3')
+    assert result['verified'] and result['method'] == 'exact-doi'

@@ -36,7 +36,9 @@ the reasoning behind any line below.
   accepted (preprint→journal upgrades); page ranges, DOI dates and arXiv IDs
   are not read as entry years. Headingless numbered bibliographies and Methods
   reference lists are segmented without including intervening Methods prose;
-  numbered section titles and steps are not mistaken for either.
+  headingless runs require author and publication-year fields, so dates in
+  numbered steps alone do not qualify. A later Methods bibliography heading
+  preserves independently identified main references before it.
   An exact DOI still verifies when no entry can be segmented, within a region
   bounded by an explicit bibliography heading and the next section.
 - Per-stem receipts under `.ingest/claim-overlap/<run-id>/` apply reciprocal
