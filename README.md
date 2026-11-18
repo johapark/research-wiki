@@ -136,10 +136,32 @@ The responder records its actual model in `via`, not the configured `model_hint`
 
 ## Organizing and browsing the wiki
 
+For a standalone browser workspace, run `researchwiki dashboard --serve --open`.
+It offers full-text search, combined category/type/year/status filters, table
+and card layouts, saved pages, an in-browser Markdown reader, source-PDF links,
+backlinks, an inbox, and metadata checks. New ingests appear automatically.
+Live keyword search reuses the CLI's Tantivy index and query syntax. The offline
+HTML file embeds MIT-licensed MiniSearch 7.2.0 for relevance-ranked search,
+prefix matching, quoted phrases, and conservative typo tolerance. If live search
+is unavailable, the browser can search its loaded library with MiniSearch.
+The server binds to localhost and leaves wiki content unchanged. Ask your chat
+agent to manage it using `dashboard --status --json`, `--serve --session LABEL`,
+and `--stop`; an optional `--owner-pid PID` ties its lifetime to a process supplied
+by the chat host. See [agent-managed dashboard](prompts/dashboard.md).
+The agent reconnects on session start/resume when a runtime receipt exists;
+an explicit stop removes that receipt.
+
+`researchwiki dashboard --open` instead generates a self-contained offline
+snapshot at `output/dashboard.html`; regenerate it after library changes.
+Bookmarks and theme preferences stay in your browser. Both modes work without
+Obsidian or Dataview. The HTML template ships in
+`researchwiki/templates/dashboard.html`.
+
 Open the directory containing both `wiki/` and `papers/` as an [Obsidian](https://obsidian.md/) vault—normally the repository root—and start at `wiki/views.md`. This keeps each page's source-PDF link inside the vault. Enable the Dataview community plugin to render the dashboard's live tables; without it, every page remains ordinary readable Markdown.
 
 | Location | Purpose |
 | --- | --- |
+| `output/dashboard.html` | Standalone browser dashboard and offline library reader |
 | `wiki/views.md` | Dashboard and default landing page |
 | `wiki/index.md` | Full catalog grouped by category |
 | `wiki/log.md` | Chronological ingest and authoring history |

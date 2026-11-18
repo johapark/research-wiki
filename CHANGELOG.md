@@ -20,6 +20,21 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Added
+
+- `researchwiki dashboard` exports a self-contained browser dashboard and
+  library reader; `--serve` runs a live localhost version. Corpus totals,
+  combined filters, table/card layouts, bookmarks, backlinks, and PDF/Obsidian
+  links support navigation without Dataview. Reader text size is adjustable
+  and saved locally; browser Back and Forward restore views and filters.
+- Live dashboard keyword search shares the CLI's Tantivy index. Offline
+  search and temporary fallback use bundled MIT-licensed MiniSearch in
+  browser memory, with relevance ranking, prefix matching, quoted phrases,
+  and conservative typo tolerance; no additional index files are required.
+- Agent-managed dashboard health, reuse, and authenticated shutdown through
+  `--status`, `--session`, and `--stop`, with optional `--owner-pid` shutdown
+  when a session-lifetime process exits. Live content refreshes automatically.
+
 ## [0.6.1] - 2026-11-11
 
 ### Added

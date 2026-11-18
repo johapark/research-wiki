@@ -117,6 +117,10 @@ researchwiki = [
     "db/*.sql",
     "pdf/data/*.txt",
     "templates/*.html",
+    "templates/*.js",
+    "templates/vendor/*.js",
+    "templates/vendor/*.txt",
+    "templates/vendor/*.md",
 ]
 
 [tool.pytest.ini_options]
