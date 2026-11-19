@@ -1592,7 +1592,7 @@ re-derivable — see the note on multiple machines below.
 
 A common setup is one wiki, two computers, with `wiki/`, `papers/`, and `inbox/`
 on a sync service. Keep the checkout and runtime state outside that service;
-see [the README symlink layout](./README.md#sync-across-computers).
+see [the README sync overview](./README.md#sync-across-computers).
 What syncs, and what each machine derives for itself:
 
 | | Where it lives | How the second machine gets it |

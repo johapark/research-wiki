@@ -40,6 +40,9 @@ the reasoning behind any line below.
 
 ### Changed
 
+- README introduces the standalone dashboard in Features and uses conversational
+  requests for setup and routine workflows. Detailed application integration
+  instructions move to a developer guide.
 - Dashboard sidebar footer shows the application release version next to the
   repository name.
 - Larger default dashboard text for navigation, library rows, filters, and

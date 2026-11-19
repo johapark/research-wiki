@@ -1,341 +1,131 @@
 # Research Wiki
 
-A local, markdown-first research wiki that compounds as you add papers. Drop PDFs into `inbox/`, ask your chat agent to ingest or analyze them, and browse the resulting knowledge base in Obsidian.
+A local, markdown-first research wiki that compounds as you add papers. Give your chat agent PDFs to ingest or questions to investigate, then explore the knowledge base in the browser dashboard or Obsidian.
 
-The agent operates the CLI for you: it reads the source PDF, writes and grades the page, connects related work, and keeps indexes current. [CLAUDE.md](./CLAUDE.md) and its `AGENTS.md` symlink contain the agent contract; [WORKFLOW.md](./WORKFLOW.md) is the detailed human reference.
+The agent handles setup, ingestion, verification, search, and maintenance. You describe the outcome; it runs the necessary commands. Your source PDFs and Markdown pages remain the durable library.
 
 ## Features
 
-- **Grounded in local PDFs.** Wiki prose comes from your papers, not web summaries. Answers start from the wiki and return to the PDFs when more detail is needed.
-- **Claim-level verification.** Claims are graded against their source and exposed through durable `[[paper#claim]]` anchors. Cross-paper pages (syntheses, concepts, and ideas) are also checked for complete citations and source fidelity.
-- **Connected knowledge.** Citation-supported links, synthesis pages, claim relationships, and a synced proposal/feedback ledger turn isolated summaries into a research map.
-- **Agent-operated workflows.** The agent coordinates ingestion, synthesis, verification, linking, indexing, and recovery through the CLI.
-- **Search and discovery.** BM25 and semantic search, citation/recommendation neighbors, gap detection, and an interactive graph help you find papers and missing literature.
-- **Portable and local-first.** Your wiki is plain Markdown, your library is gitignored, and the content directories can sync independently of the framework.
-- **Provider-flexible.** Use OpenAI, Anthropic, Gemini, another OpenAI-compatible service, a local model, or chat relay; roles can use different providers.
-
-## How it works
-
-You describe the outcome; the agent chooses the commands:
-
-| You say | The agent does |
-| --- | --- |
-| “Ingest everything in `inbox/`.” | Coordinates ingestion for the active provider and reports published pages, sandbox drafts, and failures. |
-| “What does the wiki have on sequence-to-expression models?” | Searches the wiki, reads relevant pages, and answers with `[[wikilinks]]`. |
-| “Should these pangenome papers become a synthesis?” | Reviews their coverage and recommends whether to create a synthesis; writes it only when asked. |
-| “File this design as an idea.” | Creates a reviewable idea page with grounded background and clearly marked model priors. |
-| “What related papers am I missing?” | Compares citation and recommendation metadata with the local library; new evidence still needs a PDF. |
-
-You can run `researchwiki` directly, but the intended interface is conversation with an agent that has file and shell access.
+- **Standalone dashboard.** Browse corpus status, search and filter papers, save pages, follow connections, and read wiki content in your browser. Live and offline modes are available.
+- **Grounded in local PDFs.** Wiki prose comes from your papers. Answers start from the wiki and return to the source PDFs when more detail is needed.
+- **Claim-level verification.** Claims are checked against their sources; cross-paper analyses and ideas are checked for citations and source fidelity.
+- **Connected knowledge.** Citation-supported links, synthesis pages, claim relationships, and proposals turn isolated summaries into a research map.
+- **Agent-operated workflows.** Ask the agent to ingest, compare, organize, troubleshoot, or maintain your library.
+- **Search and discovery.** Keyword and semantic search, citation and recommendation neighbors, gap detection, and an interactive graph help you find relevant work.
+- **Portable and local-first.** The library is plain Markdown and PDFs, kept separate from the framework and able to sync across computers.
+- **Provider-flexible.** Choose OpenAI, Anthropic, Gemini, another compatible service, a local model, or chat relay.
 
 ## Quick start
 
 ### Requirements
 
 - Python 3.10+
-- A shell-enabled chat agent (Claude Code, Codex, etc.)
-- An API key for a supported provider (optional but recommended; not required for local-model or chat-relay setups)
+- A chat agent with file and shell access, such as Claude Code or Codex
+- An API key for a cloud provider, or a local-model or chat-relay setup
 
 ### Install
 
-```bash
-git clone https://github.com/johapark/research-wiki.git
-cd research-wiki
-python3 -m venv ~/.venvs/research-wiki
-~/.venvs/research-wiki/bin/pip install -e .
-source ~/.venvs/research-wiki/bin/activate
-```
+Clone or download this repository and open its folder in your chat agent. Keep the checkout outside any synced folder; the agent can configure library syncing separately. Retain the checkout because the framework uses its prompts, configuration, and agent instructions.
 
-Keep the virtual environment outside the checkout, especially when syncing your library. The default install includes PDF extraction, Tantivy search, semantic grading, and the Anthropic SDK. Optional extras are `[mcp]` and `[dev]`.
+Tell the agent: **“Initialize this research wiki.”** It checks the installation, installs missing dependencies in a virtual environment outside the checkout, settles the storage layout, configures your chosen provider, and runs a local readiness check. Tell it whether you want to sync across devices before initialization.
 
-Setup is clone-first: the framework reads `config/`, prompts, and agent instructions from the checkout. A standalone `pip install` from GitHub without retaining the clone is not a supported installation path.
+The agent contract is in [CLAUDE.md](./CLAUDE.md), also loaded through the `AGENTS.md` symlink. Detailed setup steps are in the [initialization guide](./prompts/init.md).
 
-Run all `researchwiki` commands from the repository root, with the virtual environment activated.
+### Add your first paper
 
-### Initialize
+Give the agent a PDF path and say **“Add this paper to my research wiki.”** For a batch, place PDFs in `inbox/` and say **“Ingest everything in the inbox.”** If you want the original file to stay at its current location, ask the agent to copy it into the inbox first.
 
-Choose one guided setup path:
+The agent reports which papers were published, which need review, and which failed. A reviewable draft is not a published wiki page. Exact duplicate inbox files are archived and remain recoverable. For an existing reference-manager library, start with [import and export](#import-and-export).
 
-- Open the clone in Claude Code, Codex, or another compatible shell-enabled chat agent, then say: **“Initialize this research wiki.”**
-- Run the interactive wizard: `researchwiki init`.
+Then say **“Open the dashboard.”**
 
-Both paths decide the storage layout before creating the wiki directories and dashboard, then configure the provider. The interactive wizard pauses without writing if you choose cross-device sync, so you can create the three durable directories in the synced location and link them into the checkout first. It creates or updates the root `.env` directly, prompts for credentials without terminal echo, and restricts the file to mode `0600`; you do not need to copy `.env.template` first. That template is for manual configuration and for creating named profiles. For non-interactive setup, `researchwiki init --scaffold-only` creates the directory and dashboard scaffold without configuring a provider or asking questions; decide the storage layout before invoking it. On an existing wiki, `researchwiki init --refresh-dashboard` adopts the current dashboard template and backs your copy up under `.ingest/`; nothing overwrites a dashboard unless you ask.
+## How it works
 
-Then run the local, free readiness check:
-
-```bash
-researchwiki doctor
-```
-
-It checks paths, dependencies, provider configuration, the state DB, search state, and the semantic-model cache without contacting the provider or downloading anything. `researchwiki doctor --probe` is an explicit one-call connectivity test and may spend tokens.
-
-No taxonomy is predefined, and you do not need to invent one before the first paper. New papers use `other/` until at least three PDFs are available. Then run `researchwiki bootstrap-categories` to preview and save a corpus-grounded proposal; after review, `researchwiki bootstrap-categories --apply` creates exactly those directories without a second model call. If `inbox/` changed, preview again. As the corpus grows, the agent suggests useful splits for review; nothing changes automatically.
-
-### First ingest
-
-Give the agent a PDF path and say **“Add this paper to my research wiki.”** The file can already be anywhere on disk; copying it into `inbox/` first is optional. When the promotion gates pass, the pipeline moves the PDF to its canonical name in `papers/`, writes a page in `wiki/{category}/`, adds supported reciprocal links, and updates indexes. Copy the source into `inbox/` first if you want to retain the original file at its current path.
-
-The direct CLI equivalent is:
-
-```bash
-researchwiki add /path/to/paper.pdf
-```
-
-Pass several paths to use the checkpointed batch workflow. Chat-relay agents with native subagents can instead supervise a bounded pool of single-paper ingests (see [Providers](#providers)). If your papers already live in Zotero, Paperpile, Mendeley, or ReadCube, use the [library import workflow](#import-and-export) instead.
-
-Check the reported outcome: “Paper added” means promotion succeeded; `.agent-output/` means a reviewable sandbox draft, not a published wiki page; “Already present” means the deposited file exactly matched an ingested canonical PDF and downstream authoring was skipped. Exact duplicate files in `inbox/` are moved automatically to the hidden, gitignored `.duplicate-pdfs/` archive outside the content trees. Each copy keeps its original filename in a unique directory and remains recoverable; inputs outside the inbox and file symlinks are preserved. The receipt reports the archive path. Automatic gate failures exit 1, while an intentional `--force-sandbox` review run exits 0. After every worker exits, run `researchwiki status`; inspect gate failures before retrying or overriding them. See [output and recovery](./WORKFLOW.md#reading-results-and-recovering-a-batch).
-
-## Providers
-
-Initialization configures the default provider, using the root `.env` for credentials and `config/models.yaml` when custom routing is needed. The root `.env` loads automatically; variables already exported by the parent shell take precedence.
-
-Use a named profile when you want several provider setups in one checkout. Unlike the optional root `.env`, an explicitly selected profile must already exist; this fail-closed behavior prevents a misspelled path from silently selecting another provider. The global `--env-file` option must come before the command:
-
-```bash
-cp .env.template .env.openai
-chmod 600 .env.openai
-researchwiki --env-file .env.openai init
-researchwiki --env-file .env.openai status
-```
-
-A named profile replaces rather than merges with the root `.env`; use the same `--env-file` option for every command that should use it, including resume. Batch workers inherit the resolved profile without reloading the root `.env`. Exported credentials may still supply its API key, but parent-shell routing variables are rejected. Put routing in the selected profile and do not `source` it as a shell script. Known providers reuse tracked `config/models.*.yaml` templates; custom OpenAI-compatible backends ask for an explicit writable config path.
-
-| Provider | Minimal setup |
+| You say | The agent does |
 | --- | --- |
-| **OpenAI** | Select OpenAI in `researchwiki init`; set `OPENAI_API_KEY`. |
-| **Anthropic** | Select Anthropic in `researchwiki init`; set `ANTHROPIC_API_KEY`. |
-| **Gemini** | Select Other OpenAI-compatible in `researchwiki init`; provide the Gemini endpoint, model IDs, and key. |
-| **Other OpenAI-compatible** | Select it in `researchwiki init`; provide the exact models, endpoint, and API key. |
-| **Local model** | Select Local LLM in `researchwiki init`; no API key is required. |
-| **Chat relay** | Select Chat-relay in `researchwiki init`; no API key or server is required. |
-
-API-based providers are called directly by each ingest subprocess. They need a
-provider endpoint and usually an API key, but they require no interactive chat
-agent: multi-paper ingest defaults to four concurrent workers, and each request
-returns to the subprocess that issued it.
-
-Chat-relay does not call a model API. It writes each model request under
-`.llm-relay/pending/` and waits for an active Codex, Claude Code, or compatible
-chat agent to write the matching response under `.llm-relay/completed/`. A
-multi-paper chat-relay batch therefore defaults to one worker and forwards
-requests from its own child processes to the parent terminal; full worker output
-stays in the batch's per-paper logs. Run it in the
-foreground — backgrounding hides those handoffs. Passing `-w N` explicitly permits concurrent
-relay requests, but the CLI creates only isolated ingest subprocesses—not `N`
-isolated chat contexts. When native subagents are available, the supervising chat
-agent should use one foreground single-PDF ingest per subagent and maintain a
-bounded rolling pool. See [the chat-relay protocol](./prompts/chat-relay.md).
-Batch resumes re-evaluate the active provider while preserving an explicit
-`-w N`. A relay timeout keeps its pending prompt. Answer it, then use the printed
-`agent ingest --resume <batch-dir>` command for a batch, or rerun the original
-command for a single-paper ingest. Recovery restarts unfinished papers from the
-top, not from the phase that timed out; consumed responses are not retained.
-The responder records its actual model in `via`, not the configured `model_hint`.
-
-`RW_MODELS_CONFIG` selects a model config without defeating its per-role routing; `RW_LLM_PROVIDER` globally overrides every role and should normally remain unset. Keep credentials in mode-`0600` dotenv files and use only endpoints you trust. Model roles, endpoint precedence, profile isolation, local setup, and provider-specific caveats are documented in [Provider setup in depth](./WORKFLOW.md#provider-setup-in-depth).
+| “Open the dashboard.” | Starts or reuses the local server and opens the browser workspace. |
+| “Ingest everything in the inbox.” | Processes the PDFs, verifies the pages, and reports outcomes and remaining work. |
+| “What does the wiki have on sequence-to-expression models?” | Searches the library, reads relevant pages, and answers from the available evidence. |
+| “Should these pangenome papers become a synthesis?” | Reviews coverage and recommends a cross-paper analysis; writes it when asked. |
+| “File this design as an idea.” | Creates an idea page with cited background and clearly marked model assumptions. |
+| “What related papers am I missing?” | Finds literature leads; new evidence still requires an ingested PDF. |
+| “Check the library and fix incomplete indexing.” | Inspects workflow state and repairs local derived state. |
 
 ## Organizing and browsing the wiki
 
-For a standalone browser workspace, run `researchwiki dashboard --serve --open`.
-It offers full-text search, combined category/type/year/status filters, table
-and card layouts, saved pages, an in-browser Markdown reader, source-PDF links,
-backlinks, an inbox, and metadata checks. New ingests appear automatically.
-Live keyword search reuses the CLI's Tantivy index and query syntax. The offline
-HTML file embeds MIT-licensed MiniSearch 7.2.0 for relevance-ranked search,
-prefix matching, quoted phrases, and conservative typo tolerance. If live search
-is unavailable, the browser can search its loaded library with MiniSearch.
-The server binds to localhost and leaves wiki content unchanged. Ask your chat
-agent to manage it using `dashboard --status --json`, `--serve --session LABEL`,
-and `--stop`; an optional `--owner-pid PID` ties its lifetime to a process supplied
-by the chat host. See [agent-managed dashboard](prompts/dashboard.md).
-The agent reconnects on session start/resume when a runtime receipt exists;
-an explicit stop removes that receipt.
+### Browser dashboard
 
-`researchwiki dashboard --open` instead generates a self-contained offline
-snapshot at `output/dashboard.html`; regenerate it after library changes.
-Bookmarks and theme preferences stay in your browser. Both modes work without
-Obsidian or Dataview. The HTML template ships in
-`researchwiki/templates/dashboard.html`.
+Ask the agent to **“Open the dashboard”** or **“Stop the dashboard server.”** The live dashboard runs on localhost, shows corpus totals and workflow queues, and refreshes after library changes. Search and combined category, page-type, year, and status filters help navigate the library. Table and card layouts, saved pages, backlinks, and source-PDF links support reading and exploration.
 
-Open the directory containing both `wiki/` and `papers/` as an [Obsidian](https://obsidian.md/) vault—normally the repository root—and start at `wiki/views.md`. This keeps each page's source-PDF link inside the vault. Enable the Dataview community plugin to render the dashboard's live tables; without it, every page remains ordinary readable Markdown.
+The reader offers adjustable text size and a font selector: Source Serif 4, SNUJaha with Korean support, or the system font. Bookmarks, theme, and reading preferences are saved in your browser.
 
-| Location | Purpose |
+For a portable snapshot, say **“Export an offline dashboard.”** The agent creates `output/dashboard.html` with the library, search, reader, and fonts embedded. Regenerate it after library changes. Source-PDF links still need the local PDFs alongside the export's relative paths.
+
+Server management details are in the [dashboard guide](./prompts/dashboard.md).
+
+### Obsidian
+
+You can also open the directory containing both `wiki/` and `papers/` as an [Obsidian](https://obsidian.md/) vault and start at `wiki/views.md`. Enable the Dataview community plugin for its live tables. Every wiki page remains readable as ordinary Markdown.
+
+### Library organization
+
+Categories emerge from your papers. The agent proposes an initial grouping when enough PDFs are available and suggests refinements as the corpus grows; category changes are reviewed before application.
+
+- `papers/` holds canonical source PDFs and supplementary files.
+- `wiki/` holds paper summaries, cross-paper syntheses, ideas, proposals, and reference documents.
+- `inbox/` holds PDFs awaiting processing.
+- `wiki/index.md` catalogs pages; `wiki/log.md` records ingestion and authoring history.
+
+Ask **“Suggest evidence-backed synthesis or idea topics”** to explore proposals, or **“Show the library graph”** to view connections. The agent records your proposal decisions so they can inform later work. Page contracts are documented in [CLAUDE.md](./CLAUDE.md).
+
+## Providers
+
+Choose a provider during initialization, or ask the agent to switch later. It manages the provider configuration and guides credential setup.
+
+| Provider | What you need |
 | --- | --- |
-| `output/dashboard.html` | Standalone browser dashboard and offline library reader |
-| `wiki/views.md` | Dashboard and default landing page |
-| `wiki/index.md` | Full catalog grouped by category |
-| `wiki/log.md` | Chronological ingest and authoring history |
-| `wiki/{category}/` | Paper and commentary pages |
-| `wiki/synthesis/` | Retrospective cross-paper analyses |
-| `wiki/ideas/` | Forward-looking, reviewable design proposals |
-| `wiki/proposals/` | Synced candidates and user-feedback history for future synthesis/idea pages |
-| `wiki/concepts/` | Legacy grounded concept hubs, when present |
-| `wiki/references/` | Guidance, protocols, whitepapers, and books |
+| **OpenAI or Anthropic** | An API key for the selected service. |
+| **Gemini or another OpenAI-compatible service** | The service endpoint, model names, and API key. |
+| **Local model** | A running compatible local model endpoint. |
+| **Chat relay** | An active supported chat agent to answer model requests; no separate model API key or server. |
 
-Paper pages are generated from PDFs. Commentary pages are explicitly attributed and carry no findings of their own. Synthesis and concept pages are strictly grounded; idea pages allow marked model priors only in their design sections. See [CLAUDE.md](./CLAUDE.md) for the full page contracts.
-
-Use `researchwiki proposals generate "<question>"` to preview up to three evidence-backed synthesis or idea candidates. Review the saved JSON receipt, then `researchwiki proposals accept <file> --select 1` saves that exact choice without regeneration. `--prepare-only` makes no model calls. `--target-category CAT --cross-category` searches other categories for transferable methods. `researchwiki proposals feedback` records decisions in Markdown so they sync and influence later runs. Other discovery commands include `researchwiki search`, `researchwiki neighbors`, `researchwiki candidates synthesis`, and `researchwiki claim-graph`. `researchwiki visualize` writes a self-contained interactive graph to `output/graph.html`.
+Cloud providers may charge for model calls. Chat-relay workflows need the connected agent while processing. You can use separate provider profiles and different models for different roles; ask the agent to configure them. Details are in [provider setup](./WORKFLOW.md#provider-setup-in-depth) and the [chat-relay guide](./prompts/chat-relay.md).
 
 ## Import and export
 
-For an existing Zotero, Paperpile, Mendeley, or ReadCube library, export BibTeX or RIS and ask the agent to import it. `researchwiki import` pairs records with PDFs, reports duplicates and extraction problems before spending tokens, and ingests in controlled waves. See the [import guide](./prompts/import-reference-manager.md).
+For Zotero, Paperpile, Mendeley, or ReadCube, export BibTeX or RIS and give the agent that file and the PDF directory. Say **“Import this library.”** It checks metadata, PDF matches, duplicates, and extraction problems before ingestion. See the [import guide](./prompts/import-reference-manager.md).
 
-Export options:
-
-```bash
-researchwiki export --format bibtex > refs.bib
-researchwiki export --format ris > refs.ris
-researchwiki export --format okf --out output/okf
-```
-
-Bibliography exports include published resources; OKF also carries synthesis, idea, proposal, and legacy concept pages as portable knowledge. See the [export guide](./prompts/export-bibliography.md).
+Ask **“Export my bibliography as BibTeX”** or **“Export it as RIS”** for reference-manager formats. An Open Knowledge Format (OKF) export also carries synthesis, idea, proposal, and legacy concept pages. See the [export guide](./prompts/export-bibliography.md).
 
 ## Sync across computers
 
-The durable library consists of three directories:
+Tell the agent which sync service and folder to use before initialization. It keeps the checkout and virtual environment outside that folder and links the three durable directories—`wiki/`, `papers/`, and `inbox/`—into the checkout.
 
-- `wiki/` — pages, dashboard, index, and log
-- `papers/` — canonical PDFs and supplementary files
-- `inbox/` — the ingest backlog
+On an additional computer, open a separate checkout and ask **“Connect this checkout to my existing synced library.”** The agent configures that machine's provider, links the content directories, and rebuilds local state after syncing finishes. Databases, search indexes, caches, credentials, and processing telemetry stay machine-local.
 
-> **Tip:** keep the Git checkout outside your synced folder. Put these three directories under iCloud, Dropbox, Drive, Syncthing, or a similar service, then symlink them into the checkout.
-
-For a new installation, follow the [Install](#install) steps through virtual-environment activation. Before initialization, link the empty content directories into that checkout:
-
-```bash
-SYNC="$HOME/<your-synced-folder>/research-wiki"
-mkdir -p "$SYNC"/{wiki,papers,inbox}
-for d in wiki papers inbox; do ln -s "$SYNC/$d" "$d"; done
-
-researchwiki init
-```
-
-This keeps `.git/`, virtual environments, SQLite, and derived indexes out of the sync service. Open `$SYNC` as the Obsidian vault so its sibling `wiki/` and `papers/` directories—and therefore PDF links—remain inside the vault.
-
-On each additional computer:
-
-1. Clone the same Git revision and follow the [Install](#install) steps.
-2. Create a machine-local dotenv profile (`.env` or `.env.NAME`) with its credentials and model routing.
-3. Link the same three synced directories.
-4. Wait for sync to finish, then rebuild local derived state:
-
-```bash
-researchwiki db rebuild
-researchwiki reindex
-researchwiki grade regression --missing-only
-```
-
-Do **not** sync the state DB or cache/index directories. Avoid ingesting or editing on two computers simultaneously, and wait for file sync to settle before switching machines. Knowledge converges from Markdown and PDFs; ingest telemetry and cost history remain machine-local. See the [migration and sync guide](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder) for existing libraries and no-symlink setups.
-
-## Application integration
-
-`researchwiki.operations.ingest(request, event_sink=...)` runs the same single-PDF
-operation as `add` and `agent ingest`, returning a versioned `IngestResult`.
-Construct requests with `IngestRequest` and `IngestOptions`; wire values round-trip
-through `to_dict()` / `from_dict()`. Results distinguish publication, reviewable
-drafts, failed attempts, check outcomes, and incomplete post-processing.
-
-Run it in a process already configured for the request's absolute `library_root`
-and provider profile. It validates that selection without changing CWD or loading
-a different environment. Use separate processes for different libraries/profiles.
-API and chat-relay routing remain phase-configured; relay handoffs stay visible
-and still need a connected responder. An event callback receives `IngestEvent`
-objects containing lifecycle and model/relay progress without paper prose or
-credentials. Events use schema version 2; readers also accept version 1 model
-events. Requests and terminal results remain at version 1. Phase events identify
-each invocation and parallel draft slot. `publication_committed` is emitted only
-after the canonical file transaction commits.
-
-The operation performs no automatic retry. Uncertain publication requires
-reconciliation; an optional-hook failure preserves a successful publication.
-Projection status is `current` only when database repair, keyword/semantic
-indexing, and required claim-grade persistence report completion. A saved paper
-with unfinished maintenance reports `maintenance_pending`. Unobserved existing
-papers still report `unknown`. After a known commit, an interrupted maintenance
-step returns a published result with repair guidance rather than a retryable CLI
-ingest failure. The local jobs layer below can explicitly reconcile publication
-after worker loss without repeating authoring.
-
-`researchwiki.jobs.JobSupervisor` adds durable local submission, isolated worker
-startup, status/events, queued cancellation, and explicit retry. Submission is
-idempotent by library, request ID, and request fingerprint. Each worker selects
-its own library/profile; the supervisor does not switch the application's CWD
-or provider environment. Records live outside the checkout in the existing
-per-library runtime location, independently of the rebuildable database.
-`RESEARCHWIKI_JOBS_ROOT` selects an alternate base, still namespaced per library.
-
-Use `submit_ingest(request)`, `start_job(job_id)`, and `get_job(job_id)` on the
-supervisor. `read_events()` and `pending_relays()` expose progress and exact
-active handoffs. `wait(handle)` blocks; relay work still needs a connected
-responder while the process waits. Terminal stderr handoffs remain visible.
-No daemon or automatic retry is installed. `cancel_queued_job()` prevents work
-only before the worker claims it. `retry_job()` creates a new job for finished,
-known-unpublished work; source/configuration changes are recorded.
-
-`refresh_job()` detects lost ownership using the worker's OS lock, rather than
-PID liveness alone. Worker loss leaves publication unknown and retry blocked.
-Call `reconcile_job(job_id)` to inspect durable publication evidence and recover
-mutation journals in an isolated library/profile process. A confirmed rollback
-or pre-publication stop permits an explicit fresh retry. A confirmed commit
-preserves publication and repairs the database, indexes, and claim grades;
-unavailable maintenance remains pending. Missing/unsupported evidence stays
-unknown. Events and matching filenames never establish publication. Recovery
-does not repeat provider calls, answer relay prompts, run optional model hooks,
-or overwrite changed canonical content.
-
-The Community CLI exposes the same controls:
-
-```bash
-researchwiki jobs submit inbox/paper.pdf --library-root "$PWD" --request-id paper-001 --json
-researchwiki jobs run JOB_ID --library-root "$PWD" --json
-researchwiki jobs show JOB_ID --library-root "$PWD" --json
-researchwiki jobs reconcile JOB_ID --library-root "$PWD" --json
-```
-
-`submit` and `retry` only enqueue; `run` owns a foreground worker with visible
-relay handoffs. `list`, `show`, and cursor-based `events` inspect durable state;
-`cancel` applies only to queued work. Explicit library selection works from
-outside the checkout, and profiles load only in workers. See the
-[job command guide](./docs/jobs.md) for request/options files, profiles, JSON,
-exit codes, and recovery behavior.
-
-## Explicit evidence selections
-
-Search, claims, PDF lookup, synthesis scaffolding, and bibliography export accept
-`--scope-file selection.json` to restrict evidence before ranking and model context
-construction. Empty selections remain empty; unscoped operations retain their
-existing behavior. Applications can supply versioned selections without adding a
-project database or commercial dependency to the engine. See the
-[evidence-scope guide](./docs/evidence-scopes.md).
-
-Research Q&A is handled by the chat agent using the existing search, claims, and
-PDF-reading tools, following the grounding rules in [CLAUDE.md](./CLAUDE.md).
-
-`researchwiki compose "question" --title "Title" --scope-file selection.json`
-authors a complete theme-based synthesis with mandatory page and support checks.
-Preview first; `publish-synthesis` explicitly journals a verified receipt into
-the wiki. See the [synthesis authoring guide](./docs/synthesis-authoring.md).
+Wait for file sync to settle before switching computers, and avoid ingesting or editing on two computers simultaneously. The [migration and sync guide](./prompts/migration-backfill.md#keep-the-checkout-out-of-the-synced-folder) covers existing libraries and systems without symlinks.
 
 ## Data, privacy, and validation
 
-Git tracks the framework: `researchwiki/`, `prompts/`, config templates, tests, and documentation. Your `wiki/`, `papers/`, `inbox/`, dotenv profiles, active/custom model configs, databases, and caches are gitignored.
+Git tracks the framework, prompts, configuration templates, tests, and documentation. Your PDFs, wiki pages, inbox, credentials, active model configurations, databases, and caches are gitignored. Back up the durable library independently of Git.
 
-Cloud-backed model workflows may send prompts, extracted PDF text, and wiki content to the configured provider. Use a local model to keep those calls on your machine. See [SECURITY.md](./SECURITY.md) for the complete data-flow surface.
+Cloud-backed workflows may send prompts, extracted PDF text, and wiki content to your configured provider. A local model keeps those model calls on your machine. See [SECURITY.md](./SECURITY.md) for the complete data flow.
 
-For contribution and test guidance, see [CONTRIBUTING.md](./CONTRIBUTING.md).
-The [beta compatibility contract](./COMPATIBILITY.md) defines deprecation and
-persisted-data migration guarantees. For the complete CLI walkthrough and
-recovery procedures, see [WORKFLOW.md](./WORKFLOW.md).
+## Further documentation
+
+- [WORKFLOW.md](./WORKFLOW.md): technical workflows, command reference, costs, and recovery procedures.
+- [Application integration](./docs/application-integration.md): ingestion APIs, local jobs, and evidence selections for developers.
+- [Verified synthesis authoring](./docs/synthesis-authoring.md): composing and publishing cross-paper analyses.
+- [CONTRIBUTING.md](./CONTRIBUTING.md): development and test guidance.
+- [COMPATIBILITY.md](./COMPATIBILITY.md): deprecation and persisted-data migration guarantees.
 
 ## License
 
-The framework is licensed under [PolyForm Noncommercial 1.0.0](./LICENSE), which permits noncommercial use, modification, and redistribution. Commercial use requires a separate license from the copyright holder. Copies previously distributed under MIT retain their MIT permissions.
+The framework is licensed under [PolyForm Noncommercial 1.0.0](./LICENSE), permitting noncommercial use, modification, and redistribution. Commercial use requires a separate license from the copyright holder. Copies previously distributed under MIT retain their MIT permissions.
 
-PDFs under `benchmark-fixtures/pdfs/` are redistributed under CC-BY-4.0 with attribution in [`benchmark-fixtures/LICENSES.md`](./benchmark-fixtures/LICENSES.md). Your own PDFs remain under their original terms and are never included in the repository.
+Bundled Source Serif 4 and SNUJaha fonts use SIL Open Font License 1.1; their notices are included in [the font assets](./researchwiki/templates/fonts/README.md).
 
-The [example visual inspection dataset](./benchmark-fixtures/visual-inspection/README.md)
-is likewise CC-BY-4.0, with source attribution and image-modification records in
-[its license ledger](./benchmark-fixtures/visual-inspection/LICENSES.md).
+[Benchmark PDFs](./benchmark-fixtures/LICENSES.md) and the [visual inspection dataset](./benchmark-fixtures/visual-inspection/LICENSES.md) use CC-BY-4.0 with attribution. Your own PDFs retain their original terms and are not included in the repository.
 
 ## Inspiration
 
