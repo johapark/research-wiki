@@ -20,6 +20,12 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-19
+
+This release introduces the standalone browser dashboard. The minor version bump
+marks the new browsing interface; existing commands and library formats remain
+supported.
+
 ### Added
 
 - SNUJaha 0.2.2 is available in the reader font selector, with full Korean
@@ -2818,7 +2824,8 @@ the reasoning behind any line below.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/johapark/research-wiki/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/johapark/research-wiki/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/johapark/research-wiki/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/johapark/research-wiki/compare/v0.5.2...v0.5.3
