@@ -31,6 +31,20 @@ Tell the agent: **“Initialize this research wiki.”** It checks the installat
 
 The agent contract is in [CLAUDE.md](./CLAUDE.md), also loaded through the `AGENTS.md` symlink. Detailed setup steps are in the [initialization guide](./prompts/init.md).
 
+### Recommended add-ons
+
+Both are optional; the standalone dashboard works in your usual browser.
+
+#### Obsidian
+
+You can also open the directory containing both `wiki/` and `papers/` as an [Obsidian](https://obsidian.md/) vault and start at `wiki/views.md`. Enable the Dataview community plugin for its live tables. Every wiki page remains readable as ordinary Markdown.
+
+#### ego-browser
+
+[ego-browser (ego lite)](https://lite.ego.app/) supports shared browsing with your chat agent. It is particularly useful for literature scouting: a compatible agent can navigate publisher pages, download accessible PDFs through the browser interface, and place them in `inbox/` for ingestion. It also lets the agent open, navigate, and inspect the dashboard.
+
+Say **“Help me set up ego-browser for this wiki.”** The agent guides installation; you complete the browser's first-run onboarding.
+
 ### Add your first paper
 
 Give the agent a PDF path and say **“Add this paper to my research wiki.”** For a batch, place PDFs in `inbox/` and say **“Ingest everything in the inbox.”** If you want the original file to stay at its current location, ask the agent to copy it into the inbox first.
@@ -62,10 +76,6 @@ The reader offers adjustable text size and a font selector: Source Serif 4, SNUJ
 For a portable snapshot, say **“Export an offline dashboard.”** The agent creates `output/dashboard.html` with the library, search, reader, and fonts embedded. Regenerate it after library changes. Source-PDF links still need the local PDFs alongside the export's relative paths.
 
 Server management details are in the [dashboard guide](./prompts/dashboard.md).
-
-### Obsidian
-
-You can also open the directory containing both `wiki/` and `papers/` as an [Obsidian](https://obsidian.md/) vault and start at `wiki/views.md`. Enable the Dataview community plugin for its live tables. Every wiki page remains readable as ordinary Markdown.
 
 ### Library organization
 

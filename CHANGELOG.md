@@ -20,6 +20,12 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Changed
+
+- README groups Obsidian and ego-browser as optional recommended add-ons after
+  installation, with Obsidian first. Ego-browser supports literature scouting,
+  browser-based PDF downloads, and shared dashboard navigation with the agent.
+
 ## [0.7.0] - 2026-11-19
 
 This release introduces the standalone browser dashboard. The minor version bump
