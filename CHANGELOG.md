@@ -22,6 +22,9 @@ the reasoning behind any line below.
 
 ### Added
 
+- SNUJaha 0.2.2 is available in the reader font selector, with full Korean
+  coverage and regular, semibold, bold, and italic faces. Self-hosted WOFF2 files
+  and offline exports retain its SIL OFL 1.1 license and upstream notices.
 - `researchwiki dashboard` exports a self-contained browser dashboard and
   library reader; `--serve` runs a live localhost version. Corpus totals,
   combined filters, table/card layouts, bookmarks, backlinks, and PDF/Obsidian
@@ -34,6 +37,24 @@ the reasoning behind any line below.
 - Agent-managed dashboard health, reuse, and authenticated shutdown through
   `--status`, `--session`, and `--stop`, with optional `--owner-pid` shutdown
   when a session-lifetime process exits. Live content refreshes automatically.
+
+### Changed
+
+- Dashboard sidebar footer shows the application release version next to the
+  repository name.
+- Larger default dashboard text for navigation, library rows, filters, and
+  metadata; reader body text starts at 16px and retains saved zoom preferences.
+- Reader popup fills the viewport vertically with an 8px gap at the top and
+  bottom on desktop and mobile.
+- Wiki reader titles and main section headings use semibold weight with
+  slightly smaller default sizes.
+- Reader metadata shows authors, publication details, and DOI before corpus
+  dates and status.
+- Reader font selection defaults to Source Serif 4 for wiki text, with a system
+  font alternative. The table of contents and controls use the system font;
+  saved Georgia preferences migrate to Source Serif 4. Source Serif 4 is bundled
+  under SIL OFL 1.1 and embedded in offline exports; font preferences are saved
+  locally.
 
 ## [0.6.1] - 2026-11-11
 

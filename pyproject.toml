@@ -121,6 +121,9 @@ researchwiki = [
     "templates/vendor/*.js",
     "templates/vendor/*.txt",
     "templates/vendor/*.md",
+    "templates/fonts/*.woff2",
+    "templates/fonts/*.md",
+    "templates/fonts/*.txt",
 ]
 
 [tool.pytest.ini_options]

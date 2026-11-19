@@ -10,11 +10,12 @@ import hashlib
 import json
 import secrets
 import threading
+from importlib import resources
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from .dashboard import build_dashboard, render_html
+from .dashboard import FONT_FILES, build_dashboard, render_html
 from .paths import inbox_dir, papers_dir, wiki_dir
 from .dashboard_runtime import repository_id
 
@@ -89,6 +90,10 @@ def make_server(port: int, vault: str | None = None) -> ThreadingHTTPServer:
                 self.send_error(500, str(exc))
 
         def _get(self, path: str) -> None:
+            if path in {"/assets/fonts/" + filename for filename in FONT_FILES}:
+                font = resources.files("researchwiki").joinpath("templates/fonts", path.rsplit("/", 1)[-1])
+                self._send(font.read_bytes(), "font/woff2")
+                return
             if path == "/api/health":
                 self._send(json.dumps(identity).encode(), "application/json")
                 return

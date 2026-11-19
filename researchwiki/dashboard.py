@@ -7,6 +7,7 @@ dates and added dates remain separate; missing stamps never become file mtimes.
 from __future__ import annotations
 
 import datetime as dt
+import base64
 import json
 import os
 import re
@@ -15,11 +16,26 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
+from . import __version__
 from .paths import inbox_dir, papers_dir, wiki_dir, wiki_root
 from .wiki import Page, read_pages
 
 REFERENCE_TYPES = frozenset({"guidance", "protocol", "whitepaper", "book"})
 BOOKKEEPING_TYPES = frozenset({"meta", "dashboard"})
+# filename, CSS family, style, weight (variable range or static face).
+FONT_FACES = (
+    ("SourceSerif4Variable-Roman.ttf.woff2", "Source Serif 4", "normal", "200 900"),
+    ("SourceSerif4Variable-Italic.ttf.woff2", "Source Serif 4", "italic", "200 900"),
+    ("SNUJaha-Regular.woff2", "SNU Jaha", "normal", "400"),
+    ("SNUJaha-RegularItalic.woff2", "SNU Jaha", "italic", "400"),
+    ("SNUJaha-SemiBold.woff2", "SNU Jaha", "normal", "600"),
+    ("SNUJaha-SemiBoldItalic.woff2", "SNU Jaha", "italic", "600"),
+    ("SNUJaha-Bold.woff2", "SNU Jaha", "normal", "700"),
+    ("SNUJaha-BoldItalic.woff2", "SNU Jaha", "italic", "700"),
+)
+FONT_FILES = tuple(face[0] for face in FONT_FACES)
+FONT_LICENSES = ("LICENSE.md", "SNUJaha-LICENSE.txt",
+                 "SNUJaha-LICENSE-RIDIBatang.txt", "SNUJaha-LICENSE-RobotoSerif.txt")
 _LINK = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
 
 
@@ -115,12 +131,29 @@ def build_dashboard(*, out: Path | None = None, live: bool = False,
     types = Counter(row["type"] for row in rows)
     return {
         "meta": {"name": "Research Wiki", "repository": wiki_root().name,
+                 "version": __version__,
                  "generated_at": dt.datetime.now().astimezone().isoformat(),
                  "live": live, "categories": dict(sorted(categories.items())),
                  "types": dict(sorted(types.items())), "n_pages": len(rows),
                  "n_pdfs": sum(bool(r["pdf_url"]) for r in rows)},
         "pages": rows, "inbox": inbox,
     }
+
+
+def _font_css(live: bool) -> str:
+    fonts = resources.files("researchwiki").joinpath("templates/fonts")
+    faces = ["/* " + name + "\n" + fonts.joinpath(name).read_text(encoding="utf-8")
+             + "\n*/" for name in FONT_LICENSES]
+    for filename, family, style, weight in FONT_FACES:
+        if live:
+            source = "/assets/fonts/" + filename
+        else:
+            encoded = base64.b64encode(fonts.joinpath(filename).read_bytes()).decode("ascii")
+            source = "data:font/woff2;base64," + encoded
+        faces.append("@font-face{font-family:'" + family + "';src:url('" + source
+                     + "') format('woff2');font-style:" + style
+                     + ";font-weight:" + weight + ";font-display:swap;}")
+    return "\n".join(faces)
 
 
 def render_html(data: dict) -> str:
@@ -131,4 +164,6 @@ def render_html(data: dict) -> str:
     # JSON lives in an inert script element. Escape '<' so corpus text cannot
     # close that element or inject HTML, including </script> in a quoted title.
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
-    return template.replace("__MINISEARCH_SOURCE__", engine).replace("__DASHBOARD_SEARCH__", search).replace("__DASHBOARD_DATA__", payload)
+    return (template.replace("__FONT_FACES__", _font_css(bool(data.get("meta", {}).get("live"))))
+            .replace("__MINISEARCH_SOURCE__", engine).replace("__DASHBOARD_SEARCH__", search)
+            .replace("__DASHBOARD_DATA__", payload))

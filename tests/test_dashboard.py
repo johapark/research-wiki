@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import os
 import subprocess
 import sys
@@ -88,6 +89,28 @@ def test_corpus_html_cannot_escape_embedded_json(library):
     assert any(r["title"].startswith("</script>") for r in json.loads(payload)["pages"])
 
 
+def test_reader_fonts_are_embedded_offline_and_local_when_live(library):
+    offline = dashboard.render_html(dashboard.build_dashboard())
+    assert "SIL OPEN FONT LICENSE Version 1.1" in offline
+    assert "__FONT_FACES__" not in offline
+    for source in offline.split("data:font/woff2;base64,")[1:]:
+        assert base64.b64decode(source.split("'", 1)[0]).startswith(b"wOF2")
+    assert offline.count("data:font/woff2;base64,") == len(dashboard.FONT_FILES)
+    live = dashboard.render_html(dashboard.build_dashboard(live=True))
+    assert "data:font/woff2;base64," not in live
+    assert all("/assets/fonts/" + filename in live for filename in dashboard.FONT_FILES)
+    for name in dashboard.FONT_LICENSES:
+        notice = Path(dashboard.__file__).parent.joinpath("templates/fonts", name).read_text(encoding="utf-8")
+        assert notice in offline and notice in live
+    # Static faces must resolve headings, bold emphasis, and genuine italics.
+    for weight in ("400", "600", "700"):
+        for style in ("normal", "italic"):
+            assert any("font-family:'SNU Jaha'" in face
+                       and "font-style:" + style + ";" in face
+                       and "font-weight:" + weight + ";" in face
+                       for face in live.split("@font-face"))
+
+
 def test_malformed_type_stays_visible(library):
     page(library, "cgt/malformed", type=["paper"], title="Bad type")
     record = next(r for r in dashboard.build_dashboard()["pages"] if r["stem"] == "malformed")
@@ -151,6 +174,14 @@ def test_local_http_health_refresh_and_authenticated_shutdown(library):
     try:
         with urlopen(base + "/api/health", timeout=3) as response:
             assert json.load(response) == server.dashboard_identity
+        for filename in dashboard.FONT_FILES:
+            with urlopen(base + "/assets/fonts/" + filename, timeout=3) as response:
+                assert response.headers["Content-Type"] == "font/woff2"
+                assert response.read().startswith(b"wOF2")
+        for filename in dashboard.FONT_LICENSES:
+            with pytest.raises(HTTPError) as blocked_font:
+                urlopen(base + "/assets/fonts/" + filename, timeout=3)
+            assert blocked_font.value.code == 404
         with urlopen(base + "/api/dashboard", timeout=3) as response:
             data = json.load(response)
             etag = response.headers["ETag"]
