@@ -19,6 +19,10 @@ import threading
 from ..log import log
 
 _ENV = "_RESEARCHWIKI_EMBEDDING_FD"
+#: Seconds to let a slot's encoder exit on its own at each teardown step before
+#: escalating. Short: the server exits as soon as its control pipe is closed, so
+#: anything longer is a process that is wedged or mid-download.
+_SHUTDOWN_GRACE = 5
 _slot = threading.local()
 _fd = os.environ.pop(_ENV, None)
 _client = Connection(int(_fd)) if _fd is not None else None
@@ -36,7 +40,20 @@ class EncoderSlot:
         if self.control is not None:
             self.control.close()
         if self.process is not None:
-            self.process.wait()
+            # Closing `control` only reaches the server when it next returns to
+            # `recv_handle`; it does not interrupt work already in flight. An
+            # unbounded `wait()` therefore blocked teardown behind whatever the
+            # encoder was doing — in the worst case a first-use model download —
+            # so a Ctrl-C looked like a hang after every paper was terminal.
+            try:
+                self.process.wait(timeout=_SHUTDOWN_GRACE)
+            except subprocess.TimeoutExpired:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=_SHUTDOWN_GRACE)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait()
         self.control = self.process = None
 
     @contextmanager
