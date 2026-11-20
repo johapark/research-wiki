@@ -41,6 +41,11 @@ the reasoning behind any line below.
   topical `tags:` directly after its title instead of last. Appended last they
   fell past the embedder's 512-token cutoff on 18 of 38 synthesis pages, so the
   only keyword-like field those page types have was mostly not embedded at all.
+  **Run `researchwiki reindex` after upgrading.** Nothing marks the existing
+  index stale: `status`'s semantic-staleness signal is the `pages.stale`
+  sentinel, which only `mark_stale()` writes, and incremental `upsert_pages`
+  re-examines only the pages it is handed. Without a full reindex the corpus
+  keeps its pre-change vectors while `status` reports the index healthy.
 - The synthesis authoring procedure asks for premises to be stated as their own
   cited sentences rather than inside the question, for `Short answer` to carry
   4–6 cited bullets sized so a reader could repeat one (~300 characters each),
@@ -51,6 +56,24 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- A scoped EVOLVE repair now carries its JSON envelope in the system prompt as
+  well as in `schema=`. Only chat-relay enforces `schema`; Anthropic and
+  OpenAI-compatible routes ignore it, so the full-page author contract in the
+  same call won, the model replied in Markdown, `SectionRepair.apply` rejected
+  it and the repair fell back to the unchanged parent draft. On those providers
+  every scoped repair was a billed call that left the critical target-claim miss
+  in place and sent the paper to review. A custom `--system-prompt` override
+  still survives, as the envelope is appended rather than substituted.
+- A batch worker's encoder slot no longer blocks teardown indefinitely. Closing
+  the control pipe only reaches the encoder when it returns to `recv_handle`, so
+  an unbounded `wait()` waited behind work in flight — in the worst case a
+  first-use model download, which made a Ctrl-C look like a hang after every
+  paper was already terminal. Teardown now waits briefly, then escalates to
+  `terminate()` and `kill()`.
+- The critic's `REPAIR_SCOPE:` control line no longer leaks into the revision
+  notes. The critic prompt invites a bare `REPAIR_SCOPE: FULL_PAGE` when it
+  judges no gap worth editing, but the trailer was stripped only when something
+  preceded it, so that reply reached the author as its only critic note.
 - `check-grounding` and `grade synthesis` no longer exempt an entire paragraph
   because it ends in `?`. Only question sentences are skipped; declarative
   sentences beside one are graded like any other prose, so a result stated next
