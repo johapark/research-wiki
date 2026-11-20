@@ -106,7 +106,7 @@ def test_concurrent_source_edit_cannot_receive_old_grades(tmp_path, monkeypatch,
     pdf.parent.mkdir()
     pdf.write_bytes(b"old PDF")
     rebuild()
-    monkeypatch.setattr(paper, "build_pdf_index", lambda *a, **kw: None)
+    monkeypatch.setattr(paper, "open_pdf_reader", lambda *a, **kw: None)
     monkeypatch.setattr(paper, "extract_pdf", lambda *a, **kw: ("old PDF", 1))
     def score(stem, claim, *args, **kwargs):
         if edit == "page":
@@ -250,3 +250,33 @@ def test_crash_while_removing_the_old_index_leaves_a_clean_miss(tmp_path, monkey
     hits = pdf_chunks.query_pdf("example", "alpha")
     assert hits and "Alpha" in hits[0].text
     assert len(builds) >= 2
+
+
+def test_grade_reader_pins_incoming_index_and_vectors_across_replacement(tmp_path, monkeypatch):
+    import numpy as np
+    from researchwiki.index import embeddings
+
+    monkeypatch.chdir(tmp_path)
+    canonical = tmp_path / "papers/example.pdf"
+    canonical.parent.mkdir()
+    canonical.write_text("Canonical evidence")
+    incoming = tmp_path / "incoming.pdf"
+    incoming.write_text("Incoming evidence")
+    monkeypatch.setattr(pdf_chunks, "extract_pdf_page_texts", lambda p, **kw: [p.read_text()])
+    monkeypatch.setattr(embeddings, "embed_texts", lambda texts: np.array(
+        [[1., 0.] if "Incoming" in t else [0., 1.] for t in texts], dtype=np.float32))
+    pdf_chunks.build_pdf_index("example", pdf_path=incoming)
+    calls = []
+    original = pdf_chunks._open_searcher
+    def counted(path):
+        calls.append(path)
+        return original(path)
+    monkeypatch.setattr(pdf_chunks, "_open_searcher", counted)
+    reader = pdf_chunks.open_pdf_reader("example", pdf_path=incoming, semantic=True)
+    for _ in range(2):
+        assert reader.query("evidence")[0].text == "Incoming evidence"
+    assert len(calls) == 1
+    assert pdf_chunks.query_pdf("example", "evidence", pdf_path=canonical)[0].text == "Canonical evidence"
+    assert reader.query("evidence")[0].text == "Incoming evidence"
+    assert reader.embeddings_for(["Incoming evidence"]).tolist() == [[1., 0.]]
+    assert reader.embeddings_for(["Canonical evidence"]) is None

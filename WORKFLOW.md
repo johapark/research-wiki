@@ -245,6 +245,9 @@ API-backed providers — and `--stub`, which reaches no provider at all — defa
 to four parallel workers; chat-relay defaults to one visible worker because it
 needs an active conversational responder. Tune either with `-w N`. Every
 completion is recorded atomically under `.ingest/batch-<ts>/checkpoint.json`.
+When there are more inputs than workers, semantic agent ingests on POSIX keep
+one CPU embedding model per worker slot. Each PDF runs in its own process with
+a separate database connection, budget, event recorder and encoder pipe.
 Resume skips recorded completions and restarts unfinished or retryable papers
 from the beginning; there is no per-phase checkpoint. New batches record a
 versioned identity in `plan.json`: PDF and supplementary hashes, author-prompt
@@ -1313,6 +1316,12 @@ up. Not everything outside `wiki/` is disposable.
   until refreshed. Both directories are gitignored.
 - **`.grade-cache/{stem}/`** is per-paper PDF chunk index + embeddings.
   Gitignored. Built lazily on first grade call per paper.
+- **`.ingest/target-claims/`** stores successful API target-claim responses.
+  A retry with the same PDF bytes, rendered prompt, schema, model configuration,
+  endpoint and visual inventory reuses the extraction. The target-claims trace
+  records `cached` and zero tokens. Set `RW_FRESH_TARGET_CLAIMS=1` on an ingest
+  to request a new extraction and replace the entry on success. Chat relay uses
+  its existing `RW_RELAY_FRESH` setting.
 - **`.s2-cache/`, `.crossref-cache/`, `.web-cache/`** are external-API
   responses. Gitignored. Built lazily. `.web-cache/search/` holds `scout
   search` responses (re-queried after `--max-age-days`), its first-seen ledger,

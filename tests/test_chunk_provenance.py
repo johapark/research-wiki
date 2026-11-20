@@ -290,7 +290,7 @@ def test_claim_score_carries_provenance(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "wiki_root", lambda: tmp_path)
     monkeypatch.setattr(pc, "grade_cache_dir", lambda: tmp_path / ".grade-cache")
     monkeypatch.setattr(fid, "resolve_pdf", lambda stem: FIXTURES / f"{STEM}.pdf")
-    pc.build_pdf_index(STEM, pdf_path=FIXTURES / f"{STEM}.pdf")
+    reader = pc.open_pdf_reader(STEM, pdf_path=FIXTURES / f"{STEM}.pdf")
 
     class _Claim:
         section = "results"
@@ -301,7 +301,7 @@ def test_claim_score_carries_provenance(tmp_path, monkeypatch):
     full_text = PAGE_SEPARATOR.join(
         extract_pdf_page_texts(FIXTURES / f"{STEM}.pdf", max_pages=pc.MAX_PDF_PAGES)
     )
-    score = fid._score_claim(STEM, _Claim(), full_text, use_semantic=False)
+    score = fid._score_claim(reader, _Claim(), full_text, use_semantic=False)
     assert score.graded
     assert score.supporting_text
     assert score.supporting_provenance, "top-1 chunk should carry a label"

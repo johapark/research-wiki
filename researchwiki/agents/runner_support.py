@@ -332,19 +332,20 @@ def phase_reconcile(ctx, conn):
 @observed_phase("extract")
 def phase_extract(ctx, conn):
     t0 = time.monotonic()
+    from ..fsatomic import file_sha256
+    ctx.source_pdf_sha256 = file_sha256(ctx.pdf_path)
     if getattr(ctx, 'visual_inspection', False):
-        from ..fsatomic import file_sha256
-        ctx.visual_source_hash = file_sha256(ctx.pdf_path)
+        ctx.visual_source_hash = ctx.source_pdf_sha256
         from .phases.extract import extract_source_pages
         from .visual_selection import build_inventory
         sections, full_text, ctx.source_pages = extract_source_pages(ctx.pdf_path)
-        if file_sha256(ctx.pdf_path) != ctx.visual_source_hash:
-            raise EnvironmentFailure("PDF changed during visual source extraction")
         from .visual_selection import visual_source_sections
         ctx.visual_source_sections, ctx.visual_results_source = visual_source_sections(full_text)
         ctx.visual_inventory = build_inventory(ctx.source_pages, ctx.visual_source_sections)
     else:
         sections, full_text = phases.extract_sections(ctx.pdf_path)
+    if file_sha256(ctx.pdf_path) != ctx.source_pdf_sha256:
+        raise EnvironmentFailure("PDF changed during source extraction")
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     from ..pdf.sections import assess_section_health
     health = assess_section_health(full_text, sections)
@@ -367,6 +368,7 @@ def phase_target_claims(ctx, conn):
     out = extract_target_claims(
         metadata=ctx.metadata or {}, sections=ctx.sections or {},
         pdf_full_text=ctx.pdf_full_text, use_stub=ctx.use_stub,
+        source_hash=ctx.source_pdf_sha256,
         **({"visual_inventory": ctx.visual_inventory} if getattr(ctx, "visual_inspection", False) else {}),
     )
     elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -377,8 +379,8 @@ def phase_target_claims(ctx, conn):
     else:
         critical = sum(claim.importance == "critical" for claim in out.claims)
         high = sum(claim.importance == "high" for claim in out.claims)
-        decision = "extracted"
-        reason = f"n={len(out.claims)} (critical={critical}, high={high}); elapsed={elapsed_ms}ms"
+        decision = "cached" if out.cache_hit else "extracted"
+        reason = f"{decision} n={len(out.claims)} (critical={critical}, high={high}); elapsed={elapsed_ms}ms"
     write_iteration(
         attempt_id=ctx.attempt_id, paper_stem=ctx.paper_stem,
         pdf_filename=ctx.pdf_filename, iteration=ctx.iteration, role="target_claims",
@@ -389,6 +391,7 @@ def phase_target_claims(ctx, conn):
         duration_ms=elapsed_ms,
         gate_metrics={
             "target_claims": len(out.claims),
+            "cache_hit": out.cache_hit,
             "keywords": len(getattr(out, "keywords", None) or []),
             "error": bool(out.error),
             "empty": out.is_empty(),

@@ -243,6 +243,12 @@ def build_pdf_index(
                 Pass an explicit path to grade a draft against a PDF that
                 lives elsewhere (e.g. still in inbox/).
     """
+    path, _ = _ensure_pdf_index(stem, force, pdf_path)
+    return path
+
+
+def _ensure_pdf_index(stem, force, pdf_path):
+    """Under the stem lock, return the path and any searcher opened to validate it."""
     target = _index_path_for(stem)
     src = Path(pdf_path) if pdf_path is not None else _source(stem)
     if not src.is_file():
@@ -251,9 +257,11 @@ def build_pdf_index(
     meta = _index_metadata(target)
     if (not force and meta.get("cache_version") == CACHE_VERSION
             and meta.get("source_pdf_sha256") == digest
-            and (target / ".managed.json").exists()
-            and _opens(target)):
-        return target
+            and (target / ".managed.json").exists()):
+        try:
+            return target, _open_searcher(target)
+        except Exception:
+            pass  # A missing or unreadable segment requires a fresh staged index.
     pdf_path = src
     pages = extract_pdf_page_texts(pdf_path, max_pages=MAX_PDF_PAGES)
     text = PAGE_SEPARATOR.join(pages)
@@ -295,27 +303,15 @@ def build_pdf_index(
             raise RuntimeError(f"PDF changed while indexing: {src}")
         _write_index_meta(idx_dir, src, digest)
         _swap_in(idx_dir, target)
-        return target
+        return target, None
     finally:
         shutil.rmtree(idx_dir, ignore_errors=True)
 
 
-def _opens(idx_dir: Path) -> bool:
-    """Can Tantivy open every segment the index lists? A missing one is a miss.
-
-    The markers say a build *finished*, not that its files are still there —
-    an index damaged by an earlier crash (or a hand-pruned cache) keeps them.
-    Opening a searcher reads each segment's files, so this is the cheapest check
-    that catches what would otherwise surface as a `FileDoesNotExist` on the
-    first query, with the stem broken until `--rebuild-index`.
-    """
-    try:
-        index = tantivy.Index.open(str(idx_dir))
-        index.reload()
-        index.searcher()
-        return True
-    except Exception:
-        return False
+def _open_searcher(idx_dir: Path):
+    index = tantivy.Index.open(str(idx_dir))
+    index.reload()
+    return index, index.searcher()
 
 
 # Moved to `index.types` so the page index can share it; both builders need the
@@ -350,9 +346,15 @@ def get_chunk_embeddings(
 
     `pdf_path` must match the one the index was built from (see `query_pdf`).
     """
+    try:
+        return _load_chunk_embeddings(build_pdf_index(stem, pdf_path=pdf_path))
+    except (OSError, RuntimeError):
+        return None
+
+
+def _load_chunk_embeddings(idx_dir: Path) -> tuple[np.ndarray, list[str]] | None:
     from . import embeddings as semantic
     try:
-        idx_dir = build_pdf_index(stem, pdf_path=pdf_path)
         loaded = load_bundle(idx_dir / "embeddings.npz", semantic.DEFAULT_MODEL, row_fields=("text",))
         if loaded is None:
             texts = _read_cached_chunk_texts(idx_dir)
@@ -409,7 +411,6 @@ def _neutralize_operators(query: str) -> str:
     return _BOOLEAN_PREFIX_RE.sub(r"\1", query)
 
 
-@_locked
 def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT,
               pdf_path: Path | str | None = None) -> list[RetrievedChunk]:
     """Run a BM25 query against the paper's chunk index. Returns top-k chunks.
@@ -420,40 +421,67 @@ def query_pdf(stem: str, query: str, topk: int = TOPK_DEFAULT,
     so a draft graded against an incoming PDF would be silently re-indexed
     from the old canonical one and retrieve from the wrong text.
     """
-    query = _neutralize_operators(query)
-    idx_dir = build_pdf_index(stem, pdf_path=pdf_path)
-    index = tantivy.Index.open(str(idx_dir))
-    index.reload()
-    searcher = index.searcher()
-    try:
-        parsed, _ = index.parse_query_lenient(query, ["text"])
-    except Exception:
-        # Final fallback: strip non-alphanumeric characters and lowercase, so
-        # reserved boolean operators (AND/OR/NOT) survive as ordinary terms
-        # rather than tripping the strict parser. Best-effort: an unparseable
-        # claim scores zero rather than aborting the grade phase.
-        cleaned = "".join(c if c.isalnum() or c.isspace() else " " for c in query).lower()
+    return open_pdf_reader(stem, pdf_path=pdf_path).query(query, topk)
+
+
+@dataclass
+class PdfChunkReader:
+    index: tantivy.Index
+    searcher: tantivy.Searcher
+    embeddings: np.ndarray | None
+    rows_by_text: dict[str, int]
+
+    def embeddings_for(self, texts: list[str]) -> np.ndarray | None:
+        if self.embeddings is None:
+            return None
         try:
-            parsed = index.parse_query(cleaned, ["text"])
+            rows = [self.rows_by_text[text] for text in texts]
+        except KeyError:
+            return None
+        return self.embeddings[rows]
+
+    def query(self, query: str, topk: int = TOPK_DEFAULT) -> list[RetrievedChunk]:
+        query = _neutralize_operators(query)
+        try:
+            parsed, _ = self.index.parse_query_lenient(query, ["text"])
         except Exception:
-            return []
-    res = searcher.search(parsed, limit=topk)
-    out: list[RetrievedChunk] = []
-    for score, addr in res.hits:
-        d = searcher.doc(addr).to_dict()
+            # Final fallback: strip non-alphanumeric characters and lowercase, so
+            # reserved boolean operators (AND/OR/NOT) survive as ordinary terms
+            # rather than tripping the strict parser. Best-effort: an unparseable
+            # claim scores zero rather than aborting the grade phase.
+            cleaned = "".join(c if c.isalnum() or c.isspace() else " " for c in query).lower()
+            try:
+                parsed = self.index.parse_query(cleaned, ["text"])
+            except Exception:
+                return []
+        res = self.searcher.search(parsed, limit=topk)
+        out: list[RetrievedChunk] = []
+        for score, addr in res.hits:
+            d = self.searcher.doc(addr).to_dict()
 
-        def _first(key, cast, document=d):
-            vals = document.get(key)
-            return cast(vals[0]) if vals else None
+            def _first(key, cast, document=d):
+                vals = document.get(key)
+                return cast(vals[0]) if vals else None
 
-        out.append(
-            RetrievedChunk(
-                chunk_id=int((d.get("chunk_id") or [0])[0]),
-                score=float(score),
-                text=(d.get("text") or [""])[0],
-                page_start=_first("page_start", int),
-                page_end=_first("page_end", int),
-                section=_first("section", str),
+            out.append(
+                RetrievedChunk(
+                    chunk_id=int((d.get("chunk_id") or [0])[0]),
+                    score=float(score),
+                    text=(d.get("text") or [""])[0],
+                    page_start=_first("page_start", int),
+                    page_end=_first("page_end", int),
+                    section=_first("section", str),
+                )
             )
-        )
-    return out
+        return out
+
+
+@_locked
+def open_pdf_reader(stem: str, pdf_path: Path | str | None = None, *,
+                    semantic: bool = False) -> PdfChunkReader:
+    """Snapshot the searcher and aligned vectors under the same source lock."""
+    idx_dir, opened = _ensure_pdf_index(stem, False, pdf_path)
+    index, searcher = opened or _open_searcher(idx_dir)
+    bundle = _load_chunk_embeddings(idx_dir) if semantic else None
+    vectors, texts = bundle if bundle is not None else (None, [])
+    return PdfChunkReader(index, searcher, vectors, {text: i for i, text in enumerate(texts)})
