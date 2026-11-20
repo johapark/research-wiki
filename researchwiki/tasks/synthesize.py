@@ -354,13 +354,17 @@ def main(argv: list[str]) -> int:
         log(f"wrote {out}  ({len(resolved)}/{len(args.papers)} paper(s) resolved)",
             tag="synthesize")
 
-    headline = f"synthesis: {args.title} → wiki/synthesis/{slug}.md"
+    # One kind and headline for every synthesis-page event (scaffold, landing,
+    # update, upgrade, publish-synthesis), so `grep '] synthesis | '` returns a
+    # page's whole history; the suffix names the event. Format table:
+    # prompts/synthesis-page-author.md § Log entries.
+    headline = f"{args.title} → synthesis/{slug} (scaffold)"
     details = (
         f"Referenced papers: {', '.join(r.split('/', 1)[1] for r in resolved) if resolved else '(none)'}."
     )
     if missing:
         details += f" Unresolved: {', '.join(missing)}."
-    append_log_md("synthesize", headline, details)
+    append_log_md("synthesis", headline, details)
 
     # Advisory grounding summary — synthesis stubs are skeletal at write time
     # (every section is a placeholder comment), so this report is

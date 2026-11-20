@@ -25,8 +25,8 @@ Every synthesis page has these H2 sections, with these exact names, in this orde
 
 | H2 | What it is for | Grounding |
 |---|---|---|
-| `## Question` | Scope. What the page covers, what it deliberately leaves out and why, and links to neighbouring synthesis pages that cover the excluded parts. One or two short paragraphs. | strict |
-| `## Short answer` | The page's argument in miniature: one framing sentence, then 4–6 takeaways a reader could repeat to a colleague. Keep the page's key vocabulary here — the semantic index embeds this section first and truncates. | strict |
+| `## Question` | Scope. What the page covers, what it deliberately leaves out and why, and links to neighbouring synthesis pages that cover the excluded parts. One or two short paragraphs, with the question itself in a paragraph of its own. | strict |
+| `## Short answer` | The page's argument in miniature: one framing sentence, then 4–6 bulleted takeaways a reader could repeat to a colleague, roughly 300 characters each. Carries the page's key vocabulary. | strict |
 | `## Background` | What a newcomer needs before the rest makes sense: the problem, the key terms, the measurement or experimental setup the field shares. Define every term the later sections lean on. | strict |
 | `## Organizing framework` | How this page sorts the evidence, and why that sorting explains the field. Then a table placing every cited paper. | strict |
 | `## Findings` | One H3 per theme the framework defines. This is the body of the review. | strict |
@@ -49,6 +49,20 @@ The headings are deliberately neutral so they fit any kind of synthesis. What ch
 
 So a fact-collection page does not need a "comparative assessment", and a methods page does not need eras. If you catch yourself wanting an extra H2 ("Benchmarks", "When to use which", "Regulatory anchor"), it belongs as an H3 inside `Findings` or as part of `Cross-cutting insights`.
 
+### `Question` and `Short answer` in detail
+
+These two sections are written last (Mode A step 6) but read first, by people and by the tooling, and each has a constraint the page itself doesn't show.
+
+**State premises as sentences, never inside the question.** Both gates skip a question sentence, since a question asserts nothing, and check every declarative sentence beside it. So a result tucked into the question itself escapes both: "what is the trajectory from the primitive to a 40B-parameter model trained on 9.3 trillion nucleotides?" asserts two numbers that no gate reads. Put such a premise in a cited sentence before the question, or leave it to `Background`. Then give the question a paragraph of its own, so the reader sees the page's scope at a glance.
+
+**Write the takeaways as bullets, one takeaway per bullet, each with its own citation.** `check-grounding` counts a paragraph as cited when it carries any citation, so one footnote at the end of a prose Short answer satisfies the gate for every takeaway in it. A bullet per takeaway makes each one carry its own source. This is the kind of list the no-catalog-bullets rule allows: parallel findings, introduced by a framing sentence that says what they add up to. A page with a prose Short answer doesn't need a rewrite for this alone; convert it the next time the page is edited.
+
+**Size each takeaway so a reader could repeat it — roughly 300 characters.** This is the budget that matters, and it is a content rule rather than a page-length one: at 500 characters a bullet has stopped being a takeaway and become a `Findings` paragraph filed in the wrong section. Six takeaways at ~300 put a Short answer near 1,800 characters, which is where this wiki's dense pages sit. Never delete a result's conditions to get a section under a round number — stating the conditions is the rule that separates the good pages here from the rest.
+
+**The embedder reads about 1,850 characters of `Short answer` plus `Question` combined.** It takes the title, the topical `tags`, `Short answer`, then `Question`, and stops at 512 tokens — roughly 2,000 characters, of which title and tags account for ~144. Tags lead so they can never be pushed out; what a long Short answer costs is `Question`'s scope prose falling outside the page's vector, which is the trade the index was built to make (the page's own tl;dr earns the room before its scope note does). So put the vocabulary a searcher would type into `Short answer` — method names, assays, the quantities the page is about — keep `Question` to real scope, and read a Short answer past ~1,850 on its own as the signal to tighten, since past that its own tail goes unembedded too.
+
+Tighten means compressing wording, not dropping evidence. Measure before you cut: divide the section by its sentences, and if it is already near ~130–150 characters per finding, there is nothing to compress — a result with its conditions and a citation does not fit in less. A Short answer that is long *because* each takeaway bundles three findings is a symptom of a page covering that much ground, and the lever is then [a split](#when-a-page-gets-too-big) or moving detail down into `Findings`, not a shorter summary. Four pages in this wiki sit at 133–186 characters per finding for exactly that reason and are left long deliberately.
+
 ### `Organizing framework` in detail
 
 This is the page's most abstract section and the one readers struggle with most, because a scheme is an idea about other ideas. Write it **concrete first**, in this order:
@@ -57,7 +71,7 @@ This is the page's most abstract section and the one readers struggle with most,
 2. **Show the scheme resolving that case.** "They disagree because one assay has chromatin and the other has none" — the explanation comes before the category it illustrates.
 3. **Then name the axes**, now that each one has an instance attached: "That difference — the substrate a study used — is the first of two axes this page sorts on."
 4. **Then one worked example per remaining axis**, same shape: case, then the axis it names.
-5. **Say what the scheme buys**, in a sentence a reader can test: what it predicts, what it stops you doing. This is the page's thesis about the field — the best existing page frames scRNA-seq analysis as "five coupled decisions", which is what lets every later section argue rather than list.
+5. **Say what the scheme buys**, in a sentence a reader can test: what it predicts, what it stops you doing. This is the page's thesis about the field — `scrna-seq-clustering-and-marker-gene-detection` frames the analysis as five linked decisions, the later ones often reusing the counts the earlier ones used, which is what lets every later section argue rather than list.
 6. **The placement table.** One row per cited paper (or per tool, when a paper contributes several), columns for the axes plus one short note. Use bare `[[stem]]` links in tables — footnotes don't render inside markdown tables, and never use `[[stem|alias]]` (the pipe breaks the table). Keep table cells to names, categories and short labels; put numbers and claims in prose, where each one can be graded against its source.
 
 The table is also the page's index for later updates (Mode B): a new paper is placed by adding a row.
@@ -93,13 +107,13 @@ These rules are why the page exists. Each comes with its reason so you can apply
 
 **Organize by idea, not by paper.** A paragraph makes one point about the field, and papers are its evidence. If a paragraph is centred on one paper, it has to say what that paper changed in the argument — what was believed before, what it showed, what that rules in or out. *Why:* the reader already has one page per paper; the synthesis earns its place only by saying what the papers mean together.
 
-**No catalog bullets.** The pattern `- **ToolName**[^x] is a … that …` is the single most common failure in this wiki (37 of 42 bullets on one existing page). Write prose. Use bullets only for content that is genuinely a list: decision rules, criteria, a set of parallel independent facts. Even then, the sentence before the list says what the items show together. *Why:* a bullet per tool reads as complete while saying nothing about how the tools relate.
+**No catalog bullets.** The pattern `- **ToolName**[^x] is a … that …` is the single most common failure in this wiki (37 of 42 bullets on the page the example below comes from). Write prose. Use bullets only for content that is genuinely a list: decision rules, criteria, a set of parallel independent facts. Even then, the sentence before the list says what the items show together. *Why:* a bullet per tool reads as complete while saying nothing about how the tools relate.
 
 **State the conditions behind every result.** For each number or finding, say what system or cohort it came from, what it was measured or compared against, and who ran the comparison (the method's own authors, or an independent benchmark). *Why:* results in this corpus are rarely comparable as stated — one benchmark tuned the cluster count, another fixed it — and a reader who sees two numbers side by side will compare them unless told not to. This habit is what separates the best existing page from the rest.
 
 **Quote a number in the paper's own form.** Write "4% of wild-type activity" if that is what the paper says, not the equivalent "0.04×"; "8.345 × 10⁻¹⁶", not a rounded "8.3 × 10⁻¹⁶". *Why:* `grade synthesis` matches numeric tokens against the PDF text, so a correct paraphrase fails as `misattributed` and costs a round trip to the PDF to clear. Converting units or re-deriving a percentage has the same effect. If the number you want isn't printed in the paper, either cite the printed one or make the claim qualitative.
 
-**Open each H2 with its takeaway — and cite it.** The first sentence of a section is its conclusion; the rest supports it. *Why:* someone skimming section openings should get the whole argument, and putting the conclusion first forces you to have one. These framing sentences are the most common `check-grounding` failure: a summary of the section's cited claims is itself a claim, so carry the footnotes of the claims it summarizes rather than deleting the sentence.
+**Open each section with its takeaway — and cite it.** This covers every H2 from `Short answer` to `Outlook`; `Question` opens with scope and `References` holds only definitions. The first sentence of a section is its conclusion; the rest supports it. *Why:* someone skimming section openings should get the whole argument, and putting the conclusion first forces you to have one. These framing sentences are the most common `check-grounding` failure: a summary of the section's cited claims is itself a claim, so carry the footnotes of the claims it summarizes rather than deleting the sentence.
 
 **Explain before you evaluate.** Background defines terms before Findings uses them. Spell out an acronym at first use. Prefer the plain word ("cut", "edit", "reads") to the jargon when both are accurate. *Why:* "easy to understand" is half of the brief, and a review that only experts can read is a literature dump with better formatting.
 
@@ -125,7 +139,7 @@ The rule applies everywhere, not just in `Organizing framework`:
 
 ### Before and after — a methods page
 
-Catalog style (from `crispr-cas9-off-target-methods-2026`):
+Catalog style (from `crispr-cas9-off-target-methods-2026`, since replaced by `crispr-cas9-off-target-prediction-measurement-and-mitigation`):
 
 > - **CFD**[^doench-2015] is the canonical hypothesis-driven baseline: a per-position-per-mismatch scoring matrix derived from systematic profiling of 27,897 sgRNA mismatch/indel variants at the CD33 locus. Used as the comparator across most subsequent learned scorers…
 > - **CRISTA**[^abadi-2017] is the early Random Forest regressor (2017) that unifies on-target and off-target cleavage-efficiency prediction…
@@ -158,13 +172,13 @@ The facts are still there, with their numbers and their sources; the paragraph s
   [^memgpt]:       [[ai/packer-2023-memgpt-towards-llms-as-operating]] — MemGPT
   ```
 
-- Inline claim anchors `[[stem#claim_slug]]` (copied from `researchwiki claims`) are good in prose when the citation should point at one specific claim. A claim anchor inside a footnote *definition* also grades correctly now (the grader strips the fragment, fixed in 718e009 and re-verified 2026-10-04), but the paper-level form reads better and is what the rest of the wiki uses.
+- Inline claim anchors `[[stem#claim_slug]]` (copied from `researchwiki claims`) are good in prose when the citation should point at one specific claim. A claim anchor inside a footnote *definition* also grades correctly (the grader strips the fragment), but the paper-level form reads better and is what the rest of the wiki uses.
 - In tables, bare `[[stem]]` only — footnotes don't render inside a markdown table, and `[[stem|alias]]` breaks it.
 - Obsidian renders footnotes as clickable superscripts, with a ↩ back-link, only in **Reading view** (Cmd/Ctrl+E). Raw `[^id]` in Source mode is not a formatting bug.
 
 **Frontmatter provenance.** `author_model:` carries the exact model id that wrote the page's current prose, quoted — never `TODO`, a provider name, or a family alias. `researchwiki synthesize` stamps a placeholder because a scaffold cannot know which model will fill it; replace it before the page lands. Update it whenever a substantial rewrite changes the authorship. Only mechanically maintained `meta` / `dashboard` pages are exempt, and `lint`'s `missing_author_model` is the backstop.
 
-**Every section except `Outlook` is strictly grounded.** Each claim-bearing paragraph or bullet carries a wiki citation. There is no model-prior allowance in Background, Findings or Cross-cutting insights, however obvious the fact seems.
+**Every section except `Outlook` is strictly grounded.** Each claim-bearing paragraph or bullet carries a wiki citation. There is no model-prior allowance in Background, Findings or Cross-cutting insights, however obvious the fact seems. One gap to write around: the gates skip question sentences, so a fact stated inside a question goes unchecked (see [`Question` and `Short answer` in detail](#question-and-short-answer-in-detail)).
 
 **`Outlook` may use three kinds of source, and labels each one.** Outlook is where the page takes a view on what comes next, which needs more than the papers' own future-work paragraphs. Each paragraph or bullet carries exactly one source, because the label applies to the whole unit:
 
@@ -257,7 +271,7 @@ If a person is in the loop, show them the scheme, the themes with their papers, 
 researchwiki synthesize --title "<title>" --topic-seed "<4–8 word query>" --papers <stem> <stem> ...
 ```
 
-Replace the scaffold body with the fixed structure if the scaffold predates it. Then draft in this order, loading the full claim dump only for the theme you are writing:
+The scaffold writes the nine H2s with a one-line purpose comment under each, and logs its own `(scaffold)` entry (see [Log entries](#log-entries)). Draft in this order, loading the full claim dump only for the theme you are writing:
 
 1. `Background`
 2. `Organizing framework`
@@ -266,7 +280,7 @@ Replace the scaffold body with the fixed structure if the scaffold predates it. 
 5. `Tensions / open questions` — seed it with `researchwiki claim-graph --tensions` and with contradictions you noted on the cards
 6. `Outlook`
 7. `Short answer`, then `Question` — last, because you only know the argument once it is written
-8. YAML: `title`, `type: synthesis`, `category: [<dominant content category of the cited papers>]`, `generated_at: YYYY-MM-DD`, `author_model: "<exact model id>"`, `topic_seed`, `tags`, and a quoted `hook:` (≤1000 characters, result-first: the page's main finding, not its question)
+8. YAML: `title`, `type: synthesis`, `category: [<dominant content category of the cited papers>]`, `generated_at: YYYY-MM-DD`, `author_model: "<exact model id>"`, `topic_seed`, `tags`, and a quoted `hook:` (≤1000 characters, result-first: the page's main finding, not its question). For `tags`, add 3–8 topical tags next to `synthesis` (`pangenome`, `off-target`, `ldl-c`). A synthesis page has no `keywords:` field, so its tags are the only keyword vocabulary the semantic index embeds for it, and the index drops `synthesis` itself as a framework tag.
 
 When a load-bearing claim rests on a figure the caption does not settle, `researchwiki figures <stem>` lists captions for free and `--figure N` renders one page.
 
@@ -291,7 +305,7 @@ Don't rewrite the page. Rewriting churns prose that already passed both gates.
    - **Breaks the scheme** (it needs an axis the page doesn't have) → stop and tell the user; this is a restructure, done as Mode C.
 3. Recheck `Outlook` every time: a new paper often confirms or refutes one of its inferences. A confirmed inference becomes an ordinary cited claim (move it to Findings if it now belongs there); a refuted one is removed and the refutation noted in Tensions.
 4. Update `Short answer` if a takeaway changed, `generated_at:`, and `author_model:` if a different model wrote the revision.
-5. Verify and land. Record the impact-review decision (`incorporated`, with a reason) for each receipt you acted on.
+5. Verify and land, logging the entry as `(update)`. Record the impact-review decision (`incorporated`, with a reason) for each receipt you acted on.
 
 For a one-sentence addition, `researchwiki evolve <category/stem>` can propose the patch instead.
 
@@ -299,7 +313,7 @@ For a one-sentence addition, `researchwiki evolve <category/stem>` can propose t
 
 ## Mode C — upgrade a legacy page
 
-A legacy page has the old shape — usually `Evidence from the wiki` in the middle and `What would update this page` at the end. `researchwiki lint --json` will list it once the structure check exists.
+A legacy page has the old shape — usually `Evidence from the wiki` in the middle and `What would update this page` at the end. `researchwiki lint --json` lists it under `synthesis_contract_violations` as `synthesis_legacy_spine`.
 
 Run Mode A with these changes:
 
@@ -308,6 +322,7 @@ Run Mode A with these changes:
 - Rewrite catalog-style bullets into theme paragraphs.
 - Fold each `What would update this page` item into `Outlook`, as the open question it implies, and drop the old section. **This is where migrations fail the gate:** the old heading was exempt from `check-grounding` by name, and `Outlook` is not. An uncited wish list ("a head-to-head benchmark of X and Y") was legal there and is ungrounded here, so each item now needs the paper whose stated limitation leaves it open, an `*(inference)*` plus its premises, or a `*(model prior)*`.
 - Keep the slug. Inbound `[[synthesis/<slug>]]` links stay valid.
+- Log the landing as `(upgrade)`.
 
 ---
 
@@ -330,13 +345,30 @@ researchwiki check-coverage wiki/synthesis/<slug>.md --top-n <candidate count>
 
 1. `researchwiki reindex`.
 2. Add a bullet under `## synthesis` in `wiki/index.md`: `- [[synthesis/<slug>]] — **<Title>** (<year>): <hook>`.
-3. Append to `wiki/log.md`:
+3. Append the entry to `wiki/log.md`, in the format below.
 
-   ```markdown
-   ## [YYYY-MM-DD] synthesis | <Title>
-   Category: <category>. <One sentence on the scheme and scope.> Grounding N/N units (I labelled inference, M model prior); fidelity S supported, C composite, W weak, 0 misattributed.
-   Coverage review: <each check-coverage hit not cited, with its reason>.
-   ```
+### Log entries
+
+Every synthesis-page event uses one kind, `synthesis`, and one headline, `<Title> → synthesis/<slug>`, with a suffix naming the event. `grep '] synthesis | ' wiki/log.md` then finds a page's whole history.
+
+| Event | Headline | Written by |
+|---|---|---|
+| Scaffold | `<Title> → synthesis/<slug> (scaffold)` | `researchwiki synthesize`, automatically |
+| New page lands (Mode A) | `<Title> → synthesis/<slug>` | you |
+| New papers folded in (Mode B) | `<Title> → synthesis/<slug> (update)` | you |
+| Legacy page upgraded (Mode C) | `<Title> → synthesis/<slug> (upgrade)` | you |
+| Revised with no new papers (a gate repair, a trim, a fix) | `<Title> → synthesis/<slug> (revision)` | you |
+| `compose` page published | `<Title> → synthesis/<slug>` | `researchwiki publish-synthesis`, automatically |
+
+Never add a second entry for an event a command already logged. A landing entry you write looks like:
+
+```markdown
+## [YYYY-MM-DD] synthesis | <Title> → synthesis/<slug>
+Category: <category>. <One sentence on the scheme and scope.> Grounding N/N units (I labelled inference, M model prior); fidelity S supported, C composite, W weak, 0 misattributed.
+Coverage review: <each check-coverage hit not cited, with its reason>.
+```
+
+For `(update)`, replace the scheme sentence with what changed: the stems added, which themes they revised or which theme they started, and what happened to any Outlook inference they confirmed or refuted. For `(upgrade)`, say what the old shape was and where its `What would update this page` items went. Keep the grounding and coverage lines in both. For `(revision)`, one sentence on what changed and why, plus the grounding line; leave `generated_at:` alone. No new evidence came in, and `lint`'s `stale_synthesis` flags a page when a cited paper was re-ingested after that date, so bumping it would clear the flag without anyone re-reading the paper.
 
 ---
 
