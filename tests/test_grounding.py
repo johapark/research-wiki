@@ -390,6 +390,49 @@ def test_strict_ignores_both_labels_on_synthesis():
     assert rep.grounded_claims == 2
 
 
+def test_a_suffixed_outlook_heading_is_not_labelled_on_synthesis():
+    """Synthesis section names are exact: lint, `extract_section`, impact
+    review and scout triggers all miss `## Outlook — next steps`, so the gate
+    must not grant it the label privileges either."""
+    doc = SYNTH_DOC.replace("## Outlook", "## Outlook — next steps")
+    rep = grounding.check(doc, permissive=True, valid_anchors=set())
+    assert rep.model_prior_claims == 0
+    assert rep.inference_claims == 0
+
+
+QUESTION_DOC = """---
+type: synthesis
+---
+
+## Question
+
+A coherent line of work has produced DNA foundation models built on the Hyena operator rather than attention. What is the trajectory of that lineage, and where has it proven useful vs. underperformed?
+
+When a DNA language model must handle 100 kb–1 Mb of context, which levers move the needle, as Fig. 4 of e.g. Smith et al. 2024 suggests?
+
+Two questions remain open. Does X hold? Does Y?
+"""
+
+
+def test_a_question_does_not_hide_the_claims_before_it():
+    """Only question sentences are exempt. A paragraph that states a result
+    and then asks about it used to pass both gates uncited because its last
+    character was `?`."""
+    rep = grounding.check(QUESTION_DOC, permissive=True, valid_anchors=set())
+    (bad,) = rep.ungrounded_units
+    assert bad.text.startswith("A coherent line of work")
+
+
+def test_pure_questions_and_short_lead_ins_stay_exempt():
+    """A question with abbreviations inside it ("vs.", "Fig. 4", "e.g.",
+    "et al.") is still one question, and a lead-in too short to be a claim
+    stays a non-claim once its questions are dropped."""
+    rep = grounding.check(QUESTION_DOC, permissive=True, valid_anchors=set())
+    claims = _claims(rep)
+    assert len(claims) == 1
+    assert claims[0].text.startswith("A coherent line of work")
+
+
 def test_outlook_is_not_labelled_on_idea_pages():
     """Each page type labels only its own sections: an idea page's Outlook
     heading (not part of the idea contract) stays strict."""
