@@ -134,7 +134,9 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
             graded=False,
         )
 
-    hits = query_pdf(stem, claim.text, topk=5, pdf_path=pdf_path)
+    # The lexical checks use the first three hits. Semantic scoring also
+    # considers the rest of the top ten from the same ranked retrieval.
+    hits = query_pdf(stem, claim.text, topk=10 if use_semantic else 5, pdf_path=pdf_path)
     if not hits:
         return ClaimScore(
             section=claim.section,
@@ -166,30 +168,24 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
 
     semantic_score: float | None = None
     if use_semantic:
-        # Widen retrieval to top-10 for the embedding scorer (same rationale as
-        # the prior NLI path: multi-aspect claims have evidence spread across
-        # multiple chunks). The bi-encoder's max-over-chunks aggregation makes
-        # this safe; irrelevant chunks just don't move the max.
-        sem_hits = query_pdf(stem, claim.text, topk=10, pdf_path=pdf_path)
-        if sem_hits:
-            chunk_texts = [h.text for h in sem_hits]
-            # If the per-PDF embedding cache is populated and the chunk_id ↔
-            # text mapping matches, reuse the cached embeddings for the
-            # retrieved chunks. Otherwise fall back to embedding the chunks
-            # ad-hoc inside score_claim — slower but correct.
-            cached = get_chunk_embeddings(stem, pdf_path=pdf_path)
-            chunk_embs = None
-            if cached is not None:
-                cache_embs, cache_texts = cached
-                idx_by_text = {t: i for i, t in enumerate(cache_texts)}
-                rows = [idx_by_text.get(t) for t in chunk_texts]
-                if all(r is not None for r in rows):
-                    chunk_embs = cache_embs[rows]
-            result = semantic_mod.score_claim(
-                claim.text, chunk_texts, chunk_embeddings=chunk_embs,
-            )
-            if result is not None:
-                semantic_score = result.score
+        chunk_texts = [h.text for h in hits]
+        # If the per-PDF embedding cache is populated and the chunk_id ↔
+        # text mapping matches, reuse the cached embeddings for the
+        # retrieved chunks. Otherwise fall back to embedding the chunks
+        # ad-hoc inside score_claim — slower but correct.
+        cached = get_chunk_embeddings(stem, pdf_path=pdf_path)
+        chunk_embs = None
+        if cached is not None:
+            cache_embs, cache_texts = cached
+            idx_by_text = {t: i for i, t in enumerate(cache_texts)}
+            rows = [idx_by_text.get(t) for t in chunk_texts]
+            if all(r is not None for r in rows):
+                chunk_embs = cache_embs[rows]
+        result = semantic_mod.score_claim(
+            claim.text, chunk_texts, chunk_embeddings=chunk_embs,
+        )
+        if result is not None:
+            semantic_score = result.score
 
     return ClaimScore(
         section=claim.section,

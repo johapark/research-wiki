@@ -395,6 +395,10 @@ def phase_target_claims(ctx, conn):
         },
         conn=conn,
     )
+    log(f"target-claims → {reason}", tag="agent")
+    if out.is_empty():
+        log("target-claims ⚠ zero PDF-side claims extracted — nothing to "
+            "cross-check the draft's claims against beyond retrieval", tag="agent")
     return out
 
 

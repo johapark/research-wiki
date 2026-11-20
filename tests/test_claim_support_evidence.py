@@ -51,6 +51,29 @@ def _grade(tmp_path, classifier=None):
     )
 
 
+def test_semantic_claim_scoring_uses_one_ranked_retrieval(monkeypatch):
+    chunks = [_hit(i, f"Evidence number {i}.") for i in range(10)]
+    queries = []
+    def query(stem, text, topk, *, pdf_path):
+        queries.append((topk, pdf_path))
+        return chunks[:topk]
+    def score(text, chunk_texts, *, chunk_embeddings):
+        assert chunk_texts == [chunk.text for chunk in chunks]
+        return SimpleNamespace(score=0.75)
+
+    monkeypatch.setattr(paper, "query_pdf", query)
+    monkeypatch.setattr(paper, "get_chunk_embeddings", lambda *args, **kwargs: None)
+    monkeypatch.setattr(paper.semantic_mod, "score_claim", score)
+    claim = Claim("results", 0, "Evidence number 1.", False)
+    pdf = Path("inbox/incoming.pdf")
+    lexical = paper._score_claim("example", claim, "", False, pdf)
+    semantic = paper._score_claim("example", claim, "", True, pdf)
+    assert queries == [(5, pdf), (10, pdf)]
+    assert semantic.semantic_score == 0.75
+    semantic.semantic_score = None
+    assert semantic == lexical
+
+
 def test_complete_late_evidence_reaches_llm_prompt(tmp_path, monkeypatch):
     """End-to-end through the optional grade phase and real prompt builder.
 

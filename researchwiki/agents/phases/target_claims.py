@@ -1,6 +1,6 @@
 """Target-claims extraction phase (L3).
 
-Runs after extract, before crosslinks. Calls an LLM over the PDF text and
+Runs after extract, before authoring. Calls an LLM over the PDF text and
 returns a structured list of claims a thorough wiki page should cover.
 The author phase consumes this list as a coverage target — the directive
 is "consider preserving these items," not "include every one of them

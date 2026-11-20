@@ -100,6 +100,11 @@ wiki/{category}/{stem}.md             # the new wiki page
 ingest_iterations table               # per-phase audit trail in state DB
 ```
 
+On API ingests, target-claim extraction and cross-link discovery run concurrently.
+Drafting waits for both results and any requested visual inspection. Runs with an
+explicit budget, stub runs, and runs using chat relay for either phase keep the
+sequential order.
+
 Phase logic is separated from `ingest_iterations` persistence: thin runner
 wrappers write the audit rows rather than the phase functions themselves.
 Phases are otherwise effectful — they may call providers or LLMs and populate

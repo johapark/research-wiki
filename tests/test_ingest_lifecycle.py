@@ -196,6 +196,72 @@ def test_cli_does_not_return_retryable_failure_after_known_commit(library, monke
     assert 'canonical content preserved' in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("failure", [None, "target_claims", "crosslinks"])
+def test_draft_preparation_overlaps_and_joins_before_visuals(library, monkeypatch, failure):
+    from contextlib import closing
+    from researchwiki.agents.phases import target_claims
+    from researchwiki.db.connection import get_connection
+    from researchwiki.db.iterations import read_attempt
+
+    barrier = Barrier(2)
+    ctx = Context(attempt_id="parallel-inputs", pdf_path=Path(library.source_pdf),
+                  pdf_filename="paper.pdf", iteration=2, visual_inspection=True)
+    checklist = target_claims.TargetClaimsOutput()
+    links = [SimpleNamespace(wikilink="other/linked", kind="cited_by_source")]
+    def extract(**kwargs):
+        barrier.wait(timeout=5)
+        if failure == "target_claims":
+            raise RuntimeError(failure)
+        return checklist
+
+    def discover(*args, **kwargs):
+        barrier.wait(timeout=5)
+        if failure == "crosslinks":
+            raise RuntimeError(failure)
+        return links
+
+    def inspect(ctx, conn):
+        assert ctx.target_claims is checklist and ctx.crosslink_candidates == links
+        ctx.next_iter()
+
+    monkeypatch.setattr(runner.model_config, "uses_chat_relay", lambda phases: False)
+    monkeypatch.setattr(target_claims, "extract_target_claims", extract)
+    monkeypatch.setattr(runner.phases, "crosslink_candidates", discover)
+    monkeypatch.setattr(runner.phases, "propose_crosslinks", lambda *a, **kw: [])
+    monkeypatch.setattr(runner, "phase_visual_inspect", inspect)
+    events = []
+    with closing(get_connection()) as conn, observe_models(EventRecorder(library.request_id, events.append)):
+        if failure:
+            with pytest.raises(RuntimeError, match=failure):
+                runner._prepare_draft_inputs(ctx, conn)
+            assert ctx.iteration == 4
+        else:
+            runner._prepare_draft_inputs(ctx, conn)
+            assert ctx.iteration == 5
+    rows = {r.role: r.iteration for r in read_attempt(ctx.attempt_id)}
+    expected = {"target_claims": 3, "crosslinks": 4}
+    if failure:
+        del expected[failure]
+    assert rows == expected
+    assert {e.phase for e in events if e.kind == "phase_started"} == {"target_claims", "crosslinks"}
+    assert {e.phase for e in events if e.kind == "phase_failed"} == ({failure} if failure else set())
+
+
+@pytest.mark.parametrize("serial_mode", ["relay", "budget", "stub"])
+def test_serial_draft_preparation_preserves_phase_order(library, monkeypatch, serial_mode):
+    ctx = Context(attempt_id="serial-inputs", pdf_path=Path(library.source_pdf), pdf_filename="paper.pdf",
+                  iteration=2, visual_inspection=True, use_stub=serial_mode == "stub")
+    if serial_mode == "budget":
+        ctx.budget_tracker = runner.make_budget_tracker(max_model_calls=2)
+    monkeypatch.setattr(runner.model_config, "uses_chat_relay", lambda phases: serial_mode == "relay")
+    order = []
+    monkeypatch.setattr(runner, "_phase_target_claims", lambda ctx, conn: order.append(("claims", ctx.iteration)))
+    monkeypatch.setattr(runner, "phase_visual_inspect", lambda ctx, conn: order.append(("visual", ctx.next_iter())))
+    monkeypatch.setattr(runner, "_phase_crosslinks", lambda ctx, conn: order.append(("links", ctx.iteration)))
+    runner._prepare_draft_inputs(ctx, None)
+    assert order == [("claims", 3), ("visual", 4), ("links", 5)]
+
+
 def test_parallel_native_author_phases_keep_slot_identity(library, monkeypatch):
     from researchwiki.agents import phases
     from researchwiki.agents.phases.draft import Draft
