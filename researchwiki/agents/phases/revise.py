@@ -152,8 +152,13 @@ def critic(
     notes = resp.text
     section = None
     if gaps:
+        # No `preceding.strip()` guard: the critic prompt invites a bare
+        # `REPAIR_SCOPE: FULL_PAGE` when it judges no edits are needed, and
+        # `rpartition` returns ("", "", line) for a single-line reply — so
+        # requiring something before the trailer leaked the control line into
+        # the notes the author then receives.
         preceding, _, trailer = notes.rstrip().rpartition("\n")
-        if preceding.strip() and trailer.startswith("REPAIR_SCOPE: "):
+        if trailer.startswith("REPAIR_SCOPE: "):
             notes = preceding
             scope = trailer.removeprefix("REPAIR_SCOPE: ").strip()
             section = None if scope == "FULL_PAGE" else scope
@@ -169,6 +174,19 @@ def critic(
         coverage_gaps=gaps,
     )
 
+
+#: Appended to the author system prompt for a scoped (single-section) repair,
+#: so the last word the system gives agrees with the user prompt's JSON request
+#: instead of the full-page Markdown contract above it. Kept as a suffix rather
+#: than a replacement because a custom `--system-prompt` override must survive
+#: (WORKFLOW.md: the repair keeps "any custom override").
+_SECTION_RESPONSE_SYSTEM = (
+    "\n\nRESPONSE FORMAT FOR THIS REQUEST: you are revising ONE section, not the "
+    'page. Reply with a single JSON object and nothing else: {"body": "<the '
+    'revised Markdown body of that section, with its H2 heading omitted>"}. No '
+    "code fence, no commentary, no additional keys. This overrides any "
+    "instruction above to return a complete draft."
+)
 
 _CRITIC_SYSTEM = """\
 You are a critic for a research-paper wiki. The grader gives you two kinds of
@@ -297,10 +315,20 @@ def evolve(
         revision_evidence=evidence.text + visual_evidence_block(visual_evidence),
     )
     paper_type = (metadata or {}).get("paper_type")
+    system = prompt_lib.load_author_system(paper_type, override_path=system_prompt_override)
+    if repair:
+        # `schema=` is enforced only by chat-relay (see `llm.call`); Anthropic
+        # and OpenAI-compatible routes ignore it and return free text. The
+        # system prompt is therefore the only place a scoped reply's envelope
+        # can be required, and without this the full-page author contract wins:
+        # the model returns Markdown, `SectionRepair.apply` rejects it, and the
+        # repair degrades to the unchanged parent draft — a billed call that
+        # leaves the critical miss in place, on every API provider.
+        system += _SECTION_RESPONSE_SYSTEM
     resp = llm.call(
         phase="evolve",
         prompt=prompt,
-        system=prompt_lib.load_author_system(paper_type, override_path=system_prompt_override),
+        system=system,
         use_stub=use_stub,
         **({"schema": SECTION_SCHEMA} if repair else {}),
     )

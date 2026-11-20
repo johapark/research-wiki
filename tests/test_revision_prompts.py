@@ -157,3 +157,66 @@ def test_ambiguous_or_multisection_edits_keep_full_draft_repair(monkeypatch, ext
     monkeypatch.setattr(revise.llm, "call", call)
     out = revise.evolve(draft=draft, critique=critique, metadata={}, sections={})
     assert out.text == "full response" and out.evidence_metrics["revision_scope"] == "page"
+
+
+def test_scoped_repair_requires_a_json_envelope_in_the_system_prompt(monkeypatch, tmp_path):
+    """`schema=` is honored only by chat-relay, so the system prompt has to
+    carry the envelope too. Without it an API provider follows the full-page
+    author contract, `apply` rejects the Markdown, and the repair silently
+    degrades to the unchanged parent draft."""
+    custom = "CUSTOM_AUTHOR_CONTRACT\n"
+    path = tmp_path / "author.md"
+    path.write_text(custom)
+    prior = "## Summary\nKeep.\n## Results\nOld result."
+    draft = Draft(prior, "m", 0, 0, 0)
+    critique = revise.CritiqueOutput(
+        "repair", [SimpleNamespace(section="results", text="Old result.", position=0)],
+        "m", 0, 0,
+    )
+    calls = []
+
+    def call(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(text='{"body": "New result."}', model="m",
+                               temperature=.3, input_tokens=1, output_tokens=1)
+
+    monkeypatch.setattr(revise.llm, "call", call)
+    out = revise.evolve(draft=draft, critique=critique, metadata={}, sections={},
+                        system_prompt_override=str(path))
+    system = calls[0]["system"]
+    assert system.startswith(custom)          # a custom override still survives
+    assert '{"body"' in system and "overrides any instruction above" in system
+    assert calls[0]["schema"]["required"] == ["body"]
+    assert out.evidence_metrics["section_response_valid"] is True
+
+
+def test_full_page_revision_leaves_the_system_prompt_alone(monkeypatch, tmp_path):
+    """The envelope is scoped-only: a full-page call must still get the
+    author contract verbatim."""
+    custom = "CUSTOM_AUTHOR_CONTRACT\n"
+    path = tmp_path / "author.md"
+    path.write_text(custom)
+    draft = Draft("## Summary\nFinding.", "m", 0, 0, 0)
+    calls = []
+    monkeypatch.setattr(revise.llm, "call", lambda **kw: calls.append(kw) or
+                        SimpleNamespace(text="full page", model="m", temperature=0,
+                                        input_tokens=1, output_tokens=1))
+    revise.evolve(draft=draft, critique=revise.CritiqueOutput("Fix one claim", [], "m", 0, 0),
+                  metadata={}, sections={})
+    assert calls[0]["system"] == revise.prompt_lib.load_author_system(None)
+    assert "schema" not in calls[0]
+
+
+def test_a_bare_repair_scope_line_does_not_leak_into_the_critic_notes(monkeypatch):
+    """The critic prompt invites `REPAIR_SCOPE: FULL_PAGE` as its whole reply
+    when it judges no gap worth editing; that control line is not a note, and
+    the author must not receive it as one."""
+    gap = {"id": "t1", "axis": "target_claims", "importance": "critical",
+           "text": "A second comparison the draft omitted."}
+    draft = Draft("## Summary\nS.", "m", 0, 0, 0, scores={"missed_anchors": [gap]})
+    monkeypatch.setattr(revise.llm, "call", lambda **kw:
+                        SimpleNamespace(text="REPAIR_SCOPE: FULL_PAGE", model="m",
+                                        input_tokens=1, output_tokens=1))
+    out = revise.critic(draft=draft, metadata={})
+    assert "REPAIR_SCOPE" not in out.notes
+    assert out.repair_section is None
