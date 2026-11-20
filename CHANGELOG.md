@@ -26,6 +26,15 @@ the reasoning behind any line below.
   installation, with Obsidian first. Ego-browser supports literature scouting,
   browser-based PDF downloads, and shared dashboard navigation with the agent.
 
+### Fixed
+
+- Local ingest jobs submitted before a release added an ingest option (such as
+  `visual_inspection`) remain readable. Their stored request fingerprint is
+  verified against the request as written, rather than a re-serialization that
+  fills in newer defaults, so one older manifest no longer makes the job list
+  unavailable. State changes keep the stored request, so the publication ledger's
+  binding stays valid through claim, finish, and retry.
+
 ## [0.7.0] - 2026-11-19
 
 This release introduces the standalone browser dashboard. The minor version bump
