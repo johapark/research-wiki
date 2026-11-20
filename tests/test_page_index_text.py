@@ -98,7 +98,8 @@ class TestOrderingIsTldrFirst:
 
 class TestBodyFallback:
     def test_a_bespoke_synthesis_still_contributes(self):
-        """Synthesis has no mandated H2 contract; two corpus pages use their own."""
+        """A page whose H2s match none of its type's names still contributes
+        its body rather than reducing to a title."""
         t = page_index_text(_page(
             "synthesis", "## The axis\n\nthe axis prose\n\n## Positions on the axis\n\nmore\n",
         ))
@@ -136,6 +137,14 @@ class TestTagsOnlyWhereTheyCarrySignal:
         """`keywords:` is exempt for these three dirs, so tags are all they have."""
         t = page_index_text(_page(page_type, body, tags=["dna-foundation-model", "pangenome"]))
         assert "dna-foundation-model" in t and "pangenome" in t
+
+    def test_tags_come_before_the_sections_so_truncation_cannot_drop_them(self):
+        """The embedder reads ~2,000 characters. Appended after a long Short
+        answer and Question, a synthesis page's tags were never embedded."""
+        body = "## Short answer\n\n" + "a" * 3000 + "\n\n## Question\n\nQ\n"
+        t = page_index_text(_page("synthesis", body, tags=["synthesis", "pangenome"]))
+        assert t.index("pangenome") < t.index("a" * 100) < t.index("Q")
+        assert t.index("pangenome") < 200
 
     def test_framework_tags_are_stripped_even_there(self):
         t = page_index_text(_page(
