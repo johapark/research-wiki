@@ -18,6 +18,7 @@ from pathlib import Path
 from ...grade.salience import anchor_is_substantive
 from .. import llm, prompt_lib
 from ..visual_evidence import visual_evidence_block
+from .section_repair import SECTION_SCHEMA, locate_section
 from .draft import Draft
 from .grade import ClaimDetail
 from .revision_evidence import (
@@ -43,6 +44,7 @@ class CritiqueOutput:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     coverage_gaps: list[dict] = field(default_factory=list)
+    repair_section: str | None = None
 
 
 # Minimum eligible critical misses before a coverage gap alone justifies an
@@ -147,8 +149,17 @@ def critic(
         system=_CRITIC_SYSTEM,
         use_stub=use_stub,
     )
+    notes = resp.text
+    section = None
+    if gaps:
+        preceding, _, trailer = notes.rstrip().rpartition("\n")
+        if preceding.strip() and trailer.startswith("REPAIR_SCOPE: "):
+            notes = preceding
+            scope = trailer.removeprefix("REPAIR_SCOPE: ").strip()
+            section = None if scope == "FULL_PAGE" else scope
     return CritiqueOutput(
-        notes=resp.text,
+        notes=notes,
+        repair_section=section,
         weak_claims=weak,
         model=resp.model,
         input_tokens=resp.input_tokens,
@@ -239,6 +250,10 @@ def _build_critic_prompt(
         "you judged real: say add-to <section> and what to add. No prose intro "
         "or outro.",
     ])
+    if gaps:
+        parts.append("After the notes, add a final line 'REPAIR_SCOPE: <heading>' only when "
+                     "every proposed edit belongs in one existing H2. Copy its title without ##. "
+                     "For multiple sections, uncertainty, or no edits, write 'REPAIR_SCOPE: FULL_PAGE'.")
     return "\n".join(parts)
 
 
@@ -275,9 +290,10 @@ def evolve(
         sections=sections, pdf_full_text=pdf_full_text, stem=stem, pdf_path=pdf_path,
         issues=repair_issues(critique.coverage_gaps, critique.weak_claims),
     )
+    repair = locate_section(draft.text, critique)
     prompt = _build_evolve_prompt(
         draft.text, critique.notes, metadata, sections,
-        pdf_full_text=pdf_full_text,
+        pdf_full_text=pdf_full_text, repair_section=repair.title if repair else None,
         revision_evidence=evidence.text + visual_evidence_block(visual_evidence),
     )
     paper_type = (metadata or {}).get("paper_type")
@@ -286,16 +302,24 @@ def evolve(
         prompt=prompt,
         system=prompt_lib.load_author_system(paper_type, override_path=system_prompt_override),
         use_stub=use_stub,
+        **({"schema": SECTION_SCHEMA} if repair else {}),
     )
+    text = resp.text
+    metrics = dict(evidence.metrics, revision_scope="page")
+    if repair:
+        patched = repair.apply(draft.text, resp.text)
+        metrics.update(revision_scope="section", revision_section=repair.title,
+                       section_response_valid=patched is not None)
+        text = patched if patched is not None else draft.text
     return EvolveOutput(
-        text=resp.text,
+        text=text,
         model=resp.model,
         temperature=resp.temperature,
         input_tokens=resp.input_tokens,
         output_tokens=resp.output_tokens,
         cache_read_tokens=getattr(resp, "cache_read_tokens", 0),
         cache_write_tokens=getattr(resp, "cache_write_tokens", 0),
-        evidence_metrics=evidence.metrics,
+        evidence_metrics=metrics,
     )
 
 
@@ -307,7 +331,17 @@ def _build_evolve_prompt(
     *,
     pdf_full_text: str | None = None,
     revision_evidence: str | None = None,
+    repair_section: str | None = None,
 ) -> str:
+    output = (
+        'Return JSON with one field "body" containing the complete revised Markdown body '
+        f'of the "{repair_section}" section. Omit its H2 heading. Preserve supported details '
+        'and address each critic note. The other sections will be retained verbatim.'
+        if repair_section else
+        "Output the FULL revised draft with all existing sections, including any custom sections, "
+        "addressing each critic note. Keep claims the critic did not flag "
+        "essentially unchanged. Format identical to the prior draft."
+    )
     return "\n".join([
         "# Prior draft (passed tournament but the critic flagged issues)",
         prior_draft,
@@ -321,9 +355,7 @@ def _build_evolve_prompt(
         "",
         "---",
         "",
-        "Output the FULL revised draft with all existing sections, including any custom sections, "
-        "addressing each critic note. Keep claims the critic did not flag "
-        "essentially unchanged. Format identical to the prior draft.",
+        output,
     ])
 
 

@@ -83,3 +83,77 @@ def test_clean_draft_skips_model_and_retrieval(monkeypatch):
     critique = revise.critic(draft=draft, metadata={})
     assert not critique.weak_claims and not critique.coverage_gaps
     assert revise.debug(draft=draft, issues=[], gate_reasons=[], metadata={}, sections={}).text == "clean"
+
+
+def test_critic_scopes_omission_and_evolve_splices_only_that_section(monkeypatch):
+    import json
+
+    gap = {"id": "t1", "axis": "target_claims", "importance": "critical",
+           "text": "The authors reported a second comparison showing improved accuracy across three datasets."}
+    prior = ("## Summary\r\nOriginal summary.\r\n\r\n## Results\r\n\r\n"
+             "Earlier result.\r\n\r\n## Custom Appendix\r\nKeep exactly.  \r\n")
+    draft = Draft(prior, "m", 0, 0, 0, scores={"missed_anchors": [gap]})
+    calls = []
+
+    def call(**kwargs):
+        calls.append(kwargs)
+        if kwargs["phase"] == "critic":
+            assert "REPAIR_SCOPE" in kwargs["prompt"]
+            text = "Add the missing comparison to Results.\nREPAIR_SCOPE: Results"
+        else:
+            assert kwargs["phase"] == "evolve" and kwargs["schema"]["required"] == ["body"]
+            assert prior in kwargs["prompt"]
+            assert "FULL revised draft" not in kwargs["prompt"]
+            text = json.dumps({"body": "Earlier result.\nSecond comparison."})
+        return SimpleNamespace(text=text, model="m", temperature=0, input_tokens=11, output_tokens=7)
+
+    monkeypatch.setattr(revise.llm, "call", call)
+    critique = revise.critic(draft=draft, metadata={})
+    assert critique.repair_section == "Results"
+    assert "REPAIR_SCOPE" not in critique.notes
+    out = revise.evolve(draft=draft, critique=critique, metadata={}, sections={})
+    assert out.text == prior.replace("Earlier result.", "Earlier result.\r\nSecond comparison.")
+    assert out.output_tokens == 7 and len(calls) == 2
+    assert out.evidence_metrics["revision_scope"] == "section"
+    assert out.evidence_metrics["section_response_valid"] is True
+
+
+@pytest.mark.parametrize("reply", [
+    '{"body": "incomplete', '{"body": ""}', '{"body": 42}',
+    '{"body": "Repaired.\\n## Replacement appendix\\nOther edits."}',
+    '{"body": "Open block\\n```python"}', 'A full page with no JSON envelope.',
+])
+def test_invalid_scoped_response_preserves_parent_draft(monkeypatch, reply):
+    prior = "## Summary\nPreserve.\n## Results\nOld result."
+    draft = Draft(prior, "m", 0, 0, 0)
+    critique = revise.CritiqueOutput("repair", [SimpleNamespace(section="results", text="Old result.", position=0)],
+                                     "m", 0, 0)
+    monkeypatch.setattr(revise.llm, "call", lambda **kw:
+                        SimpleNamespace(text=reply, model="m", temperature=.3, input_tokens=8, output_tokens=4))
+    out = revise.evolve(draft=draft, critique=critique, metadata={}, sections={})
+    assert out.text == prior
+    assert out.evidence_metrics["section_response_valid"] is False
+    assert out.input_tokens == 8 and out.output_tokens == 4
+
+
+@pytest.mark.parametrize("extra,weak,gaps,hint", [
+    ("\n## Results\nRepeated heading.", ["results"], [], None),
+    ("\n```\n## Example\n```", ["results"], [], None),
+    ("", ["results", "limitations"], [], None),
+    ("", [], [{"text": "omission"}], None),
+    ("", ["results"], [{"text": "omission"}], "Limitations"),
+    ("", ["missing-section"], [], None),
+])
+def test_ambiguous_or_multisection_edits_keep_full_draft_repair(monkeypatch, extra, weak, gaps, hint):
+    prior = "## Results\nOriginal result.\n## Limitations\nKeep this." + extra
+    draft = Draft(prior, "m", 0, 0, 0)
+    details = [SimpleNamespace(section=k, text="result", position=0) for k in weak]
+    critique = revise.CritiqueOutput("repair", details, "m", 0, 0, coverage_gaps=gaps, repair_section=hint)
+
+    def call(**kwargs):
+        assert "schema" not in kwargs and "FULL revised draft" in kwargs["prompt"]
+        return SimpleNamespace(text="full response", model="m", temperature=0, input_tokens=1, output_tokens=2)
+
+    monkeypatch.setattr(revise.llm, "call", call)
+    out = revise.evolve(draft=draft, critique=critique, metadata={}, sections={})
+    assert out.text == "full response" and out.evidence_metrics["revision_scope"] == "page"

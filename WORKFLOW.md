@@ -119,7 +119,11 @@ results also block automatic promotion; provider failures remain errors to fix
 before retrying. `--force-sandbox` deliberately avoids publication.
 `--auto-promote` bypasses failed gates and is a reviewed override, not a repair.
 Revisions receive the full previous draft and the same author system prompt,
-including any custom override, and preserve all existing sections. Specific
+including any custom override. When all EVOLVE edits belong in one identifiable
+H2 section, the author returns its revised body and the runner splices it into
+the prior draft. The grader evaluates the assembled page. Ambiguous or
+multi-section edits use the full-draft response. A malformed section response
+retains the prior text and is recorded in the revision metrics. Specific
 repairs reuse the graded PDF's chunk index: up to four queries, two complete
 chunks per issue, a deduplicated 12,000-character packet with provenance, and
 up to 4,000 characters of supplementary context. Missing evidence, excess
