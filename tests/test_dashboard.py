@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import base64
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -65,6 +66,30 @@ def test_wikilinks_resolve_claim_anchors_and_no_self_or_ambiguous_links(library)
     page(library, "other/beta", type="paper", title="Another Beta")
     rows = {r["id"]: r for r in dashboard.build_dashboard()["pages"]}
     assert rows["cgt/alpha"]["links"] == []
+
+
+def run_dashboard_script(data, script):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is needed for dashboard JavaScript tests")
+    template = Path(dashboard.__file__).parent / "templates/dashboard.html"
+    source = template.read_text().split("const $=", 1)[1].split("document.addEventListener('click'", 1)[0]
+    app = "const DATA=JSON.parse(require('fs').readFileSync(0,'utf8'));\nconst $=" + source
+    run = subprocess.run([node, "-e", app + "\n" + script], input=json.dumps(data),
+                         text=True, capture_output=True)
+    assert run.returncode == 0, run.stderr
+
+
+def test_reader_separates_adjacent_footnotes(library):
+    run_dashboard_script(dashboard.build_dashboard(), """
+const assert=require('node:assert/strict');
+const body='Together.[^sc][^sctype] [^chet] Alone.[^sc] Literal `[^sc][^chet]`';
+const html=markdown(body).html;
+const citation=id=>`<button class="plain wikilink" data-section="fn-${id}">${id}</button>`;
+assert.ok(html.includes('<sup>'+['sc','sctype','chet'].map(citation).join(', ')+'</sup>'));
+assert.ok(html.includes('Alone.<sup>'+citation('sc')+'</sup>'));
+assert.ok(html.includes('<code>[^sc][^chet]</code>'));
+""")
 
 
 def test_export_paths_support_custom_locations_and_encoded_names(library):
