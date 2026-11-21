@@ -404,7 +404,9 @@ Optional per-PDF guardrails are `--max-model-calls`, `--max-tokens`, `--max-cost
 
 #### After ingest (both paths)
 
-**Step 2 — verify index health.** Successful agent promotion upserts the new page and every changed back-link target into both Tantivy and the semantic index under a cross-process lock. A missing index is built automatically. Run `researchwiki reindex` only after a reported incremental-update failure, after a manual/digest-path page write, or when `status` reports stale/missing indexes; it remains the full recovery builder.
+**Step 2 — verify index health.** Successful agent promotion upserts the new page and every changed back-link target into both Tantivy and the semantic index under a cross-process lock. A missing index is built automatically. After ingest, run `researchwiki reindex` for a reported incremental-update failure, a manual/digest-path page write, or stale/missing indexes reported by `status`.
+
+**After a framework upgrade**, when the [release notes](./CHANGELOG.md) call for `researchwiki reindex`, the agent runs it from the repo root and verifies that both the keyword and semantic indexes were rebuilt. This applies even when `status` reports the indexes healthy.
 
 `researchwiki db rebuild` is **not** required here. Wiki-page writers synchronize `papers`/`claims` after canonical writes; promotion and removal retain a journal until affected DB and keyword-index repair succeeds (see [state and backups](./WORKFLOW.md#what-gets-cached-what-gets-regenerated)). Rebuild remains the reconciler of last resort, for the three things per-page commits can't do: deletion detection, `claim-graph reconcile`, and edits made **outside** the package — hand edits, `Edit`/`Write` tool calls, `git` operations. Run it when you've edited pages yourself (as before any gate run on a hand-edited page), and periodically alongside `lint`. `researchwiki db verify` reports whether it's actually needed; it costs <1 s on a ~500-page corpus, so when unsure, just run it.
 
