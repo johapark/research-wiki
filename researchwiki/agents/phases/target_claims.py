@@ -1,6 +1,6 @@
 """Target-claims extraction phase (L3).
 
-Runs after extract, before crosslinks. Calls an LLM over the PDF text and
+Runs after extract, before authoring. Calls an LLM over the PDF text and
 returns a structured list of claims a thorough wiki page should cover.
 The author phase consumes this list as a coverage target — the directive
 is "consider preserving these items," not "include every one of them
@@ -28,6 +28,7 @@ metadata extraction.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -66,6 +67,7 @@ class TargetClaimsOutput:
     visual_requests: list = field(default_factory=list)
     visual_selection_status: str = "off"
     visual_evidence: list[str] = field(default_factory=list)
+    cache_hit: bool = False
 
     def is_empty(self) -> bool:
         return not self.claims
@@ -184,8 +186,9 @@ def extract_target_claims(
     pdf_full_text: str | None = None,
     use_stub: bool = False,
     visual_inventory: list | None = None,
+    source_hash: str | None = None,
 ) -> TargetClaimsOutput:
-    """Run one target-claims LLM call. Returns the parsed list.
+    """Retrieve a matching extraction or run the target-claims LLM call.
 
     On an untyped call error, JSON parse failure, or schema mismatch, returns
     an empty TargetClaimsOutput with an error string set. Typed provider and
@@ -218,6 +221,17 @@ def extract_target_claims(
         prompt += inventory_prompt(visual_inventory)
         system += NOMINATION_SYSTEM
         schema = nomination_schema(schema)
+    from . import target_claim_cache
+    cache = (target_claim_cache.cache_path(source_hash, prompt, system, schema, target_cfg, visual_inventory)
+             if source_hash else None)
+    if cache and os.environ.get("RW_FRESH_TARGET_CLAIMS") != "1":
+        cached = target_claim_cache.load(cache)
+        if cached is not None:
+            out = _parse_response(cached, visual_inventory)
+            if _cacheable(out):
+                out.cache_hit = True
+                return out
+
     try:
         resp = llm.call(
             phase="target_claims",
@@ -238,6 +252,18 @@ def extract_target_claims(
             error=f"LLM call failed: {type(e).__name__}: {e}",
         )
 
+    out = _parse_response(resp, visual_inventory)
+    if cache and _cacheable(out):
+        target_claim_cache.save(cache, resp)
+    return out
+
+
+def _cacheable(out: TargetClaimsOutput) -> bool:
+    return (bool(out.model and out.claims) and not out.error and len(out.keywords) >= 5
+            and out.visual_selection_status in ("off", "complete"))
+
+
+def _parse_response(resp, visual_inventory) -> TargetClaimsOutput:
     raw = resp.text.strip()
     # Strip code fences if the model wrapped its JSON.
     if raw.startswith("```"):

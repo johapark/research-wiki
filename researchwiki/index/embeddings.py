@@ -23,11 +23,13 @@ deterministic check that runs alongside this scorer.
 from __future__ import annotations
 
 import os
+import io
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from ..log import log
+from . import batch_embeddings
 
 
 DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
@@ -93,6 +95,10 @@ def _get_model(model_name: str = DEFAULT_MODEL):
 
 def is_available() -> bool:
     """Probe whether semantic scoring can run. Lazy-loads the model on first call."""
+    if batch_embeddings.active():
+        reply = batch_embeddings.request(None)
+        if reply is not None:
+            return bool(reply)
     return _get_model() is not None
 
 
@@ -101,6 +107,10 @@ def embed_texts(texts: list[str]) -> np.ndarray | None:
     rows so cosine similarity reduces to a dot product. Returns None if the
     model can't be loaded.
     """
+    if batch_embeddings.active():
+        data = batch_embeddings.request(texts)
+        if data is not None:
+            return np.load(io.BytesIO(data), allow_pickle=False) if data else None
     model = _get_model()
     if model is None:
         return None
@@ -136,8 +146,7 @@ def score_claim(
     Returns SemanticScore with score = max cosine similarity over chunks. None
     if the model is unavailable or evidence is empty.
     """
-    model = _get_model()
-    if model is None:
+    if not is_available():
         return None
     if not evidence_chunks:
         return SemanticScore(score=0.0, best_chunk_preview="")

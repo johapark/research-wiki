@@ -115,6 +115,12 @@ def page_index_text(p: Page) -> str:
     supporting sections trail behind where truncation costs least. An idea page
     assembles ~11.8k characters and only its first fifth is read; that is fine,
     and it is fine *because* of the ordering.
+
+    The topical `tags:` of the types that carry them go right after the title,
+    ahead of every section. Appended last, they sat past the cutoff on 18 of 38
+    synthesis pages (measured 2026-11-20), so the one keyword field those pages
+    have was mostly never embedded. A tag list is a few dozen characters, which
+    is all it costs the tl;dr's tail.
     """
     parts: list[str] = []
     page_type = str(p.fm.get("type") or "paper").strip().strip("\"'")
@@ -122,6 +128,14 @@ def page_index_text(p: Page) -> str:
     title = _frontmatter_text(p.fm.get("title"))
     if title:
         parts.append(title)
+
+    if page_type in _TAGS_CARRY_SIGNAL:
+        tags = [
+            tg for tg in _tag_list(p.fm.get("tags"))
+            if tg.lower() not in _FRAMEWORK_TAGS
+        ]
+        if tags:
+            parts.append(", ".join(tags))
 
     wanted = _INDEX_SECTIONS.get(page_type, _INDEX_SECTIONS_DEFAULT)
     seen: set[str] = set()
@@ -135,11 +149,12 @@ def page_index_text(p: Page) -> str:
             parts.append(section)
             matched_a_section = True
 
-    # Synthesis pages have no mandated H2 contract (unlike idea and concept, whose
-    # section order CLAUDE.md fixes), so name matching cannot be exhaustive there:
-    # `synthesis/dsb-free-editing-axis` uses "The axis" / "Positions on the axis",
-    # and `synthesis/suggested-additions` uses "Priority 1 — …". Both reduced to a
-    # bare title under name matching alone. Falling back to the body is safe
+    # Name matching cannot be exhaustive: a page whose H2s match none of its
+    # type's names would reduce to a bare title. Synthesis pages now share a
+    # fixed structure (CLAUDE.md §2) whose `Short answer` and `Question` always
+    # match, so the fallback serves pages outside any contract — a bookkeeping
+    # page in `synthesis/` with "Priority 1 — …" headings, or a page written
+    # before its type's structure existed. Falling back to the body is safe
     # because the embedder truncates anyway.
     # Gate on "did any section match", NOT on `len(parts)`. Counting parts made
     # the title load-bearing: a page with no `title:` and one matched section has
@@ -154,14 +169,6 @@ def page_index_text(p: Page) -> str:
     keywords = p.str_field("keywords").strip()
     if keywords:
         parts.append(keywords)
-
-    if page_type in _TAGS_CARRY_SIGNAL:
-        tags = [
-            tg for tg in _tag_list(p.fm.get("tags"))
-            if tg.lower() not in _FRAMEWORK_TAGS
-        ]
-        if tags:
-            parts.append(", ".join(tags))
 
     return "\n\n".join(parts)
 

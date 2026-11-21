@@ -19,6 +19,8 @@ from __future__ import annotations
 import time
 import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 from ..db.connection import get_connection
@@ -216,36 +218,7 @@ def run_ingest(
         log(f"extract → sections={list(sections.keys())}", tag="agent")
         _warn_thin_extraction(sections, full_text)
 
-        # Phase 2.4: target-claims extraction (L3) — structured list of
-        # claims the page should preserve. Surfaces a coverage target the
-        # author phase consumes. Failure still permits a reviewable draft, but
-        # the completeness gate prevents automatic promotion.
-        ctx.next_iter()
-        ctx.target_claims = _phase_target_claims(ctx, conn)
-        if ctx.target_claims is not None and not ctx.target_claims.is_empty():
-            n = len(ctx.target_claims.claims)
-            n_crit = len(ctx.target_claims.by_importance("critical"))
-            n_high = len(ctx.target_claims.by_importance("high"))
-            log(f"target-claims → {n} extracted "
-                  f"({n_crit} critical, {n_high} high)", tag="agent")
-        elif ctx.target_claims is not None and ctx.target_claims.error:
-            log(f"target-claims → skipped ({ctx.target_claims.error[:60]})", tag="agent")
-        # Thin-grounding warning, moved here 2026-08-10 from _warn_thin_extraction.
-        # This is the phase that genuinely extracts PDF-side claims, so an empty
-        # result here means what the old bullet-counting `pdf_claims=0` only
-        # appeared to mean: the draft's claims have no independently-extracted
-        # claim set to be checked against, leaving retrieval as the sole guard.
-        if ctx.target_claims is None or ctx.target_claims.is_empty():
-            log("target-claims ⚠ zero PDF-side claims extracted — nothing to "
-                "cross-check the draft's claims against beyond retrieval",
-                tag="agent")
-
-        if ctx.visual_inspection:
-            phase_visual_inspect(ctx, conn)
-
-        # Phase 2.5: crosslink candidates (verified surface for Related Papers)
-        ctx.next_iter()
-        ctx.crosslink_candidates = _phase_crosslinks(ctx, conn)
+        _prepare_draft_inputs(ctx, conn)
         log(f"crosslinks → {len(ctx.crosslink_candidates)} verified candidate(s)", tag="agent")
 
         # Phase 3: author × N — parallel.
@@ -256,8 +229,6 @@ def run_ingest(
         # so per-thread DB writes don't race. We don't share the runner's
         # `conn` across threads — each _phase_author call opens its own
         # commit window via the no-conn fallback in iterations.write_iteration.
-        from concurrent.futures import ThreadPoolExecutor
-
         # Per-draft temperature, clamped to Anthropic's valid [0, 1] range: the
         # raw 0.2 + 0.4*i formula exceeds 1.0 once i >= 2 (n_drafts >= 4), which
         # the API rejects. Default n_drafts=1 → [0.2] (single draft, tournament
@@ -328,8 +299,8 @@ def run_ingest(
         for round_num in range(ctx.max_evolve):
             ctx.next_iter()
             critique = _phase_critic(ctx, conn, ctx.winner)
-            if not critique.weak_claims and not critique.coverage_gaps:
-                log(f"critic  → no weak claims or coverage gaps, skipping evolve", tag="agent")
+            if not critique.needs_revision:
+                log("critic  → no revision requested, skipping evolve", tag="agent")
                 break
             log(f"critic  → flagged {len(critique.weak_claims)} weak claims, "
                   f"{len(critique.coverage_gaps)} coverage gaps "
@@ -373,6 +344,33 @@ def run_ingest(
         conn.close()
 
     return ctx
+
+
+def _prepare_draft_inputs(ctx: Context, conn) -> None:
+    """Collect the coverage checklist and verified links before the first draft."""
+    ctx.next_iter()
+    # Relay handoffs are answered in order. Under an explicit budget, keep the
+    # established reservation order (claims, optional visuals, then links).
+    if (ctx.use_stub or ctx.budget_tracker is not None
+            or model_config.uses_chat_relay(("target_claims", "link_generation"))):
+        ctx.target_claims = _phase_target_claims(ctx, conn)
+        if ctx.visual_inspection:
+            phase_visual_inspect(ctx, conn)
+        ctx.next_iter()
+        ctx.crosslink_candidates = _phase_crosslinks(ctx, conn)
+        return
+
+    # Claim extraction only reads the text/inventory already in memory. Keep
+    # PDF access (link discovery and visual inspection) on the runner thread.
+    # Snapshot the claims iteration and let its worker open its own DB writer.
+    claims_ctx = replace(ctx)
+    ctx.next_iter()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        claims = submit_observed(pool, _phase_target_claims, claims_ctx, None)
+        ctx.crosslink_candidates = _phase_crosslinks(ctx, conn)
+        ctx.target_claims = claims.result()
+    if ctx.visual_inspection:
+        phase_visual_inspect(ctx, conn)
 
 
 @observed_phase("crosslinks")
@@ -570,7 +568,9 @@ def _phase_critic(ctx: Context, conn, draft):
         use_stub=ctx.use_stub,
     )
     n_weak, n_gaps = len(critique.weak_claims), len(critique.coverage_gaps)
-    if n_weak or n_gaps:
+    if critique.declined_gaps:
+        reason = f"critic declined all {n_gaps} coverage gaps; skipping evolve"
+    elif critique.needs_revision:
         reason = f"flagged {n_weak} weak claims, {n_gaps} coverage gaps"
     else:
         reason = "no weak claims or coverage gaps; pass-through"
@@ -582,7 +582,7 @@ def _phase_critic(ctx: Context, conn, draft):
         role="critic",
         parent_iteration_id=draft.iteration_id,
         critic_notes=critique.notes,
-        decision="kept" if (n_weak or n_gaps) else "observed",
+        decision="kept" if critique.needs_revision else "observed",
         decision_reason=reason,
         model_used=critique.model,
         **usage_costs(critique),

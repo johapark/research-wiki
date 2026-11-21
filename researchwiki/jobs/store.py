@@ -45,16 +45,27 @@ class JobStore:
         return FileLock(str(path / "owner.lock"), timeout=0)
 
     def get_job(self, job_id):
+        return self._load(job_id)[0]
+
+    def _load(self, job_id):
+        """Return the record and its request document exactly as stored.
+
+        `request_sha256` fingerprints the request document written at submit.
+        Verify it against that stored document, not a re-serialization: parsing
+        fills defaults for options added since, so a manifest written by an
+        earlier release would otherwise fail its own identity check.
+        """
         path = self.path(job_id)
         try:
-            record = JobRecord.from_dict(read_json(path / "manifest.json"))
+            data = read_json(path / "manifest.json")
+            record = JobRecord.from_dict(data)
         except ContractError as exc:
             raise JobStoreUnavailable("Job manifest schema is invalid or unsupported") from exc
         if record.job_id != job_id or record.library_id != self.library_id or (
             Path(record.request.library_root).resolve() != self.library_root
-        ) or record.request_sha256 != digest(record.request.to_dict()):
+        ) or record.request_sha256 != digest(data["request"]):
             raise JobStoreUnavailable("job record library/request identity mismatch")
-        return record
+        return record, data["request"]
 
     def list_jobs(self):
         """Read durable records without refreshing ownership or creating a store."""
@@ -78,7 +89,9 @@ class JobStore:
                     continue
                 existing = self.get_job(path.name)
                 if existing.request.request_id == request.request_id:
-                    if existing.request_sha256 != fingerprint:
+                    # Compare in the current schema: an older record's stored
+                    # fingerprint omits options added since, at their defaults.
+                    if digest(existing.request.to_dict()) != fingerprint:
                         raise JobConflict("request_id already names a different request")
                     return existing
             validate_inputs(request)
@@ -100,8 +113,14 @@ class JobStore:
     def _change(self, job_id, fn):
         path = self.path(job_id) / "manifest.json"
         with exclusive_lock(path):
-            record = fn(self.get_job(job_id))
-            write_private_json(path, record.to_dict())
+            current, stored_request = self._load(job_id)
+            record = fn(current)
+            if record.request != current.request or record.request_sha256 != current.request_sha256:
+                raise JobConflict("a job's request is immutable")
+            # Rewrite state, not the request: re-serializing it would add newer
+            # default options and break the fingerprint that the publication
+            # ledger binds for this job's lifetime.
+            write_private_json(path, {**record.to_dict(), "request": stored_request})
             return record
 
     def claim(self, job_id, owner):

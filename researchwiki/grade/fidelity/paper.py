@@ -24,7 +24,7 @@ from ...paths import wiki_dir, resolve_pdf
 from ...pdf.text import extract_pdf
 from ..parser import Claim, parse_claims
 from ..primitives import normalize_numeric as _normalize_numeric, check_numerics as _check_numerics, negation_mismatch as _negation_mismatch
-from ...index.pdf_chunks import build_pdf_index, query_pdf, get_chunk_embeddings, MAX_PDF_PAGES
+from ...index.pdf_chunks import open_pdf_reader, PdfChunkReader, MAX_PDF_PAGES
 from ...index import embeddings as semantic_mod
 from ...pdf.sections import anchor_sections
 from ..salience import SalienceReport, score_salience
@@ -114,8 +114,7 @@ class PaperFidelityReport:
         return d
 
 
-def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool,
-                 pdf_path: Path | None = None) -> ClaimScore:
+def _score_claim(reader: PdfChunkReader, claim: Claim, full_pdf_text: str, use_semantic: bool) -> ClaimScore:
     if claim.is_cross_ref:
         return ClaimScore(
             section=claim.section,
@@ -134,7 +133,9 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
             graded=False,
         )
 
-    hits = query_pdf(stem, claim.text, topk=5, pdf_path=pdf_path)
+    # The lexical checks use the first three hits. Semantic scoring also
+    # considers the rest of the top ten from the same ranked retrieval.
+    hits = reader.query(claim.text, topk=10 if use_semantic else 5)
     if not hits:
         return ClaimScore(
             section=claim.section,
@@ -166,30 +167,16 @@ def _score_claim(stem: str, claim: Claim, full_pdf_text: str, use_semantic: bool
 
     semantic_score: float | None = None
     if use_semantic:
-        # Widen retrieval to top-10 for the embedding scorer (same rationale as
-        # the prior NLI path: multi-aspect claims have evidence spread across
-        # multiple chunks). The bi-encoder's max-over-chunks aggregation makes
-        # this safe; irrelevant chunks just don't move the max.
-        sem_hits = query_pdf(stem, claim.text, topk=10, pdf_path=pdf_path)
-        if sem_hits:
-            chunk_texts = [h.text for h in sem_hits]
-            # If the per-PDF embedding cache is populated and the chunk_id ↔
-            # text mapping matches, reuse the cached embeddings for the
-            # retrieved chunks. Otherwise fall back to embedding the chunks
-            # ad-hoc inside score_claim — slower but correct.
-            cached = get_chunk_embeddings(stem, pdf_path=pdf_path)
-            chunk_embs = None
-            if cached is not None:
-                cache_embs, cache_texts = cached
-                idx_by_text = {t: i for i, t in enumerate(cache_texts)}
-                rows = [idx_by_text.get(t) for t in chunk_texts]
-                if all(r is not None for r in rows):
-                    chunk_embs = cache_embs[rows]
-            result = semantic_mod.score_claim(
-                claim.text, chunk_texts, chunk_embeddings=chunk_embs,
-            )
-            if result is not None:
-                semantic_score = result.score
+        chunk_texts = [h.text for h in hits]
+        # If the per-PDF embedding cache is populated and the chunk_id ↔
+        # text mapping matches, reuse the cached embeddings for the
+        # retrieved chunks. Otherwise fall back to embedding the chunks
+        # ad-hoc inside score_claim — slower but correct.
+        result = semantic_mod.score_claim(
+            claim.text, chunk_texts, chunk_embeddings=reader.embeddings_for(chunk_texts),
+        )
+        if result is not None:
+            semantic_score = result.score
 
     return ClaimScore(
         section=claim.section,
@@ -349,15 +336,14 @@ def grade_page(
     # Ensure the per-PDF index exists before scoring claims
     from ...fsatomic import file_sha256
     pdf_digest = file_sha256(resolved_pdf)
-    build_pdf_index(stem, pdf_path=resolved_pdf)
+    semantic_available = semantic and semantic_mod.is_available()
+    reader = open_pdf_reader(stem, pdf_path=resolved_pdf, semantic=semantic_available)
 
     # Load full PDF text once for the numeric integrity fallback check
     full_pdf_text, _ = extract_pdf(resolved_pdf, max_pages=MAX_PDF_PAGES)
 
-    semantic_available = semantic and semantic_mod.is_available()
     scored: list[ClaimScore] = [
-        _score_claim(stem, c, full_pdf_text, use_semantic=semantic_available,
-                     pdf_path=resolved_pdf) for c in claims
+        _score_claim(reader, c, full_pdf_text, semantic_available) for c in claims
     ]
 
     graded = [s for s in scored if s.graded]

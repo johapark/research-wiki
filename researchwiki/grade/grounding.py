@@ -107,11 +107,15 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 #     papers. Grounds the unit only alongside a wiki citation naming the papers
 #     it follows from; the fidelity grader then skips it, because no one cited
 #     paper states the combined conclusion.
-# Idea pages label Opportunities/Plans; synthesis pages label Outlook. `\b`
-# lets the title carry a descriptive suffix like "## Plans — how to ...".
+# Idea pages label Opportunities/Plans; synthesis pages label Outlook. On idea
+# pages `\b` lets the title carry a descriptive suffix like "## Plans — how
+# to ...". Synthesis matches the whole title: its section names are a fixed
+# contract that lint, `extract_section`, impact review and scout triggers all
+# read by exact name, so a suffixed `## Outlook — next steps` must not keep the
+# label privileges while every other reader fails to find the section.
 _LABELLED_SECTION_RES: dict[str, re.Pattern[str]] = {
     "idea": re.compile(r"^(opportunities|plans)\b", re.IGNORECASE),
-    "synthesis": re.compile(r"^outlook\b", re.IGNORECASE),
+    "synthesis": re.compile(r"^outlook$", re.IGNORECASE),
 }
 _FRONTMATTER_TYPE_RE = re.compile(r"^type:\s*([^\s#]+)", re.MULTILINE)
 _H2_RE = re.compile(r"^##[ \t]+(.+?)\s*$", re.MULTILINE)
@@ -144,6 +148,44 @@ def _has_quantity(text: str) -> bool:
 # Minimum word count to treat a unit as a "claim". Below this, it's
 # probably a label/lead-in/punctuation noise, not a factual claim.
 MIN_CLAIM_WORDS = 8
+
+# Sentence ends: terminal punctuation plus any closing quote or bracket, then
+# whitespace and a capital, digit or opening mark (or the end of the text). A
+# lowercase continuation is not a new sentence, so "useful vs. underperformed?"
+# stays one question.
+_SENTENCE_END_RE = re.compile(r"[.!?]+[\"'”’)\]]*(?=\s+[A-Z0-9\"“‘(\[]|\s*$)")
+# Abbreviations whose period is followed by a capital or digit mid-sentence
+# ("Fig. 4", "et al. 2024", "e.g. Cas9"). Splitting there would leave a
+# fragment of a question looking like a declarative sentence.
+_NON_TERMINAL_ABBREV_RE = re.compile(
+    r"\b(?:e\.g|i\.e|cf|vs|al|approx|ca|fig|figs|eq|eqs|ref|refs|sec|suppl|no|nos)\.$",
+    re.IGNORECASE,
+)
+_CLOSERS = "\"'”’)]"
+
+
+def _without_questions(text: str) -> str:
+    """`text` with its question sentences removed.
+
+    A question asserts nothing, but the sentences around one can: a scope
+    paragraph that states two results and then asks what they mean carries two
+    claims. Skipping every paragraph that *ends* in `?` let those results pass
+    both gates uncited, so only the question sentences are dropped here and the
+    rest is judged like any other prose. A premise embedded inside the question
+    sentence itself still goes unchecked; the authoring procedure asks for it
+    to be stated as a cited sentence of its own.
+    """
+    sentences: list[str] = []
+    start = 0
+    for m in _SENTENCE_END_RE.finditer(text):
+        if _NON_TERMINAL_ABBREV_RE.search(text[start:m.end()].rstrip(_CLOSERS)):
+            continue
+        sentences.append(text[start:m.end()])
+        start = m.end()
+    sentences.append(text[start:])
+    kept = [s.strip() for s in sentences
+            if s.strip() and not s.strip().rstrip(_CLOSERS).endswith("?")]
+    return " ".join(kept)
 
 
 @dataclass
@@ -598,11 +640,9 @@ def _classify_claim(text: str, kind: str) -> tuple[bool, str]:
     cleaned = re.sub(r"\[\[[^\]]+\]\]", "", cleaned)        # don't count link text
     cleaned = re.sub(r"\bclaim_id\s*[:=]\s*\d+", "", cleaned)
     cleaned = _FOOTNOTE_REF_RE.sub("", cleaned)            # don't count footnote-ref ids
-    body = cleaned.strip()
+    # Questions don't make claims; the sentences beside them can.
+    body = _without_questions(cleaned.strip())
     if not body:
-        return False, ""
-    # Questions don't make claims.
-    if body.endswith("?"):
         return False, ""
     # Rule-4 disclaimers are legitimate non-citations.
     for pat in _DISCLAIMER_PATTERNS:

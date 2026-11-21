@@ -131,6 +131,7 @@ class Context:
     visual_inventory: list = field(default_factory=list)
     visual_source_sections: dict = field(default_factory=dict)
     visual_results_source: str = ''     # "heading" | "body" | "none" — see visual_source_sections
+    source_pdf_sha256: str | None = None
     visual_source_hash: str | None = None
     visual_result: object | None = None
     crosslink_candidates: list = field(default_factory=list)   # list[phases.CrosslinkCandidate]

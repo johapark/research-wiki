@@ -51,6 +51,27 @@ def _grade(tmp_path, classifier=None):
     )
 
 
+def test_semantic_claim_scoring_uses_one_ranked_retrieval(monkeypatch):
+    chunks = [_hit(i, f"Evidence number {i}.") for i in range(10)]
+    queries = []
+    def query(text, topk):
+        queries.append(topk)
+        return chunks[:topk]
+    def score(text, chunk_texts, *, chunk_embeddings):
+        assert chunk_texts == [chunk.text for chunk in chunks]
+        return SimpleNamespace(score=0.75)
+
+    reader = SimpleNamespace(query=query, embeddings_for=lambda texts: None)
+    monkeypatch.setattr(paper.semantic_mod, "score_claim", score)
+    claim = Claim("results", 0, "Evidence number 1.", False)
+    lexical = paper._score_claim(reader, claim, "", False)
+    semantic = paper._score_claim(reader, claim, "", True)
+    assert queries == [5, 10]
+    assert semantic.semantic_score == 0.75
+    semantic.semantic_score = None
+    assert semantic == lexical
+
+
 def test_complete_late_evidence_reaches_llm_prompt(tmp_path, monkeypatch):
     """End-to-end through the optional grade phase and real prompt builder.
 
@@ -71,13 +92,13 @@ def test_complete_late_evidence_reaches_llm_prompt(tmp_path, monkeypatch):
         return hits
 
     monkeypatch.setattr(pdf_chunks, "query_pdf", query)
-    monkeypatch.setattr(paper, "query_pdf", query)
+    reader = SimpleNamespace(query=lambda text, topk: query("example-2026-paper", text, topk))
     claim = Claim(
         "results", 0,
         "The enzyme retained activity after heating, assayed after cooling.",
         False,
     )
-    score = paper._score_claim("example-2026-paper", claim, first + second, False)
+    score = paper._score_claim(reader, claim, first + second, False)
     assert score.supporting_text == first[:500]
     assert "retained activity" not in score.to_dict()["supporting_text"]
     monkeypatch.setattr(grade, "grade_page", lambda **kwargs: _report([score]))

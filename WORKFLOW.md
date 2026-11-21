@@ -100,6 +100,11 @@ wiki/{category}/{stem}.md             # the new wiki page
 ingest_iterations table               # per-phase audit trail in state DB
 ```
 
+On API ingests, target-claim extraction and cross-link discovery run concurrently.
+Drafting waits for both results and any requested visual inspection. Runs with an
+explicit budget, stub runs, and runs using chat relay for either phase keep the
+sequential order.
+
 Phase logic is separated from `ingest_iterations` persistence: thin runner
 wrappers write the audit rows rather than the phase functions themselves.
 Phases are otherwise effectful — they may call providers or LLMs and populate
@@ -114,7 +119,11 @@ results also block automatic promotion; provider failures remain errors to fix
 before retrying. `--force-sandbox` deliberately avoids publication.
 `--auto-promote` bypasses failed gates and is a reviewed override, not a repair.
 Revisions receive the full previous draft and the same author system prompt,
-including any custom override, and preserve all existing sections. Specific
+including any custom override. When all EVOLVE edits belong in one identifiable
+H2 section, the author returns its revised body and the runner splices it into
+the prior draft. The grader evaluates the assembled page. Ambiguous or
+multi-section edits use the full-draft response. A malformed section response
+retains the prior text and is recorded in the revision metrics. Specific
 repairs reuse the graded PDF's chunk index: up to four queries, two complete
 chunks per issue, a deduplicated 12,000-character packet with provenance, and
 up to 4,000 characters of supplementary context. Missing evidence, excess
@@ -236,6 +245,9 @@ API-backed providers — and `--stub`, which reaches no provider at all — defa
 to four parallel workers; chat-relay defaults to one visible worker because it
 needs an active conversational responder. Tune either with `-w N`. Every
 completion is recorded atomically under `.ingest/batch-<ts>/checkpoint.json`.
+When there are more inputs than workers, semantic agent ingests on POSIX keep
+one CPU embedding model per worker slot. Each PDF runs in its own process with
+a separate database connection, budget, event recorder and encoder pipe.
 Resume skips recorded completions and restarts unfinished or retryable papers
 from the beginning; there is no per-phase checkpoint. New batches record a
 versioned identity in `plan.json`: PDF and supplementary hashes, author-prompt
@@ -1304,6 +1316,12 @@ up. Not everything outside `wiki/` is disposable.
   until refreshed. Both directories are gitignored.
 - **`.grade-cache/{stem}/`** is per-paper PDF chunk index + embeddings.
   Gitignored. Built lazily on first grade call per paper.
+- **`.ingest/target-claims/`** stores successful API target-claim responses.
+  A retry with the same PDF bytes, rendered prompt, schema, model configuration,
+  endpoint and visual inventory reuses the extraction. The target-claims trace
+  records `cached` and zero tokens. Set `RW_FRESH_TARGET_CLAIMS=1` on an ingest
+  to request a new extraction and replace the entry on success. Chat relay uses
+  its existing `RW_RELAY_FRESH` setting.
 - **`.s2-cache/`, `.crossref-cache/`, `.web-cache/`** are external-API
   responses. Gitignored. Built lazily. `.web-cache/search/` holds `scout
   search` responses (re-queried after `--max-age-days`), its first-seen ledger,

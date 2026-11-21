@@ -164,3 +164,50 @@ def test_target_extraction_returns_filtered_keywords(monkeypatch):
         "VariantMedium", "variant calling", "AUPRC", "genome benchmark",
         "precision recall",
     ]
+
+
+def test_retry_reuses_only_complete_identical_target_claims(tmp_path, monkeypatch):
+    from researchwiki.agents import model_config, llm
+    from researchwiki.agents.phases import target_claims
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RW_LLM_BASE_URL", "http://localhost:8080/v1")
+    cfg = model_config.ModelConfig("openai-compatible", "model-a", 0.2, 2000)
+    monkeypatch.setattr(model_config, "for_phase", lambda phase: cfg)
+    monkeypatch.setattr(model_config, "target_claims_max_chars", lambda: 5000)
+    calls = []
+    data = {"claims": [{"type": "headline", "content": "A verified result.", "importance": "critical"}],
+            "keywords": ["alpha", "beta", "gamma", "delta", "epsilon"], "visual_requests": []}
+
+    def call(**kwargs):
+        calls.append(kwargs)
+        return llm.LLMResponse(json.dumps(data), cfg.model, 0.2, 70, 30)
+
+    monkeypatch.setattr(llm, "call", call)
+    args = dict(metadata={}, sections={"results": "A source result."}, source_hash="a" * 64)
+    first = extract_target_claims(**args)
+    hit = extract_target_claims(**args)
+    assert hit.claims == first.claims and hit.keywords == first.keywords
+    assert hit.cache_hit and hit.input_tokens == hit.output_tokens == 0 and len(calls) == 1
+    receipt, = (tmp_path / ".ingest/target-claims").glob("*.json")
+    record = json.loads(receipt.read_text())
+    record["text"] = record["text"].replace("verified", "different")
+    receipt.write_text(json.dumps(record))
+    restored = extract_target_claims(**args)
+    assert not restored.cache_hit and restored.claims == first.claims
+    monkeypatch.setenv("RW_FRESH_TARGET_CLAIMS", "1")
+    assert not extract_target_claims(**args).cache_hit
+    monkeypatch.delenv("RW_FRESH_TARGET_CLAIMS")
+    assert not extract_target_claims(**dict(args, source_hash="b" * 64)).cache_hit
+    assert not extract_target_claims(**dict(args, metadata={"title": "Changed"})).cache_hit
+    assert not extract_target_claims(**args, visual_inventory=[]).cache_hit
+    assert extract_target_claims(**args, visual_inventory=[]).cache_hit
+    monkeypatch.setenv("RW_LLM_BASE_URL", "http://localhost:9090/v1")
+    assert not extract_target_claims(**args).cache_hit
+    cfg = model_config.ModelConfig("openai-compatible", "model-b", 0.2, 2000)
+    assert not extract_target_claims(**args).cache_hit
+    monkeypatch.setattr(target_claims, "_JSON_SCHEMA", {"type": "object"})
+    data["keywords"] = []
+    assert not extract_target_claims(**args).cache_hit
+    assert not extract_target_claims(**args).cache_hit
+    assert len(calls) == 10

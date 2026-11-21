@@ -43,6 +43,16 @@ def test_scaffold_has_the_fixed_structure_and_passes_the_contract(wiki):
     assert kinds == {"synthesis_findings_without_themes"}
 
 
+def test_scaffold_logs_under_the_shared_synthesis_kind(wiki):
+    # Every synthesis-page event shares one kind and headline shape so a
+    # page's history greps out of log.md in one pass; the scaffold is marked
+    # by its suffix (prompts/synthesis-page-author.md § Log entries).
+    assert synthesize.main(["--title", "Off-target effects", "--papers", "a-2024-x"]) == 0
+    log = (wiki / "wiki/log.md").read_text()
+    assert "] synthesis | Off-target effects → synthesis/off-target-effects (scaffold)\n" in log
+    assert "] synthesize | " not in log
+
+
 def test_evidence_goes_to_a_side_file_not_the_page(wiki, monkeypatch):
     _fake_claims(monkeypatch)
     rc = synthesize.main(["--title", "Off-target effects", "--topic-seed", "off-target",

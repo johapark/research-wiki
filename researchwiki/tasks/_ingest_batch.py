@@ -34,17 +34,20 @@ Pattern lifted from hermes-agent `batch_runner.py::BatchRunner`.
 from __future__ import annotations
 
 import concurrent.futures
+from contextlib import ExitStack
 import datetime as _dt
 import hashlib
 import json
 import os
 import re
+from queue import SimpleQueue
 import signal
 import subprocess
 import sys
 from pathlib import Path
 
 from ..errors import EnvironmentFailure
+from ..index import batch_embeddings
 from . import _batch_identity
 
 
@@ -140,7 +143,7 @@ def _worker(
 
     log_path = _worker_log_path(batch_dir, pdf_path)
     cmd = [sys.executable, "-m", "researchwiki", *subcommand, pdf_path, *extra_args]
-    with log_path.open("w", encoding="utf-8") as log_fp:
+    with batch_embeddings.child_options(child_env) as options, log_path.open("w", encoding="utf-8") as log_fp:
         log_fp.write(f"# cmd: {' '.join(cmd)}\n")
         log_fp.flush()
         proc = subprocess.Popen(
@@ -151,6 +154,7 @@ def _worker(
             encoding="utf-8",
             errors="replace",
             env=child_env,
+            **options,
         )
         assert proc.stderr is not None
         for line in proc.stderr:
@@ -354,7 +358,17 @@ def _run_batch(
     except (ValueError, OSError):
         prev_sigint = None
     installed_dfl = False
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+    with ExitStack() as resources:
+        pool_options = {}
+        if (os.name == "posix" and subcommand == ["agent", "ingest"]
+                and len(pending) > workers and "--no-semantic" not in extra_args):
+            slots = SimpleQueue()
+            for _ in range(workers):
+                slot = batch_embeddings.EncoderSlot()
+                resources.callback(slot.close)
+                slots.put(slot)
+            pool_options = {"initializer": batch_embeddings.assign_slot, "initargs": (slots,)}
+        pool = resources.enter_context(concurrent.futures.ThreadPoolExecutor(max_workers=workers, **pool_options))
         # Per-input flags are composed at submit time rather than passed
         # down, so `_worker` keeps its signature and every existing caller and
         # test is unaffected.

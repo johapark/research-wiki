@@ -25,6 +25,63 @@ the reasoning behind any line below.
 - README groups Obsidian and ego-browser as optional recommended add-ons after
   installation, with Obsidian first. Ego-browser supports literature scouting,
   browser-based PDF downloads, and shared dashboard navigation with the agent.
+- Every synthesis-page event now logs under one `log.md` kind and headline,
+  `synthesis | <Title> → synthesis/<slug>`, with a suffix naming the event
+  (`(scaffold)`, `(update)`, `(upgrade)`). `researchwiki synthesize` writes its
+  scaffold entry in that form instead of `synthesize | synthesis: … → wiki/…md`,
+  and CLAUDE.md drops the `query | <question> → <page>` form. Entries already in
+  `log.md` are unchanged.
+- Source labels (`*(inference)*`, `*(model prior)*`) on a synthesis page now
+  require the exact `## Outlook` heading. A suffixed variant such as
+  `## Outlook — next steps` previously kept the label privileges in both gates
+  while lint, `extract_section`, impact review and `scout recent` triggers all
+  failed to find the section by name. Idea pages keep their descriptive-suffix
+  allowance on `## Opportunities` / `## Plans`.
+- The semantic page index embeds a concept / idea / synthesis / proposal page's
+  topical `tags:` directly after its title instead of last. Appended last they
+  fell past the embedder's 512-token cutoff on 18 of 38 synthesis pages, so the
+  only keyword-like field those page types have was mostly not embedded at all.
+  **Run `researchwiki reindex` after upgrading.** Nothing marks the existing
+  index stale: `status`'s semantic-staleness signal is the `pages.stale`
+  sentinel, which only `mark_stale()` writes, and incremental `upsert_pages`
+  re-examines only the pages it is handed. Without a full reindex the corpus
+  keeps its pre-change vectors while `status` reports the index healthy.
+- The synthesis authoring procedure asks for premises to be stated as their own
+  cited sentences rather than inside the question, for `Short answer` to carry
+  4–6 cited bullets sized so a reader could repeat one (~300 characters each),
+  and for 3–8 topical tags. It documents the real retrieval budget — about 1,850
+  characters of `Short answer` plus `Question` reach the embedder — in place of a
+  flat section-length cap, which would have required deleting stated conditions
+  from pages that follow the content rules.
+
+### Fixed
+
+- Scoped EVOLVE repairs now request a JSON section body in the system prompt.
+  On API providers that ignore `schema=`, the full-page author instructions
+  could produce Markdown that the section parser rejected. The format
+  instruction is appended to custom `--author-prompt-file` prompts as well.
+- A batch worker's encoder slot no longer blocks teardown indefinitely. Closing
+  the control pipe only reaches the encoder when it returns to `recv_handle`, so
+  an unbounded `wait()` waited behind work in flight — in the worst case a
+  first-use model download, which made a Ctrl-C look like a hang after every
+  paper was already terminal. Teardown now waits briefly, then escalates to
+  `terminate()` and `kill()`.
+- When the critic declines all coverage gaps with a bare `REPAIR_SCOPE: FULL_PAGE`
+  and there are no weak claims, ingest skips EVOLVE and its regrade. The trace
+  records the declined gaps and the original draft proceeds to the usual gates.
+- `check-grounding` and `grade synthesis` no longer exempt an entire paragraph
+  because it ends in `?`. Only question sentences are skipped; declarative
+  sentences beside one are graded like any other prose, so a result stated next
+  to a question can no longer pass both gates uncited. A fact asserted *inside*
+  the question sentence is still unchecked, which is why the authoring procedure
+  asks for premises to be stated separately.
+
+- Local ingest jobs submitted before a release added an ingest option (such as
+  `visual_inspection`) remain readable. Their stored request fingerprint is
+  verified against the request as written, rather than a re-serialization that
+  fills in newer defaults, so one older manifest no longer makes the job list
+  unavailable. State changes keep the stored request, so the publication ledger's
+  binding stays valid through claim, finish, and retry.
 
 ## [0.7.0] - 2026-11-19
 

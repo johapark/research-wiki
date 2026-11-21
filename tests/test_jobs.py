@@ -114,6 +114,41 @@ def test_bad_manifest_is_never_rewritten_or_replayed(library, damage):
     assert path.read_bytes() == before
 
 
+def _as_written_before_visual_inspection(store, record):
+    """Rewrite a record as a release predating `visual_inspection` stored it:
+    without that option key, fingerprinted over the request it actually wrote."""
+    from researchwiki.jobs.files import digest
+    path = store.path(record.job_id) / 'manifest.json'
+    data = json.loads(path.read_text())
+    del data['request']['options']['visual_inspection']
+    data['request_sha256'] = digest(data['request'])
+    write_private_json(path, data)
+    return path, data
+
+
+def test_records_from_an_earlier_options_schema_stay_readable(library):
+    _, request, store = library
+    record = store.submit_ingest(request)
+    path, data = _as_written_before_visual_inspection(store, record)
+    legacy = store.get_job(record.job_id)
+    assert legacy.request == request and legacy.request.options.visual_inspection is False
+    assert store.list_jobs() == (legacy,)
+    # Idempotent resubmission still matches the same job, a changed option still conflicts.
+    assert store.submit_ingest(request).job_id == record.job_id
+    with pytest.raises(JobConflict, match='different request'):
+        store.submit_ingest(replace(request, options=replace(request.options, visual_inspection=True)))
+    # State transitions keep the stored request bytes, so the fingerprint the
+    # publication ledger bound at claim time remains the record's fingerprint.
+    running = store.claim(record.job_id, 'owner')
+    assert store.ledger_binding(running)['request_sha256'] == data['request_sha256']
+    finished = store.finish(record.job_id, 'owner', running.generation, failed_result(record))
+    stored = json.loads(path.read_text())
+    assert stored['request'] == data['request'] and stored['request_sha256'] == data['request_sha256']
+    assert finished.execution == 'finished' and store.get_job(record.job_id) == finished
+    retry = store.retry_job(record.job_id)
+    assert retry.parent_job_id == record.job_id and retry.request.options == request.options
+
+
 def test_cancel_wins_before_claim_and_does_not_start_worker(library):
     _, request, store = library
     record = store.submit_ingest(request)
