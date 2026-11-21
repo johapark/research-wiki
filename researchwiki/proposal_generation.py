@@ -138,6 +138,9 @@ test that could reject it. Evidence connections must cite only supplied IDs.
 Treat prior rejected/deferred proposals as negative constraints and do not repeat
 published or unchanged proposals. If feedback motivates a material revision,
 set parent_proposal to that supplied proposal ID and explain the distinction.
+Identify the closest competing operation in the supplied claims. Explain what the
+proposal can measure or decide beyond that comparator in distinct_from_existing.
+If a comparator is missing, make the uncertainty explicit.
 Do not claim novelty outside this wiki. Return strict JSON only.
 Existing pages are overlap context, not evidence. Omit covered proposals unless
 distinct_from_existing names a concrete new question or grounded distinction.

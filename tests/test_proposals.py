@@ -827,3 +827,31 @@ def test_feedback_log_entry_is_one_line(ledger, monkeypatch):
     _kind, headline, details = logged[0]
     assert "\n" not in headline and "\n" not in details
     assert "## Required controls" in details    # kept, but inline
+
+
+def test_comparator_review_searches_mechanism_outside_packet(tmp_path, monkeypatch, capsys):
+    from researchwiki import proposal_review
+    from researchwiki.proposal_preview import save_preview
+    from researchwiki.tasks import proposals as cli
+
+    monkeypatch.chdir(tmp_path)
+    data = _evidence()
+    for item in data:
+        item["citation"] = f"[[{item['paper_stem']}#{item['claim_slug']}]]"
+    packet = {"topic": "routing", "target_category": "ai", "evidence": data}
+    receipt = save_preview(packet, [_proposal()], {"model": "gpt-5.6-terra"})
+    other = dict(data[0], paper_stem="outside-paper")
+    queries = []
+
+    def search(query, **kwargs):
+        queries.append(query)
+        return [data[0], data[0], other]
+
+    monkeypatch.setattr(proposal_review, "claim_query", search)
+    assert cli.main(["review", str(receipt), "--select", "1", "--json"]) == 0
+    hits = json.loads(capsys.readouterr().out)["candidates"]
+    assert _proposal()["mechanism"] in queries[0]
+    assert [(h["citation"], h["already_cited"]) for h in hits] == [
+        (data[0]["citation"], True), ("[[outside-paper#kc-aaaa]]", False)]
+    assert cli.main(["review", str(receipt), "--select", "0"]) == 1
+    assert not (tmp_path / "wiki/proposals").exists()

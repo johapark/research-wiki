@@ -28,8 +28,8 @@ def _cluster(members, keywords, verdict="new"):
 
 
 def _pair(a, b, terms, cat_a="genomics", cat_b="cgt"):
-    return SimpleNamespace(stem_a=a, stem_b=b, category_a=cat_a, category_b=cat_b,
-                           shared_terms=terms)
+    from researchwiki.tasks.claim_discover import DiscoveredPair
+    return DiscoveredPair(a, b, cat_a, cat_b, "kc-a", "kc-b", a, b, 0.8, 2.0, terms)
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def sources(monkeypatch):
     """Fake the three local sources; tests fill them in."""
     state = {"edges": [], "clusters": [], "pairs": [], "explored": []}
     monkeypatch.setattr(po, "_live_edges", lambda: state["edges"])
-    monkeypatch.setattr(po, "_explored_paper_sets", lambda: state["explored"])
+    monkeypatch.setattr(po, "_explored_questions", lambda: state["explored"])
 
     import researchwiki.synthesis_candidates.detect as detect
     import researchwiki.tasks.claim_discover as discover
@@ -132,10 +132,36 @@ def test_bridge_commands_pin_only_target_category_papers(sources):
     assert "src-2020-x" not in opp.command()
 
 
-def test_an_existing_proposal_suppresses_its_opportunity(sources):
-    sources["edges"] = [_edge("a-2020-x", "b-2021-y")]
-    sources["explored"] = [frozenset({"a-2020-x", "b-2021-y", "z-2019-q"})]
-    assert po.find_opportunities() == []
+def test_shared_papers_preserve_distinct_questions(sources):
+    papers = ["a-2020-x", "b-2021-y"]
+    count = "Do fact counts and semantic bits move together?"
+    recover = "Can a smaller representation preserve answers to verified fact questions?"
+    prior = SimpleNamespace(proposal_id="prior", question=count, status="drafted")
+    sources["explored"] = [(prior, set(papers))]
+    opp = po.Opportunity("build-on", recover, "", papers=papers)
+    assert not po._same_question_or_note_overlap(opp, sources["explored"])
+    assert opp.overlapping_proposals == [{"proposal_id": "prior", "status": "drafted", "question": count}]
+    assert po._question_key("Does X correlate with Y?") == po._question_key("Does X covary with Y?")
+    assert po._question_key("Does X reduce Y?") != po._question_key("Does Y reduce X?")
+    assert po._same_question_or_note_overlap(po.Opportunity("build-on", count.upper(), "", papers=papers),
+                                             sources["explored"])
+
+
+def test_rank_operation_and_limit_before_generic_trial_labels(sources):
+    from dataclasses import replace
+    sources["pairs"] = [
+        _pair("trial-a", "trial-b", ["double-blind"]),
+        _pair("word-a", "word-b", ["atac-seq"]),
+        replace(_pair("limited", "method", ["needleman-wunsch"]), slug_a="lim-1",
+                text_a="Alignment fails to account for gaps.", slug_b="met-2",
+                text_b="Needleman-Wunsch aligns two sequences."),
+    ]
+    bridge, weak, generic = po._bridge_opportunities(limit=3)
+    assert bridge.papers == ["limited"] and bridge.related == ["method"]
+    assert bridge.claim_excerpts["source"]["citation"] == "[[method#met-2]]"
+    assert bridge.claim_excerpts["target"]["text"] == sources["pairs"][2].text_a
+    assert weak.related == ["word-a"] and generic.related == ["trial-a"]
+    assert po._bridge_opportunities(limit=1) == [bridge]
 
 
 def test_one_signal_cannot_crowd_out_the_others(sources):

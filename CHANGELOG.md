@@ -20,6 +20,13 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+### Changed
+
+- Proposal previews now search the claims database for competing methods.
+  Use `researchwiki proposals review` to repeat the comparison for a saved
+  proposal or preview. Opportunity lists show earlier questions that share
+  papers and the source and target claims behind cross-category leads.
+
 ## [0.7.1] - 2026-11-20
 
 **Run `researchwiki reindex` after upgrading.** This rebuilds the semantic page

@@ -11,8 +11,8 @@ ingest and the chat agent can offer one without spending anything.
 Detection is deliberately conservative. Every source is an existing local
 scan (the claim-graph edge cache, `synthesis_candidates.find_candidates`,
 `claim_discover.discover_pairs`); nothing here embeds, judges or writes a wiki
-page. A topic an existing proposal already explores is dropped, so an accepted
-or rejected proposal stops the same opportunity resurfacing.
+page. A matching question with overlapping evidence is dropped. Other questions
+sharing papers carry a pointer to the earlier decision.
 
 Ranking, strongest first:
 
@@ -75,6 +75,9 @@ class Opportunity:
     #: Papers the opportunity involves but the command cannot pin (the source
     #: side of a bridge). Used for de-duplication and the post-ingest hint.
     related: list[str] = field(default_factory=list)
+
+    claim_excerpts: dict[str, dict[str, str]] = field(default_factory=dict)
+    overlapping_proposals: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def involved(self) -> list[str]:
@@ -253,55 +256,95 @@ def _bridge_opportunities(limit: int = 30) -> list[Opportunity]:
             frequency[term] = frequency.get(term, 0) + 1
     ubiquitous = {t for t, n in frequency.items()
                   if n > max(2, _UBIQUITOUS_SHARE * len(pairs))}
-    out: list[Opportunity] = []
+    ranked = []
     for pair in pairs:
         methods = [t for t in pair.shared_terms
                    if _is_named_method(t) and t not in ubiquitous
                    and t.lower() not in _GENERIC_TERMS]
         if not methods:
             continue
-        a, b = _readable(pair.stem_a), _readable(pair.stem_b)
-        topic = (f"Could {methods[0]}, as used in {a} ({pair.category_a}), "
-                 f"address a problem in {b} ({pair.category_b})?")
-        why = (f"{pair.category_a} and {pair.category_b} papers both use "
-               f"{', '.join(methods[:3])}, with no link between them")
-        # Cross-category mode pins only target-category papers (the CLI rejects
-        # any other); the planner's search is what finds the source side, so
-        # the source paper is named in the topic and left for retrieval.
-        out.append(Opportunity(kind="bridge", topic=topic, why=why,
-                               papers=[pair.stem_b],
-                               target_category=pair.category_b, cross_category=True,
-                               related=[pair.stem_a]))
-        if len(out) >= limit:
-            break
-    return out
+        # Trial-design labels occur even when neither paper supplies a method
+        # for the other's problem. Keep such pairs available at lower priority.
+        specific = [t for t in methods if t.lower() not in
+                    {"double-blind", "placebo-controlled", "single-blind", "open-label"}]
+        method = (specific or methods)[0]
+        first = {"stem": pair.stem_a, "category": pair.category_a, "citation": pair.citation_a(),
+                 "text": pair.text_a, "slug": pair.slug_a}
+        second = {"stem": pair.stem_b, "category": pair.category_b, "citation": pair.citation_b(),
+                  "text": pair.text_b, "slug": pair.slug_b}
+        source, target = max(((first, second), (second, first)), key=_bridge_strength)
+        strength = _bridge_strength((source, target))
+        topic = (f"Could {method}, as discussed in {_readable(source['stem'])} ({source['category']}), "
+                 f"address a limitation in {_readable(target['stem'])} ({target['category']})?")
+        why = f"{source['category']} and {target['category']} claims share {', '.join(methods[:3])}"
+        if strength[0]:
+            why += "; compare the candidate operation and limitation below"
+        else:
+            why += "; the transfer still needs an operation-to-limitation mapping"
+        opportunity = Opportunity(kind="bridge", topic=topic, why=why, papers=[target["stem"]],
+                                  target_category=target["category"], cross_category=True,
+                                  related=[source["stem"]], claim_excerpts={"source": source, "target": target})
+        rank = (strength[0] and bool(specific), bool(specific), strength)
+        ranked.append((rank, opportunity))
+    ranked.sort(key=lambda entry: entry[0], reverse=True)
+    return [opp for _, opp in ranked[:limit]]
 
 
-def _explored_paper_sets() -> list[frozenset[str]]:
-    """Paper sets existing proposals already cover, from their evidence links."""
+_OPERATION = re.compile(
+    r"\b(?:align|detect|project|cluster|correct|predict|filter|reconstruct)(?:s|ed|ing)?\b|"
+    r"\b(?:map(?:s|ped|ping)?|estimat(?:e[sd]?|ing)|calibrat(?:e[sd]?|ing)|"
+    r"(?:classif|quantif)(?:y|ies|ied|ying)|infer(?:s|red|ring)?)\b", re.I)
+_LIMITATION = re.compile(r"\b(?:cannot|limited (?:to|power)|fails? to|unable to|lack(?:s|ed)?|"
+                         r"struggles? with|does not capture)\b", re.I)
+
+
+def _bridge_strength(sides: tuple[dict, dict]) -> tuple[bool, bool, bool]:
+    source, target = sides
+    # "Limited power to detect" describes an unmet need, not a detector the
+    # source can lend. Prefer an affirmative method claim on the source side.
+    operation = source["slug"].startswith("met-") or (
+        not source["slug"].startswith("lim-") and not _LIMITATION.search(source["text"])
+        and bool(_OPERATION.search(source["text"])))
+    limitation = target["slug"].startswith("lim-") or bool(_LIMITATION.search(target["text"]))
+    return operation and limitation, limitation, operation
+
+
+def _explored_questions() -> list:
+    from .proposals import _proposals_on_disk, cited_evidence_stems
+    explored = []
     try:
-        from .proposals import _proposals_on_disk
-        records = _proposals_on_disk()     # wiki/proposals/ only, not a full walk
-    except Exception:
+        records = _proposals_on_disk()
+    except OSError:
         return []
-    link = re.compile(r"\[\[(?:[^\]#|]*/)?([^\]#|/]+)#")
-    out = []
     for record in records:
         try:
-            text = record.path.read_text(encoding="utf-8")
+            stems = cited_evidence_stems(record.path.read_text(encoding="utf-8"))
         except OSError:
             continue
-        stems = frozenset(link.findall(text))
-        if stems:
-            out.append(stems)
-    return out
+        explored.append((record, stems))
+    return explored
 
 
-def _already_explored(opp: Opportunity, explored: list[frozenset[str]]) -> bool:
-    """True when an existing proposal cites at least two of this opportunity's
-    pinned papers — the same cross-paper connection, already on the ledger."""
-    pinned = set(opp.papers[:MAX_PINNED_PAPERS]) | set(opp.related)
-    return any(len(pinned & stems) >= 2 for stems in explored)
+def _question_key(text: str) -> list[str]:
+    """Normalize conservative paraphrases without reordering the quantities."""
+    text = re.sub(r"\b(?:correlat(?:e|es) with|covar(?:y|ies) with)\b", "covary with", text.casefold())
+    text = re.sub(r"\b(?:is it possible to|can (?:we|one))\b", "can we", text)
+    # Preserve scientific operators, negation and decimal values.
+    return re.findall(r"\d+(?:\.\d+)?|[^\W\d]+|[^\w\s?.!,]", text)
+
+
+def _same_question_or_note_overlap(opp: Opportunity, explored: list) -> bool:
+    # Leave uncertain paraphrases visible for editorial review.
+    question = _question_key(opp.topic)
+    involved = set(opp.involved)
+    for record, stems in explored:
+        if len(involved & stems) < 2:
+            continue
+        if question and question == _question_key(record.question):
+            return True
+        opp.overlapping_proposals.append({"proposal_id": record.proposal_id,
+                                          "status": record.status, "question": record.question})
+    return False
 
 
 #: Most opportunities of one kind in a single list, so a plentiful signal
@@ -327,8 +370,8 @@ def find_opportunities(
         found += _cluster_opportunities()
     if include_bridges:
         found += _bridge_opportunities()
-    explored = _explored_paper_sets()
-    found = [opp for opp in found if not _already_explored(opp, explored)]
+    explored = _explored_questions()
+    found = [opp for opp in found if not _same_question_or_note_overlap(opp, explored)]
     found.sort(key=lambda o: o.rank)     # stable: keeps each source's own order
     kept: list[Opportunity] = []
     taken = dict.fromkeys(KINDS, 0)

@@ -17,9 +17,10 @@ researchwiki proposals opportunities --json     # for agents
 Ranked strongest first: a judged contradiction between two papers, a chain of
 judged build-on/refine relations (one entry per connected set of papers), a
 cluster of 3–40 papers no synthesis page covers, and a cross-category claim pair
-sharing a named method (`needleman-wunsch`, `atac-seq`). A topic an existing
-proposal already cites is dropped, so accepting or rejecting one stops it
-resurfacing. `status` prints a one-line summary of the judged-edge signals
+sharing a named method (`needleman-wunsch`, `atac-seq`). Bridge entries show the two claim excerpts and favor a specific
+source operation paired with a stated target limitation. Shared vocabulary alone
+is a lead. If two or more papers overlap a saved proposal, compare the displayed
+questions. Only a matching question is suppressed automatically. `status` prints a one-line summary of the judged-edge signals
 (quiet for 14 days after it shows), and ingest prints a hint when the new paper
 joins one. Clusters and bridges take seconds to scan, so only this command
 lists them.
@@ -119,6 +120,17 @@ only if it states the source method, target problem, transfer mapping,
 mechanism, assumptions, adaptations, baseline, and first rejecting experiment.
 
 ## Remember decisions
+
+Generation displays a separate comparator search for each candidate (`comparator_reviews`
+in JSON). Before shortlisting, review work that already performs the proposed operation.
+Run `researchwiki proposals review ID` on a saved proposal, or
+`researchwiki proposals review PREVIEW.json --select N` before acceptance.
+Use `--operation "…"` to rerun the search with a narrower description. The
+search uses the current claims DB, including papers outside the proposal.
+Read the closest candidate and record its claim citation in the feedback
+reason along with what the proposal adds beyond the original question and
+what it would let you measure or decide beyond the comparator. Defer if
+that distinction remains unclear. An empty search leaves novelty unresolved.
 
 Saved records live under `wiki/proposals/` and sync with the rest of the wiki.
 Record every material decision with a reason:

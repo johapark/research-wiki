@@ -241,6 +241,12 @@ def find_proposal(identifier: str) -> ProposalRecord | None:
     return None
 
 
+def cited_evidence_stems(body: str) -> set[str]:
+    """Only original proposal evidence counts, including before later feedback."""
+    evidence = extract_section(body, "Evidence and reasoning")
+    return set(re.findall(r"\[\[(?:[^\]#|]*/)?([^\]#|/]+)#", evidence))
+
+
 def _render_connections(connections: list[dict], evidence: dict[str, dict]) -> str:
     lines: list[str] = []
     for connection in connections:

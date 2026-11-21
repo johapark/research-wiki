@@ -6,6 +6,7 @@ Usage:
       [--prepare-only] [--write] [--json]
   researchwiki proposals opportunities [--limit N] [--json]
   researchwiki proposals accept PREVIEW.json --select 1 [2 3]
+  researchwiki proposals review ID|PREVIEW.json [--select N] [--operation TEXT] [--json]
   researchwiki proposals list [--status STATUS] [--json]
   researchwiki proposals feedback ID --decision STATUS --reason TEXT [--actor NAME]
       [--resulting-page LINK]
@@ -30,6 +31,7 @@ from ..proposal_generation import (
     generate_proposals,
 )
 from ..proposal_preview import PartialAccept, accept_preview, save_preview
+from ..proposal_review import compare_candidate, review
 from ..proposals import STATUSES, append_feedback, load_proposals
 
 
@@ -140,6 +142,13 @@ def _generate(argv: list[str]) -> int:
         print(f"researchwiki proposals: {exc}", file=sys.stderr)
         return 1
 
+    try:
+        comparisons = [compare_candidate(proposal, packet["evidence"]) for proposal in generated]
+    except (ValueError, OSError) as exc:
+        print(f"researchwiki proposals: comparator search failed: {exc}", file=sys.stderr)
+        print(f"  review the saved preview: {preview}", file=sys.stderr)
+        return 1
+
     written = []
     if args.write and generated:
         try:
@@ -164,6 +173,7 @@ def _generate(argv: list[str]) -> int:
         _log_written(records, args.topic, "generated")
 
     result = {
+        "comparator_reviews": comparisons,
         "topic": args.topic,
         "preview": str(preview),
         "packet": packet,
@@ -184,11 +194,13 @@ def _generate(argv: list[str]) -> int:
         print(f"{i}. [{proposal['page_type']}/{proposal['direction']}] {proposal['title']}")
         print(f"   Question: {proposal['question']}")
         print(f"   Thesis: {proposal['thesis']}")
+        _print_comparators(comparisons[i - 1])
         if args.write:
             print(f"   Saved: {written[i - 1]['path']}")
         print()
     if not args.write:
         print(f"Full preview and evidence: {preview}")
+        print(f"Check comparable methods: researchwiki proposals review {preview} --select 1")
         print(f"Accept exact selections: researchwiki proposals accept {preview} --select 1")
     return 0
 
@@ -224,6 +236,10 @@ def _opportunities(argv: list[str]) -> int:
     print()
     for i, opp in enumerate(opps, 1):
         print(f"{i}. [{opp.kind}] {opp.why}")
+        for role, excerpt in opp.claim_excerpts.items():
+            print(f"   {role}: {excerpt['text']} {excerpt['citation']}")
+        for prior in opp.overlapping_proposals:
+            print(f"   Overlaps {prior['proposal_id']} ({prior['status']}): {prior['question']}")
         print(f"   {opp.command()}")
         print()
     print("Each command previews up to three proposals (one model call) and saves "
@@ -252,6 +268,35 @@ def _accept(argv: list[str]) -> int:
     for record in records:
         print(f"{record.proposal_id}: {record.path}")
     return 0
+
+
+def _review(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="researchwiki proposals review")
+    parser.add_argument("identifier", help="Saved proposal ID/stem or preview JSON with --select.")
+    parser.add_argument("--select", type=int, help="One-based preview entry.")
+    parser.add_argument("--operation", default="", help="Override the operation to search for.")
+    parser.add_argument("--json", action="store_true", dest="as_json")
+    args = parser.parse_args(argv)
+    try:
+        result = review(args.identifier, args.select, args.operation)
+    except (ValueError, OSError) as exc:
+        print(f"researchwiki proposals: {exc}", file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    _print_comparators(result)
+    return 0
+
+
+def _print_comparators(result: dict) -> None:
+    print(f"Comparator search: {result['query']}")
+    for hit in result["candidates"]:
+        source = "already cited" if hit["already_cited"] else "outside proposal citations"
+        print(f"  [{source}] {hit['text']} {hit['citation']}")
+    if not result["candidates"]:
+        print("No matching claims found. Corpus novelty is unresolved.")
+    print(result["review_question"])
 
 
 def _list(argv: list[str]) -> int:
@@ -337,6 +382,8 @@ def main(argv: list[str]) -> int:
         return _opportunities(rest)
     if action == "list":
         return _list(rest)
+    if action == "review":
+        return _review(rest)
     if action == "feedback":
         return _feedback(rest)
     print(f"researchwiki proposals: unknown action: {action}", file=sys.stderr)
