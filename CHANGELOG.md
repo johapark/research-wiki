@@ -20,8 +20,17 @@ the reasoning behind any line below.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-20
+
+**Run `researchwiki reindex` after upgrading.** This rebuilds the semantic page
+index with topical tags near the start of each indexed page description. Existing indexes can
+still report healthy while serving the old vectors.
+
 ### Changed
 
+- Ingest can revise a single section when the identified gaps are confined to
+  it. Draft preparation overlaps other work, and grading and batch indexing
+  reuse previously computed results and encoders.
 - README groups Obsidian and ego-browser as optional recommended add-ons after
   installation, with Obsidian first. Ego-browser supports literature scouting,
   browser-based PDF downloads, and shared dashboard navigation with the agent.
@@ -41,11 +50,6 @@ the reasoning behind any line below.
   topical `tags:` directly after its title instead of last. Appended last they
   fell past the embedder's 512-token cutoff on 18 of 38 synthesis pages, so the
   only keyword-like field those page types have was mostly not embedded at all.
-  **Run `researchwiki reindex` after upgrading.** Nothing marks the existing
-  index stale: `status`'s semantic-staleness signal is the `pages.stale`
-  sentinel, which only `mark_stale()` writes, and incremental `upsert_pages`
-  re-examines only the pages it is handed. Without a full reindex the corpus
-  keeps its pre-change vectors while `status` reports the index healthy.
 - The synthesis authoring procedure asks for premises to be stated as their own
   cited sentences rather than inside the question, for `Short answer` to carry
   4–6 cited bullets sized so a reader could repeat one (~300 characters each),
@@ -56,6 +60,11 @@ the reasoning behind any line below.
 
 ### Fixed
 
+- The dashboard reader separates adjacent inline citations with commas. After
+  following a footnote, Back returns to the original reading position. Links
+  to individual claims scroll to the cited bullet, sentence, or table row.
+- The live dashboard reruns an active search during refresh so newly indexed
+  results appear even when the wiki pages themselves are unchanged.
 - Scoped EVOLVE repairs now request a JSON section body in the system prompt.
   On API providers that ignore `schema=`, the full-page author instructions
   could produce Markdown that the section parser rejected. The format
@@ -2887,7 +2896,8 @@ supported.
 
 Initial tagged release.
 
-[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/johapark/research-wiki/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/johapark/research-wiki/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/johapark/research-wiki/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/johapark/research-wiki/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/johapark/research-wiki/compare/v0.5.3...v0.6.0
