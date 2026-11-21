@@ -17,6 +17,8 @@ from pathlib import Path
 from urllib.parse import quote, urlencode
 
 from . import __version__
+from .claim_graph.slug import resolve_claim_slug
+from .grade.parser import parse_claims
 from .paths import inbox_dir, papers_dir, wiki_dir, wiki_root
 from .wiki import Page, read_pages
 
@@ -77,6 +79,11 @@ def _page_record(page: Page, out: Path | None, live: bool, vault: str) -> dict:
         flags.append("Missing source PDF")
     if page.str_field("pdf_extraction_note"):
         flags.append("PDF extraction note")
+    anchors: dict[str, int] = {}
+    if kind == "paper":
+        for claim in parse_claims(page):
+            slug = resolve_claim_slug(claim.section, claim.position, claim.text, anchors)
+            anchors[slug] = claim.source_offset
     # Body text is copied verbatim; the dashboard never authors research prose.
     return {
         "id": page.key, "stem": page.stem, "title": page.str_field("title") or page.stem,
@@ -89,7 +96,7 @@ def _page_record(page: Page, out: Path | None, live: bool, vault: str) -> dict:
         "status": page.str_field("status"), "verdict": page.str_field("verdict"),
         "direction": page.str_field("direction"), "proposed_page_type": page.str_field("proposed_page_type"),
         "doi": page.str_field("doi"), "author_model": page.str_field("author_model"),
-        "added": added, "date_field": date_field, "body": page.body,
+        "added": added, "date_field": date_field, "body": page.body, "claim_offsets": anchors,
         "markdown_url": _url(page.path, out, live),
         "pdf_url": _url(pdf, out, live) if has_pdf else "",
         "obsidian_url": "obsidian://open?" + urlencode({"vault": vault, "file": "wiki/" + page.key}),

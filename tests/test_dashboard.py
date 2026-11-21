@@ -92,6 +92,68 @@ assert.ok(html.includes('<code>[^sc][^chet]</code>'));
 """)
 
 
+def test_reader_targets_exact_claims_in_rendered_markdown(library):
+    from researchwiki.claim_graph.slug import compute_claim_slug
+
+    bullet = "A repeated contribution."
+    method = "The second sentence describes a separate measurement."
+    row = "Example second row"
+    page(library, "cgt/claims", f"""## Summary
+Emoji 📚 before the anchors.
+## Key Contributions
+- **{bullet}**
+- **{bullet}**
+## Methodology and Architecture
+The first sentence describes the measurement procedure. {method}
+## Results
+| Example | Value |
+| --- | --- |
+| Example | first row |
+| Example | second row |
+""", type="paper")
+    run_dashboard_script(dashboard.build_dashboard(), """
+const assert=require('node:assert/strict');
+rebuild();
+const page=byId.get('cgt/claims');
+const renderClaim=slug=>markdown(page.body,page.claim_offsets[slug]).html;
+const marker='<span id="reader-claim"></span>';
+const [bullet,method,row]=%s;
+assert.ok(renderClaim(bullet+'-1').includes(
+ '<li><strong>A repeated contribution.</strong></li><li>'+marker+'<strong>A repeated contribution.</strong></li>'));
+assert.ok(renderClaim(method).includes('procedure. '+marker+'The second sentence'));
+assert.ok(renderClaim(row).includes('<tr id="reader-claim"><td>Example</td><td>second row</td></tr>'));
+""" % json.dumps([compute_claim_slug("key_contributions", bullet),
+                  compute_claim_slug("methodology", method), compute_claim_slug("results", row)]))
+
+
+def test_automatic_refresh_requeries_active_search_on_304(library):
+    run_dashboard_script(dashboard.build_dashboard(live=True), """
+const assert=require('node:assert/strict');
+const elements=new Map();
+const document={getElementById(id){
+ if(!elements.has(id))elements.set(id,{});
+ return elements.get(id);
+}};
+const requests=[];
+global.fetch=async url=>{
+ requests.push(url);
+ if(url==='/api/dashboard')return {status:304};
+ return {ok:true,json:async()=>({hits:[{id:'cgt/beta',score:1}]})};
+};
+(async()=>{
+ state.q='beta';
+ searchState.query=state.q;
+ await refresh();
+ assert.equal(requests.length,2);
+ assert.equal(new URL(requests[1],'http://localhost').searchParams.get('q'),'beta');
+ assert.ok($('results').innerHTML.includes('data-page="cgt/beta"'));
+ state.q='';
+ await refresh();
+ assert.deepEqual(requests.slice(2),['/api/dashboard']);
+})().catch(error=>{console.error(error);process.exitCode=1;});
+""")
+
+
 def test_export_paths_support_custom_locations_and_encoded_names(library):
     out = library / "exports/deep/library.html"
     data = dashboard.build_dashboard(out=out, vault="Research vault")

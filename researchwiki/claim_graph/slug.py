@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Container
 
 
 # Version of the slug scheme (normalize() + SECTION_ABBR). Bump on any
@@ -115,3 +116,14 @@ def disambiguate_slug(base_slug: str, position: int) -> str:
     position simply orphans the affected edges, which reconcile() marks stale.
     """
     return f"{base_slug}-{position}"
+
+
+def resolve_claim_slug(
+    section: str, position: int, text: str,
+    already_assigned: Container[str],
+) -> str:
+    """Use the position suffix for a slug already assigned on this paper."""
+    base = compute_claim_slug(section, text)
+    if base not in already_assigned:
+        return base
+    return disambiguate_slug(base, position)

@@ -35,8 +35,7 @@ from ..paths import papers_dir, wiki_dir
 from ..fsatomic import file_sha256
 from ..claim_graph.slug import (
     SLUG_SCHEME_VERSION,
-    compute_claim_slug,
-    disambiguate_slug,
+    resolve_claim_slug,
 )
 from ..grade.parser import parse_claims as _parse_claims
 from ..wiki import Page
@@ -261,24 +260,6 @@ def _upsert_proposal(conn: sqlite3.Connection, page: Page) -> None:
     )
 
 
-def _resolve_slug(
-    conn: sqlite3.Connection, page_stem: str, section: str, position: int, text: str,
-    already_assigned: set[str],
-) -> str:
-    """Compute a claim_slug, disambiguating collisions by position (§3.1).
-
-    A collision here means two claims in the SAME paper normalize to identical
-    text (e.g. "Method A improves accuracy." at two positions). Rare in
-    practice; the position suffix breaks the tie deterministically. We track
-    `already_assigned` within this paper's upsert batch so two fresh claims
-    with matching text also disambiguate cleanly on the first write.
-    """
-    base = compute_claim_slug(section, text)
-    if base not in already_assigned:
-        return base
-    return disambiguate_slug(base, position)
-
-
 def _upsert_claims(conn: sqlite3.Connection, page: Page,
                    digests: dict[str, str] | None = None) -> int:
     """Reconcile claims rows for this paper against a fresh parse of the page.
@@ -349,9 +330,7 @@ def _upsert_claims(conn: sqlite3.Connection, page: Page,
     n = 0
     slugs_seen_in_batch: set[str] = set()
     for c in fresh:
-        slug = _resolve_slug(
-            conn, page.stem, c.section, c.position, c.text, slugs_seen_in_batch,
-        )
+        slug = resolve_claim_slug(c.section, c.position, c.text, slugs_seen_in_batch)
         slugs_seen_in_batch.add(slug)
         prior_text = existing.get((c.section, c.position))
         if prior_text is None:

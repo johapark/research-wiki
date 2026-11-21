@@ -22,6 +22,7 @@ flags, not aggregate averages.
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -80,17 +81,19 @@ class Claim:
     text: str          # the claim sentence/bullet, with markdown bullet markers stripped
     is_cross_ref: bool # True if the claim looks like a cross-paper reference
                        # (skip from coverage grading; audit handles these)
+    source_offset: int = 0  # Character offset in Page.body, for reader navigation.
 
 
-def _split_sections(body: str) -> dict[str, str]:
-    """Return {lowercased-heading: section-body-text}."""
-    out: dict[str, str] = {}
+def _split_sections(body: str) -> dict[str, tuple[str, int]]:
+    """Return {lowercased-heading: (section-body-text, source offset)}."""
+    out: dict[str, tuple[str, int]] = {}
     matches = list(HEADING_RE.finditer(body))
     for i, m in enumerate(matches):
         name = m.group(1).strip().lower()
         start = m.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
-        out[name] = body[start:end].strip()
+        raw = body[start:end]
+        out[name] = (raw.strip(), start + len(raw) - len(raw.lstrip()))
     return out
 
 
@@ -124,17 +127,17 @@ def _looks_like_cross_ref(text: str) -> bool:
     return False
 
 
-def _extract_bullets(section_text: str) -> list[str]:
+def _extract_bullets(section_text: str) -> list[tuple[str, int]]:
     """Return cleaned bullet texts from a section body."""
-    out: list[str] = []
+    out: list[tuple[str, int]] = []
     for m in BULLET_RE.finditer(section_text):
         line = _strip_markdown(m.group(1))
         if line:
-            out.append(line)
+            out.append((line, m.start(1)))
     return out
 
 
-def _extract_prose_sentences(section_text: str) -> list[str]:
+def _extract_prose_sentences(section_text: str) -> list[tuple[str, int]]:
     """Extract sentence-shaped chunks from prose, skipping bullet content
     and table rows (those are handled by their own extractors). Filters
     very short fragments under PROSE_MIN_CHARS / PROSE_MIN_WORDS.
@@ -143,26 +146,27 @@ def _extract_prose_sentences(section_text: str) -> list[str]:
     to introduce sub-sections) are stripped from the start of sentences
     so the actual prose claim is graded, not the formatting label.
     """
-    out: list[str] = []
-    # Drop bullet lines and table rows first.
+    out: list[tuple[str, int]] = []
+    # Map positions in the filtered prose back to their lines in the source.
     non_bullet_lines = []
-    for line in section_text.splitlines():
-        if BULLET_RE.match(line):
-            continue
-        if TABLE_ROW_RE.match(line) or SEPARATOR_ROW_RE.match(line):
-            continue
-        non_bullet_lines.append(line)
+    prose_starts = []
+    source_starts = []
+    prose_length = source_offset = 0
+    for raw_line in section_text.splitlines(keepends=True):
+        line = raw_line.splitlines()[0]
+        if not (BULLET_RE.match(line) or TABLE_ROW_RE.match(line) or SEPARATOR_ROW_RE.match(line)):
+            prose_starts.append(prose_length)
+            source_starts.append(source_offset)
+            non_bullet_lines.append(line)
+            prose_length += len(line) + 1
+        source_offset += len(raw_line)
     prose = "\n".join(non_bullet_lines)
-    # Paragraph-level split, then sentence-level within each paragraph.
+    cursor = 0
     for paragraph in re.split(r"\n\s*\n", prose):
-        paragraph = paragraph.strip()
-        if not paragraph:
-            continue
-        # Collapse internal newlines so sentence splitting works on
-        # unwrapped prose (Methodology paragraphs often wrap at 80 chars).
-        paragraph = re.sub(r"\s+", " ", paragraph)
-        for sent in SENTENCE_BOUNDARY_RE.split(paragraph):
-            sent = _strip_markdown(sent.strip())
+        for raw in SENTENCE_BOUNDARY_RE.split(paragraph.strip()):
+            start = prose.index(raw, cursor)
+            cursor = start + len(raw)
+            sent = _strip_markdown(re.sub(r"\s+", " ", raw))
             # Strip a leading bold-header label like "**Indexing:**".
             sent = re.sub(r"^\*+[\w\s/&-]+:?\*+\s*", "", sent)
             sent = re.sub(r"^[A-Z][\w\s/&-]+:\s+", "", sent, count=1)
@@ -171,11 +175,13 @@ def _extract_prose_sentences(section_text: str) -> list[str]:
                 continue
             if len(sent.split()) < PROSE_MIN_WORDS:
                 continue
-            out.append(sent)
+            line_index = bisect_right(prose_starts, start) - 1
+            offset = source_starts[line_index] + start - prose_starts[line_index]
+            out.append((sent, offset))
     return out
 
 
-def _extract_table_rows(section_text: str) -> list[str]:
+def _extract_table_rows(section_text: str) -> list[tuple[str, int]]:
     """Return cleaned cell contents from each markdown table data row,
     joined into a single sentence per row.
 
@@ -183,29 +189,26 @@ def _extract_table_rows(section_text: str) -> list[str]:
     Header rows are dropped (they sit above a `|---|---|` separator);
     we use the separator as the discriminator.
     """
-    rows: list[str] = []
-    lines = section_text.splitlines()
-    n = len(lines)
-    i = 0
+    rows: list[tuple[str, int]] = []
+    offset = 0
     in_table = False
-    while i < n:
-        line = lines[i].rstrip()
+    for raw in section_text.splitlines(keepends=True):
+        start = offset
+        offset += len(raw)
+        line = raw.rstrip()
         if SEPARATOR_ROW_RE.match(line):
             in_table = True
-            i += 1
             continue
         if in_table and TABLE_ROW_RE.match(line):
             cells = [c.strip() for c in line.strip("| ").split("|")]
             text = " ".join(c for c in cells if c)
             text = _strip_markdown(text)
             if text:
-                rows.append(text)
-            i += 1
+                rows.append((text, start + 1))
             continue
         # Empty line breaks the table
         if in_table and not line.strip():
             in_table = False
-        i += 1
     return rows
 
 
@@ -231,10 +234,10 @@ def parse_claims(page: Page) -> list[Claim]:
     claims: list[Claim] = []
 
     for name, key in SECTION_KEYS:
-        section_body = sections.get(name)
-        if not section_body:
+        if name not in sections:
             continue
-        items: Iterable[str]
+        section_body, section_start = sections[name]
+        items: Iterable[tuple[str, int]]
         if name == "results":
             # Results sections often mix prose bullets with a benchmark table.
             items = _extract_bullets(section_body) + _extract_table_rows(section_body)
@@ -247,7 +250,7 @@ def parse_claims(page: Page) -> list[Claim]:
             )
         else:
             items = _extract_bullets(section_body)
-        for pos, text in enumerate(items):
+        for pos, (text, offset) in enumerate(items):
             if len(text) < 10:
                 continue
             claims.append(
@@ -256,6 +259,7 @@ def parse_claims(page: Page) -> list[Claim]:
                     position=pos,
                     text=text,
                     is_cross_ref=_looks_like_cross_ref(text),
+                    source_offset=section_start + offset,
                 )
             )
     return claims
