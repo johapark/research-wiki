@@ -27,6 +27,12 @@ the reasoning behind any line below.
   proposal or preview. Opportunity lists show earlier questions that share
   papers and the source and target claims behind cross-category leads.
 
+### Fixed
+
+- Opening a cited claim moves keyboard focus to its bullet, paragraph, or
+  table row in the dashboard reader. Live refresh preserves that focus and
+  the reader's scroll position.
+
 ## [0.7.1] - 2026-11-20
 
 **Run `researchwiki reindex` after upgrading.** This rebuilds the semantic page

@@ -126,6 +126,39 @@ assert.ok(renderClaim(row).includes('<tr id="reader-claim"><td>Example</td><td>s
                   compute_claim_slug("methodology", method), compute_claim_slug("results", row)]))
 
 
+def test_reader_focuses_cited_claim_and_preserves_scroll_on_refresh(library):
+    page(library, "cgt/claims", "## Results\n- The first distinct result.\n- The second distinct result.\n",
+         type="paper")
+    run_dashboard_script(dashboard.build_dashboard(live=True), """
+const assert=require('node:assert/strict');
+rebuild();
+const events=[];
+const elements=new Map();
+const document={activeElement:null,getElementById:id=>elements.get(id)};
+for(const id of ['reader-toc','reader-actions','reader-back'])elements.set(id,{});
+elements.set('reader',{open:true});
+elements.set('reader-scroll',{scrollTop:0,style:{}});
+elements.set('reader-content',{set innerHTML(html){
+ assert.match(html,/<li>The first distinct result\\.<\\/li><li><span id="reader-claim"><\\/span>The second/);
+ const classes=new Set();
+ const item={classList:classes,matches:()=>classes.has('cited-claim'),
+  focus(options){events.push(['focus',options]);document.activeElement=this;}};
+ document.activeElement=null;
+ elements.set('reader-claim',{closest:()=>item,scrollIntoView(options){events.push(['scroll',options]);}});
+}});
+writeHash=()=>{};
+const slug=Object.keys(byId.get('cgt/claims').claim_offsets)[1];
+showPage('cgt/claims',slug);
+assert.equal(document.activeElement.tabIndex,-1);
+assert.deepEqual(events,[['focus',{preventScroll:true}],['scroll',{block:'start'}]]);
+elements.get('reader-scroll').scrollTop=240;
+showPage('cgt/claims',slug,false,true);
+assert.equal(elements.get('reader-scroll').scrollTop,240);
+assert.equal(document.activeElement.tabIndex,-1);
+assert.deepEqual(events.slice(2),[['focus',{preventScroll:true}]]);
+""")
+
+
 def test_automatic_refresh_requeries_active_search_on_304(library):
     run_dashboard_script(dashboard.build_dashboard(live=True), """
 const assert=require('node:assert/strict');
