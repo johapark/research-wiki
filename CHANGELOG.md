@@ -56,24 +56,19 @@ the reasoning behind any line below.
 
 ### Fixed
 
-- A scoped EVOLVE repair now carries its JSON envelope in the system prompt as
-  well as in `schema=`. Only chat-relay enforces `schema`; Anthropic and
-  OpenAI-compatible routes ignore it, so the full-page author contract in the
-  same call won, the model replied in Markdown, `SectionRepair.apply` rejected
-  it and the repair fell back to the unchanged parent draft. On those providers
-  every scoped repair was a billed call that left the critical target-claim miss
-  in place and sent the paper to review. A custom `--system-prompt` override
-  still survives, as the envelope is appended rather than substituted.
+- Scoped EVOLVE repairs now request a JSON section body in the system prompt.
+  On API providers that ignore `schema=`, the full-page author instructions
+  could produce Markdown that the section parser rejected. The format
+  instruction is appended to custom `--author-prompt-file` prompts as well.
 - A batch worker's encoder slot no longer blocks teardown indefinitely. Closing
   the control pipe only reaches the encoder when it returns to `recv_handle`, so
   an unbounded `wait()` waited behind work in flight — in the worst case a
   first-use model download, which made a Ctrl-C look like a hang after every
   paper was already terminal. Teardown now waits briefly, then escalates to
   `terminate()` and `kill()`.
-- The critic's `REPAIR_SCOPE:` control line no longer leaks into the revision
-  notes. The critic prompt invites a bare `REPAIR_SCOPE: FULL_PAGE` when it
-  judges no gap worth editing, but the trailer was stripped only when something
-  preceded it, so that reply reached the author as its only critic note.
+- When the critic declines all coverage gaps with a bare `REPAIR_SCOPE: FULL_PAGE`
+  and there are no weak claims, ingest skips EVOLVE and its regrade. The trace
+  records the declined gaps and the original draft proceeds to the usual gates.
 - `check-grounding` and `grade synthesis` no longer exempt an entire paragraph
   because it ends in `?`. Only question sentences are skipped; declarative
   sentences beside one are graded like any other prose, so a result stated next

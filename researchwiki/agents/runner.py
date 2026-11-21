@@ -299,8 +299,8 @@ def run_ingest(
         for round_num in range(ctx.max_evolve):
             ctx.next_iter()
             critique = _phase_critic(ctx, conn, ctx.winner)
-            if not critique.weak_claims and not critique.coverage_gaps:
-                log(f"critic  → no weak claims or coverage gaps, skipping evolve", tag="agent")
+            if not critique.needs_revision:
+                log("critic  → no revision requested, skipping evolve", tag="agent")
                 break
             log(f"critic  → flagged {len(critique.weak_claims)} weak claims, "
                   f"{len(critique.coverage_gaps)} coverage gaps "
@@ -568,7 +568,9 @@ def _phase_critic(ctx: Context, conn, draft):
         use_stub=ctx.use_stub,
     )
     n_weak, n_gaps = len(critique.weak_claims), len(critique.coverage_gaps)
-    if n_weak or n_gaps:
+    if critique.declined_gaps:
+        reason = f"critic declined all {n_gaps} coverage gaps; skipping evolve"
+    elif critique.needs_revision:
         reason = f"flagged {n_weak} weak claims, {n_gaps} coverage gaps"
     else:
         reason = "no weak claims or coverage gaps; pass-through"
@@ -580,7 +582,7 @@ def _phase_critic(ctx: Context, conn, draft):
         role="critic",
         parent_iteration_id=draft.iteration_id,
         critic_notes=critique.notes,
-        decision="kept" if (n_weak or n_gaps) else "observed",
+        decision="kept" if critique.needs_revision else "observed",
         decision_reason=reason,
         model_used=critique.model,
         **usage_costs(critique),

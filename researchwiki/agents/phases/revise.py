@@ -34,8 +34,7 @@ class CritiqueOutput:
     """Result of a critic call. notes is the user-facing message; weak_claims
     is the deterministic list of claims the grader flagged as weak, and
     coverage_gaps the eligible load-bearing PDF anchors the draft omitted.
-    Together they are the source of truth for whether to skip evolve — the
-    first covers precision defects, the second recall defects."""
+    A gap-only critique can explicitly decline a revision."""
     notes: str
     weak_claims: list[ClaimDetail]
     model: str
@@ -45,6 +44,11 @@ class CritiqueOutput:
     cache_write_tokens: int = 0
     coverage_gaps: list[dict] = field(default_factory=list)
     repair_section: str | None = None
+    declined_gaps: bool = False
+
+    @property
+    def needs_revision(self) -> bool:
+        return bool(self.weak_claims or (self.coverage_gaps and not self.declined_gaps))
 
 
 # Minimum eligible critical misses before a coverage gap alone justifies an
@@ -151,20 +155,18 @@ def critic(
     )
     notes = resp.text
     section = None
+    declined_gaps = False
     if gaps:
-        # No `preceding.strip()` guard: the critic prompt invites a bare
-        # `REPAIR_SCOPE: FULL_PAGE` when it judges no edits are needed, and
-        # `rpartition` returns ("", "", line) for a single-line reply — so
-        # requiring something before the trailer leaked the control line into
-        # the notes the author then receives.
         preceding, _, trailer = notes.rstrip().rpartition("\n")
         if trailer.startswith("REPAIR_SCOPE: "):
             notes = preceding
             scope = trailer.removeprefix("REPAIR_SCOPE: ").strip()
             section = None if scope == "FULL_PAGE" else scope
+            declined_gaps = scope == "FULL_PAGE" and not notes.strip() and not weak
     return CritiqueOutput(
         notes=notes,
         repair_section=section,
+        declined_gaps=declined_gaps,
         weak_claims=weak,
         model=resp.model,
         input_tokens=resp.input_tokens,
@@ -178,7 +180,7 @@ def critic(
 #: Appended to the author system prompt for a scoped (single-section) repair,
 #: so the last word the system gives agrees with the user prompt's JSON request
 #: instead of the full-page Markdown contract above it. Kept as a suffix rather
-#: than a replacement because a custom `--system-prompt` override must survive
+#: than a replacement because a custom `--author-prompt-file` override must survive
 #: (WORKFLOW.md: the repair keeps "any custom override").
 _SECTION_RESPONSE_SYSTEM = (
     "\n\nRESPONSE FORMAT FOR THIS REQUEST: you are revising ONE section, not the "
@@ -317,13 +319,7 @@ def evolve(
     paper_type = (metadata or {}).get("paper_type")
     system = prompt_lib.load_author_system(paper_type, override_path=system_prompt_override)
     if repair:
-        # `schema=` is enforced only by chat-relay (see `llm.call`); Anthropic
-        # and OpenAI-compatible routes ignore it and return free text. The
-        # system prompt is therefore the only place a scoped reply's envelope
-        # can be required, and without this the full-page author contract wins:
-        # the model returns Markdown, `SectionRepair.apply` rejects it, and the
-        # repair degrades to the unchanged parent draft — a billed call that
-        # leaves the critical miss in place, on every API provider.
+        # API providers rely on prompt instructions for the JSON envelope.
         system += _SECTION_RESPONSE_SYSTEM
     resp = llm.call(
         phase="evolve",

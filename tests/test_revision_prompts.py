@@ -207,16 +207,53 @@ def test_full_page_revision_leaves_the_system_prompt_alone(monkeypatch, tmp_path
     assert "schema" not in calls[0]
 
 
-def test_a_bare_repair_scope_line_does_not_leak_into_the_critic_notes(monkeypatch):
-    """The critic prompt invites `REPAIR_SCOPE: FULL_PAGE` as its whole reply
-    when it judges no gap worth editing; that control line is not a note, and
-    the author must not receive it as one."""
+def test_bare_scope_skips_evolve_after_critic_triages_eligible_gap(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    from researchwiki.agents import runner
+    from researchwiki.db.iterations import read_attempt
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RESEARCHWIKI_DB_PATH", str(tmp_path / "state.db"))
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"source")
     gap = {"id": "t1", "axis": "target_claims", "importance": "critical",
-           "text": "A second comparison the draft omitted."}
-    draft = Draft("## Summary\nS.", "m", 0, 0, 0, scores={"missed_anchors": [gap]})
-    monkeypatch.setattr(revise.llm, "call", lambda **kw:
-                        SimpleNamespace(text="REPAIR_SCOPE: FULL_PAGE", model="m",
-                                        input_tokens=1, output_tokens=1))
-    out = revise.critic(draft=draft, metadata={})
-    assert "REPAIR_SCOPE" not in out.notes
-    assert out.repair_section is None
+           "text": "The authors reported a second comparison showing improved accuracy across three datasets."}
+    draft = Draft("## Summary\nA finding.", "m", 0, 0, 0)
+    monkeypatch.setattr(runner, "_phase_reconcile", lambda *a: ({"stem": "example-2026-paper"}, None))
+    monkeypatch.setattr(runner, "_phase_extract", lambda *a: ({}, "source"))
+    monkeypatch.setattr(runner, "_prepare_draft_inputs", lambda *a: None)
+    monkeypatch.setattr(runner.phases, "author", lambda **kw: draft)
+    monkeypatch.setattr(runner.phases, "grade_draft", lambda **kw: ({"missed_anchors": [gap]}, []))
+    monkeypatch.setattr(runner, "_phase_commit", lambda ctx, conn: tmp_path / "page.md")
+    call = Mock(return_value=SimpleNamespace(text="REPAIR_SCOPE: FULL_PAGE", model="m",
+                                             input_tokens=1, output_tokens=1))
+    monkeypatch.setattr(revise.llm, "call", call)
+
+    ctx = runner.run_ingest(pdf, use_stub=True)
+    call.assert_called_once()
+    assert call.call_args.kwargs["phase"] == "critic"
+    assert ctx.winner is draft and ctx.winner.scores["missed_anchors"] == [gap]
+    trace = read_attempt(ctx.attempt_id)
+    assert [row.role for row in trace if row.role in ("author", "grade")] == ["author", "grade"]
+    critic, = [row for row in trace if row.role == "critic"]
+    assert critic.critic_notes == "" and critic.decision == "observed"
+    assert critic.gate_metrics == {"weak_claims": 0, "coverage_gaps": 1}
+
+
+@pytest.mark.parametrize("reply,weak", [
+    ("REPAIR_SCOPE: FULL_PAGE", True),
+    ("Correct both the summary and results.\nREPAIR_SCOPE: FULL_PAGE", False),
+    ("", False),
+])
+def test_full_page_edits_weak_claims_and_missing_verdict_still_request_revision(monkeypatch, reply, weak):
+    from researchwiki.agents.phases.grade import ClaimDetail
+
+    gap = {"axis": "target_claims", "importance": "critical",
+           "text": "The authors reported a second comparison showing improved accuracy across three datasets."}
+    details = [ClaimDetail("results", 0, "Weak claim.", 2.0, 0.3, False, [])] if weak else []
+    draft = Draft("## Results\nA result.", "m", 0, 0, 0, scores={"missed_anchors": [gap]},
+                  claim_details=details)
+    monkeypatch.setattr(revise.llm, "call", lambda **kw: SimpleNamespace(
+        text=reply, model="m", input_tokens=1, output_tokens=1))
+    assert revise.critic(draft=draft, metadata={}).needs_revision
